@@ -1,6 +1,6 @@
 # mirrord README
 
-This is the README for your extension "mirrord". After writing up a brief description, we recommend including the following sections.
+The mirrord extension lets you easily redirect mirrored traffic from your production environment to your development environment.
 
 ## Features
 
