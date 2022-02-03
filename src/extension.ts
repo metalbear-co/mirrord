@@ -3,28 +3,52 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
+class ProcessCapturer implements vscode.DebugAdapterTracker {
+	static pid = 0;
+
+	onDidSendMessage(m: any) {
+		if (m.event === 'process' && m.body.systemProcessId) {
+			ProcessCapturer.pid = m.body.systemProcessId;
+		}
+	}
+}
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "mirrord" is now active!');
+	vscode.debug.registerDebugAdapterTrackerFactory('*', {
+		createDebugAdapterTracker(session: vscode.DebugSession) {
+			return new ProcessCapturer();
+		}
+	});
 
 	let filePath = context.asAbsolutePath(path.join('bintest.sh'));
-
+	let arg = '';
 	let disposable = vscode.debug.onDidStartDebugSession(session => {
-		if (session.configuration.mirrord) {
-			const cp = require('child_process');
-			cp.exec('sh ' + filePath + ' ' + session.configuration.mirrord.port, (err: string, stdout: string, stderr: string) => {
-				console.log('stdout: ' + stdout);
-				console.log('stderr: ' + stderr);
-				if (err) {
-					console.log('error: ' + err);
-				}
-			});
+		const cp = require('child_process');
+		if (session.configuration.mirrord && session.configuration.mirrord.port) {
+			arg = session.configuration.mirrord.port;
+		} else {
+			arg = ProcessCapturer.pid;
+			// The below sometimes doesn't work (possibly because the process hasn't properly started yet)
+			// let result = [];
+			// try{
+			// result = cp.execSync(`lsof -a -P -p ${ProcessCapturer.pid} -iTCP -sTCP:LISTEN -Fn`);
+			// }
+			// catch(e){
+			// 	console.log(e);
+			// }
+			// port = result.toString('utf-8').split('\n').reverse()[1].split(':')[1];
 		}
+
+		cp.exec('sh ' + filePath + ' ' + arg, (err: string, stdout: string, stderr: string) => {
+			console.log('stdout: ' + stdout);
+			console.log('stderr: ' + stderr);
+			if (err) {
+				console.log('error: ' + err);
+			}
+		});
 	});
 
 	context.subscriptions.push(disposable);
