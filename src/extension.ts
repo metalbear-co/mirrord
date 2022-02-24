@@ -56,7 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(trackerDisposable);
-	
+
 	async function runMirrorD(this: { session: vscode.DebugSession }) {
 		if (running) {
 			cleanup();
@@ -70,10 +70,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 				// Infer container id from pod name
-				let containerID = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName)
-					.status.containerStatuses[0].containerID.split('//')[1];
+				let selectedPod = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName);
+				let containerID = selectedPod.status.containerStatuses[0].containerID.split('//')[1];
+				let nodeName = selectedPod.spec.nodeName;
 
-				// Infert port from process ID
+				// Infer port from process ID
 				let port: string = '';
 				if (session.configuration.mirrord && session.configuration.mirrord.port) {
 					port = session.configuration.mirrord.port;
@@ -105,7 +106,8 @@ export async function activate(context: vscode.ExtensionContext) {
 					metadata: { name: agentPodName },
 					spec: {
 						hostPID: true,
-						hostIPC: true,
+						nodeName: nodeName,
+						restartPolicy: 'Never',
 						volumes: [
 							{
 								name: 'containerd',
@@ -149,9 +151,9 @@ export async function activate(context: vscode.ExtensionContext) {
 				let logStream = new stream.PassThrough();
 				let connections: { [connection_id: string]: net.Socket; } = {};
 				let packetCount = 0;
-				function updatePacketCount(){
+				function updatePacketCount() {
 					packetCount++;
-					statusBarButton.text = 'Stop mirrord (packets sent: ' + packetCount + ')'; 
+					statusBarButton.text = 'Stop mirrord (packets sent: ' + packetCount + ')';
 				}
 				logStream.on('data', (chunk: Buffer) => {
 					chunk.toString().split('\n').forEach((line: string) => {
