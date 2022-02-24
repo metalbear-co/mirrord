@@ -20,7 +20,7 @@ const kc = new k8s.KubeConfig();
 kc.loadFromDefault();
 const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
-async function cleanup(sessionId?: string) {
+async function cleanup(sessionId?: string, hideButton: boolean = true) {
 	if (sessionId) {
 		if (sessionId in openedPods) {
 			let podName = openedPods[sessionId];
@@ -40,6 +40,8 @@ async function cleanup(sessionId?: string) {
 				console.log(e);
 			}
 		});
+	}
+	if (hideButton) {
 		statusBarButton.hide();
 	}
 	statusBarButton.text = "Start mirrord";
@@ -56,7 +58,7 @@ async function runMirrorD() {
 	}
 
 	if (running) {
-		cleanup(session.id);
+		cleanup(session.id, false);
 	} else {
 		running = true;
 		statusBarButton.text = 'Stop mirrord (loading)';
@@ -66,7 +68,7 @@ async function runMirrorD() {
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
 		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
-			if (session === undefined) {
+			if (session === undefined || podName === undefined) {
 				return;
 			}
 			// Infer container id from pod name
