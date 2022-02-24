@@ -6,7 +6,7 @@
 	"engines": {
 		"vscode": "^1.63.0"
 	},
-	"repository": "https://github.com/eyalb181/mirrord",
+	"repository": "https://github.com/metalbear-co/mirrord",
 	"categories": [
 		"Other"
 	],
