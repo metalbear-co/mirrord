@@ -84,6 +84,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
 			vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+				if (session === undefined) {
+					return;
+				}
 				// Infer container id from pod name
 				let selectedPod = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName);
 				let containerID = selectedPod.status.containerStatuses[0].containerID.split('//')[1];
