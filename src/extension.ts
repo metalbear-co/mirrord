@@ -36,31 +36,41 @@ export async function activate(context: vscode.ExtensionContext) {
 		let pods = await k8sApi.listNamespacedPod('default');
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
-		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async pod => {
-			// Find the debugged process' port
-
+		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 			// Infer container id from pod name
-			let containerID = cp.execSync('kubectl get -o jsonpath="{.status.containerStatuses[*].containerID}" pod ' + pod);
+			let containerID = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName)
+				.status.containerStatuses[0].containerID;
 
 			// Infert port from process ID
-			let port: string;
+			let port: string = '';
 			if (session.configuration.mirrord && session.configuration.mirrord.port) {
 				port = session.configuration.mirrord.port;
 			} else {
-				port = ProcessCapturer.pid.toString();
-				let result = [];
-				try {
-					result = cp.execSync(`lsof -a -P -p ${ProcessCapturer.pid} -iTCP -sTCP:LISTEN -Fn`);
-					port = result.toString('utf-8').split('\n').reverse()[1].split(':')[1];
-				}
-				catch (e) {
-					console.log(e);
-				}
+				var netstat = require('node-netstat');
+				netstat.commands['darwin'].args.push('-a'); // The default args don't list LISTEN ports on OSX
+				// TODO: Check on other linux, windows
+				netstat({
+					filter: {
+						pid: ProcessCapturer.pid,
+						protocol: 'tcp',
+					},
+					sync: true,
+					limit: 5,
+				}, (data: { state: string; local: { port: string; }; }) => {
+					if (data.state === 'LISTEN') {
+						port = data.local.port;
+					}
+				});
 			}
 
+			if (!port) {
+				throw new Error("Could not find the debugged process' port");
+			}
 
+			const shortid = require('shortid');
+			const agentPodName = 'mirrord-' + shortid.generate().toLowerCase();
 			let agentPod = {
-				metadata: { name: 'agentpod' },
+				metadata: { name: agentPodName },
 				spec: {
 					hostPID: true,
 					hostIPC: true,
@@ -85,9 +95,9 @@ export async function activate(context: vscode.ExtensionContext) {
 							command: [
 								"./mirrord-agent",
 								"--container-id",
-								containerID,
+								'abc',
 								"--ports",
-								port
+								port.toString()
 							]
 						}
 					]
@@ -95,8 +105,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			};
 
-			await k8sApi.createNamespacedPod('default', agentPod);
-
+			try {
+				await k8sApi.createNamespacedPod('default', agentPod);
+			} catch (e) {
+				console.log(e);
+			}
 			const net = require('net');
 			const stream = require('stream');
 			let log = new k8s.Log(kc);
