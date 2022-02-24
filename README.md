@@ -8,6 +8,9 @@ When you start debugging, mirrord will prompt you to select a pod to mirror traf
 
 * Mirroring API requests from your k8s environment to your debugged process.
 
+
+![Architecture](images/architecture.png?raw=true "Architecture")
+
 ## Extension Settings
 
 To enable the extension, add the following fields to the launch.json of your debugged process:
@@ -24,4 +27,4 @@ The extension uses **kubectl** commands, so it needs to be configured and runnin
 
 
 
-icon: Flaticon.com
+Icon Credit: flaticon.com
