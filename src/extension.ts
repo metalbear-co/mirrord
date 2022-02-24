@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as net from 'net';
-import { Log } from '@kubernetes/client-node';
 import * as request from 'request';
 class ProcessCapturer implements vscode.DebugAdapterTracker {
 	static pid: number;
@@ -41,7 +40,10 @@ async function cleanup(sessionId?: string) {
 				console.log(e);
 			}
 		});
+		statusBarButton.hide();
 	}
+	statusBarButton.text = "Start mirrord";
+	running = false;
 	if (logRequest) {
 		logRequest.abort();
 	}
@@ -57,13 +59,26 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(trackerDisposable);
 
-	async function runMirrorD(this: { session: vscode.DebugSession }) {
+	const commandId = 'mirrord.toggleMirroring';
+	context.subscriptions.push(vscode.commands.registerCommand(commandId, runMirrorD));
+
+	statusBarButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+	statusBarButton.text = 'Start mirrord';
+	statusBarButton.command = commandId;
+	context.subscriptions.push(statusBarButton);
+
+	async function runMirrorD() {
+		let session = vscode.debug.activeDebugSession;
+		if (session === undefined) {
+			return;
+		}
+
 		if (running) {
-			cleanup();
+			cleanup(session.id);
 		} else {
 			running = true;
-			statusBarButton.text = 'Stop mirrord';
-			let session = this.session;
+			statusBarButton.text = 'Stop mirrord (loading)';
+
 			// Get pods from kubectl and let user select one to mirror
 			let pods = await k8sApi.listNamespacedPod('default');
 			let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
@@ -153,7 +168,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				let packetCount = 0;
 				function updatePacketCount() {
 					packetCount++;
-					statusBarButton.text = 'Stop mirrord (packets sent: ' + packetCount + ')';
+					statusBarButton.text = 'Stop mirrord (packets mirrored: ' + packetCount + ')';
 				}
 				logStream.on('data', (chunk: Buffer) => {
 					chunk.toString().split('\n').forEach((line: string) => {
@@ -196,20 +211,13 @@ export async function activate(context: vscode.ExtensionContext) {
 				logRequest = await log.log('default', agentPodName, '', logStream, (err: any) => {
 					console.log(err);
 				}, { follow: true, tailLines: 50, pretty: false, timestamps: false });
+				statusBarButton.text = 'Stop mirrord';
 			});
 		}
 	};
 
 	let debugDisposable = vscode.debug.onDidStartDebugSession(async session => {
-
-		const commandId = 'sample.showSelectionCount';
-		context.subscriptions.push(vscode.commands.registerCommand(commandId, runMirrorD, { session: session, context: context }));
-
-		statusBarButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-		statusBarButton.text = 'Start mirrord';
-		statusBarButton.command = commandId;
 		statusBarButton.show();
-		context.subscriptions.push(statusBarButton);
 	});
 	context.subscriptions.push(debugDisposable);
 
