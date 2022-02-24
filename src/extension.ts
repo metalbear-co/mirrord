@@ -12,6 +12,8 @@ class ProcessCapturer implements vscode.DebugAdapterTracker {
 	}
 }
 
+
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
@@ -35,8 +37,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 			// Infer container id from pod name
-			let containerID = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName)
-				.status.containerStatuses[0].containerID.split('//')[1];
+			let selectedPod = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName);
+			let containerID = selectedPod.status.containerStatuses[0].containerID.split('//')[1];
+			let nodeName = selectedPod.spec.nodeName;
 
 			// Infert port from process ID
 			let port: string = '';
@@ -67,10 +70,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			const shortid = require('short-uuid');
 			const agentPodName = 'mirrord-' + shortid.generate().toLowerCase();
 			let agentPod = {
-				metadata: { name: agentPodName },
+				metadata: { name: agentPodName},
 				spec: {
 					hostPID: true,
-					hostIPC: true,
+					nodeName: nodeName,
+					restartPolicy: 'Never',
 					volumes: [
 						{
 							name: 'containerd',
