@@ -37,8 +37,10 @@
 		"typescript": "^4.5.4"
 	},
 	"dependencies": {
+		"@kubernetes/client-node": "^0.16.3",
 		"ffi-napi": "^4.0.3",
 		"nan": "^2.15.0",
+		"net": "^1.0.2",
 		"node-go-require": "^2.0.0",
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
