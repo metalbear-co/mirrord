@@ -46,6 +46,6 @@
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
-		"shortid": "^2.2.16"
+		"short-uuid": "^4.2.0"
 	}
 }

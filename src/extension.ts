@@ -16,22 +16,19 @@ class ProcessCapturer implements vscode.DebugAdapterTracker {
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 
+	let openedPods: { [session_id: string]: string; } = {};
 	let trackerDisposable = vscode.debug.registerDebugAdapterTrackerFactory('*', {
 		createDebugAdapterTracker(_session: vscode.DebugSession) {
 			return new ProcessCapturer();
 		}
 	});
 	context.subscriptions.push(trackerDisposable);
+	const k8s = require('@kubernetes/client-node');
+	const kc = new k8s.KubeConfig();
+	kc.loadFromDefault();
+	const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
 	let debugDisposable = vscode.debug.onDidStartDebugSession(async session => {
-		const cp = require('child_process');
-
-		const k8s = require('@kubernetes/client-node');
-
-		const kc = new k8s.KubeConfig();
-		kc.loadFromDefault();
-		const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
-
 		// Get pods from kubectl and let user select one to mirror
 		let pods = await k8sApi.listNamespacedPod('default');
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
@@ -39,7 +36,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 			// Infer container id from pod name
 			let containerID = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName)
-				.status.containerStatuses[0].containerID;
+				.status.containerStatuses[0].containerID.split('//')[1];
 
 			// Infert port from process ID
 			let port: string = '';
@@ -67,7 +64,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				throw new Error("Could not find the debugged process' port");
 			}
 
-			const shortid = require('shortid');
+			const shortid = require('short-uuid');
 			const agentPodName = 'mirrord-' + shortid.generate().toLowerCase();
 			let agentPod = {
 				metadata: { name: agentPodName },
@@ -95,9 +92,9 @@ export async function activate(context: vscode.ExtensionContext) {
 							command: [
 								"./mirrord-agent",
 								"--container-id",
-								'abc',
+								containerID,
 								"--ports",
-								port.toString()
+								'80'
 							]
 						}
 					]
@@ -107,6 +104,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			try {
 				await k8sApi.createNamespacedPod('default', agentPod);
+				openedPods[session.id] = agentPodName;
 			} catch (e) {
 				console.log(e);
 			}
@@ -121,6 +119,9 @@ export async function activate(context: vscode.ExtensionContext) {
 					if (line) {
 						let parsedLine = JSON.parse(line);
 						let connectionId = parsedLine.content.connection_id;
+						if(parsedLine['type'] === 'Error') {
+							console.log(parsedLine.content.msg);
+						}
 						if (parsedLine['type'] === 'Connected') {
 							let socket = new net.Socket();
 							socket.connect(port, 'localhost');
@@ -139,18 +140,37 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				});
 			});
-			await log.log('default', agentPodName, '', logStream, (err: any) => { console.log(err); }, { follow: true, tailLines: 50, pretty: false, timestamps: false });
+			let waitForPod = true;
+			let attempts = 0;
+			while(waitForPod && attempts < 100) { //TODO: Must be a good way to do this
+				let status = await k8sApi.readNamespacedPodStatus(agentPodName, 'default');
+				if(status.body.status.phase === "Running"){
+					waitForPod = false;	
+				}
+				attempts += 1;
+			}
+			await log.log('default', agentPodName, '', logStream, (err: any) => { 
+				console.log(err); 
+			}, { follow: true, tailLines: 50, pretty: false, timestamps: false });
 		});
 
 	});
 
-
-
-
-
-
-
 	context.subscriptions.push(debugDisposable);
+
+	let debugEndedDisposable = vscode.debug.onDidTerminateDebugSession(async (session: vscode.DebugSession) => {
+		if (openedPods[session.id]) {
+			let podName = openedPods[session.id];
+			delete openedPods[session.id];
+			try {
+				await k8sApi.deleteNamespacedPod(podName, 'default');
+			} catch (e) {
+				console.log(e);
+			}
+		}
+	});
+
+	context.subscriptions.push(debugEndedDisposable);
 }
 
 // this method is called when your extension is deactivated
