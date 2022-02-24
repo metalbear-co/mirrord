@@ -139,7 +139,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				});
 			});
-			await log.log('default', 'agentpod', '', logStream, (err: any) => { console.log(err); }, { follow: true, tailLines: 50, pretty: false, timestamps: false });
+			await log.log('default', agentPodName, '', logStream, (err: any) => { console.log(err); }, { follow: true, tailLines: 50, pretty: false, timestamps: false });
 		});
 
 	});
