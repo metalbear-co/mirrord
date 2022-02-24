@@ -21,3 +21,7 @@ To enable the extension, add the following fields to the launch.json of your deb
 ## Requirements
 
 The extension uses **kubectl** commands, so it needs to be configured and running on your environment.
+
+
+
+icon: Flaticon.com

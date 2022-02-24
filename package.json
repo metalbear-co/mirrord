@@ -7,10 +7,15 @@
 	"engines": {
 		"vscode": "^1.63.0"
 	},
-	"repository": "https://github.com/metalbear-co/mirrord",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/metalbear-co/mirrord"
+	},
 	"categories": [
-		"Other"
+		"Testing",
+		"Debuggers"
 	],
+	"icon": "images/icon.png",
 	"activationEvents": [
 		"onDebug"
 	],
