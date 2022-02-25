@@ -37,6 +37,11 @@ To manually choose a port, edit launch json:
 }`
 
 For more technical information, see [TECHNICAL.md](./TECHNICAL.md)
+
+### Caveats
+* mirrord currently supports Kubernetes clusters using containerd runtime only. Support for more runtimes will arrive if demanded.
+
+
 ### Note
 mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
 
