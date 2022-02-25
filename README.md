@@ -15,6 +15,9 @@ When you start debugging, mirrord will prompt you to select a pod to mirror traf
 ![Demo!](https://i.imgur.com/LujQb1u.gif)
 
 
+
+![Architecture](images/architecture.png?raw=true "Architecture")
+
 ## Extension Settings
 
 To enable the extension, add the following fields to the launch.json of your debugged process:
@@ -24,3 +27,5 @@ To enable the extension, add the following fields to the launch.json of your deb
                 "pod": "<name of the pod whose traffic to mirror>"
             }
 }`
+
+Icon Credit: flaticon.com
