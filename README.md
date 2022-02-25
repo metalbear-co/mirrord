@@ -8,8 +8,8 @@ A [Visual Studio Code](https://code.visualstudio.com/) extension that lets you e
 When you start debugging, mirrord will prompt you to select a pod to mirror traffic from. It will then mirror all traffic from that pod to the process you're debugging.
 
 
----
-
+## Installing
+Get the extension [here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
 
 ## How to use
 
@@ -45,6 +45,9 @@ For more technical information, see [TECHNICAL.md](./TECHNICAL.md)
 ### Note
 mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
 
+
+## Contributing
+Contributions are welcome via PRs.
 ---
 
 
