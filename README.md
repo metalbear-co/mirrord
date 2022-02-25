@@ -7,6 +7,10 @@ A [Visual Studio Code](https://code.visualstudio.com/) extension that lets you e
 
 When you start debugging, mirrord will prompt you to select a pod to mirror traffic from. It will then mirror all traffic from that pod to the process you're debugging.
 
+
+---
+
+
 ## How to use
 
 * Start debugging your project.
@@ -18,15 +22,10 @@ When you start debugging, mirrord will prompt you to select a pod to mirror traf
   <img src="https://i.imgur.com/LujQb1u.gif" width="738">
 </p>
 
+### Note
+mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
 
-## How it works
-<p align="center">
-  <img src="images/architecture.png" width="738">
-</p>
+---
 
-<p align="center">
-  <img src="images/flowchart.jpg" width="738">
-</p>
-<!-- ![Architecture](images/architecture.png?raw=true "Architecture") -->
-<br/><br/><br/><br/><br/><br/>
+
 <i>Icon Credit: flaticon.com</i>
