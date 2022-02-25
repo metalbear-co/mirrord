@@ -1,6 +1,9 @@
-# mirrord
+<p align="center">
+  <img src="images/icon.png">
+</p>
+<h1 align="center">mirrord</h1>
 
-A [Visual Studio Code](https://code.visualstudio.com/) extension that lets you easily mirror traffic from your production environment to your development environment.
+A [Visual Studio Code](https://code.visualstudio.com/) extension that lets you easily mirror traffic from your Kubernetes cluster to your development environment.
 
 When you start debugging, mirrord will prompt you to select a pod to mirror traffic from. It will then mirror all traffic from that pod to the process you're debugging.
 
@@ -11,21 +14,19 @@ When you start debugging, mirrord will prompt you to select a pod to mirror traf
 * Choose pod to mirror traffic from.
 * Click stop when you wish to finish (or stop debugging).
 
-## Demo
-![Demo!](https://i.imgur.com/LujQb1u.gif)
+<p align="center">
+  <img src="https://i.imgur.com/LujQb1u.gif" width="738">
+</p>
 
 
+## How it works
+<p align="center">
+  <img src="images/architecture.png" width="738">
+</p>
 
-![Architecture](images/architecture.png?raw=true "Architecture")
-
-## Extension Settings
-
-To enable the extension, add the following fields to the launch.json of your debugged process:
-
-`{
-  "mirrord": {
-                "pod": "<name of the pod whose traffic to mirror>"
-            }
-}`
-
-Icon Credit: flaticon.com
+<p align="center">
+  <img src="images/flowchart.jpg" width="738">
+</p>
+<!-- ![Architecture](images/architecture.png?raw=true "Architecture") -->
+<br/><br/><br/><br/><br/><br/>
+<i>Icon Credit: flaticon.com</i>
