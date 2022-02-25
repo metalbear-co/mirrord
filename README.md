@@ -25,9 +25,11 @@ When you start debugging, mirrord will prompt you to select a pod to mirror traf
 ## How it works
 mirrord works by letting you select a pod to mirror traffic from. It launches a priveleged pod on the same node
 which enters the namespace of the selected pod and captures traffic from it.
+
 Currently it captures only port 80, but that will be changable from the extension soon.
 The extension automatically detects which port your application listens on to redirect traffic to.
 To manually choose a port, edit launch json:
+
 `{
   "mirrord": {
                 "port": "<port to send traffic to>"
