@@ -26,7 +26,8 @@
   "dependencies": {
     "@kubernetes/client-node": "^0.16.3",
     "commander": "^9.0.0",
-    "net": "^1.0.2"
+    "net": "^1.0.2",
+    "short-uuid": "^4.2.0"
   },
   "bin": {
     "mirrord": "./src/cli.js"

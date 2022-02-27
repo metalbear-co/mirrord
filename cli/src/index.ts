@@ -110,7 +110,8 @@ class K8SAPI {
     }
 
     async getPodData(podName: String, namespace: String): Promise<PodData> {
-        const rawData = await this.api.readNamespacedPod(podName, namespace);
+        const rawData = await this.api.readNamespacedPod(podName, namespace).response;
+        console.log(rawData);
         return {
             nodeName: rawData.spec.nodeName,
             containerID: rawData.status.containerStatuses[0].containerID.split('//')[1]
@@ -238,6 +239,7 @@ class MirrorD {
             console.error("Pod isn't ready after timeout");
             return;
         }
+        await this.tunnelTraffic();
     }
 
     async tunnelTraffic() {
@@ -252,20 +254,40 @@ class MirrorD {
 
     async stop() {
         if (this.logRequest) {
-            this.logRequest.abort();
+            try {
+                this.logRequest.abort();
+            }
+            catch (err) {
+                console.error(err);
+            }
+            
         }
         if (this.tunnel) {
-            this.tunnel.close();
+            try {
+               this.tunnel.close();
+            } catch (err) {
+                console.error(err)
+            }
         }
         await this.k8sApi.deletePod(this.agentPodName, this.namespace);
     }
 }
 
-let tunnel: Tunnel | null = null;
+let mirror: MirrorD | null = null;
+let run = true;
 
 function updateCallback(event: MirrorEvent, data: any) {
     console.log(event, data);
 }
+
+async function exitHandler() {
+    if (mirror) {
+        await mirror.stop();
+    }
+    run = false;
+}
+
+process.on('beforeExit', exitHandler);
 
 async function main() {
     const args = parseArgs();
@@ -273,7 +295,10 @@ async function main() {
     const podData = await api.getPodData(args.podName, args.namespace);
     const mirrord = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
     await mirrord.start();
-
+    console.log("To end, press Ctrl+C");
+    while (run) {
+        await sleep(1000);
+    }
 }
 
 main();
