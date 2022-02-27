@@ -1,0 +1,37 @@
+{
+  "name": "mirrord",
+  "version": "1.0.0",
+  "description": "mirrord lets you easily mirror traffic from your production environment to your development environment.",
+  "main": "index.js",
+  "scripts": {
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile && npm run lint",
+		"lint": "eslint src --ext ts",
+		"test": "node ./out/test/runTest.js",
+		"vscode:prepublish": "npm run esbuild-base -- --minify",
+		"esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
+		"esbuild": "npm run esbuild-base -- --sourcemap",
+		"esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
+		"test-compile": "tsc -p ./",
+    "package": "pkg . --targets node14-macos-x64 --output mirrord"
+  },
+  "author": "MetalBear.co",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^17.0.21",
+    "pkg": "^5.5.2",
+    "typescript": "^4.5.5"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^0.16.3",
+    "commander": "^9.0.0",
+    "net": "^1.0.2"
+  },
+  "bin": {
+    "mirrord": "./src/cli.js"
+  },
+  "pkg": {
+    "scripts": "src/**/*.js"
+  }
+}
