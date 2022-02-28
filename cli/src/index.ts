@@ -1,6 +1,7 @@
 #!/usr/bin/env npx ts-node
 
 import { Socket } from "net";
+import { update } from "tar";
 
 const { program } = require('commander');
 const k8s = require('@kubernetes/client-node');
@@ -28,7 +29,7 @@ function parseArgs(): Arguments {
         .name("mirrord")
         .description('Mirror traffic from specified pod to localhost')
         .argument('<podName>', 'Name of pod to mirror')
-        .option('-p, --port [localport:remoteport...]', 'Local port to send to and remote port to capture from', ['8080:80'])
+        .option('-p, --port [localport:remoteport...]', 'Local port to send to and remote port to capture from', ['8000:80'])
         .option('-n, --namespace [namespace]', 'Namespace to use', 'default')
 
     let args = program.parse(process.argv);
@@ -55,7 +56,7 @@ interface PodData {
 function createMirrordPodDefinition(agentPodName: String, nodeName: String, containerID: String, ports: number[]): any {
     let portArguments = ports.map((p: number) => {
         return ['--ports', p.toString()]
-    });
+    }).flat();
 
     return {
         metadata: { name: agentPodName },
@@ -110,8 +111,7 @@ class K8SAPI {
     }
 
     async getPodData(podName: String, namespace: String): Promise<PodData> {
-        const rawData = await this.api.readNamespacedPod(podName, namespace).response;
-        console.log(rawData);
+        const rawData = (await this.api.readNamespacedPod(podName, namespace)).body;
         return {
             nodeName: rawData.spec.nodeName,
             containerID: rawData.status.containerStatuses[0].containerID.split('//')[1]
@@ -170,7 +170,7 @@ class Tunnel {
         this.connections = new Map();
     }
     async newDataCallback(data: Buffer) {
-        data.toString().split('\n').forEach(this.handleMessage);
+        data.toString().split('\n').forEach(this.handleMessage.bind(this));
     }
 
     updateEvent(event: MirrorEvent, data?: any) {
@@ -229,6 +229,7 @@ class MirrorD {
         this.ports = ports;
         this.namespace = namespace;
         this.agentPodName = 'mirrord-' + shortid.generate().toLowerCase();
+        this.updateCallback = updateCallback;
     }
 
 
@@ -245,8 +246,8 @@ class MirrorD {
     async tunnelTraffic() {
         let log = this.k8sApi.getLog();
         let logStream = new stream.PassThrough();
-        let tunnel = new Tunnel(Object.assign({}, ...this.ports.map(p => ({[p.remotePort]: p.localPort}))), this.updateCallback);
-        logStream.on('data', tunnel.newDataCallback);
+        let tunnel = new Tunnel(Object.assign({}, ...this.ports.map(p => ({ [p.remotePort]: p.localPort }))), this.updateCallback);
+        logStream.on('data', tunnel.newDataCallback.bind(tunnel));
         this.logRequest = await log.log(this.namespace, this.agentPodName, '', logStream, (err: any) => {
             console.log(err);
         }, { follow: true, tailLines: 0, pretty: false, timestamps: false });
@@ -260,11 +261,11 @@ class MirrorD {
             catch (err) {
                 console.error(err);
             }
-            
+
         }
         if (this.tunnel) {
             try {
-               this.tunnel.close();
+                this.tunnel.close();
             } catch (err) {
                 console.error(err)
             }
@@ -277,7 +278,17 @@ let mirror: MirrorD | null = null;
 let run = true;
 
 function updateCallback(event: MirrorEvent, data: any) {
-    console.log(event, data);
+    switch (event) {
+        case MirrorEvent.NewConnection:
+            console.log('New connection to port ' + data.toString());
+            break
+        case MirrorEvent.PacketReceived:
+            console.log('Packet received');
+            break
+        case MirrorEvent.ConnectionClosed:
+            console.log('Connection closed');
+            break
+    }
 }
 
 async function exitHandler() {
@@ -293,11 +304,16 @@ async function main() {
     const args = parseArgs();
     let api = new K8SAPI();
     const podData = await api.getPodData(args.podName, args.namespace);
-    const mirrord = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
-    await mirrord.start();
-    console.log("To end, press Ctrl+C");
-    while (run) {
-        await sleep(1000);
+    mirror = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
+    try {
+        await mirror.start();
+        console.log("To end, press Ctrl+C");
+        while (run) {
+            await sleep(1000);
+        }
+    } finally {
+        await mirror.stop();
+        mirror = null;
     }
 }
 
