@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
 	"publisher": "MetalBear",
-	"version": "0.0.1",
+	"version": "1.0.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -37,6 +37,7 @@
 		"@types/mocha": "^9.0.0",
 		"@types/node": "14.x",
 		"@types/vscode": "^1.63.0",
+		"@types/request": "^2.48.0",
 		"@typescript-eslint/eslint-plugin": "^5.9.1",
 		"@typescript-eslint/parser": "^5.9.1",
 		"@vscode/test-electron": "^2.0.3",
@@ -48,15 +49,13 @@
 		"typescript": "^4.5.4"
 	},
 	"dependencies": {
-		"@kubernetes/client-node": "^0.16.3",
 		"ffi-napi": "^4.0.3",
 		"nan": "^2.15.0",
-		"net": "^1.0.2",
 		"node-go-require": "^2.0.0",
 		"node-netstat": "^1.8.0",
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
-		"short-uuid": "^4.2.0"
+		"@metalbear/mirrord-core": "^1.0.0"
 	}
 }

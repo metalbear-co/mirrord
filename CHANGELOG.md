@@ -1,10 +1,7 @@
-# Change Log
+# Changelog
 
-All notable changes to the "mirrord" extension will be documented in this file.
+See respective changelogs for each module.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [Unreleased]
-
-## 0.0.1 - 25/02/2022
-- Initial release
+* [VS Code Extension](./vscode-ext/CHANGELOG.md)
+* [CLI](./cli/CHANGELOG.md)
+* [Node Library](./core/CHANGELOG.md)
