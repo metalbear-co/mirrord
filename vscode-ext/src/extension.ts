@@ -96,7 +96,7 @@ async function runMirrorD() {
 
 			function updateCallback(event: MirrorEvent, data: any) {
 				switch (event) {
-					case MirrorEvent.PacketReceived:
+					case MirrorEvent.packetReceived:
 						packetCount++;
 						statusBarButton.text = 'Stop mirrord (packets mirrored: ' + packetCount + ')';
 						break;

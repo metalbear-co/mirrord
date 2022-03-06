@@ -21,7 +21,7 @@ function sleep(ms: number) {
 
 function createMirrordPodDefinition(agentPodName: String, nodeName: String, containerID: String, ports: number[]): any {
     let portArguments = ports.map((p: number) => {
-        return ['--ports', p.toString()]
+        return ['--ports', p.toString()];
     }).flat();
 
     return {
@@ -85,7 +85,7 @@ export class K8SAPI {
         return {
             nodeName: rawData.spec.nodeName,
             containerID: rawData.status.containerStatuses[0].containerID.split('//')[1]
-        }
+        };
     }
 
     async createAgentPod(podname: String, nodeName: String, containerID: String, namespace: String, ports: number[]): Promise<void> {
@@ -115,15 +115,15 @@ export class K8SAPI {
 }
 
 export enum MirrorEvent {
-    NewConnection,
-    PacketReceived,
-    ConnectionClosed
+    newConnection,
+    packetReceived,
+    connectionClosed
 }
 
 export class Tunnel {
     // Figure how to get type of net.Socket
     connections: Map<number, any>;
-    portsMap: { [port: number]: number }
+    portsMap: { [port: number]: number };
     eventCallback?: (event: MirrorEvent, data?: any) => void;
 
     constructor(portsMap: { [port: number]: number },
@@ -135,7 +135,7 @@ export class Tunnel {
 
     close() {
         for (let value of this.connections.values()) {
-            value.end()
+            value.end();
         }
         this.connections = new Map();
     }
@@ -151,29 +151,29 @@ export class Tunnel {
 
     async handleMessage(rawJson: string) {
         if (!rawJson) {
-            return
+            return;
         }
         let parsed = JSON.parse(rawJson);
         if (parsed['type'] === 'Error') {
             console.error('Agent error' + parsed.content.msg);
-            return
+            return;
         }
         else if (parsed['type'] === 'Connected') {
             let socket = new net.Socket();
             socket.connect(this.portsMap[parsed.content.port], '127.0.0.1');
-            this.connections.set(parsed.content.connectionID, socket)
-            this.updateEvent(MirrorEvent.NewConnection, parsed.content.port);
+            this.connections.set(parsed.content.connectionID, socket);
+            this.updateEvent(MirrorEvent.newConnection, parsed.content.port);
         }
         else if (parsed['type'] === 'Data') {
             let socket = this.connections.get(parsed.content.connectionID);
             socket.write(Buffer.from(parsed.content.data, 'base64'));
-            this.updateEvent(MirrorEvent.PacketReceived);
+            this.updateEvent(MirrorEvent.packetReceived);
         }
         else if (parsed['type'] === 'TCPEnded') {
             let socket = this.connections.get(parsed.content.connectionID);
             socket.end();
             this.connections.delete(parsed.content.connectionID);
-            this.updateEvent(MirrorEvent.ConnectionClosed);
+            this.updateEvent(MirrorEvent.connectionClosed);
         }
     }
 }
@@ -228,7 +228,7 @@ export class MirrorD {
     async stop() {
         if (this.logRequest) {
             try {
-                await this.logRequest.end()
+                await this.logRequest.end();
             }
             catch (err) {
                 console.error(err);
@@ -239,7 +239,7 @@ export class MirrorD {
             try {
                 await this.tunnel.close();
             } catch (err) {
-                console.error(err)
+                console.error(err);
             }
         }
         await this.k8sApi.deletePod(this.agentPodName, this.namespace);

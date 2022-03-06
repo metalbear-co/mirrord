@@ -23,7 +23,7 @@ function parseArgs(): Arguments {
         .description('Mirror traffic from specified pod to localhost')
         .argument('<podName>', 'Name of pod to mirror')
         .option('-p, --port [localport:remoteport...]', 'Local port to send to and remote port to capture from', ['8000:80'])
-        .option('-n, --namespace [namespace]', 'Namespace to use', 'default')
+        .option('-n, --namespace [namespace]', 'Namespace to use', 'default');
 
     let args = program.parse(process.argv);
     let options = args.opts();
@@ -43,15 +43,15 @@ function parseArgs(): Arguments {
 
 function updateCallback(event: MirrorEvent, data: any) {
     switch (event) {
-        case MirrorEvent.NewConnection:
+        case MirrorEvent.newConnection:
             console.log('New connection to port ' + data.toString());
-            break
-        case MirrorEvent.PacketReceived:
+            break;
+        case MirrorEvent.packetReceived:
             console.log('Packet received');
-            break
-        case MirrorEvent.ConnectionClosed:
+            break;
+        case MirrorEvent.connectionClosed:
             console.log('Connection closed');
-            break
+            break;
     }
 }
 
