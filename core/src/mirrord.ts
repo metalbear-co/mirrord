@@ -216,8 +216,8 @@ export class MirrorD {
     async tunnelTraffic() {
         let log = this.k8sApi.getLog();
         let logStream = new stream.PassThrough();
-        let tunnel = new Tunnel(Object.assign({}, ...this.ports.map(p => ({ [p.remotePort]: p.localPort }))), this.updateCallback);
-        logStream.on('data', tunnel.newDataCallback.bind(tunnel));
+        this.tunnel = new Tunnel(Object.assign({}, ...this.ports.map(p => ({ [p.remotePort]: p.localPort }))), this.updateCallback);
+        logStream.on('data', this.tunnel.newDataCallback.bind(this.tunnel));
         this.logRequest = await log.log(this.namespace, this.agentPodName, '', logStream, (err: any) => {
             console.log(err);
         }, { follow: true, tailLines: 0, pretty: false, timestamps: false });
@@ -226,7 +226,7 @@ export class MirrorD {
     async stop() {
         if (this.logRequest) {
             try {
-                this.logRequest.abort();
+                await this.logRequest.end()
             }
             catch (err) {
                 console.error(err);
@@ -235,7 +235,7 @@ export class MirrorD {
         }
         if (this.tunnel) {
             try {
-                this.tunnel.close();
+                await this.tunnel.close();
             } catch (err) {
                 console.error(err)
             }

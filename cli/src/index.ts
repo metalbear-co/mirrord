@@ -58,11 +58,18 @@ function updateCallback(event: MirrorEvent, data: any) {
 async function exitHandler() {
     if (mirror) {
         await mirror.stop();
+        mirror = null;
     }
     run = false;
 }
 
-process.on('beforeExit', exitHandler);
+['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT',
+    'SIGBUS', 'SIGFPE', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2', 'SIGTERM'
+].forEach(function (sig) {
+    process.on(sig, function () {
+        exitHandler();
+    });
+});
 
 async function main() {
     const args = parseArgs();
@@ -80,16 +87,12 @@ async function main() {
         return;
     }
     mirror = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
-    try {
-        await mirror.start();
-        console.log("To end, press Ctrl+C");
-        while (run) {
-            await sleep(1000);
-        }
-    } finally {
-        await mirror.stop();
-        mirror = null;
+    await mirror.start();
+    console.log("To terminate, press Ctrl+C");
+    while (run) {
+        await sleep(1000);
     }
+
 }
 
 main();

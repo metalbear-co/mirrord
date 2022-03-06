@@ -107,6 +107,7 @@ async function runMirrorD() {
 				return;
 			}
 			let mirrord = new MirrorD(nodeName, containerID, [{ remotePort: 80, localPort: parseInt(port) }], "default", k8sApi, updateCallback);
+			openedPods.set(session.id, mirrord);
 			await mirrord.start();
 			statusBarButton.text = 'Stop mirrord';
 		});
