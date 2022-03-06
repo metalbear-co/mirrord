@@ -48,7 +48,8 @@ If you prefer to direct traffic to a different local port, edit launch.json:
   <img src="https://i.imgur.com/EgyBxI9.gif" width="538">
 </p>
 
-For more options, run: <br/>
+For more options, run:
+
 `mirrord --help`
 
 ---
