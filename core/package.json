@@ -16,7 +16,9 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^17.0.21",
-    "eslint": "^8.6.0"
+    "eslint": "^8.6.0",
+		"@typescript-eslint/eslint-plugin": "^5.9.1",
+		"@typescript-eslint/parser": "^5.9.1"
   },
   "dependencies": {
     "@kubernetes/client-node": "^0.16.3",
