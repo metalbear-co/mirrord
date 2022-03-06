@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import * as net from 'net';
-import * as request from 'request';
-import {PortSpec, MirrorD, MirrorEvent, K8SAPI} from '@mirrord/core';
+import { PortSpec, MirrorD, MirrorEvent, K8SAPI } from '@metalbear/mirrord-core';
 
 class ProcessCapturer implements vscode.DebugAdapterTracker {
 	static pid: number;
@@ -92,7 +90,7 @@ async function runMirrorD() {
 			if (!port) {
 				throw new Error("Could not find the debugged process' port");
 			}
-			
+
 			let packetCount = 0;
 
 
@@ -108,7 +106,7 @@ async function runMirrorD() {
 			if (k8sApi === null) {
 				return;
 			}
-			let mirrord = new MirrorD(nodeName, containerID, [{remotePort: 80, localPort: parseInt(port)}], "default", k8sApi, updateCallback);
+			let mirrord = new MirrorD(nodeName, containerID, [{ remotePort: 80, localPort: parseInt(port) }], "default", k8sApi, updateCallback);
 			await mirrord.start();
 			statusBarButton.text = 'Stop mirrord';
 		});

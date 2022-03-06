@@ -1,6 +1,6 @@
 #!/usr/bin/env npx ts-node
 const { program } = require('commander');
-import {PortSpec, MirrorD, MirrorEvent, K8SAPI} from '@mirrord/core';
+import { PortSpec, MirrorD, MirrorEvent, K8SAPI } from '@metalbear/mirrord-core';
 
 function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -67,7 +67,18 @@ process.on('beforeExit', exitHandler);
 async function main() {
     const args = parseArgs();
     let api = new K8SAPI();
-    const podData = await api.getPodData(args.podName, args.namespace);
+    let podData: any;
+    try {
+        podData = await api.getPodData(args.podName, args.namespace);
+    }
+    catch (e: any) {
+        if (e.body) {
+            console.log(e.body.message);
+        } else {
+            console.log(e);
+        }
+        return;
+    }
     mirror = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
     try {
         await mirror.start();

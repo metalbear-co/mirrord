@@ -56,6 +56,6 @@
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
-		"@mirrord/core": "file:../core"
+		"@metalbear/mirrord-core": "^1.0.0"
 	}
 }
