@@ -10,13 +10,17 @@
     "type": "git",
     "url": "https://github.com/metalbear-co/mirrord"
   },
+  "scripts": {
+		"lint": "eslint src --ext ts"
+  },
   "homepage": "https://github.com/metalbear-co/mirrord#readme",
   "devDependencies": {
     "@types/node": "^17.0.21",
     "ts-node": "^10.5.0",
     "tslib": "^2.3.1",
     "tslint": "^6.1.3",
-    "typescript": "^4.5.5"
+    "typescript": "^4.5.5",
+    "eslint": "^8.6.0"
   },
   "dependencies": {
     "@metalbear/mirrord-core": "^1.0.0",
