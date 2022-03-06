@@ -1,4 +1,16 @@
 {
+  "name": "mirrord",
+  "bin": "out/index.js",
+  "version": "1.0.0",
+  "main": "out/index.js",
+  "author": "MetalBear",
+  "description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metalbear-co/mirrord"
+  },
+  "homepage": "https://github.com/metalbear-co/mirrord#readme",
   "devDependencies": {
     "@types/node": "^17.0.21",
     "ts-node": "^10.5.0",

@@ -56,13 +56,10 @@ function updateCallback(event: MirrorEvent, data: any) {
 }
 
 async function exitHandler() {
-    if (mirror) {
-        await mirror.stop();
-    }
     run = false;
 }
 
-process.on('beforeExit', exitHandler);
+process.on('SIGINT', exitHandler);
 
 async function main() {
     const args = parseArgs();
@@ -80,16 +77,17 @@ async function main() {
         return;
     }
     mirror = new MirrorD(podData.nodeName, podData.containerID, args.ports, args.namespace, api, updateCallback);
-    try {
-        await mirror.start();
-        console.log("To end, press Ctrl+C");
-        while (run) {
-            await sleep(1000);
-        }
-    } finally {
+    await mirror.start();
+    console.log("To terminate, press Ctrl+C");
+    while (run) {
+        await sleep(1000);
+    }
+
+    if (mirror) {
         await mirror.stop();
         mirror = null;
     }
+
 }
 
 main();
