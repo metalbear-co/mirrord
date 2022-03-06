@@ -219,7 +219,9 @@ export class MirrorD {
         this.tunnel = new Tunnel(Object.assign({}, ...this.ports.map(p => ({ [p.remotePort]: p.localPort }))), this.updateCallback);
         logStream.on('data', this.tunnel.newDataCallback.bind(this.tunnel));
         this.logRequest = await log.log(this.namespace, this.agentPodName, '', logStream, (err: any) => {
-            console.log(err);
+            if (err) {
+                console.log(err);
+            }
         }, { follow: true, tailLines: 0, pretty: false, timestamps: false });
     }
 

@@ -56,20 +56,10 @@ function updateCallback(event: MirrorEvent, data: any) {
 }
 
 async function exitHandler() {
-    if (mirror) {
-        await mirror.stop();
-        mirror = null;
-    }
     run = false;
 }
 
-['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT',
-    'SIGBUS', 'SIGFPE', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2', 'SIGTERM'
-].forEach(function (sig) {
-    process.on(sig, function () {
-        exitHandler();
-    });
-});
+process.on('SIGINT', exitHandler);
 
 async function main() {
     const args = parseArgs();
@@ -91,6 +81,11 @@ async function main() {
     console.log("To terminate, press Ctrl+C");
     while (run) {
         await sleep(1000);
+    }
+
+    if (mirror) {
+        await mirror.stop();
+        mirror = null;
     }
 
 }
