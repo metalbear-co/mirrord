@@ -1,5 +1,5 @@
 {
-  "name": "@mirrord/core",
+  "name": "@metalbear/mirrord-core",
   "version": "1.0.0",
   "description": "Core functionality for running mirrord",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "Metalbear.co",
+  "author": "MetalBear",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^17.0.21"
