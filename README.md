@@ -71,7 +71,9 @@ Contributions are welcome via PRs.
 
 
 ## Help & Community 🎉✉️
+
 Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun. 
+
 ---
 
 
