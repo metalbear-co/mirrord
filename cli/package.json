@@ -1,7 +1,7 @@
 {
   "name": "mirrord",
   "bin": "out/index.js",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "out/index.js",
   "author": "MetalBear",
   "description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
@@ -10,6 +10,17 @@
     "type": "git",
     "url": "https://github.com/metalbear-co/mirrord"
   },
+  "keywords": [
+    "kubernetes",
+    "debugging",
+    "cloud",
+    "cli",
+    "mirroring",
+    "traffic",
+    "sniffer",
+    "api",
+    "local"
+  ],
   "scripts": {
     "lint": "eslint src --ext ts"
   },
