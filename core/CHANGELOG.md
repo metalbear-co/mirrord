@@ -2,7 +2,8 @@
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
-
+### Changed
+- Pin `mirrord-agent` container image version.
 ## 1.0.3 - 06/03/2022
 - Fix issue with publishing to npm
 

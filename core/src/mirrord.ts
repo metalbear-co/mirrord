@@ -39,7 +39,7 @@ function createMirrordPodDefinition(agentPodName: String, nodeName: String, cont
             containers: [
                 {
                     name: 'mirrord-agent',
-                    image: 'ghcr.io/metalbear-co/mirrord-agent:main',
+                    image: 'ghcr.io/metalbear-co/mirrord-agent:1.0.1',
                     imagePullPolicy: 'Always',
                     securityContext: { privileged: true },
                     volumeMounts: [
