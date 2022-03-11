@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 1.0.2 - 11/03/2022
+### Added
+- Allow changing of the default namespace to mirror traffic from through the Settings (Code -> Preferences -> Settings -> Extensions -> mirrord)
+
 ## 1.0.1 - 06/03/2022
 ### Changed
 - Fix README location
