@@ -76,6 +76,10 @@ export class K8SAPI {
         return new k8s.Log(this.config);
     }
 
+    async listNamespaces(): Promise<any> {
+        return await this.api.listNamespace();
+    }
+
     async listPods(namespace: string): Promise<any> {
         return await this.api.listNamespacedPod(namespace);
     }

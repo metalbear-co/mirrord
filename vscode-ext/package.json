@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
 	"publisher": "MetalBear",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -19,6 +19,23 @@
 	"activationEvents": [
 		"onDebug"
 	],
+	"contributes": {
+		"commands": [
+			{
+				"command": "mirrord.changeSettings",
+				"category": "mirrord",
+				"title": "Change Settings"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "mirrord.changeSettings",
+					"when": "mirrord.activated"
+				}
+			]
+		}
+	},
 	"main": "./out/extension.js",
 	"scripts": {
 		"compile": "tsc -p ./",
@@ -56,6 +73,6 @@
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
-		"@metalbear/mirrord-core": "^1.0.0"
+		"@metalbear/mirrord-core": "^1.1.0"
 	}
 }
