@@ -57,7 +57,7 @@ async function runMirrorD() {
 		let pods = await k8sApi.listPods(namespace);
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
-		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror (namespace: ' + namespace + ')' }).then(async podName => {
 			if (session === undefined || podName === undefined || k8sApi === null) {
 				return;
 			}
