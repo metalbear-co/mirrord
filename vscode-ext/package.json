@@ -19,6 +19,18 @@
 	"activationEvents": [
 		"onDebug"
 	],
+	"contributes": {
+		"configuration": {
+			"title": "mirrord",
+			"properties": {
+				"mirrord.podNamespace": {
+					"type": "string",
+					"description": "Namespace to mirror traffic from",
+					"default": "default"
+				}
+			}
+		}
+	},
 	"main": "./out/extension.js",
 	"scripts": {
 		"compile": "tsc -p ./",

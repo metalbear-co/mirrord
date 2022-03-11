@@ -52,8 +52,9 @@ async function runMirrorD() {
 		running = true;
 		statusBarButton.text = 'Stop mirrord (loading)';
 
+		let namespace = vscode.workspace.getConfiguration('mirrord').podNamespace || 'default';
 		// Get pods from kubectl and let user select one to mirror
-		let pods = await k8sApi.listPods('default');
+		let pods = await k8sApi.listPods(namespace);
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
 		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
@@ -106,7 +107,7 @@ async function runMirrorD() {
 			if (k8sApi === null) {
 				return;
 			}
-			let mirrord = new MirrorD(nodeName, containerID, [{ remotePort: 80, localPort: parseInt(port) }], "default", k8sApi, updateCallback);
+			let mirrord = new MirrorD(nodeName, containerID, [{ remotePort: 80, localPort: parseInt(port) }], namespace, k8sApi, updateCallback);
 			openedPods.set(session.id, mirrord);
 			await mirrord.start();
 			statusBarButton.text = 'Stop mirrord';
