@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 1.1.0 - 12/03/2022
+### Added
+- Let user change the namespace and remote port through a new settings menu
+
 ## 1.0.1 - 06/03/2022
 ### Changed
 - Fix README location
