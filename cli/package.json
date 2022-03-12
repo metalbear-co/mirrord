@@ -1,7 +1,7 @@
 {
   "name": "mirrord",
   "bin": "out/index.js",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "out/index.js",
   "author": "MetalBear",
   "description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
