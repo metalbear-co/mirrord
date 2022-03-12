@@ -1,0 +1,52 @@
+name: 🐛 Bug Report
+description: Create a bug report
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to fill out this bug report!
+        Please fill out the form below...
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Please provide a clear and concise description of what the bug is.
+      placeholder: The bug is...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Provide steps to reproduce this bug.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: debug
+    attributes:
+      label: Backtrace
+      description: If your bug produces a backtrace, please include it here.
+      render: shell
+  - type: input
+    id: os_version
+    attributes:
+      label: Your operating system and version
+    validations:
+      required: true
+  - type: input
+    id: node_version
+    attributes:
+      label: Your Node version (`node --version`)
+      placeholder: ex. v16.13.1
+    validations:
+      required: true
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: Additional Info
+      description: Any additional info that you think might be useful or relevant to this bug
