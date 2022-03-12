@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node
+#!/usr/bin/env -S npx ts-node
 const { program } = require('commander');
 import { PortSpec, MirrorD, MirrorEvent, K8SAPI } from '@metalbear/mirrord-core';
 
