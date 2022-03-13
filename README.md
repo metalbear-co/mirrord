@@ -26,8 +26,7 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
   <img src="https://i.imgur.com/LujQb1u.gif" width="738">
 </p>
 
-Currently the extension only captures port 80, but that will be configurable soon.
-The extension automatically detects which port your debugged process listens on and directs the mirrored traffic to it.
+The extension listens on the remote port 80, and uses the k8s namespace 'default', but both of those are configurable through the settings button. The extension automatically detects which local port your debugged process listens on and directs the mirrored traffic to it.
 If you prefer to direct traffic to a different local port, edit launch.json:
 
 `{
