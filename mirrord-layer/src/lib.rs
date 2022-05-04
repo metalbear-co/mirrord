@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    env,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     os::unix::io::AsRawFd,
@@ -213,58 +214,72 @@ async fn create_agent() -> Portforwarder {
     // Create Agent
     let client = Client::try_default().await.unwrap();
     let pods: Api<Pod> = Api::namespaced(client, "default");
+    let pod = pods
+        .get(&env::var("MIRRORD_IMPERSONATED_POD_NAME").unwrap())
+        .await
+        .unwrap();
+    let node_name = &pod.spec.unwrap().node_name;
+    let container_statuses = pod.status.unwrap().container_statuses.unwrap();
+    let container_id = container_statuses
+        .first()
+        .unwrap()
+        .container_id
+        .as_ref()
+        .unwrap()
+        .split("//")
+        .last()
+        .unwrap();
     let agent_pod_name = format!(
         "mirrord-agent-{}",
         Alphanumeric
             .sample_string(&mut rand::thread_rng(), 10)
             .to_lowercase()
     );
-    let debug_pod: Pod = serde_json::from_value(
-        json!({ // TODO: Make nodename, image configurable, container-id
-            "metadata": {
-                "name": agent_pod_name
-            },
-            "spec": {
-                "hostPID": true,
-                "nodeName": "aks-agentpool-11071180-vmss000000",
-                "restartPolicy": "Never",
-                "volumes": [
-                    {
-                        "name": "containerd",
-                        "hostPath": {
-                            "path": "/run/containerd/containerd.sock"
+
+    let agent_pod: Pod = serde_json::from_value(json!({
+        "metadata": {
+            "name": agent_pod_name
+        },
+        "spec": {
+            "hostPID": true,
+            "nodeName": node_name,
+            "restartPolicy": "Never",
+            "volumes": [
+                {
+                    "name": "containerd",
+                    "hostPath": {
+                        "path": "/run/containerd/containerd.sock"
+                    }
+                }
+            ],
+            "containers": [
+                {
+                    "name": "mirrord-agent",
+                    "image": "ghcr.io/metalbear-co/mirrord-agent:2.0.0-alpha-3",
+                    "imagePullPolicy": "Always",
+                    "securityContext": {
+                        "privileged": true
+                    },
+                    "volumeMounts": [
+                        {
+                            "mountPath": "/run/containerd/containerd.sock",
+                            "name": "containerd"
                         }
-                    }
-                ],
-                "containers": [
-                    {
-                        "name": "mirrord-agent",
-                        "image": "ghcr.io/metalbear-co/mirrord-agent:2.0.0-alpha-3",
-                        "imagePullPolicy": "Always",
-                        "securityContext": {
-                            "privileged": true
-                        },
-                        "volumeMounts": [
-                            {
-                                "mountPath": "/run/containerd/containerd.sock",
-                                "name": "containerd"
-                            }
-                        ],
-                        "command": [
-                            "./mirrord-agent",
-                            "--container-id",
-                            "af14a5800124573a93d17d9302a57bdda320d15bfdebd1995e6b1cc3fdb4fee7",
-                            "-t",
-                            "60"
-                        ],
-                        "env": [{"name": "RUST_LOG", "value": "trace"}],
-                    }
-                ]
-            }
-        }),
-    )
+                    ],
+                    "command": [
+                        "./mirrord-agent",
+                        "--container-id",
+                        container_id,
+                        "-t",
+                        "60"
+                    ],
+                    "env": [{"name": "RUST_LOG", "value": "trace"}],
+                }
+            ]
+        }
+    }))
     .unwrap();
-    pods.create(&PostParams::default(), &debug_pod)
+    pods.create(&PostParams::default(), &agent_pod)
         .await
         .unwrap();
 
