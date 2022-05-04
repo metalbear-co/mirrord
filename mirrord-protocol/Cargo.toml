@@ -1,0 +1,15 @@
+[package]
+name = "mirrord-protocol"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/metalbear/mirrord"
+authors = ["Aviram <aviram@metalbear.co>", "Eyal <eyal@metalbear.co>"]
+description = "Mirrord protocol crate, used by mirrord client and agent to communicate."
+homepage = "https://mirrord.metalbear.co"
+
+[dependencies]
+actix-codec = "0.5"
+bincode = "2.0.0-rc.1"
+bytes = "1"
