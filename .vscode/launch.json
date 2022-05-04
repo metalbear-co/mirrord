@@ -1,0 +1,46 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch index.ts",
+      "type": "pwa-node",
+      "request": "launch",
+      "runtimeArgs": [
+        "-r",
+        "ts-node/register"
+      ],
+      "args": [
+        "${workspaceFolder}/cli/src/index.ts",
+        "nginx-deployment-66b6c48dd5-zshg9"
+      ],
+      "cwd": "${workspaceFolder}/cli"
+    },
+    {
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "name": "Launch Extension",
+      "outFiles": [
+        "${workspaceFolder}/vscode-ext/out/**/*.js"
+      ],
+      "request": "launch",
+      "type": "pwa-extensionHost"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug mirrord-layer with app.js",
+      "program": "node",
+      "args": ["${workspaceFolder}/sample/app.js"],
+
+      "env": {
+          "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
+          "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord.so",
+          "RUST_LOG": "trace"
+      },
+  }
+  ]
+}
