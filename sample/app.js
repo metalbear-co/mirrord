@@ -12,7 +12,7 @@ function handleConnection(conn) {
   conn.on('error', onConnError);
 
   function onConnData(d) {
-    console.log('connection data from %s: %j', remoteAddress, d);
+    console.log('connection data from %s: %j', remoteAddress, d.toString());
     conn.write(d);
   }
   function onConnClose() {
