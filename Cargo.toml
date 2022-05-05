@@ -4,4 +4,5 @@ members = [
     "mirrord-protocol",
     "mirrord-agent",
     "mirrord-layer",
+    "mirrord-cli",
 ]
