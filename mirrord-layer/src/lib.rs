@@ -12,7 +12,7 @@ use std::{
 };
 
 use ctor::ctor;
-use frida_gum::{interceptor::Interceptor, Gum, Module, NativePointer};
+use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -210,6 +210,15 @@ unsafe extern "C" fn accept_detour(
     read_fd
 }
 
+unsafe extern "C" fn accept4_detour(
+    sockfd: i32,
+    addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+    _flags: i32,
+) -> i32 {
+    accept_detour(sockfd, addr, addrlen)
+}
+
 async fn create_agent() -> Portforwarder {
     // Create Agent
     let client = Client::try_default().await.unwrap();
@@ -374,62 +383,49 @@ fn init() {
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
+macro_rules! hook {
+    ($interceptor:expr, $func:expr, $detour_name:expr) => {
+        $interceptor
+            .replace(
+                Module::find_export_by_name(None, $func).unwrap(),
+                NativePointer($detour_name as *mut c_void),
+                NativePointer(std::ptr::null_mut::<c_void>()),
+            )
+            .unwrap();
+    };
+}
+
+macro_rules! try_hook {
+    ($interceptor:expr, $func:expr, $detour_name:expr) => {
+        if let Some(addr) = Module::find_export_by_name(None, $func) {
+            match $interceptor.replace(
+                addr,
+                NativePointer($detour_name as *mut c_void),
+                NativePointer(std::ptr::null_mut::<c_void>()),
+            ) {
+                Err(Error::InterceptorAlreadyReplaced) => {
+                    debug!("{} already replaced", $func);
+                }
+                Err(e) => {
+                    debug!("{} error: {:?}", $func, e);
+                }
+                Ok(_) => {
+                    debug!("{} hooked", $func);
+                }
+            }
+        }
+    };
+}
+
 fn enable_hooks() {
     let mut interceptor = Interceptor::obtain(&GUM);
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "socket").unwrap(),
-            NativePointer(socket_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "bind").unwrap(),
-            NativePointer(bind_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "connect").unwrap(),
-            NativePointer(connect_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "listen").unwrap(),
-            NativePointer(listen_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "getpeername").unwrap(),
-            NativePointer(getpeername_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "setsockopt").unwrap(),
-            NativePointer(setsockopt_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "accept").unwrap(),
-            NativePointer(accept_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut::<c_void>()),
-        )
-        .unwrap();
+    hook!(interceptor, "socket", socket_detour);
+    hook!(interceptor, "bind", bind_detour);
+    hook!(interceptor, "connect", connect_detour);
+    hook!(interceptor, "listen", listen_detour);
+    hook!(interceptor, "getpeername", getpeername_detour);
+    hook!(interceptor, "setsockopt", setsockopt_detour);
+    try_hook!(interceptor, "uv__accept4", accept4_detour);
+    try_hook!(interceptor, "accept4", accept4_detour);
+    try_hook!(interceptor, "accept", accept_detour);
 }
