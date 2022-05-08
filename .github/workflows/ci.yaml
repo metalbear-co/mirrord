@@ -15,12 +15,12 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly
+        toolchain: stable
         components: rustfmt, clippy
     # Needed for agent
     - run: sudo apt install libpcap-dev cmake
-    - run: cargo +nightly fmt --all -- --check
-    - run: cargo +nightly clippy -- -D warnings
+    - run: cargo fmt --all -- --check
+    - run: cargo clippy -- -D warnings
 
   test_mirrord_protocol:
     strategy:
