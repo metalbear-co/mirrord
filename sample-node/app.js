@@ -1,10 +1,14 @@
 var net = require("net");
 var server = net.createServer();
+var process = require("process");
+
+console.log("process ", process.env);
+
 server.on("connection", handleConnection);
 server.listen(
   {
     host: "localhost",
-    port: 7777,
+    port: 80,
   },
   function () {
     console.log("server listening to %j", server.address());

@@ -211,7 +211,10 @@ unsafe extern "C" fn accept_detour(
         std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
     }
 
+    debug!("before connection_id");
     let connection_id = SOCKETS.read_single_connection(sockfd);
+    debug!("after connection_id");
+
     SOCKETS.create_data_socket(connection_id, socket_addr)
 }
 

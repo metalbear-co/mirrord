@@ -4,9 +4,11 @@ use std::{
 };
 
 fn main() {
-    let listener = TcpListener::bind("localhost:7777").unwrap();
+    let listener = TcpListener::bind("localhost:80").unwrap();
     listener.take_error().expect("No error here!");
     println!("Listening... {listener:#?}");
+
+    std::thread::sleep(std::time::Duration::from_secs(2));
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();

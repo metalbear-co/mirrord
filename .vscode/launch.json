@@ -25,14 +25,14 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug mirrord-layer with app.js",
+      "name": "MAIN NODE Debug mirrord-layer with app.js",
       "program": "node",
       "args": ["${workspaceFolder}/sample-node/app.js"],
       "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
+        // "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord.so",
-        "RUST_LOG": "warn,mirrord=trace",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-xg4rq",
+        "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
         "MIRRORD_AGENT_RUST_LOG": "trace"
       }
     },
@@ -48,8 +48,8 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord.so",
-        "RUST_LOG": "warn,mirrord=trace",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-xg4rq",
+        "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
         "MIRRORD_AGENT_RUST_LOG": "trace"
       }
     }
