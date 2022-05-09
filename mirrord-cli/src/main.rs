@@ -37,6 +37,10 @@ struct ExecArgs {
     #[clap(short = 'l', long)]
     pub agent_log_level: Option<String>,
 
+    /// Agent log level
+    #[clap(short = 'i', long)]
+    pub agent_image: Option<String>,
+
     /// Binary to execute and mirror traffic into.
     #[clap()]
     pub binary: String,
@@ -102,6 +106,9 @@ fn exec(args: &ExecArgs) -> Result<()> {
     }
     if let Some(log_level) = &args.agent_log_level {
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
+    }
+    if let Some(image) = &args.agent_image {
+        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
     }
     let library_path = extract_library(None);
     add_to_preload(&library_path).unwrap();

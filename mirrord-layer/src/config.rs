@@ -8,6 +8,12 @@ pub struct Config {
     #[envconfig(from = "MIRRORD_AGENT_NAMESPACE", default = "default")]
     pub agent_namespace: String,
 
+    #[envconfig(
+        from = "MIRRORD_AGENT_IMAGE",
+        default = "ghcr.io/metalbear-co/mirrord-agent:2.0.0-alpha-3"
+    )]
+    pub agent_image: String,
+
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub impersonated_pod_name: String,
 
