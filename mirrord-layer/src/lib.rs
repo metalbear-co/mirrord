@@ -42,6 +42,7 @@ fn init() {
         &config.impersonated_pod_namespace,
         &config.agent_namespace,
         config.agent_rust_log,
+        config.agent_image,
     ));
     let (sender, receiver) = channel::<i32>(1000);
     *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);

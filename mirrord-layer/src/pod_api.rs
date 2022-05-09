@@ -39,6 +39,7 @@ pub async fn create_agent(
     pod_namespace: &str,
     agent_namespace: &str,
     log_level: String,
+    agent_image: String,
 ) -> Portforwarder {
     let client = Client::try_default().await.unwrap();
     let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
@@ -68,7 +69,7 @@ pub async fn create_agent(
             "containers": [
                 {
                     "name": "mirrord-agent",
-                    "image": "ghcr.io/metalbear-co/mirrord-agent:2.0.0-alpha-3",
+                    "image": agent_image,
                     "imagePullPolicy": "Always",
                     "securityContext": {
                         "privileged": true
