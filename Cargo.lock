@@ -1356,6 +1356,7 @@ dependencies = [
  "queues",
  "rand 0.8.5",
  "redhook",
+ "rustls-native-certs",
  "serde_json",
  "socketpair",
  "tempdir",

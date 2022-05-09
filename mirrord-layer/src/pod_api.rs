@@ -2,7 +2,7 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{
     api::{Api, Portforwarder, PostParams},
     runtime::wait::{await_condition, conditions::is_pod_running},
-    Client,
+    Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
@@ -41,7 +41,15 @@ pub async fn create_agent(
     log_level: String,
     agent_image: String,
 ) -> Portforwarder {
-    let client = Client::try_default().await.unwrap();
+    let mut config = Config::infer().await.unwrap();
+    let certificates = rustls_native_certs::load_native_certs().unwrap();
+    config.root_cert = Some(
+        certificates
+            .iter()
+            .map(|cert| cert.0.clone())
+            .collect::<Vec<_>>(),
+    );
+    let client = Client::try_from(config).unwrap();
     let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
     let agent_pod_name = format!(
         "mirrord-agent-{}",
