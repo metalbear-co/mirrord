@@ -1,13 +1,18 @@
 // #![feature(c_variadic)]
 
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    mem::MaybeUninit,
+    sync::{Mutex, Once},
+    thread,
+    time::Duration,
+};
 
 use ctor::ctor;
 use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
-use libc::{c_char, c_void, sockaddr, socklen_t};
+use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use os_socketaddr::OsSocketAddr;
 use tokio::{
@@ -16,9 +21,14 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tracing::{debug, error};
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 
+mod file;
 mod pod_api;
 mod sockets;
+
+// TODO(alex) [high] 2022-05-09: After running for a while, it never displays anything (no response
+// to curl) after "send message to client 7777". Later it starts to output "NONE in none".
 
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
@@ -27,18 +37,106 @@ lazy_static! {
     static ref NEW_CONNECTION_SENDER: Mutex<Option<Sender<i32>>> = Mutex::new(None);
 }
 
+static mut MAIN_FUNCTION: MaybeUninit<MainFn> = MaybeUninit::uninit();
+static INIT_MAIN_FN: Once = Once::new();
+
+type MainFn = extern "C" fn(c_int, *const *const c_char, *const *const c_char) -> c_int;
+type LibcStartMainArgs = fn(
+    MainFn,
+    c_int,
+    *const *const c_char,
+    extern "C" fn(),
+    extern "C" fn(),
+    extern "C" fn(),
+    extern "C" fn(),
+) -> c_int;
+
 #[ctor]
 fn init() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
-    debug!("init called");
+    let mut interceptor = Interceptor::obtain(&GUM);
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "__libc_start_main").unwrap(),
+            // TODO(alex) [low] 2022-05-03: Is there another way of converting a function into a
+            // pointer?
+            NativePointer(libc_start_main_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
 
-    let pf = RUNTIME.block_on(pod_api::create_agent());
-    let (sender, receiver) = channel::<i32>(1000);
-    *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
-    enable_hooks();
-    RUNTIME.spawn(poll_agent(pf, receiver));
+    // tracing_subscriber::registry()
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .with(tracing_subscriber::EnvFilter::from_default_env())
+    //     .init();
+    // debug!("init called");
+
+    // let pf = RUNTIME.block_on(pod_api::create_agent());
+    // let (sender, receiver) = channel::<i32>(1000);
+    // *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
+    // enable_hooks();
+    // RUNTIME.spawn(poll_agent(pf, receiver));
+}
+
+// TODO(alex) [high] 2022-05-09: Calculate amount of files ignored if we do normal `init`, versus
+// later initialization with `libc_start_main_detour`, see if they actually differ in the quantity
+// of files loaded.
+unsafe extern "C" fn libc_start_main_detour(
+    main_fn: MainFn,
+    argc: c_int,
+    ubp_av: *const *const c_char,
+    init: extern "C" fn(),
+    fini: extern "C" fn(),
+    rtld_fini: extern "C" fn(),
+    stack_end: extern "C" fn(),
+) -> i32 {
+    debug!("loaded libc_start_main_detour");
+
+    let mut interceptor = Interceptor::obtain(&GUM);
+    let libc_start_main_ptr = Module::find_export_by_name(None, "__libc_start_main").unwrap();
+    let real_libc_start_main: LibcStartMainArgs = std::mem::transmute(libc_start_main_ptr.0);
+    // let libc_start_main_ptr = libc::dlsym(
+    //     libc::RTLD_NEXT,
+    //     CString::new("__libc_start_main").unwrap().into_raw(),
+    // );
+    // let real_libc_start_main: LibMainArgs = std::mem::transmute(libc_start_main_ptr);
+
+    debug!("preparing the program's main function to be called later");
+    INIT_MAIN_FN.call_once(|| {
+        MAIN_FUNCTION = MaybeUninit::new(main_fn);
+    });
+
+    // real_main(main_fn, argc, ubp_av, init, fini, rtld_fini, stack_end)
+    real_libc_start_main(main_detour, argc, ubp_av, init, fini, rtld_fini, stack_end)
+}
+
+// WARNING(alex): Normal `main` can't be found, so it doesn't work.
+extern "C" fn main_detour(
+    argc: c_int,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    unsafe {
+        debug!("loaded main_detour");
+
+        debug!("Hello from fake main!");
+
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+        debug!("init called");
+
+        let pf = RUNTIME.block_on(pod_api::create_agent());
+        let (sender, receiver) = channel::<i32>(1000);
+        *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
+        enable_hooks();
+        RUNTIME.spawn(poll_agent(pf, receiver));
+
+        let real_main = MAIN_FUNCTION.assume_init();
+
+        debug!("about to call program's main");
+        real_main(argc, argv, envp)
+    }
 }
 
 unsafe extern "C" fn socket_detour(_domain: i32, _socket_type: i32, _protocol: i32) -> i32 {
@@ -207,6 +305,8 @@ macro_rules! try_hook {
 
 fn enable_hooks() {
     let mut interceptor = Interceptor::obtain(&GUM);
+    interceptor.begin_transaction();
+
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
@@ -215,4 +315,8 @@ fn enable_hooks() {
     try_hook!(interceptor, "uv__accept4", accept4_detour);
     try_hook!(interceptor, "accept4", accept4_detour);
     try_hook!(interceptor, "accept", accept_detour);
+
+    file::enable_file_hooks(&mut interceptor);
+
+    interceptor.end_transaction();
 }
