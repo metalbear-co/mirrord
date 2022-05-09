@@ -3,6 +3,7 @@
 use std::{sync::Mutex, thread, time::Duration};
 
 use ctor::ctor;
+use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
@@ -17,8 +18,10 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+mod config;
 mod pod_api;
 mod sockets;
+use config::Config;
 
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
@@ -33,8 +36,13 @@ fn init() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
     debug!("init called");
-
-    let pf = RUNTIME.block_on(pod_api::create_agent());
+    let config = Config::init_from_env().unwrap();
+    let pf = RUNTIME.block_on(pod_api::create_agent(
+        &config.impersonated_pod_name,
+        &config.impersonated_pod_namespace,
+        &config.agent_namespace,
+        config.agent_rust_log,
+    ));
     let (sender, receiver) = channel::<i32>(1000);
     *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
     enable_hooks();
