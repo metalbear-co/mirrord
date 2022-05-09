@@ -29,7 +29,7 @@
       "program": "node",
       "args": ["${workspaceFolder}/sample-node/app.js"],
       "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
@@ -46,7 +46,7 @@
       "program": "${cargo:program}",
       "cwd": "${workspaceFolder}",
       "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",

@@ -26,7 +26,7 @@ use crate::GUM;
 
 lazy_static! {
     static ref IGNORE_FILES: Regex = Regex::new(
-        r#"(.*\.so|.*\.d|.*\.toml|.*\.gitconfig|/proc/.*|/sys/.*|/lib/.*|/etc/.*|/dev/.*|rust-toolchain/.*|\.cargo/.*)"#
+        r#"(.*\.so|.*\.d|.*\.toml|.*\.gitconfig|/proc/.*|/sys/.*|/lib/.*|/etc/.*|/usr/.*|/dev/.*|rust-toolchain/.*|\.cargo/.*)"#
     )
     .expect("Failed building regex to ignore file extensions!");
 }
