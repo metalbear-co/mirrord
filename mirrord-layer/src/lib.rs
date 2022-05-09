@@ -8,6 +8,7 @@ use std::{
 };
 
 use ctor::ctor;
+use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
@@ -23,6 +24,9 @@ use tokio::{
 use tracing::{debug, error};
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 
+use crate::config::Config;
+
+mod config;
 mod file;
 mod pod_api;
 mod sockets;
@@ -63,18 +67,6 @@ fn init() {
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
-
-    // tracing_subscriber::registry()
-    //     .with(tracing_subscriber::fmt::layer())
-    //     .with(tracing_subscriber::EnvFilter::from_default_env())
-    //     .init();
-    // debug!("init called");
-
-    // let pf = RUNTIME.block_on(pod_api::create_agent());
-    // let (sender, receiver) = channel::<i32>(1000);
-    // *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
-    // enable_hooks();
-    // RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
 // TODO(alex) [high] 2022-05-09: Calculate amount of files ignored if we do normal `init`, versus
@@ -91,14 +83,8 @@ unsafe extern "C" fn libc_start_main_detour(
 ) -> i32 {
     debug!("loaded libc_start_main_detour");
 
-    let mut interceptor = Interceptor::obtain(&GUM);
     let libc_start_main_ptr = Module::find_export_by_name(None, "__libc_start_main").unwrap();
     let real_libc_start_main: LibcStartMainArgs = std::mem::transmute(libc_start_main_ptr.0);
-    // let libc_start_main_ptr = libc::dlsym(
-    //     libc::RTLD_NEXT,
-    //     CString::new("__libc_start_main").unwrap().into_raw(),
-    // );
-    // let real_libc_start_main: LibMainArgs = std::mem::transmute(libc_start_main_ptr);
 
     debug!("preparing the program's main function to be called later");
     INIT_MAIN_FN.call_once(|| {
@@ -126,7 +112,14 @@ extern "C" fn main_detour(
             .init();
         debug!("init called");
 
-        let pf = RUNTIME.block_on(pod_api::create_agent());
+        let config = Config::init_from_env().unwrap();
+        let pf = RUNTIME.block_on(pod_api::create_agent(
+            &config.impersonated_pod_name,
+            &config.impersonated_pod_namespace,
+            &config.agent_namespace,
+            config.agent_rust_log,
+            config.agent_image,
+        ));
         let (sender, receiver) = channel::<i32>(1000);
         *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
         enable_hooks();

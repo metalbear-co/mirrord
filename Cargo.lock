@@ -537,6 +537,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "exec"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "886b70328cba8871bfc025858e1de4be16b1d5088f2ba50b57816f4210672615"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1285,6 +1295,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9f1c5b025cda876f66ef43a113f91ebc9f4ccef34843000e0adf6ebbab84e21"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "mirrord"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.1.15",
+ "exec",
+ "mirrord-layer",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2153,10 +2175,6 @@ name = "ryu"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
-
-[[package]]
-name = "sample-rust"
-version = "0.1.0"
 
 [[package]]
 name = "schannel"

@@ -37,5 +37,4 @@ envconfig = "0.10.0"
 regex = "*"
 
 [lib]
-name = "mirrord"
 crate_type = ["cdylib"]
