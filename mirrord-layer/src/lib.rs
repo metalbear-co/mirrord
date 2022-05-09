@@ -1,13 +1,13 @@
 // #![feature(c_variadic)]
 
-use std::{sync::Mutex, thread, time::Duration};
+use std::{collections::HashSet, sync::Mutex, thread, time::Duration};
 
 use ctor::ctor;
 use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
-use libc::{c_char, c_void, sockaddr, socklen_t};
+use libc::{c_void, sockaddr, socklen_t};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use os_socketaddr::OsSocketAddr;
 use tokio::{
@@ -25,6 +25,7 @@ lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
     static ref SOCKETS: sockets::Sockets = sockets::Sockets::default();
     static ref NEW_CONNECTION_SENDER: Mutex<Option<Sender<i32>>> = Mutex::new(None);
+    static ref UNIX_FDS: Mutex<HashSet<i32>> = Mutex::new(HashSet::new());
 }
 
 #[ctor]
@@ -41,13 +42,21 @@ fn init() {
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
-unsafe extern "C" fn socket_detour(_domain: i32, _socket_type: i32, _protocol: i32) -> i32 {
+unsafe extern "C" fn socket_detour(domain: i32, socket_type: i32, protocol: i32) -> i32 {
     debug!("socket called");
+    if domain == 2 { // Unix socket
+        let fd = libc::socket(domain, socket_type, protocol);
+        UNIX_FDS.lock().unwrap().insert(fd);
+        return fd;
+    }
     SOCKETS.create_socket()
 }
 
 unsafe extern "C" fn bind_detour(sockfd: i32, addr: *const sockaddr, addrlen: socklen_t) -> i32 {
     debug!("bind called");
+    if UNIX_FDS.lock().unwrap().contains(&sockfd) {
+        return libc::bind(sockfd, addr, addrlen);
+    }
     let parsed_addr = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
         .into_addr()
         .unwrap();
@@ -56,9 +65,11 @@ unsafe extern "C" fn bind_detour(sockfd: i32, addr: *const sockaddr, addrlen: so
     0
 }
 
-unsafe extern "C" fn listen_detour(sockfd: i32, _backlog: i32) -> i32 {
+unsafe extern "C" fn listen_detour(sockfd: i32, backlog: i32) -> i32 {
     debug!("listen called");
-
+    if UNIX_FDS.lock().unwrap().contains(&sockfd) {
+        return libc::listen(sockfd, backlog);
+    }
     match SOCKETS.set_connection_state(sockfd, sockets::ConnectionState::Listening) {
         Ok(()) => {
             let sender = NEW_CONNECTION_SENDER.lock().unwrap();
@@ -77,6 +88,9 @@ unsafe extern "C" fn getpeername_detour(
     addr: *mut sockaddr,
     addrlen: *mut socklen_t,
 ) -> i32 {
+    if UNIX_FDS.lock().unwrap().contains(&sockfd) {
+        return libc::getpeername(sockfd, addr, addrlen);
+    }
     let socket_addr = SOCKETS.get_data_socket_address(sockfd).unwrap();
     let os_addr: OsSocketAddr = socket_addr.into();
     let len = std::cmp::min(*addrlen as usize, os_addr.len() as usize);
@@ -90,9 +104,12 @@ unsafe extern "C" fn setsockopt_detour(
     _sockfd: i32,
     _level: i32,
     _optname: i32,
-    _optval: *mut c_char,
+    _optval: *mut c_void,
     _optlen: socklen_t,
 ) -> i32 {
+    if UNIX_FDS.lock().unwrap().contains(&_sockfd) {
+        return libc::setsockopt(_sockfd, _level, _optname, _optval, _optlen);
+    }
     0
 }
 
@@ -101,6 +118,9 @@ unsafe extern "C" fn accept_detour(
     addr: *mut sockaddr,
     addrlen: *mut socklen_t,
 ) -> i32 {
+    if UNIX_FDS.lock().unwrap().contains(&sockfd) {
+        return libc::accept(sockfd, addr, addrlen);
+    }
     debug!(
         "Accept called with sockfd {:?}, addr {:?}, addrlen {:?}",
         &sockfd, &addr, &addrlen
