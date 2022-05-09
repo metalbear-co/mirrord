@@ -6,6 +6,7 @@ use std::{
     sync::Mutex,
 };
 
+use libc;
 use multi_map::MultiMap;
 use queues::{IsQueue, Queue};
 use socketpair::{socketpair_stream, SocketpairStream};
@@ -15,6 +16,7 @@ pub struct Socket {
     pub read_fd: SockFd,
     pub read_socket: SocketpairStream,
     pub write_socket: SocketpairStream,
+    pub real_fd: SockFd,
 }
 
 pub struct ConnectionSocket {
@@ -23,6 +25,14 @@ pub struct ConnectionSocket {
     pub write_socket: SocketpairStream,
     pub address: SocketAddr,
     pub state: ConnectionState,
+    // pub real_fd: SockFd
+}
+
+pub struct RealConnectionSocket {
+    pub fd: SockFd,
+    pub address: SocketAddr,
+    // pub state: ConnectionState,
+    // pub real_fd: SockFd
 }
 
 #[derive(PartialEq)]
@@ -49,6 +59,7 @@ pub struct Sockets {
     new_sockets: Mutex<HashMap<SockFd, Socket>>,
     connections: Mutex<MultiMap<SockFd, Port, ConnectionSocket>>,
     data: Mutex<MultiMap<SockFd, ConnectionId, DataSocket>>,
+    real_connections: Mutex<MultiMap<SockFd, Port, RealConnectionSocket>>,
     connection_queues: Mutex<HashMap<SockFd, Queue<ConnectionId>>>, /* Used to enqueue incoming
                                                                      * connection
                                                                      * ids from the
@@ -72,18 +83,20 @@ impl Default for Sockets {
             data: Mutex::new(MultiMap::new()),
             connection_queues: Mutex::new(HashMap::new()),
             pending_data: Mutex::new(HashMap::new()),
+            real_connections: Mutex::new(MultiMap::new()),
         }
     }
 }
 
 impl Sockets {
-    pub fn create_socket(&self) -> SockFd {
+    pub fn create_socket(&self, real_fd: SockFd) -> SockFd {
         let (write_socket, read_socket) = socketpair_stream().unwrap();
         let read_fd = read_socket.as_raw_fd();
         let socket = Socket {
             read_fd,
             read_socket,
             write_socket,
+            real_fd,
         };
 
         self.new_sockets.lock().unwrap().insert(read_fd, socket);
@@ -96,7 +109,6 @@ impl Sockets {
 
         // let mut sockets = self.connections.lock().unwrap();
         if let Some(socket) = sockets.remove(&sockfd) {
-            // socket.port = port;
             self.connections.lock().unwrap().insert(
                 sockfd,
                 address.port(),
@@ -111,6 +123,43 @@ impl Sockets {
         } else {
             error!("No socket found for fd: {}", sockfd);
         }
+    }
+
+    pub fn get_real_fd(&self, sockfd: SockFd) -> SockFd {
+        self.new_sockets
+            .lock()
+            .unwrap()
+            .get(&sockfd)
+            .map(|socket| socket.real_fd)
+            .unwrap()
+    }
+
+    pub fn write_to_socket(&self, sockfd: SockFd) {
+        if let Some(mut socket) = self.new_sockets.lock().unwrap().remove(&sockfd) {
+            debug!("Writing to socket: {}", sockfd);
+            debug!("Socket: {:?}", socket.write_socket.as_raw_fd());
+            write!(socket.write_socket, "a").unwrap();
+            socket.write_socket.flush().unwrap();
+        };
+    }
+
+    pub fn create_real_connection(&self, sockfd: SockFd, address: SocketAddr) -> SockFd {
+        let real_fd = self
+            .new_sockets
+            .lock()
+            .unwrap()
+            .get(&sockfd)
+            .map(|socket| socket.real_fd)
+            .unwrap();
+        let socket = RealConnectionSocket {
+            fd: real_fd,
+            address,
+        };
+        self.real_connections
+            .lock()
+            .unwrap()
+            .insert(sockfd, address.port(), socket);
+        real_fd
     }
 
     pub fn set_connection_state(&self, sockfd: SockFd, state: ConnectionState) -> Result<(), ()> {

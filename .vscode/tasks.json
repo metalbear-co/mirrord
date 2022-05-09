@@ -15,6 +15,15 @@
 				"isDefault": true
 			},
 			"label": "rust: cargo build"
+		},
+		{
+			"type": "typescript",
+			"tsconfig": "vscode-ext/tsconfig.json",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build",
+			"label": "tsc: build - vscode-ext/tsconfig.json"
 		}
 	]
 }

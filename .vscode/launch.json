@@ -37,10 +37,10 @@
       "args": ["${workspaceFolder}/sample/app.js"],
 
       "env": {
-          "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord.dylib",
+          "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
           "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord.so",
           "RUST_LOG": "trace",
-          "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-xg4rq",
+          "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
           "MIRRORD_AGENT_RUST_LOG": "trace",
       },
   }
