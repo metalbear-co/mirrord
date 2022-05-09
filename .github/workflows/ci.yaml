@@ -15,7 +15,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: stable
+        toolchain: nightly
         components: rustfmt, clippy
     # Needed for agent
     - run: sudo apt install libpcap-dev cmake
