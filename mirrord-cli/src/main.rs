@@ -25,6 +25,18 @@ struct ExecArgs {
     #[clap(short, long)]
     pub pod_name: String,
 
+    /// Namespace of the pod to mirror. Defaults to "default".
+    #[clap(short = 'n', long)]
+    pub pod_namespace: Option<String>,
+
+    /// Namespace to place agent in.
+    #[clap(short = 'a', long)]
+    pub agent_namespace: Option<String>,
+
+    /// Agent log level
+    #[clap(short = 'l', long)]
+    pub agent_log_level: Option<String>,
+
     /// Binary to execute and mirror traffic into.
     #[clap()]
     pub binary: String,
@@ -79,6 +91,18 @@ fn exec(args: &ExecArgs) -> Result<()> {
         args.binary, args.binary_args
     );
     std::env::set_var("MIRRORD_IMPERSONATED_POD_NAME", args.pod_name.clone());
+    if let Some(namespace) = &args.pod_namespace {
+        std::env::set_var(
+            "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",
+            namespace.clone(),
+        );
+    }
+    if let Some(namespace) = &args.agent_namespace {
+        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
+    }
+    if let Some(log_level) = &args.agent_log_level {
+        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
+    }
     let library_path = extract_library(None);
     add_to_preload(&library_path).unwrap();
     let mut binary_args = args.binary_args.clone();

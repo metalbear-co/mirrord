@@ -6,26 +6,42 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
-#[path = "config.rs"]
-mod config;
-use config::CONFIG;
 
-pub async fn create_agent() -> Portforwarder {
-    // Create Agent
+struct RuntimeData {
+    container_id: String,
+    node_name: String,
+}
+
+impl RuntimeData {
+    async fn from_k8s(client: Client, pod_name: &str, pod_namespace: &str) -> Self {
+        let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
+        let pod = pods_api.get(pod_name).await.unwrap();
+        let node_name = &pod.spec.unwrap().node_name;
+        let container_statuses = pod.status.unwrap().container_statuses.unwrap();
+        let container_id = container_statuses
+            .first()
+            .unwrap()
+            .container_id
+            .as_ref()
+            .unwrap()
+            .split("//")
+            .last()
+            .unwrap();
+        RuntimeData {
+            container_id: container_id.to_string(),
+            node_name: node_name.as_ref().unwrap().to_string(),
+        }
+    }
+}
+
+pub async fn create_agent(
+    pod_name: &str,
+    pod_namespace: &str,
+    agent_namespace: &str,
+    log_level: String,
+) -> Portforwarder {
     let client = Client::try_default().await.unwrap();
-    let pods: Api<Pod> = Api::namespaced(client, "default");
-    let pod = pods.get(&CONFIG.impersonated_pod_name).await.unwrap();
-    let node_name = &pod.spec.unwrap().node_name;
-    let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-    let container_id = container_statuses
-        .first()
-        .unwrap()
-        .container_id
-        .as_ref()
-        .unwrap()
-        .split("//")
-        .last()
-        .unwrap();
+    let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
     let agent_pod_name = format!(
         "mirrord-agent-{}",
         Alphanumeric
@@ -39,7 +55,7 @@ pub async fn create_agent() -> Portforwarder {
         },
         "spec": {
             "hostPID": true,
-            "nodeName": node_name,
+            "nodeName": runtime_data.node_name,
             "restartPolicy": "Never",
             "volumes": [
                 {
@@ -66,26 +82,32 @@ pub async fn create_agent() -> Portforwarder {
                     "command": [
                         "./mirrord-agent",
                         "--container-id",
-                        container_id,
+                        runtime_data.container_id,
                         "-t",
                         "60"
                     ],
-                    "env": [{"name": "RUST_LOG", "value": CONFIG.agent_rust_log}],
+                    "env": [{"name": "RUST_LOG", "value": log_level}],
                 }
             ]
         }
     }))
     .unwrap();
-    pods.create(&PostParams::default(), &agent_pod)
+
+    let pods_api: Api<Pod> = Api::namespaced(client, agent_namespace);
+    pods_api
+        .create(&PostParams::default(), &agent_pod)
         .await
         .unwrap();
 
     //   Wait until the pod is running, otherwise we get 500 error.
-    let running = await_condition(pods.clone(), &agent_pod_name, is_pod_running());
+    let running = await_condition(pods_api.clone(), &agent_pod_name, is_pod_running());
     let _ = tokio::time::timeout(std::time::Duration::from_secs(15), running)
         .await
         .unwrap();
-    let pf = pods.portforward(&agent_pod_name, &[61337]).await.unwrap();
+    let pf = pods_api
+        .portforward(&agent_pod_name, &[61337])
+        .await
+        .unwrap();
 
     pf
 }
