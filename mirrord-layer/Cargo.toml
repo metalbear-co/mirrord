@@ -16,7 +16,7 @@ socketpair = "0.15.0"
 tempdir = "0.3.7"
 tracing = "0.1"
 env_logger = "0.9"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 frida-gum = {version = "0.6.5", features = ["auto-download"]}
 futures = "0.3.21"
 clap = { version = "3.1.12", features = ["derive"] }

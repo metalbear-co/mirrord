@@ -22,6 +22,7 @@ mod config;
 mod pod_api;
 mod sockets;
 use config::Config;
+use tracing_subscriber::prelude::*;
 
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
@@ -32,9 +33,11 @@ lazy_static! {
 
 #[ctor]
 fn init() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
     debug!("init called");
     let config = Config::init_from_env().unwrap();
     let pf = RUNTIME.block_on(pod_api::create_agent(
