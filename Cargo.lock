@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.0.0-alpha-3"
+version = "2.0.0-alpha-4"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1342,6 +1342,7 @@ dependencies = [
  "ctor",
  "env_logger 0.9.0",
  "envconfig",
+ "errno",
  "frida-gum",
  "futures",
  "k8s-openapi",
@@ -1355,7 +1356,6 @@ dependencies = [
  "os_socketaddr",
  "queues",
  "rand 0.8.5",
- "redhook",
  "serde_json",
  "socketpair",
  "tempdir",
@@ -1990,15 +1990,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
 dependencies = [
  "rand_core 0.3.1",
-]
-
-[[package]]
-name = "redhook"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e109b8469dbbe6d7cbe18e5ebd65d4a134e2f4b91304ad9213984cad1d70a6"
-dependencies = [
- "libc",
 ]
 
 [[package]]

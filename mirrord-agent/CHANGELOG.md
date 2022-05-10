@@ -1,4 +1,7 @@
 ## [Unreleased]
+## 2.0.0-alpha-4 - 5/11/2022
+### Changed
+* Add `source_port` to `NewTCPConnection` and change `port` to `destination_port`
 ## 2.0.0-alpha-3 - 1/5/2022
 ### Changed
 * Change behavior of namespace change - set the namespace only in the packet sniffing, in a new thread so "command" socket will listen on the original network namespace
