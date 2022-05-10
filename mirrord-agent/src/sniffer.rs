@@ -143,10 +143,11 @@ impl ConnectionManager {
         };
         let dest_port = tcp_packet.get_destination();
         let tcp_flags = tcp_packet.get_flags();
+        let source_port = tcp_packet.get_source();
         let identifier = TCPSessionIdentifier {
             source_addr: ip_packet.get_source(),
             dest_addr: ip_packet.get_destination(),
-            source_port: tcp_packet.get_source(),
+            source_port,
             dest_port,
         };
         let is_client_packet = self.qualified_port(dest_port);
@@ -165,7 +166,8 @@ impl ConnectionManager {
                     None
                 })?;
                 messages.push(SnifferOutput::NewTCPConnection(NewTCPConnection {
-                    port: dest_port,
+                    destination_port: dest_port,
+                    source_port,
                     connection_id: id,
                     address: IpAddr::V4(identifier.source_addr),
                 }));

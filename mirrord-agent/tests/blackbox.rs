@@ -74,6 +74,7 @@ mod tests {
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
             .expect("connection to dummy failed");
+        let port = test_conn.local_addr().unwrap().port();
         let test_data = [0, 3, 5];
         test_conn
             .write(&test_data)
@@ -100,7 +101,8 @@ mod tests {
             DaemonMessage::NewTCPConnection(NewTCPConnection {
                 connection_id: 0,
                 address: IpAddr::V4("127.0.0.1".parse().unwrap()),
-                port: 1337
+                destination_port: 1337,
+                source_port: port
             })
         );
 

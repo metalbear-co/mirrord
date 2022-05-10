@@ -204,7 +204,7 @@ async fn start() -> Result<()> {
                     Some(message) => {
                         match message {
                             SnifferOutput::NewTCPConnection(conn) => {
-                                let peer_ids = state.port_subscriptions.get_topic_subscribers(conn.port);
+                                let peer_ids = state.port_subscriptions.get_topic_subscribers(conn.destination_port);
                                 for peer_id in peer_ids {
                                     state.connections_subscriptions.subscribe(peer_id, conn.connection_id);
                                     if let Some(peer) = state.peers.get(&peer_id) {

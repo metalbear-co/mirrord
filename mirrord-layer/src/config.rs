@@ -10,7 +10,7 @@ pub struct Config {
 
     #[envconfig(
         from = "MIRRORD_AGENT_IMAGE",
-        default = "ghcr.io/metalbear-co/mirrord-agent:2.0.0-alpha-3"
+        default = "ghcr.io/metalbear-co/mirrord:2.0.0-alpha-4"
     )]
     pub agent_image: String,
 
