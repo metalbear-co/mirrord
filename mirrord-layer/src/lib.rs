@@ -1,4 +1,6 @@
 // #![feature(c_variadic)]
+#![feature(once_cell)]
+#![feature(unboxed_closures)]
 
 use std::{
     mem::MaybeUninit,
@@ -57,21 +59,30 @@ type LibcStartMainArgs = fn(
 
 #[ctor]
 fn init() {
-    let mut interceptor = Interceptor::obtain(&GUM);
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "__libc_start_main").unwrap(),
-            // TODO(alex) [low] 2022-05-03: Is there another way of converting a function into a
-            // pointer?
-            NativePointer(libc_start_main_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut()),
-        )
-        .unwrap();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    debug!("Initializing hooks from ctor!");
+
+    let config = Config::init_from_env().unwrap();
+    let pf = RUNTIME.block_on(pod_api::create_agent(
+        &config.impersonated_pod_name,
+        &config.impersonated_pod_namespace,
+        &config.agent_namespace,
+        config.agent_rust_log,
+        config.agent_image,
+    ));
+
+    let (sender, receiver) = channel::<i32>(1000);
+    *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
+
+    enable_hooks();
+
+    RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
-// TODO(alex) [high] 2022-05-09: Calculate amount of files ignored if we do normal `init`, versus
-// later initialization with `libc_start_main_detour`, see if they actually differ in the quantity
-// of files loaded.
 unsafe extern "C" fn libc_start_main_detour(
     main_fn: MainFn,
     argc: c_int,
