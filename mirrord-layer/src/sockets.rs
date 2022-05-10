@@ -6,10 +6,18 @@ use std::{
     sync::Mutex,
 };
 
+use frida_gum::interceptor::Interceptor;
+use libc::{c_char, sockaddr, socklen_t};
 use multi_map::MultiMap;
+use os_socketaddr::OsSocketAddr;
 use queues::{IsQueue, Queue};
 use socketpair::{socketpair_stream, SocketpairStream};
 use tracing::{debug, error};
+
+use crate::{
+    macros::{hook, try_hook},
+    NEW_CONNECTION_SENDER, SOCKETS,
+};
 
 pub struct Socket {
     pub read_fd: SockFd,
@@ -237,4 +245,100 @@ fn clear_data(socket: &mut SocketpairStream) {
         .take(num_ready_bytes)
         .read_to_end(&mut buffer)
         .unwrap();
+}
+
+unsafe extern "C" fn socket_detour(_domain: i32, _socket_type: i32, _protocol: i32) -> i32 {
+    debug!("socket called");
+    SOCKETS.create_socket()
+}
+
+unsafe extern "C" fn bind_detour(sockfd: i32, addr: *const sockaddr, addrlen: socklen_t) -> i32 {
+    debug!("bind called");
+    let parsed_addr = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
+        .into_addr()
+        .unwrap();
+
+    SOCKETS.convert_to_connection_socket(sockfd, parsed_addr);
+    0
+}
+
+unsafe extern "C" fn listen_detour(sockfd: i32, _backlog: i32) -> i32 {
+    debug!("listen called");
+
+    match SOCKETS.set_connection_state(sockfd, ConnectionState::Listening) {
+        Ok(()) => {
+            let sender = NEW_CONNECTION_SENDER.lock().unwrap();
+            sender.as_ref().unwrap().blocking_send(sockfd).unwrap(); // Tell main thread to subscribe to agent
+            0
+        }
+        Err(()) => {
+            error!("Failed to set connection state to listening");
+            -1
+        }
+    }
+}
+
+unsafe extern "C" fn getpeername_detour(
+    sockfd: i32,
+    addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+) -> i32 {
+    let socket_addr = SOCKETS.get_data_socket_address(sockfd).unwrap();
+    let os_addr: OsSocketAddr = socket_addr.into();
+    let len = std::cmp::min(*addrlen as usize, os_addr.len() as usize);
+    std::ptr::copy_nonoverlapping(os_addr.as_ptr() as *const u8, addr as *mut u8, len);
+
+    *addrlen = os_addr.len();
+    0
+}
+
+unsafe extern "C" fn setsockopt_detour(
+    _sockfd: i32,
+    _level: i32,
+    _optname: i32,
+    _optval: *mut c_char,
+    _optlen: socklen_t,
+) -> i32 {
+    0
+}
+
+unsafe extern "C" fn accept_detour(
+    sockfd: i32,
+    addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+) -> i32 {
+    debug!(
+        "Accept called with sockfd {:?}, addr {:?}, addrlen {:?}",
+        &sockfd, &addr, &addrlen
+    );
+    let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
+
+    if !addr.is_null() {
+        debug!("received non-null address in accept");
+        let os_addr: OsSocketAddr = socket_addr.into();
+        std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
+    }
+
+    let connection_id = SOCKETS.read_single_connection(sockfd);
+    SOCKETS.create_data_socket(connection_id, socket_addr)
+}
+
+unsafe extern "C" fn accept4_detour(
+    sockfd: i32,
+    addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+    _flags: i32,
+) -> i32 {
+    accept_detour(sockfd, addr, addrlen)
+}
+
+pub fn enable_hooks(mut interceptor: Interceptor) {
+    hook!(interceptor, "socket", socket_detour);
+    hook!(interceptor, "bind", bind_detour);
+    hook!(interceptor, "listen", listen_detour);
+    hook!(interceptor, "getpeername", getpeername_detour);
+    hook!(interceptor, "setsockopt", setsockopt_detour);
+    try_hook!(interceptor, "uv__accept4", accept4_detour);
+    try_hook!(interceptor, "accept4", accept4_detour);
+    try_hook!(interceptor, "accept", accept_detour);
 }
