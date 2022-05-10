@@ -49,19 +49,13 @@ pub struct Sockets {
     new_sockets: Mutex<HashMap<SockFd, Socket>>,
     connections: Mutex<MultiMap<SockFd, Port, ConnectionSocket>>,
     data: Mutex<MultiMap<SockFd, ConnectionId, DataSocket>>,
-    connection_queues: Mutex<HashMap<SockFd, Queue<ConnectionId>>>, /* Used to enqueue incoming
-                                                                     * connection
-                                                                     * ids from the
-                                                                     * agent, to be read in the
-                                                                     * 'accept'
-                                                                     * call */
-    pending_data: Mutex<HashMap<ConnectionId, TCPBuffer>>, /* Used to store data that arrived
-                                                            * before its
-                                                            * connection was opened. When the
-                                                            * connection is
-                                                            * later opened, pending_data is read
-                                                            * and
-                                                            * emptied. */
+
+    /// Used to enqueue incoming connection ids from the agent, to be read in the 'accept' call.
+    connection_queues: Mutex<HashMap<SockFd, Queue<ConnectionId>>>,
+
+    /// Used to store data that arrived before its connection was opened. When the connection is
+    /// later opened, pending_data is read and emptied.
+    pending_data: Mutex<HashMap<ConnectionId, TCPBuffer>>,
 }
 
 impl Default for Sockets {

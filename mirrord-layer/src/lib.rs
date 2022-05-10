@@ -1,6 +1,4 @@
-// #![feature(c_variadic)]
 #![feature(once_cell)]
-#![feature(unboxed_closures)]
 
 use std::{
     mem::MaybeUninit,
@@ -33,29 +31,12 @@ mod file;
 mod pod_api;
 mod sockets;
 
-// TODO(alex) [high] 2022-05-09: After running for a while, it never displays anything (no response
-// to curl) after "send message to client 7777". Later it starts to output "NONE in none".
-
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
     static ref SOCKETS: sockets::Sockets = sockets::Sockets::default();
     static ref NEW_CONNECTION_SENDER: Mutex<Option<Sender<i32>>> = Mutex::new(None);
 }
-
-static mut MAIN_FUNCTION: MaybeUninit<MainFn> = MaybeUninit::uninit();
-static INIT_MAIN_FN: Once = Once::new();
-
-type MainFn = extern "C" fn(c_int, *const *const c_char, *const *const c_char) -> c_int;
-type LibcStartMainArgs = fn(
-    MainFn,
-    c_int,
-    *const *const c_char,
-    extern "C" fn(),
-    extern "C" fn(),
-    extern "C" fn(),
-    extern "C" fn(),
-) -> c_int;
 
 #[ctor]
 fn init() {
@@ -81,66 +62,6 @@ fn init() {
     enable_hooks();
 
     RUNTIME.spawn(poll_agent(pf, receiver));
-}
-
-unsafe extern "C" fn libc_start_main_detour(
-    main_fn: MainFn,
-    argc: c_int,
-    ubp_av: *const *const c_char,
-    init: extern "C" fn(),
-    fini: extern "C" fn(),
-    rtld_fini: extern "C" fn(),
-    stack_end: extern "C" fn(),
-) -> i32 {
-    debug!("loaded libc_start_main_detour");
-
-    let libc_start_main_ptr = Module::find_export_by_name(None, "__libc_start_main").unwrap();
-    let real_libc_start_main: LibcStartMainArgs = std::mem::transmute(libc_start_main_ptr.0);
-
-    debug!("preparing the program's main function to be called later");
-    INIT_MAIN_FN.call_once(|| {
-        MAIN_FUNCTION = MaybeUninit::new(main_fn);
-    });
-
-    // real_main(main_fn, argc, ubp_av, init, fini, rtld_fini, stack_end)
-    real_libc_start_main(main_detour, argc, ubp_av, init, fini, rtld_fini, stack_end)
-}
-
-// WARNING(alex): Normal `main` can't be found, so it doesn't work.
-extern "C" fn main_detour(
-    argc: c_int,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    unsafe {
-        debug!("loaded main_detour");
-
-        debug!("Hello from fake main!");
-
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-        debug!("init called");
-
-        let config = Config::init_from_env().unwrap();
-        let pf = RUNTIME.block_on(pod_api::create_agent(
-            &config.impersonated_pod_name,
-            &config.impersonated_pod_namespace,
-            &config.agent_namespace,
-            config.agent_rust_log,
-            config.agent_image,
-        ));
-        let (sender, receiver) = channel::<i32>(1000);
-        *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
-        enable_hooks();
-        RUNTIME.spawn(poll_agent(pf, receiver));
-
-        let real_main = MAIN_FUNCTION.assume_init();
-
-        debug!("about to call program's main");
-        real_main(argc, argv, envp)
-    }
 }
 
 unsafe extern "C" fn socket_detour(_domain: i32, _socket_type: i32, _protocol: i32) -> i32 {
@@ -204,7 +125,7 @@ unsafe extern "C" fn accept_detour(
     addrlen: *mut socklen_t,
 ) -> i32 {
     debug!(
-        "Accept called with sockfd {:?}, addr {:?}, addrlen {:?}",
+        "accept_detour: sockfd {:?}, addr {:?}, addrlen {:?}",
         &sockfd, &addr, &addrlen
     );
     let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
@@ -215,10 +136,7 @@ unsafe extern "C" fn accept_detour(
         std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
     }
 
-    debug!("before connection_id");
     let connection_id = SOCKETS.read_single_connection(sockfd);
-    debug!("after connection_id");
-
     SOCKETS.create_data_socket(connection_id, socket_addr)
 }
 
@@ -327,3 +245,77 @@ fn enable_hooks() {
 
     interceptor.end_transaction();
 }
+
+// static mut MAIN_FUNCTION: MaybeUninit<MainFn> = MaybeUninit::uninit();
+// static INIT_MAIN_FN: Once = Once::new();
+
+// type MainFn = extern "C" fn(c_int, *const *const c_char, *const *const c_char) -> c_int;
+// type LibcStartMainArgs = fn(
+//     MainFn,
+//     c_int,
+//     *const *const c_char,
+//     extern "C" fn(),
+//     extern "C" fn(),
+//     extern "C" fn(),
+//     extern "C" fn(),
+// ) -> c_int;
+
+// unsafe extern "C" fn libc_start_main_detour(
+//     main_fn: MainFn,
+//     argc: c_int,
+//     ubp_av: *const *const c_char,
+//     init: extern "C" fn(),
+//     fini: extern "C" fn(),
+//     rtld_fini: extern "C" fn(),
+//     stack_end: extern "C" fn(),
+// ) -> i32 {
+//     debug!("loaded libc_start_main_detour");
+
+//     let libc_start_main_ptr = Module::find_export_by_name(None, "__libc_start_main").unwrap();
+//     let real_libc_start_main: LibcStartMainArgs = std::mem::transmute(libc_start_main_ptr.0);
+
+//     debug!("preparing the program's main function to be called later");
+//     INIT_MAIN_FN.call_once(|| {
+//         MAIN_FUNCTION = MaybeUninit::new(main_fn);
+//     });
+
+//     // real_main(main_fn, argc, ubp_av, init, fini, rtld_fini, stack_end)
+//     real_libc_start_main(main_detour, argc, ubp_av, init, fini, rtld_fini, stack_end)
+// }
+
+// WARNING(alex): Normal `main` can't be found, so it doesn't work.
+// extern "C" fn main_detour(
+//     argc: c_int,
+//     argv: *const *const c_char,
+//     envp: *const *const c_char,
+// ) -> c_int {
+//     unsafe {
+//         debug!("loaded main_detour");
+
+//         debug!("Hello from fake main!");
+
+//         tracing_subscriber::registry()
+//             .with(tracing_subscriber::fmt::layer())
+//             .with(tracing_subscriber::EnvFilter::from_default_env())
+//             .init();
+//         debug!("init called");
+
+//         let config = Config::init_from_env().unwrap();
+//         let pf = RUNTIME.block_on(pod_api::create_agent(
+//             &config.impersonated_pod_name,
+//             &config.impersonated_pod_namespace,
+//             &config.agent_namespace,
+//             config.agent_rust_log,
+//             config.agent_image,
+//         ));
+//         let (sender, receiver) = channel::<i32>(1000);
+//         *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
+//         enable_hooks();
+//         RUNTIME.spawn(poll_agent(pf, receiver));
+
+//         let real_main = MAIN_FUNCTION.assume_init();
+
+//         debug!("about to call program's main");
+//         real_main(argc, argv, envp)
+//     }
+// }

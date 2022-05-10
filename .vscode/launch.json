@@ -8,7 +8,10 @@
       "name": "Launch index.ts",
       "type": "pwa-node",
       "request": "launch",
-      "runtimeArgs": ["-r", "ts-node/register"],
+      "runtimeArgs": [
+        "-r",
+        "ts-node/register"
+      ],
       "args": [
         "${workspaceFolder}/cli/src/index.ts",
         "nginx-deployment-66b6c48dd5-zshg9"
@@ -16,9 +19,13 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
       "name": "Launch Extension",
-      "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
+      "outFiles": [
+        "${workspaceFolder}/vscode-ext/out/**/*.js"
+      ],
       "request": "launch",
       "type": "pwa-extensionHost"
     },
@@ -27,12 +34,14 @@
       "request": "launch",
       "name": "MAIN NODE Debug mirrord-layer with app.js",
       "program": "node",
-      "args": ["${workspaceFolder}/sample-node/app.js"],
+      "args": [
+        "${workspaceFolder}/sample-node/app.js"
+      ],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-c47lc",
         "MIRRORD_AGENT_RUST_LOG": "trace"
       }
     },
@@ -41,7 +50,11 @@
       "request": "launch",
       "name": "Debug executable 'sample-rust'",
       "cargo": {
-        "args": ["build", "--bin=sample-rust", "--package=sample-rust"]
+        "args": [
+          "build",
+          "--bin=sample-rust",
+          "--package=sample-rust"
+        ]
       },
       "program": "${cargo:program}",
       "cwd": "${workspaceFolder}",
@@ -49,7 +62,7 @@
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord-agent=trace,mirrord=trace",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-s2jbg",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-c47lc",
         "MIRRORD_AGENT_RUST_LOG": "trace"
       }
     }

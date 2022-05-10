@@ -1,8 +1,23 @@
 var net = require("net");
 var server = net.createServer();
-var process = require("process");
+var fs = require("fs");
 
-console.log("process ", process.env);
+fs.open("/home/alexc/dev/mirrord/Cargo.toml", "r", (err, data) => {
+  if (err) {
+    console.error("Error opening file: ", err);
+  }
+
+  console.log("Opened file: ", data);
+});
+
+// fs.readFile("/home/alexc/dev/mirrord/Cargo.toml", "utf8", (err, data) => {
+//   if (err) {
+//     console.error("Error loading file: ", err);
+//   }
+
+//   console.log("Loaded file: ", data);
+
+// });
 
 server.on("connection", handleConnection);
 server.listen(

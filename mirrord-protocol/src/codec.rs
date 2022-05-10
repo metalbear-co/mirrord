@@ -38,12 +38,19 @@ pub enum ClientMessage {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct FileData {
+    pub connection_id: ConnectionID,
+    pub data: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum DaemonMessage {
     Close,
     NewTCPConnection(NewTCPConnection),
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
+    OpenFile(),
 }
 
 pub struct ClientCodec {
