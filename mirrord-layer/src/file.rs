@@ -9,7 +9,7 @@ use multi_map::MultiMap;
 use queues::Queue;
 use regex::Regex;
 use socketpair::{socketpair_stream, SocketpairStream};
-use tracing::debug;
+use tracing::{debug, info};
 
 // TODO(alex) [low] 2022-05-03: `panic::catch_unwind`, but do we need it? If we panic in a C context
 // it's bad news without it, but are we in a C context when using LD_PRELOAD?
@@ -162,13 +162,17 @@ pub(super) unsafe extern "C" fn open_detour(path: *const c_char, flags: c_int) -
         .expect("Failed converting path from c_char!");
     debug!("open_detour -> path {path_str}");
 
-    if IGNORE_FILES.is_match(path_str) {
+    let file_fd = if IGNORE_FILES.is_match(path_str) {
         debug!("open_detour -> ignored path {path_str}");
-        (LIBC_FILE_FUNCTIONS.open)(path, flags)
+        libc::open(path, flags)
+        // (LIBC_FILE_FUNCTIONS.open)(path, flags)
     } else {
         debug!("open_detour -> opening fake path {path_str}");
         FILES.open_file(path_str)
-    }
+    };
+
+    info!("open_detour -> fd {file_fd:?}");
+    file_fd
 }
 
 /// NOTE(alex): libc also has a `fopen64` function. Both functions point to the same address, so
@@ -179,20 +183,19 @@ unsafe extern "C" fn fopen_detour(filename: *const c_char, mode: *const c_char) 
         .expect("Failed converting filename from c_char!");
     debug!("fopen_detour -> filename {filename_str}");
 
-    let file_fd = if IGNORE_FILES.is_match(filename_str) {
-        (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
+    let file_ptr = if IGNORE_FILES.is_match(filename_str) {
+        // (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
+        libc::fopen(filename, mode)
     } else {
-        (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
+        // (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
+        libc::fopen(filename, mode)
     };
 
-    file_fd
-}
+    let fd = libc::fileno(file_ptr);
+    info!("fopen_detour -> fd {fd:?}");
 
-unsafe extern "C" fn fdopen_detour(fd: c_int, mode: *const c_char) -> *mut FILE {
-    debug!("fdopen_detour -> fd {fd:#?}");
-    let file_fd = (LIBC_FILE_FUNCTIONS.fdopen)(fd, mode);
-
-    file_fd
+    debug!("fopen_detour -> file_ptr {file_ptr:?}");
+    file_ptr
 }
 
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
@@ -202,7 +205,9 @@ unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> 
     // let stat_result = libc::fstat(fd, &mut stat);
     // debug!("read_detour -> stat_result {stat_result:?}, stat {stat:#?}");
 
-    let read_count = (LIBC_FILE_FUNCTIONS.read)(fd, buf, count);
+    // let read_count = (LIBC_FILE_FUNCTIONS.read)(fd, buf, count);
+    let read_count = libc::read(fd, buf, count);
+    info!("read_detour -> fd {fd:#?}");
 
     read_count
 }
@@ -222,14 +227,6 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
         .replace(
             Module::find_export_by_name(None, "fopen").unwrap(),
             NativePointer(fopen_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut()),
-        )
-        .unwrap();
-
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "fdopen").unwrap(),
-            NativePointer(fdopen_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
