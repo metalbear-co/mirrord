@@ -6,3 +6,11 @@ members = [
     "mirrord-layer",
     "mirrord-cli",
 ]
+
+# latest commits on rustls suppress certificate verification 
+# https://github.com/rustls/rustls/pull/1032
+# so we patch crates.io to use the latest commits from rustls
+# this should be changed once a newer version of rustls is out
+
+[patch.crates-io]
+rustls = { git = 'https://github.com/rustls/rustls' }
