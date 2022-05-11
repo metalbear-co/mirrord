@@ -34,7 +34,9 @@ queues = "1.1.0"
 rand = "0.8.5"
 multi-map = "1.3.0"
 envconfig = "0.10.0"
-regex = "*"
+regex = "1.5"
+errno = "0.2.8"
 
 [lib]
 crate_type = ["cdylib"]
+

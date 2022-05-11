@@ -1,20 +1,10 @@
 use std::{
-    collections::HashMap,
-    ffi::{CStr, CString},
-    lazy::SyncLazy,
-    mem::MaybeUninit,
-    net::SocketAddr,
-    os::unix::prelude::AsRawFd,
-    path::Path,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Mutex, Once, RwLock,
-    },
+    collections::HashMap, ffi::CStr, lazy::SyncLazy, net::SocketAddr, os::unix::prelude::AsRawFd,
+    path::Path, sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use lazy_static::lazy_static;
-use libc::{c_char, c_int, c_short, c_void, mode_t, size_t, ssize_t, FILE};
+use libc::{c_char, c_int, c_short, c_void, size_t, ssize_t, FILE};
 use multi_map::MultiMap;
 use queues::Queue;
 use regex::Regex;
@@ -144,6 +134,8 @@ impl Default for Files {
 }
 
 impl Files {
+    // TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
+    // implement file faking. Look at how `socket` is doing the message passing.
     pub fn open_file<P: AsRef<Path>>(&self, path: P) -> FileFd {
         let path = path.as_ref();
         debug!("open_file -> path {path:?}");
