@@ -1,6 +1,12 @@
 use std::{
-    collections::HashMap, ffi::CStr, lazy::SyncLazy, net::SocketAddr, os::unix::prelude::AsRawFd,
-    path::Path, sync::Mutex,
+    borrow::Borrow,
+    collections::HashMap,
+    ffi::CStr,
+    lazy::SyncLazy,
+    net::SocketAddr,
+    os::unix::{io::RawFd, prelude::AsRawFd},
+    path::Path,
+    sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
@@ -9,7 +15,7 @@ use multi_map::MultiMap;
 use queues::Queue;
 use regex::Regex;
 use socketpair::{socketpair_stream, SocketpairStream};
-use tracing::{debug, info};
+use tracing::debug;
 
 // TODO(alex) [low] 2022-05-03: `panic::catch_unwind`, but do we need it? If we panic in a C context
 // it's bad news without it, but are we in a C context when using LD_PRELOAD?
@@ -19,18 +25,6 @@ use tracing::{debug, info};
 // TODO(alex) [low] 2022-05-03: Safe wrappers around these functions.
 
 // https://users.rust-lang.org/t/problem-overriding-libc-functions-with-ld-preload/41516/4
-
-type LibcOpen = fn(*const c_char, c_int) -> c_int;
-type LibcFopen = fn(*const c_char, *const c_char) -> *mut FILE;
-type LibcFdopen = fn(c_int, *const c_char) -> *mut FILE;
-type LibcRead = fn(c_int, *mut c_void, size_t) -> ssize_t;
-
-struct LibcFileOps {
-    open: LibcOpen,
-    fopen: LibcFopen,
-    fdopen: LibcFdopen,
-    read: LibcRead,
-}
 
 /// NOTE(alex): Regex that ignores system files + files in the current working directory.
 static IGNORE_FILES: SyncLazy<Regex> = SyncLazy::new(|| {
@@ -51,128 +45,54 @@ static IGNORE_FILES: SyncLazy<Regex> = SyncLazy::new(|| {
         .expect("Failed building regex to ignore files!")
 });
 
-static LIBC_FILE_FUNCTIONS: SyncLazy<LibcFileOps> = SyncLazy::new(|| {
-    let libc_open_ptr = Module::find_export_by_name(None, "open").unwrap();
-    let libc_open: LibcOpen = unsafe { std::mem::transmute(libc_open_ptr) };
+pub struct Open {
+    file: std::fs::File,
+}
 
-    let libc_fopen_ptr = Module::find_export_by_name(None, "fopen").unwrap();
-    let libc_fopen: LibcFopen = unsafe { std::mem::transmute(libc_fopen_ptr) };
-
-    let libc_fdopen_ptr = Module::find_export_by_name(None, "fdopen").unwrap();
-    let libc_fdopen: LibcFdopen = unsafe { std::mem::transmute(libc_fdopen_ptr) };
-
-    let libc_read_ptr = Module::find_export_by_name(None, "read").unwrap();
-    let libc_read: LibcRead = unsafe { std::mem::transmute(libc_read_ptr) };
-
-    LibcFileOps {
-        open: libc_open,
-        fopen: libc_fopen,
-        fdopen: libc_fdopen,
-        read: libc_read,
-    }
-});
-
-static mut FILES: SyncLazy<Files> = SyncLazy::new(|| Files::default());
-
-type FileFd = c_int;
-type Port = c_short;
-type ConnectionId = c_short;
-type TCPBuffer = Vec<u8>;
+pub enum FileState {
+    AwaitingRemote,
+    Open(Open),
+}
 
 pub struct File {
-    pub read_fd: FileFd,
+    pub fd: RawFd,
     pub read_file: SocketpairStream,
     pub write_file: SocketpairStream,
 }
 
-pub struct ConnectionFile {
-    pub read_fd: FileFd,
-    pub read_file: SocketpairStream,
-    pub write_file: SocketpairStream,
-    pub address: SocketAddr,
-    pub state: ConnectionState,
-}
-
-#[derive(PartialEq)]
-pub enum ConnectionState {
-    Bound,
-    Listening,
-}
-
-pub struct DataFile {
-    pub connection_id: ConnectionId,
-    #[allow(dead_code)]
-    pub read_socket: SocketpairStream, /* Though this is unread, it's necessary to keep the
-                                        * socket open */
-    pub write_socket: SocketpairStream,
-    pub address: SocketAddr,
-}
-
-pub struct Files {
-    new_files: Mutex<HashMap<FileFd, File>>,
-    connections: Mutex<MultiMap<FileFd, Port, ConnectionFile>>,
-    data: Mutex<MultiMap<FileFd, ConnectionId, DataFile>>,
-
-    /// Used to enqueue incoming connection ids from the agent, to be read in the 'accept' call.
-    connection_queues: Mutex<HashMap<FileFd, Queue<ConnectionId>>>,
-
-    /// Used to store data that arrived before its connection was opened. When the connection is
-    /// later opened, pending_data is read and emptied.
-    pending_data: Mutex<HashMap<ConnectionId, TCPBuffer>>,
-}
-
-impl Default for Files {
-    fn default() -> Self {
-        Self {
-            new_files: Mutex::new(HashMap::new()),
-            connections: Mutex::new(MultiMap::new()),
-            data: Mutex::new(MultiMap::new()),
-            connection_queues: Mutex::new(HashMap::new()),
-            pending_data: Mutex::new(HashMap::new()),
-        }
+impl Borrow<RawFd> for File {
+    fn borrow(&self) -> &RawFd {
+        &self.fd
     }
 }
 
-impl Files {
-    // TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
-    // implement file faking. Look at how `socket` is doing the message passing.
-    pub fn open_file<P: AsRef<Path>>(&self, path: P) -> FileFd {
-        let path = path.as_ref();
-        debug!("open_file -> path {path:?}");
+static mut FILES: SyncLazy<Mutex<Vec<File>>> = SyncLazy::new(|| Mutex::new(Vec::with_capacity(32)));
 
-        let (write_socket, read_socket) = socketpair_stream().unwrap();
-        let read_fd = read_socket.as_raw_fd();
-        let socket = File {
-            read_fd,
-            read_file: read_socket,
-            write_file: write_socket,
-        };
+// TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
+// implement file faking. Look at how `socket` is doing the message passing.
+pub fn open_file(path: *const c_char, oflag: c_int) -> RawFd {
+    debug!("open_file -> path: {path:?}, flags: {oflag:?}");
+    let fd = unsafe { libc::open(path, oflag) };
 
-        self.new_files.lock().unwrap().insert(read_fd, socket);
+    let path_str = unsafe { CStr::from_ptr(path) }
+        .to_str()
+        .expect("Failed converting path from c_char!");
 
-        read_fd
+    if IGNORE_FILES.is_match(path_str) {
+        return fd;
     }
+
+    fd
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
 /// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
-pub(super) unsafe extern "C" fn open_detour(path: *const c_char, flags: c_int) -> FileFd {
+pub(super) unsafe extern "C" fn open_detour(path: *const c_char, oflag: c_int) -> RawFd {
     let path_str = CStr::from_ptr(path)
         .to_str()
         .expect("Failed converting path from c_char!");
     debug!("open_detour -> path {path_str}");
-
-    let file_fd = if IGNORE_FILES.is_match(path_str) {
-        debug!("open_detour -> ignored path {path_str}");
-        libc::open(path, flags)
-        // (LIBC_FILE_FUNCTIONS.open)(path, flags)
-    } else {
-        debug!("open_detour -> opening fake path {path_str}");
-        FILES.open_file(path_str)
-    };
-
-    info!("open_detour -> fd {file_fd:?}");
-    file_fd
+    open_file(path, oflag)
 }
 
 /// NOTE(alex): libc also has a `fopen64` function. Both functions point to the same address, so
@@ -184,15 +104,10 @@ unsafe extern "C" fn fopen_detour(filename: *const c_char, mode: *const c_char) 
     debug!("fopen_detour -> filename {filename_str}");
 
     let file_ptr = if IGNORE_FILES.is_match(filename_str) {
-        // (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
         libc::fopen(filename, mode)
     } else {
-        // (LIBC_FILE_FUNCTIONS.fopen)(filename, mode)
         libc::fopen(filename, mode)
     };
-
-    let fd = libc::fileno(file_ptr);
-    info!("fopen_detour -> fd {fd:?}");
 
     debug!("fopen_detour -> file_ptr {file_ptr:?}");
     file_ptr
@@ -201,13 +116,7 @@ unsafe extern "C" fn fopen_detour(filename: *const c_char, mode: *const c_char) 
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
     debug!("read_detour -> fd {fd:#?}");
 
-    // let mut stat: libc::stat = std::mem::zeroed();
-    // let stat_result = libc::fstat(fd, &mut stat);
-    // debug!("read_detour -> stat_result {stat_result:?}, stat {stat:#?}");
-
-    // let read_count = (LIBC_FILE_FUNCTIONS.read)(fd, buf, count);
     let read_count = libc::read(fd, buf, count);
-    info!("read_detour -> fd {fd:#?}");
 
     read_count
 }
