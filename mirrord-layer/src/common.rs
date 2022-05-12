@@ -1,3 +1,8 @@
+use std::{
+    os::unix::prelude::*,
+    path::{Path, PathBuf},
+};
+
 pub type Port = u16;
 
 #[derive(Debug)]
@@ -8,7 +13,14 @@ pub struct Listen {
 }
 
 #[derive(Debug)]
-pub enum HookMessage {
-    Listen(Listen),
+pub struct OpenFile {
+    pub(crate) path: PathBuf,
 }
 
+// TODO(alex) [high] 2022-05-11: Write down the message flow.
+/// These are the messages that `mirrord-layer` sends to ?.
+#[derive(Debug)]
+pub enum HookMessage {
+    Listen(Listen),
+    // OpenFile(OpenFile),
+}

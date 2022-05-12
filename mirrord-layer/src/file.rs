@@ -5,7 +5,7 @@ use std::{
     lazy::SyncLazy,
     net::SocketAddr,
     os::unix::{io::RawFd, prelude::AsRawFd},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -13,9 +13,15 @@ use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{c_char, c_int, c_short, c_void, size_t, ssize_t, FILE};
 use multi_map::MultiMap;
 use queues::Queue;
-use regex::Regex;
+use rand::prelude::*;
+use regex::{Regex, RegexSet};
 use socketpair::{socketpair_stream, SocketpairStream};
-use tracing::debug;
+use tracing::{debug, error, info};
+
+use crate::{
+    common::{HookMessage, OpenFile},
+    HOOK_SENDER,
+};
 
 // TODO(alex) [low] 2022-05-03: `panic::catch_unwind`, but do we need it? If we panic in a C context
 // it's bad news without it, but are we in a C context when using LD_PRELOAD?
@@ -27,7 +33,7 @@ use tracing::debug;
 // https://users.rust-lang.org/t/problem-overriding-libc-functions-with-ld-preload/41516/4
 
 /// NOTE(alex): Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: SyncLazy<Regex> = SyncLazy::new(|| {
+static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     // NOTE(alex): To handle the problem of injecting `open` and friends into project runners (like
     // in a call to `node app.js`, or `cargo run app`), we're ignoring files from the current
     // working directory (as suggested by aviram).
@@ -37,27 +43,34 @@ static IGNORE_FILES: SyncLazy<Regex> = SyncLazy::new(|| {
     let cwd_str = unsafe { CStr::from_ptr(cwd) }
         .to_str()
         .expect("Failed converting cwd from c_char!");
+    // .replace(r"/", r"\/");
     debug!("cwd {cwd_str}");
 
-    let system_ignore = r#"(.*\.so|.*\.d|/proc/.*|/sys/.*|/lib/.*|/etc/.*|/usr/.*|/dev/.*)"#;
+    let set = RegexSet::new(&[
+        r".*\.so",
+        r".*\.d",
+        r"^/proc/.*",
+        r"^/sys/.*",
+        r"^/lib/.*",
+        r"^/etc/.*",
+        r"^/usr/.*",
+        r"^/dev/.*",
+        cwd_str,
+    ])
+    .unwrap();
 
-    Regex::new(&format!("{system_ignore}|{cwd_str}/.*"))
-        .expect("Failed building regex to ignore files!")
+    set
 });
-
-pub struct Open {
-    file: std::fs::File,
-}
 
 pub enum FileState {
     AwaitingRemote,
-    Open(Open),
+    Open(OpenFile),
 }
 
 pub struct File {
+    pub fake_fd: RawFd,
     pub fd: RawFd,
-    pub read_file: SocketpairStream,
-    pub write_file: SocketpairStream,
+    pub state: FileState,
 }
 
 impl Borrow<RawFd> for File {
@@ -70,28 +83,35 @@ static mut FILES: SyncLazy<Mutex<Vec<File>>> = SyncLazy::new(|| Mutex::new(Vec::
 
 // TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
 // implement file faking. Look at how `socket` is doing the message passing.
-pub fn open_file(path: *const c_char, oflag: c_int) -> RawFd {
-    debug!("open_file -> path: {path:?}, flags: {oflag:?}");
-    let fd = unsafe { libc::open(path, oflag) };
-
-    let path_str = unsafe { CStr::from_ptr(path) }
+pub fn open_file(raw_path: *const c_char, oflag: c_int) -> RawFd {
+    let path: PathBuf = unsafe { CStr::from_ptr(raw_path) }
         .to_str()
-        .expect("Failed converting path from c_char!");
+        .expect("Failed converting path from c_char!")
+        .into();
+    debug!("open_file -> path: {path:?}, flags: {oflag:?}",);
 
-    if IGNORE_FILES.is_match(path_str) {
-        return fd;
+    if IGNORE_FILES.is_match(path.to_str().unwrap()) {
+        info!("open_file -> ignoring file: {path:?}");
+        let fd = unsafe { libc::open(raw_path, oflag) };
+        fd
+    } else {
+        let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+        // match sender.blocking_send(HookMessage::OpenFile(OpenFile { path })) {
+        //     Ok(_) => {}
+        //     Err(e) => {
+        //         error!("open: failed to send open message: {:?}", e);
+        //         return libc::EFAULT;
+        //     }
+        // };
+
+        let random_fd = 1000;
+        random_fd
     }
-
-    fd
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
 /// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
 pub(super) unsafe extern "C" fn open_detour(path: *const c_char, oflag: c_int) -> RawFd {
-    let path_str = CStr::from_ptr(path)
-        .to_str()
-        .expect("Failed converting path from c_char!");
-    debug!("open_detour -> path {path_str}");
     open_file(path, oflag)
 }
 
@@ -132,19 +152,19 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
         )
         .unwrap();
 
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "fopen").unwrap(),
-            NativePointer(fopen_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut()),
-        )
-        .unwrap();
+    // interceptor
+    //     .replace(
+    //         Module::find_export_by_name(None, "fopen").unwrap(),
+    //         NativePointer(fopen_detour as *mut c_void),
+    //         NativePointer(std::ptr::null_mut()),
+    //     )
+    //     .unwrap();
 
-    interceptor
-        .replace(
-            Module::find_export_by_name(None, "read").unwrap(),
-            NativePointer(read_detour as *mut c_void),
-            NativePointer(std::ptr::null_mut()),
-        )
-        .unwrap();
+    // interceptor
+    //     .replace(
+    //         Module::find_export_by_name(None, "read").unwrap(),
+    //         NativePointer(read_detour as *mut c_void),
+    //         NativePointer(std::ptr::null_mut()),
+    //     )
+    //     .unwrap();
 }
