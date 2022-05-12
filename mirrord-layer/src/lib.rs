@@ -1,34 +1,94 @@
 // #![feature(c_variadic)]
 
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    os::unix::io::RawFd,
+    thread,
+    time::Duration,
+};
 
 use ctor::ctor;
 use envconfig::Envconfig;
-use frida_gum::{interceptor::Interceptor, Error, Gum, Module, NativePointer};
+use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
-use libc::{c_char, c_void, sockaddr, socklen_t};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
-use os_socketaddr::OsSocketAddr;
 use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
+    task,
 };
 use tracing::{debug, error};
 
+mod common;
 mod config;
+mod macros;
 mod pod_api;
 mod sockets;
-use config::Config;
+
 use tracing_subscriber::prelude::*;
+
+use crate::{
+    common::{HookMessage, Port},
+    config::Config,
+    sockets::{SocketInformation, CONNECTION_QUEUE},
+};
 
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
-    static ref SOCKETS: sockets::Sockets = sockets::Sockets::default();
-    static ref NEW_CONNECTION_SENDER: Mutex<Option<Sender<i32>>> = Mutex::new(None);
+}
+
+pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+
+#[derive(Debug)]
+enum TcpTunnelMessages {
+    Data(Vec<u8>),
+    Close,
+}
+
+#[derive(Debug, Clone)]
+struct ListenData {
+    ipv6: bool,
+    port: Port,
+    fd: RawFd,
+}
+
+async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunnelMessages>) {
+    loop {
+        select! {
+            message = receiver.recv() => {
+                match message {
+                    Some(TcpTunnelMessages::Data(data)) => {
+                        local_stream.write_all(&data).await.unwrap()
+                    },
+                    Some(TcpTunnelMessages::Close) => break,
+                    None => break
+                };
+            },
+            _ = local_stream.readable() => {
+                let mut data = vec![0; 1024];
+                match local_stream.try_read(&mut data) {
+                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        continue
+                        },
+                    Err(err) => {
+                        debug!("local stream ended with err {:?}", err);
+                        break;
+                    }
+                    Ok(n) if n == 0 => break,
+                    Ok(_) => {}
+                }
+
+            }
+        }
+    }
+    debug!("exiting tcp tunnel");
 }
 
 #[ctor]
@@ -47,108 +107,27 @@ fn init() {
         config.agent_rust_log,
         config.agent_image,
     ));
-    let (sender, receiver) = channel::<i32>(1000);
-    *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
+    let (sender, receiver) = channel::<HookMessage>(1000);
+    unsafe {
+        HOOK_SENDER = Some(sender);
+    };
     enable_hooks();
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
-unsafe extern "C" fn socket_detour(_domain: i32, _socket_type: i32, _protocol: i32) -> i32 {
-    debug!("socket called");
-    SOCKETS.create_socket()
-}
-
-unsafe extern "C" fn bind_detour(sockfd: i32, addr: *const sockaddr, addrlen: socklen_t) -> i32 {
-    debug!("bind called");
-    let parsed_addr = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
-        .into_addr()
-        .unwrap();
-
-    SOCKETS.convert_to_connection_socket(sockfd, parsed_addr);
-    0
-}
-
-unsafe extern "C" fn listen_detour(sockfd: i32, _backlog: i32) -> i32 {
-    debug!("listen called");
-
-    match SOCKETS.set_connection_state(sockfd, sockets::ConnectionState::Listening) {
-        Ok(()) => {
-            let sender = NEW_CONNECTION_SENDER.lock().unwrap();
-            sender.as_ref().unwrap().blocking_send(sockfd).unwrap(); // Tell main thread to subscribe to agent
-            0
-        }
-        Err(()) => {
-            error!("Failed to set connection state to listening");
-            -1
-        }
-    }
-}
-
-unsafe extern "C" fn getpeername_detour(
-    sockfd: i32,
-    addr: *mut sockaddr,
-    addrlen: *mut socklen_t,
-) -> i32 {
-    let socket_addr = SOCKETS.get_data_socket_address(sockfd).unwrap();
-    let os_addr: OsSocketAddr = socket_addr.into();
-    let len = std::cmp::min(*addrlen as usize, os_addr.len() as usize);
-    std::ptr::copy_nonoverlapping(os_addr.as_ptr() as *const u8, addr as *mut u8, len);
-
-    *addrlen = os_addr.len();
-    0
-}
-
-unsafe extern "C" fn setsockopt_detour(
-    _sockfd: i32,
-    _level: i32,
-    _optname: i32,
-    _optval: *mut c_char,
-    _optlen: socklen_t,
-) -> i32 {
-    0
-}
-
-unsafe extern "C" fn accept_detour(
-    sockfd: i32,
-    addr: *mut sockaddr,
-    addrlen: *mut socklen_t,
-) -> i32 {
-    debug!(
-        "Accept called with sockfd {:?}, addr {:?}, addrlen {:?}",
-        &sockfd, &addr, &addrlen
-    );
-    let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
-
-    if !addr.is_null() {
-        debug!("received non-null address in accept");
-        let os_addr: OsSocketAddr = socket_addr.into();
-        std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
-    }
-
-    let connection_id = SOCKETS.read_single_connection(sockfd);
-    SOCKETS.create_data_socket(connection_id, socket_addr)
-}
-
-unsafe extern "C" fn accept4_detour(
-    sockfd: i32,
-    addr: *mut sockaddr,
-    addrlen: *mut socklen_t,
-    _flags: i32,
-) -> i32 {
-    accept_detour(sockfd, addr, addrlen)
-}
-
-async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<i32>) {
+async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
+    let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
+    let mut active_connections = HashMap::new();
     loop {
         select! {
             message = receiver.recv() => {
                 match message {
-                    Some(sockfd) => {
-                        let port = SOCKETS.get_connection_socket_address(sockfd).unwrap().port();
-                        debug!("send message to client {:?}", port);
-                        codec.send(ClientMessage::PortSubscribe(vec![port])).await.unwrap();
+                    Some(HookMessage::Listen(msg)) => {
+                        debug!("received message from hook {:?}", msg);
+                        codec.send(ClientMessage::PortSubscribe(vec![msg.real_port])).await.unwrap();
+                        port_mapping.insert(msg.real_port, ListenData{port: msg.fake_port, ipv6: msg.ipv6, fd: msg.fd});
                     }
                     None => {
                         debug!("NONE in recv");
@@ -159,14 +138,59 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<i32>) {
             message = codec.next() => {
                 match message {
                     Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
-                        SOCKETS.open_connection(conn.connection_id, conn.port);
+                        debug!("new connection {:?}", conn);
+                        let listen_data = match port_mapping.get(&conn.destination_port) {
+                            Some(listen_data) => (*listen_data).clone(),
+                            None => {
+                                debug!("no listen_data for {:?}", conn.destination_port);
+                                continue;
+                            }
+                        };
+                        let addr = match listen_data.ipv6 {
+                            false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
+                            true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
+                        };
+                        let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+                        {
+                            CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+                        }
+                        let stream = match TcpStream::connect(addr).await {
+                            Ok(stream) => stream,
+                            Err(err) => {
+                                error!("failed to connect to port {:?}", err);
+                                continue;
+                            }
+                        };
+                        let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
+                        active_connections.insert(conn.connection_id, sender);
+                        task::spawn(async move {
+                            tcp_tunnel(stream, receiver).await
+                        });
                     }
-                    Some(Ok(DaemonMessage::TCPData(d))) => {
-                        // Write to socket - need to find it in OPEN_CONNECTION_SOCKETS by conn_id
-                        SOCKETS.write_data(d.connection_id, d.data);
-                    }
-                    Some(Ok(DaemonMessage::TCPClose(d))) => {
-                        SOCKETS.close_connection(d.connection_id)
+                    Some(Ok(DaemonMessage::TCPData(msg))) => {
+                        let sender = match active_connections.get(&msg.connection_id) {
+                            Some(sender) => sender,
+                            None => {
+                                debug!("no sender for {:?}", msg.connection_id);
+                                continue;
+                            }
+                        };
+                        if let Err(err) = sender.send(TcpTunnelMessages::Data(msg.data)).await {
+                                debug!("sender error {:?}", err);
+                                active_connections.remove(&msg.connection_id);
+                        }
+                    },
+                    Some(Ok(DaemonMessage::TCPClose(msg))) => {
+                        let sender = match active_connections.remove(&msg.connection_id) {
+                            Some(sender) => sender,
+                            None => {
+                                debug!("no sender for {:?}", msg.connection_id);
+                                continue;
+                            }
+                        };
+                        if let Err(err) = sender.send(TcpTunnelMessages::Close).await {
+                                debug!("sender error {:?}", err);
+                        }
                     }
                     Some(_) => {
                         debug!("NONE in some");
@@ -183,48 +207,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<i32>) {
     }
 }
 
-macro_rules! hook {
-    ($interceptor:expr, $func:expr, $detour_name:expr) => {
-        $interceptor
-            .replace(
-                Module::find_export_by_name(None, $func).unwrap(),
-                NativePointer($detour_name as *mut c_void),
-                NativePointer(std::ptr::null_mut::<c_void>()),
-            )
-            .unwrap();
-    };
-}
-
-macro_rules! try_hook {
-    ($interceptor:expr, $func:expr, $detour_name:expr) => {
-        if let Some(addr) = Module::find_export_by_name(None, $func) {
-            match $interceptor.replace(
-                addr,
-                NativePointer($detour_name as *mut c_void),
-                NativePointer(std::ptr::null_mut::<c_void>()),
-            ) {
-                Err(Error::InterceptorAlreadyReplaced) => {
-                    debug!("{} already replaced", $func);
-                }
-                Err(e) => {
-                    debug!("{} error: {:?}", $func, e);
-                }
-                Ok(_) => {
-                    debug!("{} hooked", $func);
-                }
-            }
-        }
-    };
-}
-
 fn enable_hooks() {
-    let mut interceptor = Interceptor::obtain(&GUM);
-    hook!(interceptor, "socket", socket_detour);
-    hook!(interceptor, "bind", bind_detour);
-    hook!(interceptor, "listen", listen_detour);
-    hook!(interceptor, "getpeername", getpeername_detour);
-    hook!(interceptor, "setsockopt", setsockopt_detour);
-    try_hook!(interceptor, "uv__accept4", accept4_detour);
-    try_hook!(interceptor, "accept4", accept4_detour);
-    try_hook!(interceptor, "accept", accept_detour);
+    let interceptor = Interceptor::obtain(&GUM);
+    sockets::enable_hooks(interceptor)
 }
