@@ -14,7 +14,8 @@ pub struct Listen {
 }
 
 #[derive(Debug)]
-pub struct OpenFile {
+pub struct Open {
+    pub(crate) fake_fd: RawFd,
     pub(crate) path: PathBuf,
 }
 
@@ -23,5 +24,5 @@ pub struct OpenFile {
 #[derive(Debug)]
 pub enum HookMessage {
     Listen(Listen),
-    // OpenFile(OpenFile),
+    Open(Open),
 }

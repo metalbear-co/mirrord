@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr},
+    os::unix::prelude::RawFd,
 };
 
 use anyhow::{anyhow, Result};
@@ -35,6 +36,7 @@ type ConnectionID = u16;
 pub enum SnifferCommand {
     SetPorts(Vec<u16>),
     Close,
+    FileLink(RawFd),
 }
 
 #[derive(Debug)]
@@ -280,6 +282,20 @@ pub async fn packet_worker(
                         };
 
                     },
+                    Some(SnifferCommand::FileLink(file_fd)) => {
+                        debug!("linking file {file_fd:?}");
+                        connection_manager.set_ports(&ports);
+                        let sniffer = stream.inner_mut();
+                        if ports.is_empty() {
+                            debug!("empty ports, setting dummy bpf");
+                            sniffer.filter(DUMMY_BPF, true)?
+                        } else {
+                            let bpf = format_bpf(&ports);
+                            debug!("setting bpf to {:?}", &bpf);
+                            sniffer.filter(&bpf, true)?
+                        };
+
+                    }
                     Some(SnifferCommand::Close) | None => {
                         debug!("sniffer closed");
                         break;

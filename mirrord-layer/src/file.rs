@@ -16,10 +16,10 @@ use queues::Queue;
 use rand::prelude::*;
 use regex::{Regex, RegexSet};
 use socketpair::{socketpair_stream, SocketpairStream};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
-    common::{HookMessage, OpenFile},
+    common::{HookMessage, Open},
     HOOK_SENDER,
 };
 
@@ -64,7 +64,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 
 pub enum FileState {
     AwaitingRemote,
-    Open(OpenFile),
+    Open(Open),
 }
 
 pub struct File {
@@ -83,36 +83,43 @@ static mut FILES: SyncLazy<Mutex<Vec<File>>> = SyncLazy::new(|| Mutex::new(Vec::
 
 // TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
 // implement file faking. Look at how `socket` is doing the message passing.
-pub fn open_file(raw_path: *const c_char, oflag: c_int) -> RawFd {
+pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
     let path: PathBuf = unsafe { CStr::from_ptr(raw_path) }
         .to_str()
         .expect("Failed converting path from c_char!")
         .into();
-    debug!("open_file -> path: {path:?}, flags: {oflag:?}",);
+    debug!("open -> path: {path:?}, flags: {oflag:?}",);
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        info!("open_file -> ignoring file: {path:?}");
+        warn!("open_file -> ignoring file: {path:?}");
         let fd = unsafe { libc::open(raw_path, oflag) };
         fd
     } else {
+        let fake_fd = 1000;
         let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-        // match sender.blocking_send(HookMessage::OpenFile(OpenFile { path })) {
-        //     Ok(_) => {}
-        //     Err(e) => {
-        //         error!("open: failed to send open message: {:?}", e);
-        //         return libc::EFAULT;
-        //     }
-        // };
+        match sender.blocking_send(HookMessage::Open(Open { fake_fd, path })) {
+            Ok(_) => {}
+            Err(fail) => {
+                error!("open: failed to send open message: {fail:?}!");
+                return libc::EFAULT;
+            }
+        };
+        // TODO(alex) [high] 2022-05-12: Instead of returning this `fake_fd` thing, we should block
+        // while waiting for an `-agent` reply.
+        // To do this:
+        // - create a (send_tx, recv_tx) for file ops;
+        // - do `recv_tx.recv()` here to block until the "file is open" message is received;
+        // - send an open file request to `-agent` in `poll_agent`;
+        // - when the reply comes back, `send_tx.send(file)` in `poll_agent`;
 
-        let random_fd = 1000;
-        random_fd
+        fake_fd
     }
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
 /// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
 pub(super) unsafe extern "C" fn open_detour(path: *const c_char, oflag: c_int) -> RawFd {
-    open_file(path, oflag)
+    open(path, oflag)
 }
 
 /// NOTE(alex): libc also has a `fopen64` function. Both functions point to the same address, so

@@ -1,4 +1,4 @@
-use std::{io, net::IpAddr};
+use std::{io, net::IpAddr, path::PathBuf};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
@@ -36,6 +36,7 @@ pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
+    OpenFile(PathBuf),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]

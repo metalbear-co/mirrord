@@ -1356,7 +1356,6 @@ dependencies = [
  "os_socketaddr",
  "queues",
  "rand 0.8.5",
- "redhook",
  "regex",
  "serde_json",
  "socketpair",

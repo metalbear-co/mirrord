@@ -27,7 +27,7 @@
       "request": "launch",
       "name": "MAIN NODE Debug mirrord-layer with app.js",
       "program": "node",
-      "args": ["${workspaceFolder}/sample-node/app.js"],
+      "args": ["${workspaceFolder}/sample/app.js"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",

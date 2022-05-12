@@ -44,6 +44,7 @@ impl ConnectionQueue {
     pub fn add(&mut self, fd: &RawFd, info: SocketInformation) {
         self.connections.entry(*fd).or_default().push_back(info);
     }
+
     pub fn get(&mut self, fd: &RawFd) -> Option<SocketInformation> {
         let mut queue = self.connections.remove(fd)?;
         if let Some(info) = queue.pop_front() {

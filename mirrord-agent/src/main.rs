@@ -3,6 +3,8 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
+    os::unix::prelude::{AsRawFd, RawFd},
+    path::PathBuf,
 };
 
 use anyhow::Result;
@@ -11,7 +13,7 @@ use mirrord_protocol::{ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, 
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
+    sync::mpsc,
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
@@ -58,12 +60,30 @@ impl Borrow<PeerID> for Peer {
     }
 }
 
+async fn handle_open_file(
+    state: &mut State,
+    peer_id: PeerID,
+    path: PathBuf,
+    packet_command_tx: mpsc::Sender<SnifferCommand>,
+) -> Result<()> {
+    let file = std::fs::File::open(path).unwrap();
+    let file_fd = file.as_raw_fd();
+
+    state.open_files.subscribe(peer_id, file_fd);
+    packet_command_tx
+        .send(SnifferCommand::FileLink(file_fd))
+        .await?;
+
+    Ok(())
+}
+
 #[derive(Debug)]
 struct State {
     pub peers: HashSet<Peer>,
     index_allocator: IndexAllocator<PeerID>,
     pub port_subscriptions: Subscriptions<Port, PeerID>,
     pub connections_subscriptions: Subscriptions<ConnectionID, PeerID>,
+    pub open_files: Subscriptions<RawFd, PeerID>,
 }
 
 impl State {
@@ -73,6 +93,7 @@ impl State {
             index_allocator: IndexAllocator::new(),
             port_subscriptions: Subscriptions::new(),
             connections_subscriptions: Subscriptions::new(),
+            open_files: Subscriptions::new(),
         }
     }
 
@@ -181,13 +202,13 @@ async fn start() -> Result<()> {
             Some(message) = peers_rx.recv() => {
                 match message.msg {
                     ClientMessage::PortSubscribe(ports) => {
-                        debug!("peer id {:?} asked to subscribe to {:?}", message.peer_id, ports);
+                        debug!("start -> peer id {:?} asked to subscribe to {:?}", message.peer_id, ports);
                         state.port_subscriptions.subscribe_many(message.peer_id, ports);
                         let ports = state.port_subscriptions.get_subscribed_topics();
                         packet_command_tx.send(SnifferCommand::SetPorts(ports)).await?;
                     }
                     ClientMessage::Close => {
-                        debug!("peer id {:?} sent close", &message.peer_id);
+                        debug!("start -> peer id {:?} sent close", &message.peer_id);
                         state.remove_peer(message.peer_id);
                         let ports = state.port_subscriptions.get_subscribed_topics();
                         packet_command_tx.send(SnifferCommand::SetPorts(ports)).await?;
@@ -195,8 +216,10 @@ async fn start() -> Result<()> {
                     ClientMessage::ConnectionUnsubscribe(connection_id) => {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
-
-
+                    ClientMessage::OpenFile(path) => {
+                        debug!("start -> peer id {:?} asked to open file {path:?}", message.peer_id);
+                        handle_open_file(&mut state, message.peer_id, path, packet_command_tx.clone()).await?;
+                    }
                 }
             },
             message = packet_sniffer_rx.recv() => {

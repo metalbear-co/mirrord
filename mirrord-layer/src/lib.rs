@@ -25,7 +25,7 @@ use tokio::{
     task,
 };
 use tracing::{debug, error};
-use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
 
 mod common;
 mod config;
@@ -33,8 +33,6 @@ mod file;
 mod macros;
 mod pod_api;
 mod sockets;
-
-use tracing_subscriber::prelude::*;
 
 use crate::{
     common::{HookMessage, Port},
@@ -127,10 +125,14 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
         select! {
             message = receiver.recv() => {
                 match message {
-                    Some(HookMessage::Listen(msg)) => {
-                        debug!("received message from hook {:?}", msg);
-                        codec.send(ClientMessage::PortSubscribe(vec![msg.real_port])).await.unwrap();
-                        port_mapping.insert(msg.real_port, ListenData{port: msg.fake_port, ipv6: msg.ipv6, fd: msg.fd});
+                    Some(HookMessage::Listen(listen)) => {
+                        debug!("poll_agent -> received `Listen` message from hook {:?}", listen);
+                        codec.send(ClientMessage::PortSubscribe(vec![listen.real_port])).await.unwrap();
+                        port_mapping.insert(listen.real_port, ListenData{port: listen.fake_port, ipv6: listen.ipv6, fd: listen.fd});
+                    }
+                    Some(HookMessage::Open(open)) => {
+                        debug!("poll_agent -> received `Open` message from hook {:?}", open);
+                        codec.send(ClientMessage::OpenFile(open.path)).await.unwrap();
                     }
                     None => {
                         debug!("NONE in recv");
@@ -219,77 +221,3 @@ fn enable_hooks() {
 
     interceptor.end_transaction();
 }
-
-// static mut MAIN_FUNCTION: MaybeUninit<MainFn> = MaybeUninit::uninit();
-// static INIT_MAIN_FN: Once = Once::new();
-
-// type MainFn = extern "C" fn(c_int, *const *const c_char, *const *const c_char) -> c_int;
-// type LibcStartMainArgs = fn(
-//     MainFn,
-//     c_int,
-//     *const *const c_char,
-//     extern "C" fn(),
-//     extern "C" fn(),
-//     extern "C" fn(),
-//     extern "C" fn(),
-// ) -> c_int;
-
-// unsafe extern "C" fn libc_start_main_detour(
-//     main_fn: MainFn,
-//     argc: c_int,
-//     ubp_av: *const *const c_char,
-//     init: extern "C" fn(),
-//     fini: extern "C" fn(),
-//     rtld_fini: extern "C" fn(),
-//     stack_end: extern "C" fn(),
-// ) -> i32 {
-//     debug!("loaded libc_start_main_detour");
-
-//     let libc_start_main_ptr = Module::find_export_by_name(None, "__libc_start_main").unwrap();
-//     let real_libc_start_main: LibcStartMainArgs = std::mem::transmute(libc_start_main_ptr.0);
-
-//     debug!("preparing the program's main function to be called later");
-//     INIT_MAIN_FN.call_once(|| {
-//         MAIN_FUNCTION = MaybeUninit::new(main_fn);
-//     });
-
-//     // real_main(main_fn, argc, ubp_av, init, fini, rtld_fini, stack_end)
-//     real_libc_start_main(main_detour, argc, ubp_av, init, fini, rtld_fini, stack_end)
-// }
-
-// WARNING(alex): Normal `main` can't be found, so it doesn't work.
-// extern "C" fn main_detour(
-//     argc: c_int,
-//     argv: *const *const c_char,
-//     envp: *const *const c_char,
-// ) -> c_int {
-//     unsafe {
-//         debug!("loaded main_detour");
-
-//         debug!("Hello from fake main!");
-
-//         tracing_subscriber::registry()
-//             .with(tracing_subscriber::fmt::layer())
-//             .with(tracing_subscriber::EnvFilter::from_default_env())
-//             .init();
-//         debug!("init called");
-
-//         let config = Config::init_from_env().unwrap();
-//         let pf = RUNTIME.block_on(pod_api::create_agent(
-//             &config.impersonated_pod_name,
-//             &config.impersonated_pod_namespace,
-//             &config.agent_namespace,
-//             config.agent_rust_log,
-//             config.agent_image,
-//         ));
-//         let (sender, receiver) = channel::<i32>(1000);
-//         *NEW_CONNECTION_SENDER.lock().unwrap() = Some(sender);
-//         enable_hooks();
-//         RUNTIME.spawn(poll_agent(pf, receiver));
-
-//         let real_main = MAIN_FUNCTION.assume_init();
-
-//         debug!("about to call program's main");
-//         real_main(argc, argv, envp)
-//     }
-// }
