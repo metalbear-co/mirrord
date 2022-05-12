@@ -1,12 +1,15 @@
+use envconfig::Envconfig;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     api::{Api, Portforwarder, PostParams},
     runtime::wait::{await_condition, conditions::is_pod_running},
-    Client,
+    Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
+use tracing::warn;
 
+use crate::config;
 struct RuntimeData {
     container_id: String,
     node_name: String,
@@ -41,7 +44,15 @@ pub async fn create_agent(
     log_level: String,
     agent_image: String,
 ) -> Portforwarder {
-    let client = Client::try_default().await.unwrap();
+    let env_config = config::Config::init_from_env().unwrap();
+    let client = if env_config.accept_invalid_certificates {
+        let mut config = Config::infer().await.unwrap();
+        config.accept_invalid_certs = true;
+        warn!("Accepting invalid certificates");
+        Client::try_from(config).unwrap()
+    } else {
+        Client::try_default().await.unwrap()
+    };
     let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
     let agent_pod_name = format!(
         "mirrord-agent-{}",

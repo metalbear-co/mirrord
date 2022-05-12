@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    os::unix::io::RawFd,
     thread,
     time::Duration,
 };
@@ -33,9 +34,12 @@ mod macros;
 mod pod_api;
 mod sockets;
 
+use tracing_subscriber::prelude::*;
+
 use crate::{
     common::{HookMessage, Port},
     config::Config,
+    sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
 lazy_static! {
@@ -55,6 +59,7 @@ enum TcpTunnelMessages {
 struct ListenData {
     ipv6: bool,
     port: Port,
+    fd: RawFd,
 }
 
 async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunnelMessages>) {
@@ -96,8 +101,7 @@ fn init() {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    debug!("Initializing hooks from ctor!");
-
+    debug!("init called");
     let config = Config::init_from_env().unwrap();
     let pf = RUNTIME.block_on(pod_api::create_agent(
         &config.impersonated_pod_name,
@@ -111,7 +115,6 @@ fn init() {
         HOOK_SENDER = Some(sender);
     };
     enable_hooks();
-
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
@@ -125,11 +128,9 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
             message = receiver.recv() => {
                 match message {
                     Some(HookMessage::Listen(msg)) => {
-                        // let port = SOCKETS.get_connection_socket_address(sockfd).unwrap().port();
-                        // debug!("send message to client {:?}", port);
                         debug!("received message from hook {:?}", msg);
                         codec.send(ClientMessage::PortSubscribe(vec![msg.real_port])).await.unwrap();
-                        port_mapping.insert(msg.real_port, ListenData{port: msg.fake_port, ipv6: msg.ipv6});
+                        port_mapping.insert(msg.real_port, ListenData{port: msg.fake_port, ipv6: msg.ipv6, fd: msg.fd});
                     }
                     None => {
                         debug!("NONE in recv");
@@ -141,10 +142,10 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                 match message {
                     Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
                         debug!("new connection {:?}", conn);
-                        let listen_data = match port_mapping.get(&conn.port) {
+                        let listen_data = match port_mapping.get(&conn.destination_port) {
                             Some(listen_data) => (*listen_data).clone(),
                             None => {
-                                debug!("no listen_data for {:?}", conn.port);
+                                debug!("no listen_data for {:?}", conn.destination_port);
                                 continue;
                             }
                         };
@@ -152,6 +153,10 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                             false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
                             true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
                         };
+                        let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+                        {
+                            CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+                        }
                         let stream = match TcpStream::connect(addr).await {
                             Ok(stream) => stream,
                             Err(err) => {

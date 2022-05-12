@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.0.0-alpha-3"
+version = "2.0.0-alpha-4"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1995,15 +1995,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redhook"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e109b8469dbbe6d7cbe18e5ebd65d4a134e2f4b91304ad9213984cad1d70a6"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2132,8 +2123,7 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.20.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fbfeb8d0ddb84706bc597a5574ab8912817c52a397f819e5b614e2265206921"
+source = "git+https://github.com/rustls/rustls#093e88e7e180d44eb94b6f2c30b92a89f9f0cdbe"
 dependencies = [
  "log",
  "ring",

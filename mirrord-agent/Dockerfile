@@ -2,8 +2,13 @@ FROM rust:latest as build-env
 RUN apt update && apt install -y libpcap-dev cmake
 RUN rustup toolchain install nightly --component rustfmt
 WORKDIR /app
-COPY . /app
-RUN cargo build --manifest-path mirrord-agent/Cargo.toml --release
+COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
+COPY mirrord-protocol /app/mirrord-protocol
+COPY mirrord-agent /app/mirrord-agent
+COPY mirrord-layer /app/mirrord-layer
+COPY mirrord-cli /app/mirrord-cli
+COPY .cargo /app/.cargo
+RUN cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release
 
 FROM debian:stable
 RUN apt update && apt install -y libpcap-dev

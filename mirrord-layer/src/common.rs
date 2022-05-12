@@ -1,5 +1,5 @@
 use std::{
-    os::unix::prelude::*,
+    os::unix::{io::RawFd, prelude::*},
     path::{Path, PathBuf},
 };
 
@@ -10,6 +10,7 @@ pub struct Listen {
     pub fake_port: Port,
     pub real_port: Port,
     pub ipv6: bool,
+    pub fd: RawFd,
 }
 
 #[derive(Debug)]

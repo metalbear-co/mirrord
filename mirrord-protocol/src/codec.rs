@@ -11,7 +11,8 @@ pub type Port = u16;
 pub struct NewTCPConnection {
     pub connection_id: ConnectionID,
     pub address: IpAddr,
-    pub port: Port,
+    pub destination_port: Port,
+    pub source_port: Port,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
