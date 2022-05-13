@@ -4,6 +4,8 @@ use std::{
     sync::Arc,
 };
 
+use futures::channel::oneshot;
+use mirrord_protocol::FileOpen;
 use tokio::sync::Notify;
 
 pub type Port = u16;
@@ -17,7 +19,7 @@ pub struct Listen {
 }
 
 #[derive(Debug)]
-pub struct Open {
+pub struct OpenFile {
     pub(crate) path: PathBuf,
 }
 
@@ -26,5 +28,5 @@ pub struct Open {
 #[derive(Debug)]
 pub enum HookMessage {
     Listen(Listen),
-    Open(Open),
+    OpenFile(OpenFile),
 }

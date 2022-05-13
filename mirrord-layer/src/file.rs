@@ -3,14 +3,17 @@ use std::{
     collections::HashMap,
     ffi::CStr,
     lazy::SyncLazy,
+    mem::MaybeUninit,
     net::SocketAddr,
     os::unix::{io::RawFd, prelude::AsRawFd},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Once},
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
+use futures::channel::oneshot;
 use libc::{c_char, c_int, c_short, c_void, size_t, ssize_t, FILE};
+use mirrord_protocol::FileOpen;
 use multi_map::MultiMap;
 use queues::Queue;
 use rand::prelude::*;
@@ -20,7 +23,7 @@ use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    common::{HookMessage, Open},
+    common::{HookMessage, OpenFile},
     HOOK_SENDER, RUNTIME,
 };
 
@@ -65,11 +68,12 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     set
 });
 
-pub(super) static FILE_NOTIFIER: SyncLazy<Arc<Notify>> = SyncLazy::new(|| Arc::new(Notify::new()));
+pub static mut FILE_HOOK_SENDER: SyncLazy<Mutex<Vec<oneshot::Sender<FileOpen>>>> =
+    SyncLazy::new(|| Mutex::new(Vec::with_capacity(4)));
+static FILE_HOOK_INITIALIZER: Once = Once::new();
 
 pub enum FileState {
     AwaitingRemote,
-    Open(Open),
 }
 
 pub struct File {
@@ -106,8 +110,15 @@ pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
     } else {
         debug!("open -> trying to open valid file {path:?}");
         let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+        let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpen>();
 
-        match sender.blocking_send(HookMessage::Open(Open { path })) {
+        unsafe {
+            FILE_HOOK_SENDER.lock().unwrap().push(file_channel_tx);
+        };
+
+        let requesting_file = OpenFile { path };
+
+        match sender.blocking_send(HookMessage::OpenFile(requesting_file)) {
             Ok(_) => {}
             Err(fail) => {
                 error!("open: failed to send open message: {fail:?}!");
@@ -117,11 +128,12 @@ pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
 
         debug!("Blocking on file open operation!");
 
-        RUNTIME.block_on(async {
-            FILE_NOTIFIER.notified().await;
+        let file_open = RUNTIME.block_on(async {
+            let file_open = file_channel_rx.await.unwrap();
+            file_open
         });
 
-        debug!("After `block_on` call!");
+        debug!("After `block_on` call, we have an open file {file_open:#?}!");
 
         // TODO(alex) [high] 2022-05-12: Instead of returning this `fake_fd` thing, we should block
         // while waiting for an `-agent` reply.
@@ -131,7 +143,7 @@ pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
         // - send an open file request to `-agent` in `poll_agent`;
         // - when the reply comes back, `send_tx.send(file)` in `poll_agent`;
 
-        todo!()
+        file_open.fd
     }
 }
 

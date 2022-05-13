@@ -37,7 +37,7 @@ mod sockets;
 use crate::{
     common::{HookMessage, Port},
     config::Config,
-    file::FILE_NOTIFIER,
+    file::FILE_HOOK_SENDER,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
@@ -131,7 +131,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                         codec.send(ClientMessage::PortSubscribe(vec![listen.real_port])).await.unwrap();
                         port_mapping.insert(listen.real_port, ListenData{port: listen.fake_port, ipv6: listen.ipv6, fd: listen.fd});
                     }
-                    Some(HookMessage::Open(open)) => {
+                    Some(HookMessage::OpenFile(open)) => {
                         debug!("poll_agent -> received `Open` message from hook {:?}", open);
                         codec.send(ClientMessage::OpenFileRequest(open.path)).await.unwrap();
                     }
@@ -200,7 +200,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     }
                     Some(Ok(DaemonMessage::FileOpenResponse(file_open_message))) => {
                         debug!("poll_agent -> received a FileOpen message with contents {file_open_message:?}!");
-                        FILE_NOTIFIER.notify_waiters();
+                        unsafe { FILE_HOOK_SENDER.lock().unwrap().pop().unwrap().send(file_open_message) };
                     },
                     Some(_) => {
                         debug!("NONE in some");

@@ -38,6 +38,7 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-c47lc",
         // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-9456bbbf9-gnxhg",
         "MIRRORD_AGENT_RUST_LOG": "debug",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         // "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true"
       }
     }
