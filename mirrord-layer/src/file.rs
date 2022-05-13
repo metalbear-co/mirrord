@@ -6,7 +6,7 @@ use std::{
     net::SocketAddr,
     os::unix::{io::RawFd, prelude::AsRawFd},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
@@ -16,11 +16,12 @@ use queues::Queue;
 use rand::prelude::*;
 use regex::{Regex, RegexSet};
 use socketpair::{socketpair_stream, SocketpairStream};
+use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use crate::{
     common::{HookMessage, Open},
-    HOOK_SENDER,
+    HOOK_SENDER, RUNTIME,
 };
 
 // TODO(alex) [low] 2022-05-03: `panic::catch_unwind`, but do we need it? If we panic in a C context
@@ -43,8 +44,6 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     let cwd_str = unsafe { CStr::from_ptr(cwd) }
         .to_str()
         .expect("Failed converting cwd from c_char!");
-    // .replace(r"/", r"\/");
-    debug!("cwd {cwd_str}");
 
     let set = RegexSet::new(&[
         r".*\.so",
@@ -55,12 +54,18 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
         r"^/etc/.*",
         r"^/usr/.*",
         r"^/dev/.*",
+        // TODO(alex) [low] 2022-05-13: Investigate why it's trying to load this file all of a
+        // sudden. We have to ignore this here as `node` will look for it outside the cwd (it
+        // searches up the directory, until it finds).
+        r".*/package.json",
         cwd_str,
     ])
     .unwrap();
 
     set
 });
+
+pub(super) static FILE_NOTIFIER: SyncLazy<Arc<Notify>> = SyncLazy::new(|| Arc::new(Notify::new()));
 
 pub enum FileState {
     AwaitingRemote,
@@ -81,29 +86,43 @@ impl Borrow<RawFd> for File {
 
 static mut FILES: SyncLazy<Mutex<Vec<File>>> = SyncLazy::new(|| Mutex::new(Vec::with_capacity(32)));
 
-// TODO(alex) [high] 2022-05-10: Create this action on the other side, so that we can properly
-// implement file faking. Look at how `socket` is doing the message passing.
+/// Blocking wrapper around `libc::open` call.
+///
+/// It's bypassed when trying to load system files, and files from the current working directory
+/// (which is different anyways when running in `-agent` context).
+///
+/// When called for a valid file, it'll block, send a `ClientMessage::OpenFileRequest` to be handled
+/// by `mirrord-agent` (`handle_peer_message` function), and wait until it receives a
+/// `DaemonMessage::FileOpenResponse`.
 pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
     let path: PathBuf = unsafe { CStr::from_ptr(raw_path) }
         .to_str()
         .expect("Failed converting path from c_char!")
         .into();
-    debug!("open -> path: {path:?}, flags: {oflag:?}",);
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        warn!("open_file -> ignoring file: {path:?}");
         let fd = unsafe { libc::open(raw_path, oflag) };
         fd
     } else {
-        let fake_fd = 1000;
+        debug!("open -> trying to open valid file {path:?}");
         let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-        match sender.blocking_send(HookMessage::Open(Open { fake_fd, path })) {
+
+        match sender.blocking_send(HookMessage::Open(Open { path })) {
             Ok(_) => {}
             Err(fail) => {
                 error!("open: failed to send open message: {fail:?}!");
                 return libc::EFAULT;
             }
         };
+
+        debug!("Blocking on file open operation!");
+
+        RUNTIME.block_on(async {
+            FILE_NOTIFIER.notified().await;
+        });
+
+        debug!("After `block_on` call!");
+
         // TODO(alex) [high] 2022-05-12: Instead of returning this `fake_fd` thing, we should block
         // while waiting for an `-agent` reply.
         // To do this:
@@ -112,7 +131,7 @@ pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
         // - send an open file request to `-agent` in `poll_agent`;
         // - when the reply comes back, `send_tx.send(file)` in `poll_agent`;
 
-        fake_fd
+        todo!()
     }
 }
 

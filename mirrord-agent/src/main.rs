@@ -1,7 +1,8 @@
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
+    io::prelude::*,
     net::{Ipv4Addr, SocketAddrV4},
     os::unix::prelude::{AsRawFd, RawFd},
     path::PathBuf,
@@ -9,7 +10,7 @@ use std::{
 
 use anyhow::Result;
 use futures::SinkExt;
-use mirrord_protocol::{ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, Port};
+use mirrord_protocol::{ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileOpen, Port};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -26,6 +27,8 @@ mod util;
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
+
+use crate::sniffer::FileCommand;
 
 type PeerID = u32;
 
@@ -60,21 +63,9 @@ impl Borrow<PeerID> for Peer {
     }
 }
 
-async fn handle_open_file(
-    state: &mut State,
-    peer_id: PeerID,
-    path: PathBuf,
-    packet_command_tx: mpsc::Sender<SnifferCommand>,
-) -> Result<()> {
-    let file = std::fs::File::open(path).unwrap();
-    let file_fd = file.as_raw_fd();
-
-    state.open_files.subscribe(peer_id, file_fd);
-    packet_command_tx
-        .send(SnifferCommand::FileLink(file_fd))
-        .await?;
-
-    Ok(())
+#[derive(Debug)]
+struct OpenFile {
+    pub fd: RawFd,
 }
 
 #[derive(Debug)]
@@ -83,7 +74,7 @@ struct State {
     index_allocator: IndexAllocator<PeerID>,
     pub port_subscriptions: Subscriptions<Port, PeerID>,
     pub connections_subscriptions: Subscriptions<ConnectionID, PeerID>,
-    pub open_files: Subscriptions<RawFd, PeerID>,
+    pub file_managers: HashMap<PeerID, Vec<OpenFile>>,
 }
 
 impl State {
@@ -93,7 +84,7 @@ impl State {
             index_allocator: IndexAllocator::new(),
             port_subscriptions: Subscriptions::new(),
             connections_subscriptions: Subscriptions::new(),
-            open_files: Subscriptions::new(),
+            file_managers: HashMap::new(),
         }
     }
 
@@ -115,6 +106,33 @@ struct PeerMessage {
     peer_id: PeerID,
 }
 
+async fn handle_peer_message(
+    message: PeerMessage,
+    tx: mpsc::Sender<PeerMessage>,
+    stream: &mut actix_codec::Framed<TcpStream, DaemonCodec>,
+) -> Result<()> {
+    match message.msg {
+        // NOTE(alex): Handling file requests here for simplicity.
+        ClientMessage::OpenFileRequest(path) => {
+            debug!(
+                "handle_peer_message -> peer id {:?} asked to open file {path:?}",
+                message.peer_id
+            );
+
+            let file = std::fs::File::open(path)?;
+            let file_fd = file.as_raw_fd();
+
+            debug!("handle_peer_message -> file is open with fd {file_fd:?}");
+
+            let open_file_message = DaemonMessage::FileOpenResponse(FileOpen { fd: file_fd });
+            stream.send(open_file_message).await?;
+        }
+        _ => tx.send(message).await?,
+    };
+
+    Ok(())
+}
+
 async fn peer_handler(
     mut rx: mpsc::Receiver<DaemonMessage>,
     tx: mpsc::Sender<PeerMessage>,
@@ -132,7 +150,7 @@ async fn peer_handler(
                             peer_id
                         };
                         debug!("client sent message {:?}", &message);
-                        tx.send(message).await?;
+                        handle_peer_message(message, tx.clone(), &mut stream).await?;
                     }
                     None => break
                 }
@@ -172,6 +190,7 @@ async fn start() -> Result<()> {
     let (peers_tx, mut peers_rx) = mpsc::channel::<PeerMessage>(1000);
     let (packet_sniffer_tx, mut packet_sniffer_rx) = mpsc::channel::<SnifferOutput>(1000);
     let (packet_command_tx, packet_command_rx) = mpsc::channel::<SnifferCommand>(1000);
+
     // We use tokio spawn so it'll create another thread.
     let packet_task = tokio::spawn(packet_worker(
         packet_sniffer_tx,
@@ -179,6 +198,7 @@ async fn start() -> Result<()> {
         args.interface.clone(),
         args.container_id.clone(),
     ));
+
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
@@ -190,7 +210,7 @@ async fn start() -> Result<()> {
                     tokio::spawn(async move {
                         match peer_handler(rx, worker_tx, stream, id).await {
                             Ok(()) => {debug!("Peer closed")},
-                            Err(err) => {error!("Peer encountered error {}", err.to_string());}
+                            Err(err) => {error!("Peer encountered error {err:#?}");}
                         };
                     });
                 }
@@ -216,9 +236,10 @@ async fn start() -> Result<()> {
                     ClientMessage::ConnectionUnsubscribe(connection_id) => {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
-                    ClientMessage::OpenFile(path) => {
-                        debug!("start -> peer id {:?} asked to open file {path:?}", message.peer_id);
-                        handle_open_file(&mut state, message.peer_id, path, packet_command_tx.clone()).await?;
+                    ClientMessage::OpenFileRequest(_) => {
+                        // NOTE(alex): `peers_rx` never receives this type of message, as it is
+                        // handled in `peer_handler`.
+                        unreachable!();
                     }
                 }
             },

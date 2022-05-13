@@ -1,7 +1,10 @@
 use std::{
     os::unix::{io::RawFd, prelude::*},
     path::{Path, PathBuf},
+    sync::Arc,
 };
+
+use tokio::sync::Notify;
 
 pub type Port = u16;
 
@@ -15,7 +18,6 @@ pub struct Listen {
 
 #[derive(Debug)]
 pub struct Open {
-    pub(crate) fake_fd: RawFd,
     pub(crate) path: PathBuf,
 }
 

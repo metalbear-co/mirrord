@@ -37,12 +37,13 @@ mod sockets;
 use crate::{
     common::{HookMessage, Port},
     config::Config,
+    file::FILE_NOTIFIER,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
 lazy_static! {
     static ref GUM: Gum = unsafe { Gum::obtain() };
-    static ref RUNTIME: Runtime = Runtime::new().unwrap();
+    pub(crate) static ref RUNTIME: Runtime = Runtime::new().unwrap();
 }
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
@@ -132,7 +133,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     }
                     Some(HookMessage::Open(open)) => {
                         debug!("poll_agent -> received `Open` message from hook {:?}", open);
-                        codec.send(ClientMessage::OpenFile(open.path)).await.unwrap();
+                        codec.send(ClientMessage::OpenFileRequest(open.path)).await.unwrap();
                     }
                     None => {
                         debug!("NONE in recv");
@@ -197,6 +198,10 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                                 debug!("sender error {:?}", err);
                         }
                     }
+                    Some(Ok(DaemonMessage::FileOpenResponse(file_open_message))) => {
+                        debug!("poll_agent -> received a FileOpen message with contents {file_open_message:?}!");
+                        FILE_NOTIFIER.notify_waiters();
+                    },
                     Some(_) => {
                         debug!("NONE in some");
                         break

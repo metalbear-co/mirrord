@@ -1,4 +1,4 @@
-use std::{io, net::IpAddr, path::PathBuf};
+use std::{io, net::IpAddr, os::unix::prelude::RawFd, path::PathBuf};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
@@ -36,13 +36,12 @@ pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
-    OpenFile(PathBuf),
+    OpenFileRequest(PathBuf),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct FileData {
-    pub connection_id: ConnectionID,
-    pub data: Vec<u8>,
+pub struct FileOpen {
+    pub fd: RawFd,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
@@ -52,7 +51,7 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
-    OpenFile(),
+    FileOpenResponse(FileOpen),
 }
 
 pub struct ClientCodec {

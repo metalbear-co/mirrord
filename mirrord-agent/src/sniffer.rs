@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
-use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
+use mirrord_protocol::{FileOpen, NewTCPConnection, TCPClose, TCPData};
 use pcap::{stream::PacketCodec, Active, Capture, Device, Linktype};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
@@ -36,7 +36,10 @@ type ConnectionID = u16;
 pub enum SnifferCommand {
     SetPorts(Vec<u16>),
     Close,
-    FileLink(RawFd),
+}
+#[derive(Debug)]
+pub enum FileCommand {
+    OpenFile(RawFd),
 }
 
 #[derive(Debug)]
@@ -204,14 +207,6 @@ impl PacketCodec for TCPManagerCodec {
 
     fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
         Ok(packet.data.to_vec())
-        // let res = match EthernetPacket::new(packet.data) {
-        //     Some(packet) => self
-        //         .connection_manager
-        //         .handle_packet(&packet)
-        //         .unwrap_or(vec![]),
-        //     _ => vec![],
-        // };
-        // Ok(res)
     }
 }
 
@@ -282,20 +277,6 @@ pub async fn packet_worker(
                         };
 
                     },
-                    Some(SnifferCommand::FileLink(file_fd)) => {
-                        debug!("linking file {file_fd:?}");
-                        connection_manager.set_ports(&ports);
-                        let sniffer = stream.inner_mut();
-                        if ports.is_empty() {
-                            debug!("empty ports, setting dummy bpf");
-                            sniffer.filter(DUMMY_BPF, true)?
-                        } else {
-                            let bpf = format_bpf(&ports);
-                            debug!("setting bpf to {:?}", &bpf);
-                            sniffer.filter(&bpf, true)?
-                        };
-
-                    }
                     Some(SnifferCommand::Close) | None => {
                         debug!("sniffer closed");
                         break;

@@ -2,13 +2,14 @@ var net = require("net");
 var server = net.createServer();
 var fs = require("fs");
 
-fs.open("/home/alexc/dev/mirrord/Cargo.toml", "r", (err, data) => {
+fs.open("/var/log/dpkg.log", "r", (err, data) => {
   if (err) {
     console.error("Error opening file: ", err);
   }
-
-  console.log("Opened file: ", data);
 });
+
+//   console.log("Opened file: ", data);
+// });
 
 // fs.readFile("/home/alexc/dev/mirrord/Cargo.toml", "utf8", (err, data) => {
 //   if (err) {
