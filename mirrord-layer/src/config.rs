@@ -22,4 +22,7 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
     pub accept_invalid_certificates: bool,
+
+    #[envconfig(from = "MIRRORD_AGENT_TTL", default = "0")]
+    pub agent_ttl: u16,
 }

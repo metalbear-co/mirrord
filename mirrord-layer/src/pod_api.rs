@@ -1,7 +1,7 @@
 use envconfig::Envconfig;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
 use kube::{
-    api::{Api, Portforwarder, PostParams},
+    api::{Api, ListParams, Portforwarder, PostParams},
     runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
 };
@@ -54,72 +54,82 @@ pub async fn create_agent(
         Client::try_default().await.unwrap()
     };
     let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
-    let agent_pod_name = format!(
+    let agent_job_name = format!(
         "mirrord-agent-{}",
         Alphanumeric
             .sample_string(&mut rand::thread_rng(), 10)
             .to_lowercase()
     );
 
-    let agent_pod: Pod = serde_json::from_value(json!({
-        "metadata": {
-            "name": agent_pod_name
-        },
-        "spec": {
-            "hostPID": true,
-            "nodeName": runtime_data.node_name,
-            "restartPolicy": "Never",
-            "volumes": [
-                {
-                    "name": "containerd",
-                    "hostPath": {
-                        "path": "/run/containerd/containerd.sock"
-                    }
-                }
-            ],
-            "containers": [
-                {
-                    "name": "mirrord-agent",
-                    "image": agent_image,
-                    "imagePullPolicy": "Always",
-                    "securityContext": {
-                        "privileged": true
-                    },
-                    "volumeMounts": [
+    let agent_pod: Job =
+        serde_json::from_value(json!({ // Only Jobs support self deletion after completion
+                "metadata": {
+                    "name": agent_job_name
+                },
+                "spec": {
+                "ttlSecondsAfterFinished": env_config.agent_ttl,
+
+                    "template": {
+                "spec": {
+                    "hostPID": true,
+                    "nodeName": runtime_data.node_name,
+                    "restartPolicy": "Never",
+                    "volumes": [
                         {
-                            "mountPath": "/run/containerd/containerd.sock",
-                            "name": "containerd"
+                            "name": "containerd",
+                            "hostPath": {
+                                "path": "/run/containerd/containerd.sock"
+                            }
                         }
                     ],
-                    "command": [
-                        "./mirrord-agent",
-                        "--container-id",
-                        runtime_data.container_id,
-                        "-t",
-                        "60"
-                    ],
-                    "env": [{"name": "RUST_LOG", "value": log_level}],
+                    "containers": [
+                        {
+                            "name": "mirrord-agent",
+                            "image": agent_image,
+                            "imagePullPolicy": "Always",
+                            "securityContext": {
+                                "privileged": true
+                            },
+                            "volumeMounts": [
+                                {
+                                    "mountPath": "/run/containerd/containerd.sock",
+                                    "name": "containerd"
+                                }
+                            ],
+                            "command": [
+                                "./mirrord-agent",
+                                "--container-id",
+                                runtime_data.container_id,
+                                "-t",
+                                "30"
+                            ],
+                            "env": [{"name": "RUST_LOG", "value": log_level}],
+                        }
+                    ]
                 }
-            ]
+            }
         }
-    }))
-    .unwrap();
+            }
+        ))
+        .unwrap();
 
-    let pods_api: Api<Pod> = Api::namespaced(client, agent_namespace);
-    pods_api
+    let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
+    jobs_api
         .create(&PostParams::default(), &agent_pod)
         .await
         .unwrap();
 
-    //   Wait until the pod is running, otherwise we get 500 error.
-    let running = await_condition(pods_api.clone(), &agent_pod_name, is_pod_running());
+    let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
+    let pods = pods_api
+        .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
+        .await
+        .unwrap();
+    let pod = pods.items.first().unwrap();
+    let pod_name = pod.metadata.name.clone().unwrap();
+    let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
     let _ = tokio::time::timeout(std::time::Duration::from_secs(15), running)
         .await
         .unwrap();
-    let pf = pods_api
-        .portforward(&agent_pod_name, &[61337])
-        .await
-        .unwrap();
-
+    let pf = pods_api.portforward(&pod_name, &[61337]).await.unwrap();
     pf
 }
