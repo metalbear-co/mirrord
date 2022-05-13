@@ -46,8 +46,8 @@ struct ExecArgs {
     pub binary: String,
 
     /// Accept/reject invalid certificates.
-    #[clap(parse(try_from_str), short = 'c', long)]
-    pub accept_invalid_certificates: Option<bool>,
+    #[clap(short = 'c', long)]
+    pub accept_invalid_certificates: bool,
     /// Arguments to pass to the binary.
     #[clap()]
     binary_args: Vec<String>,
@@ -113,11 +113,8 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if let Some(image) = &args.agent_image {
         std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
     }
-    if let Some(accept_invalid_certificates) = &args.accept_invalid_certificates {
-        std::env::set_var(
-            "MIRRORD_ACCEPT_INVALID_CERTIFICATES",
-            accept_invalid_certificates.to_string(),
-        );
+    if args.accept_invalid_certificates {
+        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
     let library_path = extract_library(None);
     add_to_preload(&library_path).unwrap();
