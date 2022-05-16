@@ -108,6 +108,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
     }
     if let Some(log_level) = &args.agent_log_level {
+        let levels = vec!["trace", "debug", "info", "warn", "error"];
+        if !levels.contains(&log_level.to_lowercase().as_str()) {
+            error!("Invalid log level: {}", log_level);
+            return Err(anyhow!("Invalid log level"));
+        }
+
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
     }
     if let Some(image) = &args.agent_image {
