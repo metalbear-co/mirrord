@@ -2,16 +2,19 @@
 
 use std::{
     collections::HashMap,
+    error::Error,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    sync::Mutex,
     thread,
     time::Duration,
 };
 
+use actix_codec::{AsyncRead, AsyncWrite};
 use ctor::ctor;
 use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{SinkExt, StreamExt};
+use futures::{channel::oneshot, SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
 use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
@@ -117,29 +120,144 @@ fn init() {
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
+async fn handle_hook_message(
+    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
+    port_mapping: &mut HashMap<Port, ListenData>,
+    hook_message: Option<HookMessage>,
+) {
+    match hook_message {
+        Some(HookMessage::Listen(listen)) => {
+            debug!(
+                "poll_agent -> received `Listen` message from hook {:?}",
+                listen
+            );
+            codec
+                .send(ClientMessage::PortSubscribe(vec![listen.real_port]))
+                .await
+                .unwrap();
+
+            port_mapping.insert(
+                listen.real_port,
+                ListenData {
+                    port: listen.fake_port,
+                    ipv6: listen.ipv6,
+                    fd: listen.fd,
+                },
+            );
+        }
+        Some(HookMessage::OpenFileHook(open)) => {
+            // NOTE(alex): Lock the file handler and insert a channel that will be used to retrieve
+            // the file data when it comes back from `DaemonMessage::OpenFileResponse`.
+            debug!("poll_agent -> received `Open` message from hook {:?}", open);
+            open_file_handler.lock().unwrap().push(open.file_channel_tx);
+
+            codec
+                .send(ClientMessage::OpenFileRequest(open.path))
+                .await
+                .unwrap();
+        }
+        None => {
+            debug!("NONE in recv");
+            // TODO(alex) [low] 2022-05-16: Removed a `break` statement here, so it's probably a
+            // good idea to revisit this whole `match`.
+        }
+    }
+}
+
+async fn handle_daemon_message(
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
+    port_mapping: &mut HashMap<Port, ListenData>,
+    active_connections: HashMap<u16, Sender<TcpTunnelMessages>>,
+    daemon_message: Option<Result<DaemonMessage, Box<dyn Error>>>,
+) {
+    match daemon_message {
+        Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
+            debug!("new connection {:?}", conn);
+            // TODO(alex) [high] 2022-05-16: Refactor these matches to not crash on `None`.
+            // Probably add `inspect_err`, plus chain these as monadic calls.
+            let listen_data = match port_mapping.get(&conn.destination_port) {
+                Some(listen_data) => (*listen_data).clone(),
+                None => {
+                    debug!("no listen_data for {:?}", conn.destination_port);
+                }
+            };
+            let addr = match listen_data.ipv6 {
+                false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
+                true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
+            };
+            let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+            {
+                CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+            }
+            let stream = match TcpStream::connect(addr).await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    error!("failed to connect to port {:?}", err);
+                }
+            };
+            let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
+            active_connections.insert(conn.connection_id, sender);
+            task::spawn(async move { tcp_tunnel(stream, receiver).await });
+        }
+        Some(Ok(DaemonMessage::TCPData(msg))) => {
+            let sender = match active_connections.get(&msg.connection_id) {
+                Some(sender) => sender,
+                None => {
+                    debug!("no sender for {:?}", msg.connection_id);
+                }
+            };
+            if let Err(err) = sender.send(TcpTunnelMessages::Data(msg.data)).await {
+                debug!("sender error {:?}", err);
+                active_connections.remove(&msg.connection_id);
+            }
+        }
+        Some(Ok(DaemonMessage::TCPClose(msg))) => {
+            let sender = match active_connections.remove(&msg.connection_id) {
+                Some(sender) => sender,
+                None => {
+                    debug!("no sender for {:?}", msg.connection_id);
+                }
+            };
+            if let Err(err) = sender.send(TcpTunnelMessages::Close).await {
+                debug!("sender error {:?}", err);
+            }
+        }
+        Some(Ok(DaemonMessage::OpenFileResponse(open_file_message))) => {
+            debug!(
+                "poll_agent -> received a FileOpen message with contents {open_file_message:?}!"
+            );
+            unsafe {
+                FILE_HOOK_SENDER
+                    .lock()
+                    .unwrap()
+                    .pop()
+                    .unwrap()
+                    .send(open_file_message)
+            };
+        }
+        Some(_) => {
+            debug!("NONE in some");
+        }
+        None => {
+            thread::sleep(Duration::from_millis(2000));
+            debug!("NONE in none");
+        }
+    }
+}
+
 async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
+
+    let open_file_handler = Mutex::new(Vec::with_capacity(4));
+
     loop {
         select! {
             message = receiver.recv() => {
-                match message {
-                    Some(HookMessage::Listen(listen)) => {
-                        debug!("poll_agent -> received `Listen` message from hook {:?}", listen);
-                        codec.send(ClientMessage::PortSubscribe(vec![listen.real_port])).await.unwrap();
-                        port_mapping.insert(listen.real_port, ListenData{port: listen.fake_port, ipv6: listen.ipv6, fd: listen.fd});
-                    }
-                    Some(HookMessage::OpenFile(open)) => {
-                        debug!("poll_agent -> received `Open` message from hook {:?}", open);
-                        codec.send(ClientMessage::OpenFileRequest(open.path)).await.unwrap();
-                    }
-                    None => {
-                        debug!("NONE in recv");
-                        break
-                    }
-                }
+                handle_hook_message(&mut codec, &open_file_handler, &mut port_mapping, message).await;
             }
             message = codec.next() => {
                 match message {
@@ -198,9 +316,9 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                                 debug!("sender error {:?}", err);
                         }
                     }
-                    Some(Ok(DaemonMessage::FileOpenResponse(file_open_message))) => {
-                        debug!("poll_agent -> received a FileOpen message with contents {file_open_message:?}!");
-                        unsafe { FILE_HOOK_SENDER.lock().unwrap().pop().unwrap().send(file_open_message) };
+                    Some(Ok(DaemonMessage::OpenFileResponse(open_file_message))) => {
+                        debug!("poll_agent -> received a FileOpen message with contents {open_file_message:?}!");
+                        unsafe { FILE_HOOK_SENDER.lock().unwrap().pop().unwrap().send(open_file_message) };
                     },
                     Some(_) => {
                         debug!("NONE in some");

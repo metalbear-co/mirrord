@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
-use mirrord_protocol::{FileOpen, NewTCPConnection, TCPClose, TCPData};
+use mirrord_protocol::{FileOpenResponse, NewTCPConnection, TCPClose, TCPData};
 use pcap::{stream::PacketCodec, Active, Capture, Device, Linktype};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},

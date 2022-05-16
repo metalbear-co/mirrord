@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::channel::oneshot;
-use mirrord_protocol::FileOpen;
+use mirrord_protocol::FileOpenResponse;
 use tokio::sync::Notify;
 
 pub type Port = u16;
@@ -19,8 +19,9 @@ pub struct Listen {
 }
 
 #[derive(Debug)]
-pub struct OpenFile {
+pub struct OpenFileHook {
     pub(crate) path: PathBuf,
+    pub(crate) file_channel_tx: oneshot::Sender<FileOpenResponse>,
 }
 
 // TODO(alex) [high] 2022-05-11: Write down the message flow.
@@ -28,5 +29,5 @@ pub struct OpenFile {
 #[derive(Debug)]
 pub enum HookMessage {
     Listen(Listen),
-    OpenFile(OpenFile),
+    OpenFileHook(OpenFileHook),
 }

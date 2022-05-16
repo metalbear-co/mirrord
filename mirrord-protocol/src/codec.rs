@@ -40,7 +40,7 @@ pub enum ClientMessage {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct FileOpen {
+pub struct FileOpenResponse {
     pub fd: RawFd,
 }
 
@@ -51,7 +51,7 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
-    FileOpenResponse(FileOpen),
+    OpenFileResponse(FileOpenResponse),
 }
 
 pub struct ClientCodec {

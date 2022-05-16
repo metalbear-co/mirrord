@@ -10,7 +10,9 @@ use std::{
 
 use anyhow::Result;
 use futures::SinkExt;
-use mirrord_protocol::{ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileOpen, Port};
+use mirrord_protocol::{
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileOpenResponse, Port,
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -124,7 +126,8 @@ async fn handle_peer_message(
 
             debug!("handle_peer_message -> file is open with fd {file_fd:?}");
 
-            let open_file_message = DaemonMessage::FileOpenResponse(FileOpen { fd: file_fd });
+            let open_file_message =
+                DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
             stream.send(open_file_message).await?;
         }
         _ => tx.send(message).await?,

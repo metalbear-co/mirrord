@@ -13,7 +13,7 @@ use std::{
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use futures::channel::oneshot;
 use libc::{c_char, c_int, c_short, c_void, size_t, ssize_t, FILE};
-use mirrord_protocol::FileOpen;
+use mirrord_protocol::FileOpenResponse;
 use multi_map::MultiMap;
 use queues::Queue;
 use rand::prelude::*;
@@ -23,7 +23,7 @@ use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    common::{HookMessage, OpenFile},
+    common::{HookMessage, OpenFileHook},
     HOOK_SENDER, RUNTIME,
 };
 
@@ -68,7 +68,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     set
 });
 
-pub static mut FILE_HOOK_SENDER: SyncLazy<Mutex<Vec<oneshot::Sender<FileOpen>>>> =
+pub static mut FILE_HOOK_SENDER: SyncLazy<Mutex<Vec<oneshot::Sender<FileOpenResponse>>>> =
     SyncLazy::new(|| Mutex::new(Vec::with_capacity(4)));
 static FILE_HOOK_INITIALIZER: Once = Once::new();
 
@@ -110,15 +110,14 @@ pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
     } else {
         debug!("open -> trying to open valid file {path:?}");
         let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-        let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpen>();
+        let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpenResponse>();
 
-        unsafe {
-            FILE_HOOK_SENDER.lock().unwrap().push(file_channel_tx);
+        let requesting_file = OpenFileHook {
+            path,
+            file_channel_tx,
         };
 
-        let requesting_file = OpenFile { path };
-
-        match sender.blocking_send(HookMessage::OpenFile(requesting_file)) {
+        match sender.blocking_send(HookMessage::OpenFileHook(requesting_file)) {
             Ok(_) => {}
             Err(fail) => {
                 error!("open: failed to send open message: {fail:?}!");
