@@ -4,7 +4,11 @@ members = [
     "mirrord-protocol",
     "mirrord-agent",
     "mirrord-layer",
-    "mirrord-cli",
+    "mirrord-cli",    
+]
+
+exclude = [
+    "e2e"
 ]
 
 # latest commits on rustls suppress certificate verification 
