@@ -168,65 +168,75 @@ async fn handle_hook_message(
 async fn handle_daemon_message(
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
     port_mapping: &mut HashMap<Port, ListenData>,
-    active_connections: HashMap<u16, Sender<TcpTunnelMessages>>,
-    daemon_message: Option<Result<DaemonMessage, Box<dyn Error>>>,
+    active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+    daemon_message: DaemonMessage,
 ) {
     match daemon_message {
-        Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
+        DaemonMessage::NewTCPConnection(conn) => {
             debug!("new connection {:?}", conn);
             // TODO(alex) [high] 2022-05-16: Refactor these matches to not crash on `None`.
             // Probably add `inspect_err`, plus chain these as monadic calls.
-            let listen_data = match port_mapping.get(&conn.destination_port) {
-                Some(listen_data) => (*listen_data).clone(),
-                None => {
-                    debug!("no listen_data for {:?}", conn.destination_port);
-                }
-            };
-            let addr = match listen_data.ipv6 {
-                false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
-                true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
-            };
-            let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
-            {
-                CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
-            }
-            let stream = match TcpStream::connect(addr).await {
-                Ok(stream) => stream,
-                Err(err) => {
-                    error!("failed to connect to port {:?}", err);
-                }
-            };
-            let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
-            active_connections.insert(conn.connection_id, sender);
-            task::spawn(async move { tcp_tunnel(stream, receiver).await });
+            let _ = port_mapping
+                .get(&conn.destination_port)
+                .map(|listen_data| {
+                    let addr = match listen_data.ipv6 {
+                        false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
+                        true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
+                    };
+
+                    let info =
+                        SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+                    {
+                        CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+                    }
+
+                    TcpStream::connect(addr)
+                })
+                .and_then(|stream| {
+                    let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
+                    active_connections.insert(conn.connection_id, sender);
+                    task::spawn(async move { tcp_tunnel(stream.await.unwrap(), receiver).await });
+
+                    Some(())
+                });
         }
-        Some(Ok(DaemonMessage::TCPData(msg))) => {
-            let sender = match active_connections.get(&msg.connection_id) {
-                Some(sender) => sender,
-                None => {
-                    debug!("no sender for {:?}", msg.connection_id);
-                }
-            };
-            if let Err(err) = sender.send(TcpTunnelMessages::Data(msg.data)).await {
-                debug!("sender error {:?}", err);
+        DaemonMessage::TCPData(msg) => {
+            if let Err(fail) = active_connections
+                .get(&msg.connection_id)
+                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
+                .unwrap()
+                .await
+            {
+                debug!("sender error {:?}", fail);
                 active_connections.remove(&msg.connection_id);
             }
         }
-        Some(Ok(DaemonMessage::TCPClose(msg))) => {
-            let sender = match active_connections.remove(&msg.connection_id) {
-                Some(sender) => sender,
-                None => {
-                    debug!("no sender for {:?}", msg.connection_id);
-                }
-            };
-            if let Err(err) = sender.send(TcpTunnelMessages::Close).await {
-                debug!("sender error {:?}", err);
+        DaemonMessage::TCPClose(msg) => {
+            if let Err(fail) = active_connections
+                .get(&msg.connection_id)
+                .map(|sender| sender.send(TcpTunnelMessages::Close))
+                .unwrap()
+                .await
+            {
+                debug!("sender error {:?}", fail);
+                active_connections.remove(&msg.connection_id);
             }
         }
-        Some(Ok(DaemonMessage::OpenFileResponse(open_file_message))) => {
+        DaemonMessage::OpenFileResponse(open_file_message) => {
             debug!(
                 "poll_agent -> received a FileOpen message with contents {open_file_message:?}!"
             );
+            // TODO(alex) [high] 2022-05-16: After changing this part to be outside of `select!`
+            // macro, we're crashing with:
+            /*
+                        poll_agent -> received a FileOpen message with contents FileOpenResponse { fd: 14 }!
+            thread 'tokio-runtime-worker' panicked at 'called `Option::unwrap()` on a `None` value', mirrord-layer/src/lib.rs:234:22
+            note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+            thread '<unnamed>' panicked at 'called `Result::unwrap()` on an `Err` value: Canceled', mirrord-layer/src/file.rs:131:51
+            fatal runtime error: failed to initiate panic, error 5
+                        */
+            // I think this has to do with `unwrapping` outside. It only crashes for file, so that's
+            // good I guess.
             unsafe {
                 FILE_HOOK_SENDER
                     .lock()
@@ -236,13 +246,8 @@ async fn handle_daemon_message(
                     .send(open_file_message)
             };
         }
-        Some(_) => {
-            debug!("NONE in some");
-        }
-        None => {
-            thread::sleep(Duration::from_millis(2000));
-            debug!("NONE in none");
-        }
+        DaemonMessage::Close => todo!(),
+        DaemonMessage::LogMessage(_) => todo!(),
     }
 }
 
@@ -256,80 +261,11 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
 
     loop {
         select! {
-            message = receiver.recv() => {
-                handle_hook_message(&mut codec, &open_file_handler, &mut port_mapping, message).await;
+            hook_message = receiver.recv() => {
+                handle_hook_message(&mut codec, &open_file_handler, &mut port_mapping, hook_message).await;
             }
-            message = codec.next() => {
-                match message {
-                    Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
-                        debug!("new connection {:?}", conn);
-                        let listen_data = match port_mapping.get(&conn.destination_port) {
-                            Some(listen_data) => (*listen_data).clone(),
-                            None => {
-                                debug!("no listen_data for {:?}", conn.destination_port);
-                                continue;
-                            }
-                        };
-                        let addr = match listen_data.ipv6 {
-                            false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
-                            true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
-                        };
-                        let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
-                        {
-                            CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
-                        }
-                        let stream = match TcpStream::connect(addr).await {
-                            Ok(stream) => stream,
-                            Err(err) => {
-                                error!("failed to connect to port {:?}", err);
-                                continue;
-                            }
-                        };
-                        let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
-                        active_connections.insert(conn.connection_id, sender);
-                        task::spawn(async move {
-                            tcp_tunnel(stream, receiver).await
-                        });
-                    }
-                    Some(Ok(DaemonMessage::TCPData(msg))) => {
-                        let sender = match active_connections.get(&msg.connection_id) {
-                            Some(sender) => sender,
-                            None => {
-                                debug!("no sender for {:?}", msg.connection_id);
-                                continue;
-                            }
-                        };
-                        if let Err(err) = sender.send(TcpTunnelMessages::Data(msg.data)).await {
-                                debug!("sender error {:?}", err);
-                                active_connections.remove(&msg.connection_id);
-                        }
-                    },
-                    Some(Ok(DaemonMessage::TCPClose(msg))) => {
-                        let sender = match active_connections.remove(&msg.connection_id) {
-                            Some(sender) => sender,
-                            None => {
-                                debug!("no sender for {:?}", msg.connection_id);
-                                continue;
-                            }
-                        };
-                        if let Err(err) = sender.send(TcpTunnelMessages::Close).await {
-                                debug!("sender error {:?}", err);
-                        }
-                    }
-                    Some(Ok(DaemonMessage::OpenFileResponse(open_file_message))) => {
-                        debug!("poll_agent -> received a FileOpen message with contents {open_file_message:?}!");
-                        unsafe { FILE_HOOK_SENDER.lock().unwrap().pop().unwrap().send(open_file_message) };
-                    },
-                    Some(_) => {
-                        debug!("NONE in some");
-                        break
-                    },
-                    None => {
-                        thread::sleep(Duration::from_millis(2000));
-                        debug!("NONE in none");
-                        continue
-                    }
-                }
+            daemon_message = codec.next() => {
+                handle_daemon_message(&open_file_handler, &mut port_mapping, &mut active_connections, daemon_message.unwrap().unwrap()).await;
             }
         }
     }

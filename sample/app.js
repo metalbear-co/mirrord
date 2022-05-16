@@ -9,19 +9,19 @@ fs.open("/var/log/dpkg.log", "r", (err, data) => {
   }
 });
 
-fs.open("/var/log/dpkg.log", "r", (err, data) => {
-  console.log("Calling open on /var/log/dpkg.log file again!");
-  if (err) {
-    console.error("Error opening file: ", err);
-  }
-});
+// fs.open("/var/log/dpkg.log", "r", (err, data) => {
+//   console.log("Calling open on /var/log/dpkg.log file again!");
+//   if (err) {
+//     console.error("Error opening file: ", err);
+//   }
+// });
 
-fs.open("/var/log/dpkg.log", "r", (err, data) => {
-  console.log("Open /var/log/dpkg.log file again, three times the charm!");
-  if (err) {
-    console.error("Error opening file: ", err);
-  }
-});
+// fs.open("/var/log/dpkg.log", "r", (err, data) => {
+//   console.log("Open /var/log/dpkg.log file again, three times the charm!");
+//   if (err) {
+//     console.error("Error opening file: ", err);
+//   }
+// });
 
 //   console.log("Opened file: ", data);
 // });
