@@ -1,13 +1,10 @@
-// #![feature(c_variadic)]
-
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    thread,
-    time::Duration,
 };
 
+use actix_codec::{AsyncRead, AsyncWrite};
 use ctor::ctor;
 use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
@@ -23,7 +20,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     task,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 mod common;
 mod config;
@@ -97,8 +94,10 @@ fn init() {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    debug!("init called");
+    info!("Initializing mirrord-layer!");
+
     let config = Config::init_from_env().unwrap();
+
     let pf = RUNTIME.block_on(pod_api::create_agent(
         &config.impersonated_pod_name,
         &config.impersonated_pod_namespace,
@@ -106,101 +105,118 @@ fn init() {
         config.agent_rust_log,
         config.agent_image,
     ));
+
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
         HOOK_SENDER = Some(sender);
     };
+
     enable_hooks();
+
     RUNTIME.spawn(poll_agent(pf, receiver));
+}
+
+async fn handle_hook_message(
+    hook_message: HookMessage,
+    port_mapping: &mut HashMap<Port, ListenData>,
+    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+) {
+    match hook_message {
+        HookMessage::Listen(listen_message) => {
+            debug!("HookMessage::Listen {:?}", listen_message);
+
+            let _listen_data = codec
+                .send(ClientMessage::PortSubscribe(vec![listen_message.real_port]))
+                .await
+                .map(|()| {
+                    port_mapping.insert(
+                        listen_message.real_port,
+                        ListenData {
+                            port: listen_message.fake_port,
+                            ipv6: listen_message.ipv6,
+                            fd: listen_message.fd,
+                        },
+                    )
+                });
+        }
+    }
+}
+
+async fn handle_daemon_message(
+    daemon_message: DaemonMessage,
+    port_mapping: &mut HashMap<Port, ListenData>,
+    active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+) {
+    match daemon_message {
+        DaemonMessage::NewTCPConnection(conn) => {
+            debug!("DaemonMessage::NewTCPConnection {conn:#?}");
+
+            let _ = port_mapping
+                .get(&conn.destination_port)
+                .map(|listen_data| {
+                    let addr = match listen_data.ipv6 {
+                        false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
+                        true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
+                    };
+
+                    let info =
+                        SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+                    {
+                        CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+                    }
+
+                    TcpStream::connect(addr)
+                })
+                .map(|stream| {
+                    let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
+
+                    active_connections.insert(conn.connection_id, sender);
+
+                    task::spawn(async move { tcp_tunnel(stream.await.unwrap(), receiver).await })
+                });
+        }
+        DaemonMessage::TCPData(msg) => {
+            if let Err(fail) = active_connections
+                .get(&msg.connection_id)
+                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
+                .unwrap()
+                .await
+            {
+                error!("DaemonMessage::TCPData error {fail:#?}");
+                active_connections.remove(&msg.connection_id);
+            }
+        }
+        DaemonMessage::TCPClose(msg) => {
+            if let Err(fail) = active_connections
+                .get(&msg.connection_id)
+                .map(|sender| sender.send(TcpTunnelMessages::Close))
+                .unwrap()
+                .await
+            {
+                error!("DaemonMessage::TCPClose error {fail:#?}");
+                active_connections.remove(&msg.connection_id);
+            }
+        }
+        DaemonMessage::Close => todo!(),
+        DaemonMessage::LogMessage(_) => todo!(),
+    }
 }
 
 async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+
+    // NOTE(alex): `codec` is used to retrieve messages from the daemon (messages that are sent
+    // from -agent to -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
     loop {
         select! {
-            message = receiver.recv() => {
-                match message {
-                    Some(HookMessage::Listen(msg)) => {
-                        debug!("received message from hook {:?}", msg);
-                        codec.send(ClientMessage::PortSubscribe(vec![msg.real_port])).await.unwrap();
-                        port_mapping.insert(msg.real_port, ListenData{port: msg.fake_port, ipv6: msg.ipv6, fd: msg.fd});
-                    }
-                    None => {
-                        debug!("NONE in recv");
-                        break
-                    }
-                }
+            hook_message = receiver.recv() => {
+                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec).await;
             }
-            message = codec.next() => {
-                match message {
-                    Some(Ok(DaemonMessage::NewTCPConnection(conn))) => {
-                        debug!("new connection {:?}", conn);
-                        let listen_data = match port_mapping.get(&conn.destination_port) {
-                            Some(listen_data) => (*listen_data).clone(),
-                            None => {
-                                debug!("no listen_data for {:?}", conn.destination_port);
-                                continue;
-                            }
-                        };
-                        let addr = match listen_data.ipv6 {
-                            false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
-                            true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
-                        };
-                        let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
-                        {
-                            CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
-                        }
-                        let stream = match TcpStream::connect(addr).await {
-                            Ok(stream) => stream,
-                            Err(err) => {
-                                error!("failed to connect to port {:?}", err);
-                                continue;
-                            }
-                        };
-                        let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
-                        active_connections.insert(conn.connection_id, sender);
-                        task::spawn(async move {
-                            tcp_tunnel(stream, receiver).await
-                        });
-                    }
-                    Some(Ok(DaemonMessage::TCPData(msg))) => {
-                        let sender = match active_connections.get(&msg.connection_id) {
-                            Some(sender) => sender,
-                            None => {
-                                debug!("no sender for {:?}", msg.connection_id);
-                                continue;
-                            }
-                        };
-                        if let Err(err) = sender.send(TcpTunnelMessages::Data(msg.data)).await {
-                                debug!("sender error {:?}", err);
-                                active_connections.remove(&msg.connection_id);
-                        }
-                    },
-                    Some(Ok(DaemonMessage::TCPClose(msg))) => {
-                        let sender = match active_connections.remove(&msg.connection_id) {
-                            Some(sender) => sender,
-                            None => {
-                                debug!("no sender for {:?}", msg.connection_id);
-                                continue;
-                            }
-                        };
-                        if let Err(err) = sender.send(TcpTunnelMessages::Close).await {
-                                debug!("sender error {:?}", err);
-                        }
-                    }
-                    Some(_) => {
-                        debug!("NONE in some");
-                        break
-                    },
-                    None => {
-                        thread::sleep(Duration::from_millis(2000));
-                        debug!("NONE in none");
-                        continue
-                    }
-                }
+            daemon_message = codec.next() => {
+                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections).await;
             }
         }
     }
