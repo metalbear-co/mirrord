@@ -1,13 +1,15 @@
 use envconfig::Envconfig;
+use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
+    core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::config;
 struct RuntimeData {
@@ -120,6 +122,21 @@ pub async fn create_agent(
         .unwrap();
 
     let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
+    let params = ListParams::default()
+        .labels(&format!("job-name={}", agent_job_name))
+        .timeout(10);
+    let mut stream = pods_api.watch(&params, "0").await.unwrap().boxed();
+    while let Some(status) = stream.try_next().await.unwrap() {
+        match status {
+            WatchEvent::Added(_) => break,
+            WatchEvent::Error(s) => {
+                error!("Error watching pods: {:?}", s);
+                break;
+            }
+            _ => {}
+        }
+    }
+
     let pods = pods_api
         .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
         .await
