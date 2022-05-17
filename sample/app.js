@@ -4,36 +4,27 @@ var fs = require("fs");
 
 fs.open("/var/log/dpkg.log", "r", (err, data) => {
   console.log("Opening /var/log/dpkg.log file!");
+
   if (err) {
     console.error("Error opening file: ", err);
   }
 });
 
-// fs.open("/var/log/dpkg.log", "r", (err, data) => {
-//   console.log("Calling open on /var/log/dpkg.log file again!");
-//   if (err) {
-//     console.error("Error opening file: ", err);
-//   }
-// });
+fs.open("/var/log/dpkg.log", "r", (err, data) => {
+  console.log("Calling open on /var/log/dpkg.log file again!");
 
-// fs.open("/var/log/dpkg.log", "r", (err, data) => {
-//   console.log("Open /var/log/dpkg.log file again, three times the charm!");
-//   if (err) {
-//     console.error("Error opening file: ", err);
-//   }
-// });
+  if (err) {
+    console.error("Error opening file: ", err);
+  }
+});
 
-//   console.log("Opened file: ", data);
-// });
+fs.open("/var/log/dpkg.log", "r", (err, data) => {
+  console.log("Open /var/log/dpkg.log file again, three times the charm!");
 
-// fs.readFile("/home/alexc/dev/mirrord/Cargo.toml", "utf8", (err, data) => {
-//   if (err) {
-//     console.error("Error loading file: ", err);
-//   }
-
-//   console.log("Loaded file: ", data);
-
-// });
+  if (err) {
+    console.error("Error opening file: ", err);
+  }
+});
 
 server.on("connection", handleConnection);
 server.listen(

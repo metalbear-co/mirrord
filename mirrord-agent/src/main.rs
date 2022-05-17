@@ -1,11 +1,9 @@
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::{Hash, Hasher},
-    io::prelude::*,
     net::{Ipv4Addr, SocketAddrV4},
-    os::unix::prelude::{AsRawFd, RawFd},
-    path::PathBuf,
+    os::unix::prelude::AsRawFd,
 };
 
 use anyhow::Result;
@@ -29,8 +27,6 @@ mod util;
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
-
-use crate::sniffer::FileCommand;
 
 type PeerID = u32;
 
@@ -66,17 +62,11 @@ impl Borrow<PeerID> for Peer {
 }
 
 #[derive(Debug)]
-struct OpenFile {
-    pub fd: RawFd,
-}
-
-#[derive(Debug)]
 struct State {
     pub peers: HashSet<Peer>,
     index_allocator: IndexAllocator<PeerID>,
     pub port_subscriptions: Subscriptions<Port, PeerID>,
     pub connections_subscriptions: Subscriptions<ConnectionID, PeerID>,
-    pub file_managers: HashMap<PeerID, Vec<OpenFile>>,
 }
 
 impl State {
@@ -86,7 +76,6 @@ impl State {
             index_allocator: IndexAllocator::new(),
             port_subscriptions: Subscriptions::new(),
             connections_subscriptions: Subscriptions::new(),
-            file_managers: HashMap::new(),
         }
     }
 

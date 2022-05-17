@@ -1,26 +1,11 @@
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    ffi::CStr,
-    lazy::SyncLazy,
-    mem::MaybeUninit,
-    net::SocketAddr,
-    os::unix::{io::RawFd, prelude::AsRawFd},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, Once},
-};
+use std::{ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf};
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use futures::channel::oneshot;
-use libc::{c_char, c_int, c_short, c_void, size_t, ssize_t, FILE};
+use libc::{c_char, c_int, c_void, size_t, ssize_t, FILE};
 use mirrord_protocol::FileOpenResponse;
-use multi_map::MultiMap;
-use queues::Queue;
-use rand::prelude::*;
-use regex::{Regex, RegexSet};
-use socketpair::{socketpair_stream, SocketpairStream};
-use tokio::sync::Notify;
-use tracing::{debug, error, info, warn};
+use regex::RegexSet;
+use tracing::{debug, error};
 
 use crate::{
     common::{HookMessage, OpenFileHook},
@@ -67,28 +52,6 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 
     set
 });
-
-pub static mut FILE_HOOK_SENDER: SyncLazy<Mutex<Vec<oneshot::Sender<FileOpenResponse>>>> =
-    SyncLazy::new(|| Mutex::new(Vec::with_capacity(4)));
-static FILE_HOOK_INITIALIZER: Once = Once::new();
-
-pub enum FileState {
-    AwaitingRemote,
-}
-
-pub struct File {
-    pub fake_fd: RawFd,
-    pub fd: RawFd,
-    pub state: FileState,
-}
-
-impl Borrow<RawFd> for File {
-    fn borrow(&self) -> &RawFd {
-        &self.fd
-    }
-}
-
-static mut FILES: SyncLazy<Mutex<Vec<File>>> = SyncLazy::new(|| Mutex::new(Vec::with_capacity(32)));
 
 /// Blocking wrapper around `libc::open` call.
 ///

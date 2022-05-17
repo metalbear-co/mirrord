@@ -1,12 +1,7 @@
-use std::{
-    os::unix::{io::RawFd, prelude::*},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{os::unix::io::RawFd, path::PathBuf};
 
 use futures::channel::oneshot;
 use mirrord_protocol::FileOpenResponse;
-use tokio::sync::Notify;
 
 pub type Port = u16;
 
@@ -24,8 +19,7 @@ pub struct OpenFileHook {
     pub(crate) file_channel_tx: oneshot::Sender<FileOpenResponse>,
 }
 
-// TODO(alex) [high] 2022-05-11: Write down the message flow.
-/// These are the messages that `mirrord-layer` sends to ?.
+/// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub enum HookMessage {
     Listen(Listen),

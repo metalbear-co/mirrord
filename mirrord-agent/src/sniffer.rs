@@ -2,12 +2,11 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr},
-    os::unix::prelude::RawFd,
 };
 
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
-use mirrord_protocol::{FileOpenResponse, NewTCPConnection, TCPClose, TCPData};
+use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
 use pcap::{stream::PacketCodec, Active, Capture, Device, Linktype};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
@@ -36,10 +35,6 @@ type ConnectionID = u16;
 pub enum SnifferCommand {
     SetPorts(Vec<u16>),
     Close,
-}
-#[derive(Debug)]
-pub enum FileCommand {
-    OpenFile(RawFd),
 }
 
 #[derive(Debug)]

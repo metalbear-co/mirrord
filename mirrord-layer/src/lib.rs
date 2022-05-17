@@ -2,12 +2,9 @@
 
 use std::{
     collections::HashMap,
-    error::Error,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::Mutex,
-    thread,
-    time::Duration,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
@@ -17,7 +14,6 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{channel::oneshot, SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
-use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use tokio::{
     io::AsyncWriteExt,
@@ -27,7 +23,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     task,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
 
 mod common;
@@ -40,7 +36,6 @@ mod sockets;
 use crate::{
     common::{HookMessage, Port},
     config::Config,
-    file::FILE_HOOK_SENDER,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
@@ -103,8 +98,10 @@ fn init() {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    debug!("init called");
+    debug!("Initializing mirrord-layer.");
+
     let config = Config::init_from_env().unwrap();
+
     let pf = RUNTIME.block_on(pod_api::create_agent(
         &config.impersonated_pod_name,
         &config.impersonated_pod_namespace,
@@ -112,11 +109,14 @@ fn init() {
         config.agent_rust_log,
         config.agent_image,
     ));
+
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
         HOOK_SENDER = Some(sender);
     };
+
     enable_hooks();
+
     RUNTIME.spawn(poll_agent(pf, receiver));
 }
 
@@ -128,10 +128,8 @@ async fn handle_hook_message(
 ) {
     match hook_message {
         Some(HookMessage::Listen(listen)) => {
-            debug!(
-                "poll_agent -> received `Listen` message from hook {:?}",
-                listen
-            );
+            debug!("HookMessage::Listen {listen:#?}");
+
             codec
                 .send(ClientMessage::PortSubscribe(vec![listen.real_port]))
                 .await
@@ -147,9 +145,10 @@ async fn handle_hook_message(
             );
         }
         Some(HookMessage::OpenFileHook(open)) => {
+            debug!("HookMessage::OpenFileHook {open:#?}");
+
             // NOTE(alex): Lock the file handler and insert a channel that will be used to retrieve
             // the file data when it comes back from `DaemonMessage::OpenFileResponse`.
-            debug!("poll_agent -> received `Open` message from hook {:?}", open);
             open_file_handler.lock().unwrap().push(open.file_channel_tx);
 
             codec
@@ -158,7 +157,7 @@ async fn handle_hook_message(
                 .unwrap();
         }
         None => {
-            debug!("NONE in recv");
+            warn!("NONE for `hook_message`");
             // TODO(alex) [low] 2022-05-16: Removed a `break` statement here, so it's probably a
             // good idea to revisit this whole `match`.
         }
@@ -173,9 +172,7 @@ async fn handle_daemon_message(
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
-            debug!("new connection {:?}", conn);
-            // TODO(alex) [high] 2022-05-16: Refactor these matches to not crash on `None`.
-            // Probably add `inspect_err`, plus chain these as monadic calls.
+            debug!("DaemonMessage::NewTCPConnection {conn:#?}");
             let _ = port_mapping
                 .get(&conn.destination_port)
                 .map(|listen_data| {
@@ -207,7 +204,7 @@ async fn handle_daemon_message(
                 .unwrap()
                 .await
             {
-                debug!("sender error {:?}", fail);
+                error!("DaemonMessage::TCPData error {fail:#?}");
                 active_connections.remove(&msg.connection_id);
             }
         }
@@ -218,33 +215,20 @@ async fn handle_daemon_message(
                 .unwrap()
                 .await
             {
-                debug!("sender error {:?}", fail);
+                error!("DaemonMessage::TCPClose error {fail:#?}");
                 active_connections.remove(&msg.connection_id);
             }
         }
         DaemonMessage::OpenFileResponse(open_file_message) => {
-            debug!(
-                "poll_agent -> received a FileOpen message with contents {open_file_message:?}!"
-            );
-            // TODO(alex) [high] 2022-05-16: After changing this part to be outside of `select!`
-            // macro, we're crashing with:
-            /*
-                        poll_agent -> received a FileOpen message with contents FileOpenResponse { fd: 14 }!
-            thread 'tokio-runtime-worker' panicked at 'called `Option::unwrap()` on a `None` value', mirrord-layer/src/lib.rs:234:22
-            note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-            thread '<unnamed>' panicked at 'called `Result::unwrap()` on an `Err` value: Canceled', mirrord-layer/src/file.rs:131:51
-            fatal runtime error: failed to initiate panic, error 5
-                        */
-            // I think this has to do with `unwrapping` outside. It only crashes for file, so that's
-            // good I guess.
-            unsafe {
-                FILE_HOOK_SENDER
-                    .lock()
-                    .unwrap()
-                    .pop()
-                    .unwrap()
-                    .send(open_file_message)
-            };
+            debug!("DaemonMessage::OpenFileResponse {open_file_message:#?}!");
+
+            open_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(open_file_message)
+                .unwrap();
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -253,10 +237,15 @@ async fn handle_daemon_message(
 
 async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+
+    // NOTE(alex): `codec` is used to retrieve messages from the daemon (messages that are sent
+    // from -agent to -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
 
+    // NOTE(alex): Stores a list of `oneshot`s that notifies (and retrieves data) the `open` hook
+    // when -layer receives a `DaemonMessage::OpenFileResponse`.
     let open_file_handler = Mutex::new(Vec::with_capacity(4));
 
     loop {
@@ -271,6 +260,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     }
 }
 
+/// Enables file and socket hooks.
 fn enable_hooks() {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
