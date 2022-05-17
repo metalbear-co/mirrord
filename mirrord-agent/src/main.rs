@@ -7,7 +7,9 @@ use std::{
 
 use anyhow::Result;
 use futures::SinkExt;
-use mirrord_protocol::{ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, Port};
+use mirrord_protocol::{
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileOpenResponse, Port,
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -90,7 +92,7 @@ impl State {
 
 #[derive(Debug)]
 struct PeerMessage {
-    msg: ClientMessage,
+    client_message: ClientMessage,
     peer_id: PeerID,
 }
 
@@ -107,11 +109,29 @@ async fn peer_handler(
                 match message {
                     Some(message) => {
                         let message = PeerMessage {
-                            msg: message?,
+                            client_message: message?,
                             peer_id
                         };
                         debug!("client sent message {:?}", &message);
-                        tx.send(message).await?;
+
+                        if let ClientMessage::OpenFileRequest(path) = message.client_message {
+                            debug!(
+                                "handle_peer_message -> peer id {:?} asked to open file {path:?}",
+                                message.peer_id
+                            );
+
+                            let file = std::fs::File::open(path)?;
+                            let file_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+
+                            debug!("handle_peer_message -> file is open with fd {file_fd:?}");
+
+                            let open_file_message =
+                                DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
+                            stream.send(open_file_message).await?;
+                        } else {
+                            tx.send(message).await?;
+                        }
+
                     }
                     None => break
                 }
@@ -130,7 +150,7 @@ async fn peer_handler(
         }
     }
     tx.send(PeerMessage {
-        msg: ClientMessage::Close,
+        client_message: ClientMessage::Close,
         peer_id,
     })
     .await?;
@@ -179,7 +199,7 @@ async fn start() -> Result<()> {
 
             },
             Some(message) = peers_rx.recv() => {
-                match message.msg {
+                match message.client_message {
                     ClientMessage::PortSubscribe(ports) => {
                         debug!("peer id {:?} asked to subscribe to {:?}", message.peer_id, ports);
                         state.port_subscriptions.subscribe_many(message.peer_id, ports);
@@ -195,8 +215,11 @@ async fn start() -> Result<()> {
                     ClientMessage::ConnectionUnsubscribe(connection_id) => {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
-
-
+                    ClientMessage::OpenFileRequest(_) => {
+                        // NOTE(alex): `peers_rx` never receives this type of message, as it is
+                        // handled in `peer_handler`.
+                        unreachable!();
+                    }
                 }
             },
             message = packet_sniffer_rx.recv() => {

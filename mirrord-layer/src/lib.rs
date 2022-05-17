@@ -1,14 +1,17 @@
+#![feature(once_cell)]
+
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    sync::Mutex,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use ctor::ctor;
 use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{SinkExt, StreamExt};
+use futures::{channel::oneshot, SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
@@ -21,13 +24,14 @@ use tokio::{
     task,
 };
 use tracing::{debug, error, info};
+use tracing_subscriber::prelude::*;
 
 mod common;
 mod config;
+mod files;
 mod macros;
 mod pod_api;
 mod sockets;
-use tracing_subscriber::prelude::*;
 
 use crate::{
     common::{HookMessage, Port},
@@ -120,6 +124,7 @@ async fn handle_hook_message(
     hook_message: HookMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -139,6 +144,18 @@ async fn handle_hook_message(
                     )
                 });
         }
+        HookMessage::OpenFileHook(open) => {
+            debug!("HookMessage::OpenFileHook {open:#?}");
+
+            // NOTE(alex): Lock the file handler and insert a channel that will be used to retrieve
+            // the file data when it comes back from `DaemonMessage::OpenFileResponse`.
+            open_file_handler.lock().unwrap().push(open.file_channel_tx);
+
+            codec
+                .send(ClientMessage::OpenFileRequest(open.path))
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -146,6 +163,7 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -197,6 +215,17 @@ async fn handle_daemon_message(
                 active_connections.remove(&msg.connection_id);
             }
         }
+        DaemonMessage::OpenFileResponse(open_file) => {
+            debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
+
+            open_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(open_file)
+                .unwrap();
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -210,19 +239,30 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
+
+    // NOTE(alex): Stores a list of `oneshot`s that notifies (and retrieves data) the `open` hook
+    // when -layer receives a `DaemonMessage::OpenFileResponse`.
+    let open_file_handler = Mutex::new(Vec::with_capacity(4));
+
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec).await;
+                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler).await;
             }
         }
     }
 }
 
+/// Enables file and socket hooks.
 fn enable_hooks() {
-    let interceptor = Interceptor::obtain(&GUM);
-    sockets::enable_hooks(interceptor)
+    let mut interceptor = Interceptor::obtain(&GUM);
+    interceptor.begin_transaction();
+
+    sockets::enable_socket_hooks(&mut interceptor);
+    files::enable_file_hooks(&mut interceptor);
+
+    interceptor.end_transaction();
 }

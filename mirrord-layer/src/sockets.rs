@@ -539,7 +539,7 @@ unsafe extern "C" fn accept4_detour(
     accept(sockfd, address, address_len, res)
 }
 
-pub fn enable_hooks(mut interceptor: Interceptor) {
+pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);

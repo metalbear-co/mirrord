@@ -1,4 +1,4 @@
-use std::{io, net::IpAddr};
+use std::{io, net::IpAddr, path::PathBuf};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
@@ -31,13 +31,21 @@ pub struct LogMessage {
     pub message: String,
 }
 
+/// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
+    OpenFileRequest(PathBuf),
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct FileOpenResponse {
+    pub fd: i32,
+}
+
+/// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum DaemonMessage {
     Close,
@@ -45,6 +53,7 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
+    OpenFileResponse(FileOpenResponse),
 }
 
 pub struct ClientCodec {
