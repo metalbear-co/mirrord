@@ -25,21 +25,16 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "MAIN NODE Debug mirrord-layer with app.js",
+      "name": "Debug mirrord-layer with app.js",
       "program": "node",
       "args": ["${workspaceFolder}/sample/app.js"],
-      "sourceMap": {
-        "/rustc/e7575f9670f3c837def3d186ae09366c75c7632e": "/home/lanedraex/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust"
-      },
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "info,mirrord=trace",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-c47lc",
-        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-9456bbbf9-gnxhg",
-        "MIRRORD_AGENT_RUST_LOG": "debug",
-        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
-        // "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true"
+        "RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "MIRRORD_AGENT_RUST_LOG": "trace",
+        "MIRRORD_AGENT_IMAGE": "",
       }
     }
   ]
