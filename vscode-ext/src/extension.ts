@@ -10,44 +10,21 @@ const LIBRARIES: {[platform: string] : string} = {
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-let k8sApi: K8SAPI | null = null;
-
-export class K8SAPI {
-	api: any;
-	config: any;
-
-	constructor() {
-		const kc = new k8s.KubeConfig();
-		kc.loadFromDefault();
-		this.config = kc;
-		this.api = kc.makeApiClient(k8s.CoreV1Api);
-	}
-
-	async listNamespaces(): Promise<any> {
-		return await this.api.listNamespace();
-	}
-
-	async listPods(namespace: string): Promise<any> {
-		return await this.api.listNamespacedPod(namespace);
-	}
-
-}
+let k8sApi: any;
 
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
 	let impersonatedPodNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
-	let remotePort = globalContext.workspaceState.get<number>('remotePort', 80); // TODO: is this still configurable?
 
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
-	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')',
-	'Change remote port (current: ' + remotePort + ')'];
+	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
 			return;
 		}
 
 		if (setting.startsWith('Change namespace')) {
-			let namespaces = await k8sApi?.api.listNamespace();
+			let namespaces = await k8sApi.listNamespace();
 			let namespaceNames = namespaces.body.items.map((namespace: { metadata: { name: any; }; }) => { return namespace.metadata.name; });
 			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
 				if (namespaceName === undefined) {
@@ -60,13 +37,6 @@ async function changeSettings() {
 				}
 			});
 
-		} else if (setting.startsWith('Change remote port')) {
-			vscode.window.showInputBox({ prompt: 'Enter new remote port' }).then(async port => {
-				if (port === undefined) {
-					return;
-				}
-				globalContext.workspaceState.update('remotePort', parseInt(port));
-			});
 		}
 	});
 }
@@ -88,7 +58,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// TODO: Download mirrord according to platform
 
 	globalContext = context;
-	k8sApi = new K8SAPI();
+	let k8sConfig = new k8s.KubeConfig();
+	k8sConfig.loadFromDefault();
+	k8sApi = k8sConfig.makeApiClient(k8s.CoreV1Api);
+
 	context.globalState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 	buttons = { toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0) };
@@ -128,7 +101,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
 		// Get pods from kubectl and let user select one to mirror
-		let pods = await k8sApi!.listPods(namespace);
+		let pods = await k8sApi.listNamespacedPod(namespace);
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
 		return await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
@@ -148,8 +121,6 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				}
 				
 				config.env = {
-					// eslint-disable-next-line @typescript-eslint/naming-convention
-					'RUST_LOG': 'trace',
 					// eslint-disable-next-line @typescript-eslint/naming-convention
 					'DYLD_INSERT_LIBRARIES': path.join(libraryPath, LIBRARIES[os.platform()]),
 					// eslint-disable-next-line @typescript-eslint/naming-convention
