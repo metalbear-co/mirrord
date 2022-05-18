@@ -1,7 +1,11 @@
 use std::{os::unix::io::RawFd, path::PathBuf};
 
-use futures::channel::oneshot;
 use mirrord_protocol::FileOpenResponse;
+use thiserror::Error;
+use tokio::sync::{
+    mpsc::error::SendError,
+    oneshot::{self, error::RecvError},
+};
 
 pub type Port = u16;
 
@@ -24,4 +28,13 @@ pub struct OpenFileHook {
 pub enum HookMessage {
     Listen(Listen),
     OpenFileHook(OpenFileHook),
+}
+
+#[derive(Error, Debug)]
+pub enum LayerError {
+    #[error("Sender failed with `{0}`!")]
+    SendError(#[from] SendError<HookMessage>),
+
+    #[error("Receiver failed with `{0}`!")]
+    RecvError(#[from] RecvError),
 }

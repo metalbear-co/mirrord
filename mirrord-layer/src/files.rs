@@ -1,15 +1,15 @@
-use std::{ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf};
+use std::{env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf};
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use futures::channel::oneshot;
 use libc::{c_char, c_int, c_void, size_t, ssize_t, FILE};
 use mirrord_protocol::FileOpenResponse;
 use regex::RegexSet;
+use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
-    common::{HookMessage, OpenFileHook},
-    HOOK_SENDER, RUNTIME,
+    common::{HookMessage, LayerError, OpenFileHook},
+    HOOK_SENDER,
 };
 
 // TODO(alex) [low] 2022-05-03: `panic::catch_unwind`, but do we need it? If we panic in a C context
@@ -26,12 +26,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     // NOTE(alex): To handle the problem of injecting `open` and friends into project runners (like
     // in a call to `node app.js`, or `cargo run app`), we're ignoring files from the current
     // working directory (as suggested by aviram).
-    let mut cwd_buffer = [0; libc::PATH_MAX as usize];
-    let cwd = unsafe { libc::getcwd(cwd_buffer.as_mut_ptr(), cwd_buffer.len()) };
-
-    let cwd_str = unsafe { CStr::from_ptr(cwd) }
-        .to_str()
-        .expect("Failed converting cwd from c_char!");
+    let current_dir = env::current_dir().unwrap();
 
     let set = RegexSet::new(&[
         r".*\.so",
@@ -46,7 +41,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
         // sudden. We have to ignore this here as `node` will look for it outside the cwd (it
         // searches up the directory, until it finds).
         r".*/package.json",
-        cwd_str,
+        &current_dir.to_string_lossy(),
     ])
     .unwrap();
 
@@ -61,58 +56,45 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 /// When called for a valid file, it'll block, send a `ClientMessage::OpenFileRequest` to be handled
 /// by `mirrord-agent` (`handle_peer_message` function), and wait until it receives a
 /// `DaemonMessage::FileOpenResponse`.
-pub fn open(raw_path: *const c_char, oflag: c_int) -> RawFd {
-    let path: PathBuf = unsafe { CStr::from_ptr(raw_path) }
+pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
+    debug!("open -> trying to open valid file {path:?}");
+    let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpenResponse>();
+
+    let requesting_file = OpenFileHook {
+        path,
+        file_channel_tx,
+    };
+
+    sender.blocking_send(HookMessage::OpenFileHook(requesting_file))?;
+
+    debug!("Blocking on file open operation!");
+    let file_open = file_channel_rx.blocking_recv()?;
+    debug!("After `block_on` call, we have an open file {file_open:#?}!");
+
+    Ok(file_open.fd)
+}
+
+/// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
+/// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
+pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_int) -> RawFd {
+    let path: PathBuf = CStr::from_ptr(raw_path)
         .to_str()
         .expect("Failed converting path from c_char!")
         .into();
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        let fd = unsafe { libc::open(raw_path, oflag) };
+        let fd = libc::open(raw_path, oflag);
         fd
     } else {
-        debug!("open -> trying to open valid file {path:?}");
-        let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-        let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpenResponse>();
-
-        let requesting_file = OpenFileHook {
-            path,
-            file_channel_tx,
-        };
-
-        match sender.blocking_send(HookMessage::OpenFileHook(requesting_file)) {
-            Ok(_) => {}
-            Err(fail) => {
-                error!("open: failed to send open message: {fail:?}!");
-                return libc::EFAULT;
-            }
-        };
-
-        debug!("Blocking on file open operation!");
-
-        let file_open = RUNTIME.block_on(async {
-            let file_open = file_channel_rx.await.unwrap();
-            file_open
-        });
-
-        debug!("After `block_on` call, we have an open file {file_open:#?}!");
-
-        // TODO(alex) [high] 2022-05-12: Instead of returning this `fake_fd` thing, we should block
-        // while waiting for an `-agent` reply.
-        // To do this:
-        // - create a (send_tx, recv_tx) for file ops;
-        // - do `recv_tx.recv()` here to block until the "file is open" message is received;
-        // - send an open file request to `-agent` in `poll_agent`;
-        // - when the reply comes back, `send_tx.send(file)` in `poll_agent`;
-
-        file_open.fd
+        match open(path).map_err(|fail| {
+            error!("Failed opening file with {fail:#?}");
+            libc::EFAULT
+        }) {
+            Ok(fd) => fd,
+            Err(fail) => fail,
+        }
     }
-}
-
-/// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
-/// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
-pub(super) unsafe extern "C" fn open_detour(path: *const c_char, oflag: c_int) -> RawFd {
-    open(path, oflag)
 }
 
 /// NOTE(alex): libc also has a `fopen64` function. Both functions point to the same address, so
@@ -133,6 +115,9 @@ unsafe extern "C" fn fopen_detour(filename: *const c_char, mode: *const c_char) 
     file_ptr
 }
 
+// TODO(alex) [mid] 2022-05-18: This function should check the `fd` if it exists in our remote file
+// manager, then we're dealing with some hooked file, otherwise it's probably a system `read` call.
+// It must be done in such a fashion to avoid having some sort of `IGNORE_FILES` check here.
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
     debug!("read_detour -> fd {fd:#?}");
 

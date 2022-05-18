@@ -1360,6 +1360,7 @@ dependencies = [
  "serde_json",
  "socketpair",
  "tempdir",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",

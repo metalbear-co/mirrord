@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::Mutex,
@@ -11,16 +12,18 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use ctor::ctor;
 use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{channel::oneshot, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
-use lazy_static::lazy_static;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     runtime::Runtime,
     select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
     task,
 };
 use tracing::{debug, error, info};
@@ -39,10 +42,8 @@ use crate::{
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
-lazy_static! {
-    static ref GUM: Gum = unsafe { Gum::obtain() };
-    static ref RUNTIME: Runtime = Runtime::new().unwrap();
-}
+static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
+static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 

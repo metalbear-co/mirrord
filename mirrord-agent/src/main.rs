@@ -1,6 +1,7 @@
 use std::{
     borrow::Borrow,
     collections::HashSet,
+    error::Error,
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
 };
@@ -96,9 +97,46 @@ struct PeerMessage {
     peer_id: PeerID,
 }
 
+async fn handle_peer_messages(
+    daemon_messages_tx: mpsc::Sender<PeerMessage>,
+    stream: TcpStream,
+    peer_id: PeerID,
+    message: Option<Result<ClientMessage, Box<dyn Error>>>,
+) -> Result<()> {
+    if let Some(message) = message {
+        let message = PeerMessage {
+            client_message: message.unwrap(),
+            peer_id,
+        };
+        debug!("client sent message {:?}", &message);
+
+        if let ClientMessage::OpenFileRequest(path) = message.client_message {
+            debug!(
+                "handle_peer_message -> peer id {:?} asked to open file {path:?}",
+                message.peer_id
+            );
+
+            let file = std::fs::File::open(path)?;
+            let file_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+
+            debug!("handle_peer_message -> file is open with fd {file_fd:?}");
+
+            let open_file_message =
+                DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
+            stream.send(open_file_message).await?;
+        } else {
+            daemon_messages_tx.send(message).await?;
+        }
+
+        Ok(())
+    } else {
+        todo!()
+    }
+}
+
 async fn peer_handler(
-    mut rx: mpsc::Receiver<DaemonMessage>,
-    tx: mpsc::Sender<PeerMessage>,
+    mut daemon_messages_rx: mpsc::Receiver<DaemonMessage>,
+    daemon_messages_tx: mpsc::Sender<PeerMessage>,
     stream: TcpStream,
     peer_id: PeerID,
 ) -> Result<()> {
@@ -129,7 +167,7 @@ async fn peer_handler(
                                 DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
                             stream.send(open_file_message).await?;
                         } else {
-                            tx.send(message).await?;
+                            daemon_messages_tx.send(message).await?;
                         }
 
                     }
@@ -137,7 +175,7 @@ async fn peer_handler(
                 }
 
             },
-            message = rx.recv() => {
+            message = daemon_messages_rx.recv() => {
                 match message {
                     Some(message) => {
                         debug!("send message to client {:?}", &message);
@@ -149,11 +187,12 @@ async fn peer_handler(
             }
         }
     }
-    tx.send(PeerMessage {
-        client_message: ClientMessage::Close,
-        peer_id,
-    })
-    .await?;
+    daemon_messages_tx
+        .send(PeerMessage {
+            client_message: ClientMessage::Close,
+            peer_id,
+        })
+        .await?;
     Ok(())
 }
 
