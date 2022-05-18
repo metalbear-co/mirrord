@@ -1,15 +1,20 @@
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     error::Error,
+    fs::File,
     hash::{Hash, Hasher},
+    io::Read,
     net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
 };
 
+use actix_codec::Framed;
 use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileOpenResponse, Port,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileResponse, Port,
+    ReadFileResponse,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -61,6 +66,47 @@ impl Borrow<PeerID> for Peer {
     }
 }
 
+#[derive(Debug, Default)]
+struct FileManager {
+    pub open_files: HashMap<i32, File>,
+}
+
+impl FileManager {
+    pub(crate) fn open(&mut self, path: PathBuf) -> Result<i32> {
+        debug!("FileManager::open -> Trying to open file {path:#?}.");
+
+        // TODO(alex) [low] 2022-05-18: To avoid opening the same file multiple times, we could
+        // search `FileManager::open_files` for a path that matches the one passed as a parameter.
+        let file = std::fs::File::open(path)?;
+        let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+
+        self.open_files.insert(fd, file);
+
+        Ok(fd)
+    }
+
+    pub(crate) fn read(&self, fd: i32, read_count: usize) -> Result<Vec<u8>> {
+        let mut file = self.open_files.get(&fd).unwrap();
+
+        debug!("FileManager::read -> Trying to read file {file:#?}, with count {read_count:#?}");
+        debug!(
+            "FileManager::read -> File has len {:#?}",
+            file.metadata().unwrap().len()
+        );
+
+        // TODO(alex) [mid] 2022-05-18: Investigate this, nodejs `fs.readFile` calls `read` with a
+        // `count` of `65536`, breaking `File::read_exact`.
+        let read_count = read_count.min(file.metadata().unwrap().len() as usize);
+
+        let mut buffer = vec![0; read_count];
+        let read_result = file.read_exact(&mut buffer);
+
+        debug!("FileManager::read -> read_result is {read_result:#?}");
+
+        Ok(buffer)
+    }
+}
+
 #[derive(Debug)]
 struct State {
     pub peers: HashSet<Peer>,
@@ -99,9 +145,10 @@ struct PeerMessage {
 
 async fn handle_peer_messages(
     daemon_messages_tx: mpsc::Sender<PeerMessage>,
-    stream: TcpStream,
+    daemon_stream: &mut Framed<TcpStream, DaemonCodec>,
     peer_id: PeerID,
-    message: Option<Result<ClientMessage, Box<dyn Error>>>,
+    message: Option<Result<ClientMessage, std::io::Error>>,
+    file_manager: &mut FileManager,
 ) -> Result<()> {
     if let Some(message) = message {
         let message = PeerMessage {
@@ -110,22 +157,42 @@ async fn handle_peer_messages(
         };
         debug!("client sent message {:?}", &message);
 
-        if let ClientMessage::OpenFileRequest(path) = message.client_message {
-            debug!(
-                "handle_peer_message -> peer id {:?} asked to open file {path:?}",
-                message.peer_id
-            );
+        match message.client_message {
+            ClientMessage::OpenFileRequest(path) => {
+                debug!(
+                    "handle_peer_message -> peer id {:?} asked to open file {path:?}",
+                    message.peer_id
+                );
 
-            let file = std::fs::File::open(path)?;
-            let file_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+                let file_fd = file_manager.open(path)?;
+                let open_file_response =
+                    DaemonMessage::OpenFileResponse(OpenFileResponse { fd: file_fd });
 
-            debug!("handle_peer_message -> file is open with fd {file_fd:?}");
+                daemon_stream.send(open_file_response).await?;
+            }
+            ClientMessage::ReadFileRequest((fd, count)) => {
+                debug!(
+                    "handle_peer_message -> peer id {:?} asked to read file {fd:#?}",
+                    message.peer_id
+                );
 
-            let open_file_message =
-                DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
-            stream.send(open_file_message).await?;
-        } else {
-            daemon_messages_tx.send(message).await?;
+                let read_bytes = file_manager.read(fd, count)?;
+                let debug_length = read_bytes.len();
+
+                debug!("handle_peer_message -> file read operation was successful.");
+                debug!("handle_peer_message -> read len {debug_length:#?}.");
+
+                let read_file_response =
+                    DaemonMessage::ReadFileResponse(ReadFileResponse { bytes: read_bytes });
+
+                debug!("handle_peer_message -> prepared `read_file_response`.",);
+
+                let send_result = daemon_stream.send(read_file_response).await;
+                debug!("handle_peer_message -> `send_result` {send_result:#?}.");
+            }
+            ClientMessage::Close => daemon_messages_tx.send(message).await?,
+            ClientMessage::PortSubscribe(_) => daemon_messages_tx.send(message).await?,
+            ClientMessage::ConnectionUnsubscribe(_) => daemon_messages_tx.send(message).await?,
         }
 
         Ok(())
@@ -140,46 +207,20 @@ async fn peer_handler(
     stream: TcpStream,
     peer_id: PeerID,
 ) -> Result<()> {
-    let mut stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+    let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+
+    let mut file_manager = FileManager::default();
+
     loop {
         select! {
-            message = stream.next() => {
-                match message {
-                    Some(message) => {
-                        let message = PeerMessage {
-                            client_message: message?,
-                            peer_id
-                        };
-                        debug!("client sent message {:?}", &message);
-
-                        if let ClientMessage::OpenFileRequest(path) = message.client_message {
-                            debug!(
-                                "handle_peer_message -> peer id {:?} asked to open file {path:?}",
-                                message.peer_id
-                            );
-
-                            let file = std::fs::File::open(path)?;
-                            let file_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-
-                            debug!("handle_peer_message -> file is open with fd {file_fd:?}");
-
-                            let open_file_message =
-                                DaemonMessage::OpenFileResponse(FileOpenResponse { fd: file_fd });
-                            stream.send(open_file_message).await?;
-                        } else {
-                            daemon_messages_tx.send(message).await?;
-                        }
-
-                    }
-                    None => break
-                }
-
+            message = daemon_stream.next() => {
+                handle_peer_messages(daemon_messages_tx.clone(), &mut daemon_stream, peer_id, message, &mut file_manager).await?;
             },
             message = daemon_messages_rx.recv() => {
                 match message {
                     Some(message) => {
                         debug!("send message to client {:?}", &message);
-                        stream.send(message).await?;
+                        daemon_stream.send(message).await?;
                     }
                     None => break
                 }
@@ -187,12 +228,14 @@ async fn peer_handler(
             }
         }
     }
+
     daemon_messages_tx
         .send(PeerMessage {
             client_message: ClientMessage::Close,
             peer_id,
         })
         .await?;
+
     Ok(())
 }
 
@@ -255,6 +298,11 @@ async fn start() -> Result<()> {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
                     ClientMessage::OpenFileRequest(_) => {
+                        // NOTE(alex): `peers_rx` never receives this type of message, as it is
+                        // handled in `peer_handler`.
+                        unreachable!();
+                    }
+                    ClientMessage::ReadFileRequest(_) => {
                         // NOTE(alex): `peers_rx` never receives this type of message, as it is
                         // handled in `peer_handler`.
                         unreachable!();

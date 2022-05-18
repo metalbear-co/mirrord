@@ -38,11 +38,18 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     OpenFileRequest(PathBuf),
+    // TODO(alex) [mid] 2022-05-18: Give some more meaningful types, instead of this simple tuple.
+    ReadFileRequest((i32, usize)),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct FileOpenResponse {
+pub struct OpenFileResponse {
     pub fd: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct ReadFileResponse {
+    pub bytes: Vec<u8>,
 }
 
 /// `-agent` --> `-layer` messages.
@@ -53,7 +60,8 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
-    OpenFileResponse(FileOpenResponse),
+    OpenFileResponse(OpenFileResponse),
+    ReadFileResponse(ReadFileResponse),
 }
 
 pub struct ClientCodec {

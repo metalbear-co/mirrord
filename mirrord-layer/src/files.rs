@@ -1,14 +1,17 @@
-use std::{env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf};
+use std::{
+    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf,
+    sync::Mutex,
+};
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{c_char, c_int, c_void, size_t, ssize_t, FILE};
-use mirrord_protocol::FileOpenResponse;
+use mirrord_protocol::{OpenFileResponse, ReadFileResponse};
 use regex::RegexSet;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
-    common::{HookMessage, LayerError, OpenFileHook},
+    common::{HookMessage, LayerError, OpenFileHook, ReadFileHook},
     HOOK_SENDER,
 };
 
@@ -48,6 +51,9 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     set
 });
 
+static OPEN_FILES: SyncLazy<Mutex<HashSet<RawFd>>> =
+    SyncLazy::new(|| Mutex::new(HashSet::with_capacity(4)));
+
 /// Blocking wrapper around `libc::open` call.
 ///
 /// It's bypassed when trying to load system files, and files from the current working directory
@@ -59,20 +65,48 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
     debug!("open -> trying to open valid file {path:?}");
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-    let (file_channel_tx, file_channel_rx) = oneshot::channel::<FileOpenResponse>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<OpenFileResponse>();
 
     let requesting_file = OpenFileHook {
         path,
         file_channel_tx,
     };
 
+    // TODO(alex) [high] 2022-05-18: Possible deadlock when `readFile` is used, as it will call
+    // `open` and `read`?
     sender.blocking_send(HookMessage::OpenFileHook(requesting_file))?;
 
     debug!("Blocking on file open operation!");
-    let file_open = file_channel_rx.blocking_recv()?;
-    debug!("After `block_on` call, we have an open file {file_open:#?}!");
+    let open_file = file_channel_rx.blocking_recv()?;
+    debug!("After `block_on` call, we have an open file {open_file:#?}!");
 
-    Ok(file_open.fd)
+    OPEN_FILES.lock().unwrap().insert(open_file.fd);
+
+    Ok(open_file.fd)
+}
+
+/// Blocking wrapper around `libc::read` call.
+///
+/// Bypassed when trying to load system files, and files from the current working directory, see
+/// `open`.
+pub fn read(fd: RawFd, buf: &mut Vec<u8>) -> Result<usize, LayerError> {
+    debug!("read -> trying to read valid file {fd:?}");
+    let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
+
+    let read_file = ReadFileHook {
+        fd,
+        count: buf.len(),
+        file_channel_tx,
+    };
+
+    sender.blocking_send(HookMessage::ReadFileHook(read_file))?;
+
+    debug!("Blocking on file read operation!");
+    let read_file = file_channel_rx.blocking_recv()?;
+    debug!("After `block_on` call, we read a file {read_file:#?}!");
+
+    todo!()
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -97,33 +131,28 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
     }
 }
 
-/// NOTE(alex): libc also has a `fopen64` function. Both functions point to the same address, so
-/// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
-unsafe extern "C" fn fopen_detour(filename: *const c_char, mode: *const c_char) -> *mut FILE {
-    let filename_str = CStr::from_ptr(filename)
-        .to_str()
-        .expect("Failed converting filename from c_char!");
-    debug!("fopen_detour -> filename {filename_str}");
-
-    let file_ptr = if IGNORE_FILES.is_match(filename_str) {
-        libc::fopen(filename, mode)
-    } else {
-        libc::fopen(filename, mode)
-    };
-
-    debug!("fopen_detour -> file_ptr {file_ptr:?}");
-    file_ptr
-}
-
 // TODO(alex) [mid] 2022-05-18: This function should check the `fd` if it exists in our remote file
 // manager, then we're dealing with some hooked file, otherwise it's probably a system `read` call.
 // It must be done in such a fashion to avoid having some sort of `IGNORE_FILES` check here.
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
     debug!("read_detour -> fd {fd:#?}");
 
-    let read_count = libc::read(fd, buf, count);
+    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+        debug!("read_detour -> reading a debuggable file.");
 
-    read_count
+        let mut read_buffer = vec![0; count];
+
+        match read(*managed_fd, &mut read_buffer).map_err(|fail| {
+            error!("Failed reading file with {fail:#?}");
+            0
+        }) {
+            Ok(read_count) => read_count.try_into().unwrap(),
+            Err(fail) => fail,
+        }
+    } else {
+        let read_count = libc::read(fd, buf, count);
+        read_count
+    }
 }
 
 pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
@@ -137,19 +166,11 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
         )
         .unwrap();
 
-    // interceptor
-    //     .replace(
-    //         Module::find_export_by_name(None, "fopen").unwrap(),
-    //         NativePointer(fopen_detour as *mut c_void),
-    //         NativePointer(std::ptr::null_mut()),
-    //     )
-    //     .unwrap();
-
-    // interceptor
-    //     .replace(
-    //         Module::find_export_by_name(None, "read").unwrap(),
-    //         NativePointer(read_detour as *mut c_void),
-    //         NativePointer(std::ptr::null_mut()),
-    //     )
-    //     .unwrap();
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "read").unwrap(),
+            NativePointer(read_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
 }

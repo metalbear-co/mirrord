@@ -125,7 +125,8 @@ async fn handle_hook_message(
     hook_message: HookMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
-    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -157,6 +158,16 @@ async fn handle_hook_message(
                 .await
                 .unwrap();
         }
+        HookMessage::ReadFileHook(read) => {
+            debug!("HookMessage::ReadFileHook {read:#?}");
+
+            read_file_handler.lock().unwrap().push(read.file_channel_tx);
+
+            codec
+                .send(ClientMessage::ReadFileRequest((read.fd, read.count)))
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -164,7 +175,7 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
-    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::FileOpenResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -227,6 +238,7 @@ async fn handle_daemon_message(
                 .send(open_file)
                 .unwrap();
         }
+        DaemonMessage::ReadFileResponse(read_file) => todo!(),
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -244,11 +256,12 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     // NOTE(alex): Stores a list of `oneshot`s that notifies (and retrieves data) the `open` hook
     // when -layer receives a `DaemonMessage::OpenFileResponse`.
     let open_file_handler = Mutex::new(Vec::with_capacity(4));
+    let read_file_handler = Mutex::new(Vec::with_capacity(4));
 
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler).await;
+                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler, &read_file_handler).await;
             }
             daemon_message = codec.next() => {
                 handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler).await;

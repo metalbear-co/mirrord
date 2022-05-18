@@ -26,6 +26,14 @@ fs.open("/var/log/dpkg.log", "r", (err, data) => {
   }
 });
 
+fs.readFile("/var/log/dpkg.log", (err, data) => {
+  console.log("Read /var/log/dpkg.log, this is after opening it 3 times!");
+
+  if (err) {
+    console.error("Error reading file: ", err);
+  }
+});
+
 server.on("connection", handleConnection);
 server.listen(
   {
