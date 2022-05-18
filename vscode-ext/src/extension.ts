@@ -1,30 +1,36 @@
 import * as vscode from 'vscode';
 
 const k8s = require('@kubernetes/client-node');
+const path = require('path');
+const os = require('os');
+const LIBRARIES: {[platform: string] : string} = {
+	'darwin' : 'libmirrord_layer.dylib',
+	'linux' : 'libmirrord_layer.so'
+};
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
 let k8sApi: K8SAPI | null = null;
 
 export class K8SAPI {
-    api: any;
-    config: any;
+	api: any;
+	config: any;
 
-    constructor() {
-        const kc = new k8s.KubeConfig();
-        kc.loadFromDefault();
-        this.config = kc;
-        this.api = kc.makeApiClient(k8s.CoreV1Api);
-    }
+	constructor() {
+		const kc = new k8s.KubeConfig();
+		kc.loadFromDefault();
+		this.config = kc;
+		this.api = kc.makeApiClient(k8s.CoreV1Api);
+	}
 
-    async listNamespaces(): Promise<any> {
-        return await this.api.listNamespace();
-    }
+	async listNamespaces(): Promise<any> {
+		return await this.api.listNamespace();
+	}
 
-    async listPods(namespace: string): Promise<any> {
-        return await this.api.listNamespacedPod(namespace);
-    }
-    
+	async listPods(namespace: string): Promise<any> {
+		return await this.api.listNamespacedPod(namespace);
+	}
+
 }
 
 async function changeSettings() {
@@ -33,7 +39,7 @@ async function changeSettings() {
 	let remotePort = globalContext.workspaceState.get<number>('remotePort', 80); // TODO: is this still configurable?
 
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
-	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')', 
+	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')',
 	'Change remote port (current: ' + remotePort + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
@@ -65,7 +71,7 @@ async function changeSettings() {
 	});
 }
 
-async function toggle(state: vscode.Memento, button: vscode.StatusBarItem){
+async function toggle(state: vscode.Memento, button: vscode.StatusBarItem) {
 	if (state.get('enabled')) {
 		// vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 		state.update('enabled', false);
@@ -112,12 +118,10 @@ export async function activate(context: vscode.ExtensionContext) {
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 		if (!globalContext.globalState.get('enabled')) {
-			return new Promise(resolve => {resolve(config)});
+			return new Promise(resolve => { resolve(config) });
 		}
 		if (config.runtimeExecutable === undefined) { // For some reason resolveDebugConfiguration runs twice. runTimeExecutable is undefined the second time.
 			return new Promise(resolve => {
-				console.log("SECOND");
-				console.log(config);
 				return resolve(config);
 			});
 		}
@@ -135,10 +139,22 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				if (k8sApi === null) {
 					return;
 				}
-				config.runtimeExecutable = 'mirrord';
-				config.runtimeArgs = ['exec', '--pod-name', podName, 'node'];
-				config.env = { 'RUST_LOG': 'trace' };
-				console.log(config);
+
+				let libraryPath;
+				if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
+					libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
+				} else {
+					libraryPath = globalContext.extensionPath;
+				}
+				
+				config.env = {
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					'RUST_LOG': 'trace',
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					'DYLD_INSERT_LIBRARIES': path.join(libraryPath, LIBRARIES[os.platform()]),
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
+				};
 				return resolve(config);
 			});
 		});
