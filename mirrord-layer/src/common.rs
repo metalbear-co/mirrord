@@ -27,7 +27,7 @@ pub struct OpenFileHook {
 pub struct ReadFileHook {
     pub(crate) fd: RawFd,
     pub(crate) file_channel_tx: oneshot::Sender<ReadFileResponse>,
-    pub(crate) count: usize,
+    pub(crate) buffer_size: usize,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.

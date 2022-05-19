@@ -14,7 +14,7 @@ use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -151,6 +151,9 @@ async fn handle_hook_message(
 
             // NOTE(alex): Lock the file handler and insert a channel that will be used to retrieve
             // the file data when it comes back from `DaemonMessage::OpenFileResponse`.
+            //
+            // TODO(alex) [mid] 2022-05-19: `Vec` here may cause thread issues, @aviramha suggested
+            // using a `HashMap` of request id / response id.
             open_file_handler.lock().unwrap().push(open.file_channel_tx);
 
             codec
@@ -163,8 +166,13 @@ async fn handle_hook_message(
 
             read_file_handler.lock().unwrap().push(read.file_channel_tx);
 
+            let read_file_request = ReadFileRequest {
+                fd: read.fd,
+                buffer_size: read.buffer_size,
+            };
+
             codec
-                .send(ClientMessage::ReadFileRequest((read.fd, read.count)))
+                .send(ClientMessage::ReadFileRequest(read_file_request))
                 .await
                 .unwrap();
         }
@@ -290,6 +298,9 @@ fn enable_hooks() {
     interceptor.begin_transaction();
 
     sockets::enable_socket_hooks(&mut interceptor);
+
+    // TODO(alex) [mid] 2022-05-19: Make this configurable (enabled / disabled by default).
+    // Possible solutions: `env` variable, or `cfg`.
     files::enable_file_hooks(&mut interceptor);
 
     interceptor.end_transaction();

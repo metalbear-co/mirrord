@@ -31,6 +31,12 @@ pub struct LogMessage {
     pub message: String,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct ReadFileRequest {
+    pub fd: i32,
+    pub buffer_size: usize,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum ClientMessage {
@@ -38,8 +44,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     OpenFileRequest(PathBuf),
-    // TODO(alex) [mid] 2022-05-18: Give some more meaningful types, instead of this simple tuple.
-    ReadFileRequest((i32, usize)),
+    ReadFileRequest(ReadFileRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
@@ -50,6 +55,7 @@ pub struct OpenFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
+    pub read_amount: usize,
 }
 
 /// `-agent` --> `-layer` messages.

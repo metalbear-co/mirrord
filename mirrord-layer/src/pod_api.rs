@@ -57,7 +57,7 @@ pub async fn create_agent(
     };
     let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
     let agent_job_name = format!(
-        "mirrord-agent-{}",
+        "meow-mirrord-agent-{}",
         Alphanumeric
             .sample_string(&mut rand::thread_rng(), 10)
             .to_lowercase()

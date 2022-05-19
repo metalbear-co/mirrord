@@ -1,7 +1,6 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    error::Error,
     fs::File,
     hash::{Hash, Hasher},
     io::Read,
@@ -14,7 +13,7 @@ use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileResponse, Port,
-    ReadFileResponse,
+    ReadFileRequest, ReadFileResponse,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -72,6 +71,9 @@ struct FileManager {
 }
 
 impl FileManager {
+    // TODO(alex) [mid] 2022-05-19: Need to do a better job handling errors here (and in `read`)?
+    // Ideally we would send the error back in the `Response`, to be handled by the mirrod-layer
+    // side, and converted into some `libc::X` value.
     pub(crate) fn open(&mut self, path: PathBuf) -> Result<i32> {
         debug!("FileManager::open -> Trying to open file {path:#?}.");
 
@@ -85,23 +87,24 @@ impl FileManager {
         Ok(fd)
     }
 
-    pub(crate) fn read(&self, fd: i32, read_count: usize) -> Result<Vec<u8>> {
+    pub(crate) fn read(&self, fd: i32, buffer_size: usize) -> Result<ReadFileResponse> {
         let mut file = self.open_files.get(&fd).unwrap();
 
-        debug!("FileManager::read -> Trying to read file {file:#?}, with count {read_count:#?}");
+        debug!("FileManager::read -> Trying to read file {file:#?}, with count {buffer_size:#?}");
         debug!(
             "FileManager::read -> File has len {:#?}",
             file.metadata().unwrap().len()
         );
 
-        // TODO(alex) [mid] 2022-05-18: Investigate this, nodejs `fs.readFile` calls `read` with a
-        // `count` of `65536`, breaking `File::read_exact`.
-        let read_count = read_count.min(file.metadata().unwrap().len() as usize);
+        let mut buffer = vec![0; buffer_size];
+        let read_amount = file.read(&mut buffer)?;
 
-        let mut buffer = vec![0; read_count];
-        file.read_exact(&mut buffer)?;
+        let response = ReadFileResponse {
+            bytes: buffer,
+            read_amount,
+        };
 
-        Ok(buffer)
+        Ok(response)
     }
 }
 
@@ -168,24 +171,18 @@ async fn handle_peer_messages(
 
                 daemon_stream.send(open_file_response).await?;
             }
-            ClientMessage::ReadFileRequest((fd, count)) => {
+            ClientMessage::ReadFileRequest(ReadFileRequest { fd, buffer_size }) => {
                 debug!(
                     "handle_peer_messages -> peer id {:?} asked to read file {fd:#?}",
                     message.peer_id
                 );
 
-                let read_bytes = file_manager.read(fd, count)?;
-                let debug_length = read_bytes.len();
-
+                let read_file_response = file_manager.read(fd, buffer_size)?;
                 debug!("handle_peer_messages -> file read operation was successful.");
-                debug!("handle_peer_messages -> read len {debug_length:#?}.");
 
-                let read_file_response =
-                    DaemonMessage::ReadFileResponse(ReadFileResponse { bytes: read_bytes });
-
-                debug!("handle_peer_message -> prepared `read_file_response`.",);
-
-                let send_result = daemon_stream.send(read_file_response).await;
+                let send_result = daemon_stream
+                    .send(DaemonMessage::ReadFileResponse(read_file_response))
+                    .await;
                 debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
             }
             ClientMessage::Close => daemon_messages_tx.send(message).await?,
@@ -302,13 +299,17 @@ async fn start() -> Result<()> {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
                     ClientMessage::OpenFileRequest(_) => {
+                        // TODO(alex) [low] 2022-05-19: These are unreachable, as they're handled
+                        // by `peer_handler(...)`.
+                        //
+                        // @aviramha suggested creating a different `enum` for these messages.
+
                         // NOTE(alex): `peers_rx` never receives this type of message, as it is
                         // handled in `peer_handler`.
                         unreachable!();
                     }
                     ClientMessage::ReadFileRequest(_) => {
-                        // NOTE(alex): `peers_rx` never receives this type of message, as it is
-                        // handled in `peer_handler`.
+                        // NOTE(alex): Same as the `OpenFileRequest` case.
                         unreachable!();
                     }
                 }

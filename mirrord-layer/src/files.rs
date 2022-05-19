@@ -1,10 +1,10 @@
 use std::{
-    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, mem::size_of, os::unix::io::RawFd,
-    path::PathBuf, ptr, sync::Mutex,
+    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf, ptr,
+    sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use libc::{c_char, c_int, c_void, size_t, ssize_t, FILE};
+use libc::{c_char, c_int, c_void, size_t, ssize_t};
 use mirrord_protocol::{OpenFileResponse, ReadFileResponse};
 use regex::RegexSet;
 use tokio::sync::oneshot;
@@ -54,6 +54,14 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 static OPEN_FILES: SyncLazy<Mutex<HashSet<RawFd>>> =
     SyncLazy::new(|| Mutex::new(HashSet::with_capacity(4)));
 
+#[derive(Debug, Clone)]
+pub(crate) struct ReadFile {
+    bytes: Vec<u8>,
+    read_amount: usize,
+}
+
+// TODO(alex) [high] 2022-05-19: Hook file `seek`, and `write`.
+
 /// Blocking wrapper around `libc::open` call.
 ///
 /// It's bypassed when trying to load system files, and files from the current working directory
@@ -62,8 +70,9 @@ static OPEN_FILES: SyncLazy<Mutex<HashSet<RawFd>>> =
 /// When called for a valid file, it'll block, send a `ClientMessage::OpenFileRequest` to be handled
 /// by `mirrord-agent` (`handle_peer_message` function), and wait until it receives a
 /// `DaemonMessage::FileOpenResponse`.
-pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
-    debug!("open -> trying to open valid file {path:?}");
+pub(crate) fn open(path: PathBuf) -> Result<RawFd, LayerError> {
+    debug!("open -> trying to open valid file {path:?}.");
+
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<OpenFileResponse>();
 
@@ -72,11 +81,6 @@ pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
         file_channel_tx,
     };
 
-    // TODO(alex) [high] 2022-05-18: Possible deadlock when `readFile` is used, as it will call
-    // `open` and `read`?
-    //
-    // TODO(alex) [high] 2022-05-19: We're trying to `open` the same file multiple times, why?
-    // We even get different fds.
     sender.blocking_send(HookMessage::OpenFileHook(requesting_file))?;
 
     debug!("Blocking on file open operation!");
@@ -92,35 +96,28 @@ pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 ///
 /// Bypassed when trying to load system files, and files from the current working directory, see
 /// `open`.
-pub fn read(fd: RawFd, read_amount: usize) -> Result<Vec<u8>, LayerError> {
-    debug!("read -> trying to read valid file {fd:?}");
+pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError> {
+    debug!("read -> trying to read valid file {fd:?}.");
+
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
 
     let read_file = ReadFileHook {
         fd,
-        count: read_amount,
+        buffer_size: read_amount,
         file_channel_tx,
     };
 
-    // TODO(alex) [high] 2022-05-19: We're trying to `read` the same file multiple times, why? It
-    // keeps getting called, so after the first `read` -agent crashes:
-    /*
-    [2022-05-19T03:50:58Z DEBUG mirrord_agent] FileManager::read -> Trying to read file File {
-            fd: 14,
-            path: "/var/log/dpkg.log",
-            read: true,
-            write: false,
-        }, with count 65536
-    [2022-05-19T03:50:58Z DEBUG mirrord_agent] FileManager::read -> File has len 26604
-    [2022-05-19T03:50:58Z ERROR mirrord_agent] Peer encountered error failed to fill whole buffer
-         */
     sender.blocking_send(HookMessage::ReadFileHook(read_file))?;
 
-    debug!("Blocking on file read operation!");
-    let read_file = file_channel_rx.blocking_recv()?;
+    let read_file_response = file_channel_rx.blocking_recv()?;
 
-    Ok(read_file.bytes)
+    let read_file = ReadFile {
+        bytes: read_file_response.bytes,
+        read_amount: read_file_response.read_amount,
+    };
+
+    Ok(read_file)
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -145,24 +142,30 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
     }
 }
 
-// TODO(alex) [mid] 2022-05-18: This function should check the `fd` if it exists in our remote file
-// manager, then we're dealing with some hooked file, otherwise it's probably a system `read` call.
-// It must be done in such a fashion to avoid having some sort of `IGNORE_FILES` check here.
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
-    debug!("read_detour -> fd {fd:#?} count {count:#?}");
-
+    // NOTE(alex): We're only interested in files that are handled by `mirrord-agent`.
     if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
         debug!("read_detour -> reading a debuggable file.");
+        debug!("read_detour -> managed_fd {managed_fd:#?} | fd {fd:#?} | count {count:#?}");
 
         match read(*managed_fd, count).map_err(|fail| {
             error!("Failed reading file with {fail:#?}");
-            0
+            -1
         }) {
-            Ok(read_bytes) => {
-                let read_ptr = read_bytes.as_ptr();
-                ptr::copy(read_ptr, buf as *mut u8, read_bytes.len());
+            Ok(read_file) => {
+                let ReadFile { bytes, read_amount } = read_file;
 
-                read_bytes.len().try_into().unwrap()
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = buf.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount);
+
+                // WARN(alex): Must be careful when it comes to `EOF`, incorrect handling appears
+                // as the `read` call being repeated.
+                if read_amount == 0 {
+                    libc::EOF.try_into().unwrap()
+                } else {
+                    read_amount.try_into().unwrap()
+                }
             }
             Err(fail) => fail,
         }
@@ -176,8 +179,6 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
     interceptor
         .replace(
             Module::find_export_by_name(None, "open").unwrap(),
-            // TODO(alex) [low] 2022-05-03: Is there another way of converting a function into a
-            // pointer?
             NativePointer(open_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
