@@ -544,8 +544,8 @@ pub fn enable_hooks(mut interceptor: Interceptor) {
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
     hook!(interceptor, "connect", connect_detour);
-    hook!(interceptor, "getpeername", getpeername_detour);
-    hook!(interceptor, "getsockname", getsockname_detour);
+    try_hook!(interceptor, "getpeername", getpeername_detour);
+    try_hook!(interceptor, "getsockname", getsockname_detour);
     // hook!(interceptor, "setsockopt", setsockopt_detour);
     #[cfg(target_os = "linux")]
     {
