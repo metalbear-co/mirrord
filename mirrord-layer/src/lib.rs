@@ -176,6 +176,7 @@ async fn handle_daemon_message(
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -238,7 +239,20 @@ async fn handle_daemon_message(
                 .send(open_file)
                 .unwrap();
         }
-        DaemonMessage::ReadFileResponse(read_file) => todo!(),
+        DaemonMessage::ReadFileResponse(read_file) => {
+            debug!(
+                "DaemonMessage::ReadFileResponse {:#?}!",
+                read_file.bytes.len()
+            );
+
+            read_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(read_file)
+                .unwrap();
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -264,7 +278,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                 handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler, &read_file_handler).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler, &read_file_handler).await;
             }
         }
     }

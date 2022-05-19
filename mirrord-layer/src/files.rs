@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf,
-    sync::Mutex,
+    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, mem::size_of, os::unix::io::RawFd,
+    path::PathBuf, ptr, sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
@@ -74,6 +74,9 @@ pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 
     // TODO(alex) [high] 2022-05-18: Possible deadlock when `readFile` is used, as it will call
     // `open` and `read`?
+    //
+    // TODO(alex) [high] 2022-05-19: We're trying to `open` the same file multiple times, why?
+    // We even get different fds.
     sender.blocking_send(HookMessage::OpenFileHook(requesting_file))?;
 
     debug!("Blocking on file open operation!");
@@ -89,24 +92,35 @@ pub fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 ///
 /// Bypassed when trying to load system files, and files from the current working directory, see
 /// `open`.
-pub fn read(fd: RawFd, buf: &mut Vec<u8>) -> Result<usize, LayerError> {
+pub fn read(fd: RawFd, read_amount: usize) -> Result<Vec<u8>, LayerError> {
     debug!("read -> trying to read valid file {fd:?}");
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
 
     let read_file = ReadFileHook {
         fd,
-        count: buf.len(),
+        count: read_amount,
         file_channel_tx,
     };
 
+    // TODO(alex) [high] 2022-05-19: We're trying to `read` the same file multiple times, why? It
+    // keeps getting called, so after the first `read` -agent crashes:
+    /*
+    [2022-05-19T03:50:58Z DEBUG mirrord_agent] FileManager::read -> Trying to read file File {
+            fd: 14,
+            path: "/var/log/dpkg.log",
+            read: true,
+            write: false,
+        }, with count 65536
+    [2022-05-19T03:50:58Z DEBUG mirrord_agent] FileManager::read -> File has len 26604
+    [2022-05-19T03:50:58Z ERROR mirrord_agent] Peer encountered error failed to fill whole buffer
+         */
     sender.blocking_send(HookMessage::ReadFileHook(read_file))?;
 
     debug!("Blocking on file read operation!");
     let read_file = file_channel_rx.blocking_recv()?;
-    debug!("After `block_on` call, we read a file {read_file:#?}!");
 
-    todo!()
+    Ok(read_file.bytes)
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -135,18 +149,21 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
 // manager, then we're dealing with some hooked file, otherwise it's probably a system `read` call.
 // It must be done in such a fashion to avoid having some sort of `IGNORE_FILES` check here.
 unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
-    debug!("read_detour -> fd {fd:#?}");
+    debug!("read_detour -> fd {fd:#?} count {count:#?}");
 
     if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
         debug!("read_detour -> reading a debuggable file.");
 
-        let mut read_buffer = vec![0; count];
-
-        match read(*managed_fd, &mut read_buffer).map_err(|fail| {
+        match read(*managed_fd, count).map_err(|fail| {
             error!("Failed reading file with {fail:#?}");
             0
         }) {
-            Ok(read_count) => read_count.try_into().unwrap(),
+            Ok(read_bytes) => {
+                let read_ptr = read_bytes.as_ptr();
+                ptr::copy(read_ptr, buf as *mut u8, read_bytes.len());
+
+                read_bytes.len().try_into().unwrap()
+            }
             Err(fail) => fail,
         }
     } else {

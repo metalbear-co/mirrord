@@ -3,23 +3,7 @@ var server = net.createServer();
 var fs = require("fs");
 
 fs.open("/var/log/dpkg.log", "r", (err, data) => {
-  console.log("Opening /var/log/dpkg.log file!");
-
-  if (err) {
-    console.error("Error opening file: ", err);
-  }
-});
-
-fs.open("/var/log/dpkg.log", "r", (err, data) => {
-  console.log("Calling open on /var/log/dpkg.log file again!");
-
-  if (err) {
-    console.error("Error opening file: ", err);
-  }
-});
-
-fs.open("/var/log/dpkg.log", "r", (err, data) => {
-  console.log("Open /var/log/dpkg.log file again, three times the charm!");
+  console.log(">>>> Opening /var/log/dpkg.log file!");
 
   if (err) {
     console.error("Error opening file: ", err);
@@ -27,11 +11,13 @@ fs.open("/var/log/dpkg.log", "r", (err, data) => {
 });
 
 fs.readFile("/var/log/dpkg.log", (err, data) => {
-  console.log("Read /var/log/dpkg.log, this is after opening it 3 times!");
+  console.log(">>>> Reading /var/log/dpkg.log");
 
   if (err) {
     console.error("Error reading file: ", err);
   }
+
+  console.log(">>>> finished reading ", data);
 });
 
 server.on("connection", handleConnection);

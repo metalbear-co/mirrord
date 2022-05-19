@@ -22,7 +22,7 @@ use tokio::{
     sync::mpsc::{self},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 mod cli;
 mod runtime;
@@ -99,9 +99,7 @@ impl FileManager {
         let read_count = read_count.min(file.metadata().unwrap().len() as usize);
 
         let mut buffer = vec![0; read_count];
-        let read_result = file.read_exact(&mut buffer);
-
-        debug!("FileManager::read -> read_result is {read_result:#?}");
+        file.read_exact(&mut buffer)?;
 
         Ok(buffer)
     }
@@ -155,12 +153,12 @@ async fn handle_peer_messages(
             client_message: message.unwrap(),
             peer_id,
         };
-        debug!("client sent message {:?}", &message);
+        debug!("handle_peer_message -> client sent message {:?}", &message);
 
         match message.client_message {
             ClientMessage::OpenFileRequest(path) => {
                 debug!(
-                    "handle_peer_message -> peer id {:?} asked to open file {path:?}",
+                    "handle_peer_messages -> peer id {:?} asked to open file {path:?}",
                     message.peer_id
                 );
 
@@ -172,15 +170,15 @@ async fn handle_peer_messages(
             }
             ClientMessage::ReadFileRequest((fd, count)) => {
                 debug!(
-                    "handle_peer_message -> peer id {:?} asked to read file {fd:#?}",
+                    "handle_peer_messages -> peer id {:?} asked to read file {fd:#?}",
                     message.peer_id
                 );
 
                 let read_bytes = file_manager.read(fd, count)?;
                 let debug_length = read_bytes.len();
 
-                debug!("handle_peer_message -> file read operation was successful.");
-                debug!("handle_peer_message -> read len {debug_length:#?}.");
+                debug!("handle_peer_messages -> file read operation was successful.");
+                debug!("handle_peer_messages -> read len {debug_length:#?}.");
 
                 let read_file_response =
                     DaemonMessage::ReadFileResponse(ReadFileResponse { bytes: read_bytes });
@@ -188,7 +186,7 @@ async fn handle_peer_messages(
                 debug!("handle_peer_message -> prepared `read_file_response`.",);
 
                 let send_result = daemon_stream.send(read_file_response).await;
-                debug!("handle_peer_message -> `send_result` {send_result:#?}.");
+                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
             }
             ClientMessage::Close => daemon_messages_tx.send(message).await?,
             ClientMessage::PortSubscribe(_) => daemon_messages_tx.send(message).await?,
@@ -197,7 +195,13 @@ async fn handle_peer_messages(
 
         Ok(())
     } else {
-        todo!()
+        // TODO(alex) [mid] 2022-05-19: Figure out what should happen here.
+        warn!(
+            "handle_peer_messages -> Have no idea yet what is supposed to happen here {:#?}.",
+            message
+        );
+
+        Ok(())
     }
 }
 
