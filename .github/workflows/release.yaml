@@ -17,3 +17,33 @@ jobs:
         with:
             registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
   # add publish docker image
+  release_vscode_ext:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-18.04
+            extension: so
+            target: x86_64-unknown-linux-gnu
+            code-target: linux-x64
+          - os: ubuntu-18.04
+            extension: so
+            target: aarch64-unknown-linux-gnu
+            code-target: linux-arm64
+          - os: macos-11
+            extension: dylib
+            target: x86_64-apple-darwin
+            code-target: darwin-x64
+          - os: macos-11
+            extension: dylib
+            target: aarch64-apple-darwin
+            code-target: darwin-arm64    
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+    - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
+    - run: mv target/debug/libmirrordlayer_lib.${{matrix.extension}} vscode-ext/
+    - run: cd vscode-ext && vsce package  --allow-star-activation --target ${{matrix.code-target}}
