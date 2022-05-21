@@ -1,17 +1,24 @@
 use std::{
-    collections::HashSet, env, ffi::CStr, lazy::SyncLazy, os::unix::io::RawFd, path::PathBuf, ptr,
+    collections::{HashMap, HashSet},
+    env,
+    ffi::{CStr, CString},
+    io::SeekFrom,
+    lazy::SyncLazy,
+    os::unix::io::RawFd,
+    path::PathBuf,
+    ptr,
     sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use libc::{c_char, c_int, c_void, size_t, ssize_t};
-use mirrord_protocol::{OpenFileResponse, ReadFileResponse};
+use libc::{c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t};
+use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse};
 use regex::RegexSet;
 use tokio::sync::oneshot;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::{
-    common::{HookMessage, LayerError, OpenFileHook, ReadFileHook},
+    common::{HookMessage, LayerError, OpenFileHook, ReadFileHook, SeekFileHook},
     HOOK_SENDER,
 };
 
@@ -51,8 +58,11 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     set
 });
 
-static OPEN_FILES: SyncLazy<Mutex<HashSet<RawFd>>> =
-    SyncLazy::new(|| Mutex::new(HashSet::with_capacity(4)));
+type LocalFd = RawFd;
+type RemoteFd = RawFd;
+
+static OPEN_FILES: SyncLazy<Mutex<HashMap<LocalFd, RemoteFd>>> =
+    SyncLazy::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReadFile {
@@ -83,13 +93,23 @@ pub(crate) fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 
     sender.blocking_send(HookMessage::OpenFileHook(requesting_file))?;
 
-    debug!("Blocking on file open operation!");
+    debug!("open -> await response from remote");
     let open_file = file_channel_rx.blocking_recv()?;
-    debug!("After `block_on` call, we have an open file {open_file:#?}!");
 
-    OPEN_FILES.lock().unwrap().insert(open_file.fd);
+    let fake_file_name = CString::new(open_file.fd.to_string()).unwrap();
+    let local_file_fd = unsafe { libc::memfd_create(fake_file_name.as_ptr(), 0) };
 
-    Ok(open_file.fd)
+    debug!(
+        "open -> local_fd {local_file_fd:#?} | remote_fd {:#?}",
+        open_file.fd
+    );
+
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .insert(local_file_fd, open_file.fd);
+
+    Ok(local_file_fd)
 }
 
 /// Blocking wrapper around `libc::read` call.
@@ -120,6 +140,26 @@ pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError
     Ok(read_file)
 }
 
+pub(crate) fn lseek(fd: RawFd, seek_from: SeekFrom) -> Result<u64, LayerError> {
+    debug!("lseek -> trying to seek valid file {fd:?}.");
+
+    let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<SeekFileResponse>();
+
+    let read_file = SeekFileHook {
+        fd,
+        seek_from,
+        file_channel_tx,
+    };
+
+    sender.blocking_send(HookMessage::SeekFileHook(read_file))?;
+
+    let seek_file_response = file_channel_rx.blocking_recv()?;
+    let result_offset = seek_file_response.result_offset;
+
+    Ok(result_offset)
+}
+
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
 /// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_int) -> RawFd {
@@ -129,8 +169,10 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
         .into();
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        let fd = libc::open(raw_path, oflag);
-        fd
+        let bypassed_fd = libc::open(raw_path, oflag);
+        debug!("open_detour -> bypassed_fd {bypassed_fd:#?}");
+
+        bypassed_fd
     } else {
         match open(path).map_err(|fail| {
             error!("Failed opening file with {fail:#?}");
@@ -142,13 +184,12 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
     }
 }
 
-unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
+unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> ssize_t {
     // NOTE(alex): We're only interested in files that are handled by `mirrord-agent`.
-    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
-        debug!("read_detour -> reading a debuggable file.");
-        debug!("read_detour -> managed_fd {managed_fd:#?} | fd {fd:#?} | count {count:#?}");
+    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+        debug!("read_detour -> managed_fd {remote_fd:#?} | fd {fd:#?} | count {count:#?}");
 
-        match read(*managed_fd, count).map_err(|fail| {
+        match read(*remote_fd, count).map_err(|fail| {
             error!("Failed reading file with {fail:#?}");
             -1
         }) {
@@ -175,6 +216,52 @@ unsafe extern "C" fn read_detour(fd: c_int, buf: *mut c_void, count: size_t) -> 
     }
 }
 
+unsafe extern "C" fn fseek_detour(stream: *mut libc::FILE, offset: c_long, whence: c_int) -> c_int {
+    let fd = libc::fileno(stream);
+
+    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+        debug!(
+            "fseek_detour -> managed_fd {managed_fd:#?} | offset {offset:#?} | whence {whence:#?}"
+        );
+
+        todo!()
+    } else {
+        let result = libc::fseek(stream, offset, whence);
+        result
+    }
+}
+
+unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
+    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+        debug!(
+            "lseek_detour -> managed_fd {managed_fd:#?} | offset {offset:#?} | whence {whence:#?}"
+        );
+
+        let seek_from = match whence {
+            libc::SEEK_SET => SeekFrom::Start(offset as u64),
+            libc::SEEK_CUR => SeekFrom::Current(offset),
+            libc::SEEK_END => SeekFrom::End(offset),
+            libc::SEEK_DATA => todo!(),
+            libc::SEEK_HOLE => todo!(),
+            other => {
+                error!("lseek_detour -> invalid value for whence {whence:#?}");
+                return libc::EINVAL.into();
+            }
+        };
+
+        match lseek(*managed_fd, seek_from).map_err(|fail| {
+            error!("Failed lseek operation with {fail:#?}");
+            libc::EFAULT
+        }) {
+            Ok(result_offset) => result_offset as off_t,
+            Err(fail) => fail.into(),
+        }
+    } else {
+        let result_offset = libc::lseek(fd, offset, whence);
+        result_offset
+    }
+}
+
 pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
     interceptor
         .replace(
@@ -188,6 +275,22 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
         .replace(
             Module::find_export_by_name(None, "read").unwrap(),
             NativePointer(read_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
+
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "fseek").unwrap(),
+            NativePointer(fseek_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
+
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "lseek").unwrap(),
+            NativePointer(lseek_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();

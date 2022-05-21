@@ -1,4 +1,8 @@
-use std::{io, net::IpAddr, path::PathBuf};
+use std::{
+    io::{self, SeekFrom},
+    net::IpAddr,
+    path::PathBuf,
+};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
@@ -37,6 +41,14 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
+// TODO(alex) [high] 2022-05-21: Implement encode/decode manually, or change `SeekFrom` to be a
+// custom struct.
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct SeekFileRequest {
+    pub fd: i32,
+    pub seek_from: SeekFrom,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum ClientMessage {
@@ -58,6 +70,11 @@ pub struct ReadFileResponse {
     pub read_amount: usize,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct SeekFileResponse {
+    pub result_offset: u64,
+}
+
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum DaemonMessage {
@@ -68,6 +85,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     OpenFileResponse(OpenFileResponse),
     ReadFileResponse(ReadFileResponse),
+    SeekFileResponse(SeekFileResponse),
 }
 
 pub struct ClientCodec {

@@ -127,6 +127,7 @@ async fn handle_hook_message(
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -176,6 +177,21 @@ async fn handle_hook_message(
                 .await
                 .unwrap();
         }
+        HookMessage::SeekFileHook(seek) => {
+            debug!("HookMessage::SeekFileHook {seek:#?}");
+
+            seek_file_handler.lock().unwrap().push(seek.file_channel_tx);
+
+            let seek_file_request = SeekFileRequest {
+                fd: seek.fd,
+                seek_from: seek.seek_from,
+            };
+
+            codec
+                .send(ClientMessage::SeekFileRequest(seek_file_request))
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -185,6 +201,7 @@ async fn handle_daemon_message(
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -261,6 +278,17 @@ async fn handle_daemon_message(
                 .send(read_file)
                 .unwrap();
         }
+        DaemonMessage::SeekFileResponse(seek_file) => {
+            debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
+
+            seek_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(seek_file)
+                .unwrap();
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -279,14 +307,15 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     // when -layer receives a `DaemonMessage::OpenFileResponse`.
     let open_file_handler = Mutex::new(Vec::with_capacity(4));
     let read_file_handler = Mutex::new(Vec::with_capacity(4));
+    let seek_file_handler = Mutex::new(Vec::with_capacity(4));
 
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler, &read_file_handler).await;
+                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler, &read_file_handler, &seek_file_handler).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler, &read_file_handler).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler, &read_file_handler, &seek_file_handler).await;
             }
         }
     }

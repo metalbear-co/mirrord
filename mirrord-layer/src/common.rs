@@ -1,6 +1,6 @@
-use std::{os::unix::io::RawFd, path::PathBuf};
+use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use mirrord_protocol::{OpenFileResponse, ReadFileResponse};
+use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::error::SendError,
@@ -26,8 +26,15 @@ pub struct OpenFileHook {
 #[derive(Debug)]
 pub struct ReadFileHook {
     pub(crate) fd: RawFd,
-    pub(crate) file_channel_tx: oneshot::Sender<ReadFileResponse>,
     pub(crate) buffer_size: usize,
+    pub(crate) file_channel_tx: oneshot::Sender<ReadFileResponse>,
+}
+
+#[derive(Debug)]
+pub struct SeekFileHook {
+    pub(crate) fd: RawFd,
+    pub(crate) seek_from: SeekFrom,
+    pub(crate) file_channel_tx: oneshot::Sender<SeekFileResponse>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
@@ -36,6 +43,7 @@ pub enum HookMessage {
     Listen(Listen),
     OpenFileHook(OpenFileHook),
     ReadFileHook(ReadFileHook),
+    SeekFileHook(SeekFileHook),
 }
 
 #[derive(Error, Debug)]

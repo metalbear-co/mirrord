@@ -144,7 +144,10 @@ pub async fn create_agent(
     let pod = pods.items.first().unwrap();
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), running)
+
+    // TODO(alex) [low] 2022-05-20: Had to increase timeout, otherwise it would hit the pod while
+    // it's status was `ContainerCreating`.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(25), running)
         .await
         .unwrap();
     let pf = pods_api.portforward(&pod_name, &[61337]).await.unwrap();
