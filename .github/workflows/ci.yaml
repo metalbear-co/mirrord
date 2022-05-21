@@ -98,5 +98,7 @@ jobs:
         toolchain: nightly
     - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
     - run: ls
+    - run: ls target
+    - run: ls target/debug
     - run: mv target/debug/libmirrord_layer.${{matrix.extension}} vscode-ext/
     - run: cd vscode-ext && vsce package  --allow-star-activation --target ${{matrix.code-target}}
