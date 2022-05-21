@@ -104,4 +104,4 @@ jobs:
     - run: ls target
     - run: ls target/debug
     - run: mv target/debug/libmirrord_layer.${{matrix.extension}} vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && vsce package  -o testpackage --allow-star-activation --target ${{matrix.code-target}}
+    - run: cd vscode-ext && npm install && tsc && echo package.json && vsce package  -o testpackage --allow-star-activation --target ${{matrix.code-target}}
