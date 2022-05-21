@@ -97,6 +97,7 @@ jobs:
         profile: minimal
         toolchain: nightly
     - run: npm install -g vsce
+    - run: npm install -g esbuild
     - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
     - run: ls
     - run: ls target
