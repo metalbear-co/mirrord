@@ -7,7 +7,7 @@ use bytes::{Buf, BufMut, BytesMut};
 pub type ConnectionID = u16;
 pub type Port = u16;
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTCPConnection {
     pub connection_id: ConnectionID,
     pub address: IpAddr,
@@ -15,30 +15,30 @@ pub struct NewTCPConnection {
     pub source_port: Port,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TCPData {
     pub connection_id: ConnectionID,
     pub data: Vec<u8>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TCPClose {
     pub connection_id: ConnectionID,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
     Close,
     NewTCPConnection(NewTCPConnection),
