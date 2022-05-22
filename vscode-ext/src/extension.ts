@@ -113,12 +113,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 					return;
 				}
 
-				let libraryPath;
-				if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
-					libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
-				} else {
-					libraryPath = globalContext.extensionPath;
-				}
+				let libraryPath = globalContext.extensionPath;
 				
 				config.env = {
 					// eslint-disable-next-line @typescript-eslint/naming-convention

@@ -6,6 +6,7 @@ node_modules
 .DS_Store
 **/.DS_Store
 target
+vscode-ext/libmirrord_layer.*
 
 ### VSCode ###
 .vscode/*
