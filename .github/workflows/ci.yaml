@@ -91,6 +91,9 @@ jobs:
             code-target: darwin-arm64    
     runs-on: ${{matrix.os}}
     steps:
+    - name: Publish extension
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
       with:

@@ -1,5 +1,11 @@
 name: Release
-on:   
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: Version to release
+        required: true
   push:
     tags:        
     - "*.*.*"
@@ -37,13 +43,20 @@ jobs:
             extension: dylib
             target: aarch64-apple-darwin
             code-target: darwin-arm64    
-    runs-on: ubuntu-latest
+    runs-on: ${{matrix.os}}
     steps:
+    - name: Publish extension
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
       with:
         profile: minimal
         toolchain: nightly
-    - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
-    - run: mv target/debug/libmirrordlayer_lib.${{matrix.extension}} vscode-ext/
-    - run: cd vscode-ext && vsce package  --allow-star-activation --target ${{matrix.code-target}}
+    - run: npm install -g vsce
+    - run: npm install -g typescript
+    - run: npm install -g esbuild
+    - run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml
+    - run: mv target/release/libmirrord_layer.${{matrix.extension}} vscode-ext/
+    - run: cd vscode-ext && npm install && tsc && cat package.json && vsce package  {{github.event.inputs.version}} --allow-star-activation --target ${{matrix.code-target}} --pre-release
