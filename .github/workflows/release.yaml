@@ -1,5 +1,11 @@
 name: Release
-on:   
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: Version to release
+        required: true
   push:
     tags:        
     - "*.*.*"
@@ -17,3 +23,36 @@ jobs:
         with:
             registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
   # add publish docker image
+  release_vscode_ext:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-18.04
+            extension: so
+            target: x86_64-unknown-linux-gnu
+            code-target: linux-x64
+          - os: ubuntu-18.04
+            extension: so
+            target: aarch64-unknown-linux-gnu
+            code-target: linux-arm64
+          - os: macos-11
+            extension: dylib
+            target: x86_64-apple-darwin
+            code-target: darwin-x64
+          - os: macos-11
+            extension: dylib
+            target: aarch64-apple-darwin
+            code-target: darwin-arm64    
+    runs-on: ${{matrix.os}}
+    steps:  
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+    - run: npm install -g vsce typescript esbuild
+    - run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml
+    - run: mv target/release/libmirrord_layer.${{matrix.extension}} vscode-ext/
+    - run: cd vscode-ext && npm install && tsc && cat package.json && vsce package  {{github.event.inputs.version}} --allow-star-activation --target ${{matrix.code-target}} --pre-release
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
