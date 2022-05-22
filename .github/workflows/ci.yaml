@@ -97,8 +97,8 @@ jobs:
         profile: minimal
         toolchain: nightly
     - run: npm install -g vsce
-    - run: npm install typescript --save-dev
+    - run: npm install -g typescript
     - run: npm install -g esbuild
     - run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml
     - run: mv target/release/libmirrord_layer.${{matrix.extension}} vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && cat package.json && vsce package  -o testpackage --allow-star-activation --target ${{matrix.code-target}}
+    - run: cd vscode-ext && npm install && tsc && cat package.json && vsce package  --allow-star-activation --target ${{matrix.code-target}}
