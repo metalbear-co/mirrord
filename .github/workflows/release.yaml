@@ -44,11 +44,7 @@ jobs:
             target: aarch64-apple-darwin
             code-target: darwin-arm64    
     runs-on: ${{matrix.os}}
-    steps:
-    - name: Publish extension
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
+    steps:  
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
       with:
@@ -60,3 +56,5 @@ jobs:
     - run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml
     - run: mv target/release/libmirrord_layer.${{matrix.extension}} vscode-ext/
     - run: cd vscode-ext && npm install && tsc && cat package.json && vsce package  {{github.event.inputs.version}} --allow-star-activation --target ${{matrix.code-target}} --pre-release
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
