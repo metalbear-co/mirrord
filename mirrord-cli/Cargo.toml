@@ -1,14 +1,26 @@
+cargo-features = ["workspace-inheritance"]
+
 [package]
 name = "mirrord"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3", features = ["derive"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-mirrord-layer = { artifact = "cdylib", version = "0.1", path="../mirrord-layer" }
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+mirrord-layer = { artifact = "cdylib", path="../mirrord-layer" }
 exec = "0.3"
-anyhow = "1"
+anyhow.workspace = true
