@@ -12,13 +12,13 @@ use std::{
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t};
-use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse};
+use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse, WriteFileResponse};
 use regex::RegexSet;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 
 use crate::{
-    common::{HookMessage, LayerError, OpenFileHook, ReadFileHook, SeekFileHook},
+    common::{HookMessage, LayerError, OpenFileHook, ReadFileHook, SeekFileHook, WriteFileHook},
     HOOK_SENDER,
 };
 
@@ -70,7 +70,7 @@ pub(crate) struct ReadFile {
     read_amount: usize,
 }
 
-// TODO(alex) [high] 2022-05-19: Hook file `seek`, and `write`.
+// TODO(alex) [high] 2022-05-22: Hook file `write`.
 
 /// Blocking wrapper around `libc::open` call.
 ///
@@ -122,13 +122,13 @@ pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
 
-    let read_file = ReadFileHook {
+    let reading_file = ReadFileHook {
         fd,
         buffer_size: read_amount,
         file_channel_tx,
     };
 
-    sender.blocking_send(HookMessage::ReadFileHook(read_file))?;
+    sender.blocking_send(HookMessage::ReadFileHook(reading_file))?;
 
     let read_file_response = file_channel_rx.blocking_recv()?;
 
@@ -146,18 +146,37 @@ pub(crate) fn lseek(fd: RawFd, seek_from: SeekFrom) -> Result<u64, LayerError> {
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<SeekFileResponse>();
 
-    let read_file = SeekFileHook {
+    let seeking_file = SeekFileHook {
         fd,
         seek_from,
         file_channel_tx,
     };
 
-    sender.blocking_send(HookMessage::SeekFileHook(read_file))?;
+    sender.blocking_send(HookMessage::SeekFileHook(seeking_file))?;
 
     let seek_file_response = file_channel_rx.blocking_recv()?;
     let result_offset = seek_file_response.result_offset;
 
     Ok(result_offset)
+}
+
+pub(crate) fn write(fd: RawFd, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
+    debug!("write -> trying to write valid file {fd:?}.");
+
+    let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<WriteFileResponse>();
+
+    let writing_file = WriteFileHook {
+        fd,
+        write_bytes,
+        file_channel_tx,
+    };
+
+    sender.blocking_send(HookMessage::WriteFileHook(writing_file))?;
+
+    let write_file_response = file_channel_rx.blocking_recv()?;
+
+    Ok(write_file_response.written_amount)
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -216,21 +235,6 @@ unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> 
     }
 }
 
-unsafe extern "C" fn fseek_detour(stream: *mut libc::FILE, offset: c_long, whence: c_int) -> c_int {
-    let fd = libc::fileno(stream);
-
-    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
-        debug!(
-            "fseek_detour -> managed_fd {managed_fd:#?} | offset {offset:#?} | whence {whence:#?}"
-        );
-
-        todo!()
-    } else {
-        let result = libc::fseek(stream, offset, whence);
-        result
-    }
-}
-
 unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
     if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
         debug!(
@@ -262,6 +266,31 @@ unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> of
     }
 }
 
+unsafe extern "C" fn write_detour(fd: RawFd, buf: *const c_void, count: size_t) -> ssize_t {
+    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+        debug!("write_detour -> managed_fd {remote_fd:#?} | count {count:#?}");
+
+        let write_bytes: Vec<u8> = Vec::from_raw_parts(buf as *mut _, count, count);
+
+        match write(*remote_fd, write_bytes).map_err(|fail| {
+            error!("Failed reading file with {fail:#?}");
+            -1 as isize
+        }) {
+            Ok(written_amount) => {
+                if written_amount == -1 {
+                    libc::EOF.try_into().unwrap()
+                } else {
+                    written_amount.try_into().unwrap()
+                }
+            }
+            Err(fail) => fail,
+        }
+    } else {
+        let written_count = libc::write(fd, buf, count);
+        written_count.try_into().unwrap()
+    }
+}
+
 pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
     interceptor
         .replace(
@@ -281,16 +310,16 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
 
     interceptor
         .replace(
-            Module::find_export_by_name(None, "fseek").unwrap(),
-            NativePointer(fseek_detour as *mut c_void),
+            Module::find_export_by_name(None, "lseek").unwrap(),
+            NativePointer(lseek_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
 
     interceptor
         .replace(
-            Module::find_export_by_name(None, "lseek").unwrap(),
-            NativePointer(lseek_detour as *mut c_void),
+            Module::find_export_by_name(None, "write").unwrap(),
+            NativePointer(write_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();

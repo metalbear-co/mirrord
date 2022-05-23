@@ -94,17 +94,3 @@ function handleConnection(conn) {
     console.log("Connection %s error: %s", remoteAddress, err.message);
   }
 }
-
-// TODO(aviram) [mid] 2022-05-20:
-/*
-process A loads our layer, our layer connects to k8s, creates agent and hooks.
-process A then forks to process B, to do some offloading work (like read of Node.js)
-process B isn't hooked or loaded (which is weird? as LD PRELOAD should pass down? we need to check that)
-if we get it to pass down, we shouldn't load normally, we should load in a "fork" mode where we connect to process A
-and use it for communicating with agent, as it has the "full state" (and we won't create an agent per fork)
-once layerd loads for first time, it changes a flag env var to specify it was loaded, and forks should get the env var passed.
-LAYERD_PARENT_FD = 10
-each child communicates via LAYERD_PARENT_FD
-
-
-*/

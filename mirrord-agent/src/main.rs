@@ -1,9 +1,9 @@
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fs::File,
     hash::{Hash, Hasher},
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
 };
@@ -13,7 +13,7 @@ use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileResponse, Port,
-    ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
+    ReadFileRequest, SeekFileRequest, WriteFileRequest,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -24,6 +24,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
 mod cli;
+mod files;
 mod runtime;
 mod sniffer;
 mod util;
@@ -62,56 +63,6 @@ impl Hash for Peer {
 impl Borrow<PeerID> for Peer {
     fn borrow(&self) -> &PeerID {
         &self.id
-    }
-}
-
-#[derive(Debug, Default)]
-struct FileManager {
-    pub open_files: HashMap<i32, File>,
-}
-
-impl FileManager {
-    // TODO(alex) [mid] 2022-05-19: Need to do a better job handling errors here (and in `read`)?
-    // Ideally we would send the error back in the `Response`, to be handled by the mirrod-layer
-    // side, and converted into some `libc::X` value.
-    pub(crate) fn open(&mut self, path: PathBuf) -> Result<i32> {
-        debug!("FileManager::open -> Trying to open file {path:#?}.");
-
-        // TODO(alex) [low] 2022-05-18: To avoid opening the same file multiple times, we could
-        // search `FileManager::open_files` for a path that matches the one passed as a parameter.
-        let file = std::fs::File::open(path)?;
-        let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-
-        self.open_files.insert(fd, file);
-
-        Ok(fd)
-    }
-
-    pub(crate) fn read(&self, fd: i32, buffer_size: usize) -> Result<ReadFileResponse> {
-        let mut file = self.open_files.get(&fd).unwrap();
-
-        debug!("FileManager::read -> Trying to read file {file:#?}, with count {buffer_size:#?}");
-
-        let mut buffer = vec![0; buffer_size];
-        let read_amount = file.read(&mut buffer)?;
-
-        let response = ReadFileResponse {
-            bytes: buffer,
-            read_amount,
-        };
-
-        Ok(response)
-    }
-
-    pub(crate) fn seek(&self, fd: i32, seek_from: SeekFrom) -> Result<SeekFileResponse> {
-        let mut file = self.open_files.get(&fd).unwrap();
-
-        debug!("FileManager::seek -> Trying to seek file {file:#?}, with seek {seek_from:#?}");
-
-        let result_offset = file.seek(seek_from)?;
-
-        let response = SeekFileResponse { result_offset };
-        Ok(response)
     }
 }
 
@@ -156,7 +107,7 @@ async fn handle_peer_messages(
     daemon_stream: &mut Framed<TcpStream, DaemonCodec>,
     peer_id: PeerID,
     message: Option<Result<ClientMessage, std::io::Error>>,
-    file_manager: &mut FileManager,
+    file_manager: &mut files::FileManager,
 ) -> Result<()> {
     if let Some(message) = message {
         let message = PeerMessage {
@@ -206,6 +157,20 @@ async fn handle_peer_messages(
                     .await;
                 debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
             }
+            ClientMessage::WriteFileRequest(WriteFileRequest { fd, write_bytes }) => {
+                debug!(
+                    "handle_peer_messages -> peer id {:?} asked to write file {fd:#?}",
+                    message.peer_id
+                );
+
+                let write_file_response = file_manager.write(fd, write_bytes)?;
+                debug!("handle_peer_messages -> file write operation was successful.");
+
+                let send_result = daemon_stream
+                    .send(DaemonMessage::WriteFileResponse(write_file_response))
+                    .await;
+                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
+            }
             ClientMessage::Close => daemon_messages_tx.send(message).await?,
             ClientMessage::PortSubscribe(_) => daemon_messages_tx.send(message).await?,
             ClientMessage::ConnectionUnsubscribe(_) => daemon_messages_tx.send(message).await?,
@@ -230,7 +195,7 @@ async fn peer_handler(
 ) -> Result<()> {
     let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
-    let mut file_manager = FileManager::default();
+    let mut file_manager = files::FileManager::default();
 
     loop {
         select! {
@@ -333,6 +298,10 @@ async fn start() -> Result<()> {
                         unreachable!();
                     }
                     ClientMessage::SeekFileRequest(_) => {
+                        // NOTE(alex): Same as the `OpenFileRequest` case.
+                        unreachable!();
+                    }
+                    ClientMessage::WriteFileRequest(_) => {
                         // NOTE(alex): Same as the `OpenFileRequest` case.
                         unreachable!();
                     }

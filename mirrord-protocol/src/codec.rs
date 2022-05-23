@@ -75,6 +75,12 @@ pub struct SeekFileRequest {
     pub seek_from: SeekFromInternal,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct WriteFileRequest {
+    pub fd: i32,
+    pub write_bytes: Vec<u8>,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum ClientMessage {
@@ -84,6 +90,7 @@ pub enum ClientMessage {
     OpenFileRequest(PathBuf),
     ReadFileRequest(ReadFileRequest),
     SeekFileRequest(SeekFileRequest),
+    WriteFileRequest(WriteFileRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
@@ -102,6 +109,11 @@ pub struct SeekFileResponse {
     pub result_offset: u64,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct WriteFileResponse {
+    pub written_amount: isize,
+}
+
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub enum DaemonMessage {
@@ -113,6 +125,7 @@ pub enum DaemonMessage {
     OpenFileResponse(OpenFileResponse),
     ReadFileResponse(ReadFileResponse),
     SeekFileResponse(SeekFileResponse),
+    WriteFileResponse(WriteFileResponse),
 }
 
 pub struct ClientCodec {

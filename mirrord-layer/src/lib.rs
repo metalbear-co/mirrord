@@ -15,7 +15,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest, SeekFileRequest,
+    ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest, SeekFileRequest, WriteFileRequest,
 };
 use tokio::{
     io::AsyncWriteExt,
@@ -130,6 +130,7 @@ async fn handle_hook_message(
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
     seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::WriteFileResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -194,6 +195,24 @@ async fn handle_hook_message(
                 .await
                 .unwrap();
         }
+        HookMessage::WriteFileHook(write) => {
+            debug!("HookMessage::WriteFileHook {write:#?}");
+
+            write_file_handler
+                .lock()
+                .unwrap()
+                .push(write.file_channel_tx);
+
+            let write_file_request = WriteFileRequest {
+                fd: write.fd,
+                write_bytes: write.write_bytes,
+            };
+
+            codec
+                .send(ClientMessage::WriteFileRequest(write_file_request))
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -204,6 +223,7 @@ async fn handle_daemon_message(
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
     seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::WriteFileResponse>>>,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -291,6 +311,17 @@ async fn handle_daemon_message(
                 .send(seek_file)
                 .unwrap();
         }
+        DaemonMessage::WriteFileResponse(write_file) => {
+            debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
+
+            write_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(write_file)
+                .unwrap();
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -305,19 +336,41 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
 
+    // TODO(alex) [low] 2022-05-22: Starting to think about a better abstraction over this whole
+    // mess. File operations are pretty much just `std::fs::File` things, so I think the best
+    // approach would be to create a `FakeFile`, and implement `std::io` traits on it.
+    //
+    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
+    // `common` module above `XHook` structs.
+    //
     // NOTE(alex): Stores a list of `oneshot`s that notifies (and retrieves data) the `open` hook
     // when -layer receives a `DaemonMessage::OpenFileResponse`.
     let open_file_handler = Mutex::new(Vec::with_capacity(4));
     let read_file_handler = Mutex::new(Vec::with_capacity(4));
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
+    let write_file_handler = Mutex::new(Vec::with_capacity(4));
 
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, &open_file_handler, &read_file_handler, &seek_file_handler).await;
+                handle_hook_message(hook_message.unwrap(),
+                    &mut port_mapping,
+                    &mut codec,
+                    &open_file_handler,
+                    &read_file_handler,
+                    &seek_file_handler,
+                    &write_file_handler
+                ).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &open_file_handler, &read_file_handler, &seek_file_handler).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(),
+                    &mut port_mapping,
+                    &mut active_connections,
+                    &open_file_handler,
+                    &read_file_handler,
+                    &seek_file_handler,
+                    &write_file_handler
+                ).await;
             }
         }
     }
