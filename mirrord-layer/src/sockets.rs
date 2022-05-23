@@ -540,13 +540,10 @@ unsafe extern "C" fn accept4_detour(
 }
 
 fn close(fd: c_int) {
-    let mut sockets = SOCKETS.lock().unwrap();
-    debug!("removing {fd:?}");
-    sockets.remove(&fd);
+    SOCKETS.lock().unwrap().remove(&fd);
 }
 
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    debug!("close called");
     close(fd);
     libc::close(fd)
 }
