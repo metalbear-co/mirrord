@@ -15,11 +15,11 @@ readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
 documentation = "https://mirrord.dev/docs"
 authors = ["MetalBear <hi@metalbear.co>"]
-description = "Mirrord protocol crate, used by mirrord client and agent to communicate."
-homepage = "https://mirrord.metalbear.co"
+description = "mirrord - run local process in context of a remote environment"
+homepage = "https://mirrord.dev"
 publish = false
 keywords = ["cli", "backend", "debug", "test", "kubernetes", "cloud", "native", "local", "ide", "devtool", "developer", "tool"]
-categories = ["development-tools", "backend", "devtool", ]
+categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
