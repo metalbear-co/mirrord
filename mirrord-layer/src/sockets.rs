@@ -539,7 +539,20 @@ unsafe extern "C" fn accept4_detour(
     accept(sockfd, address, address_len, res)
 }
 
+fn close(fd: c_int) {
+    let mut sockets = SOCKETS.lock().unwrap();
+    debug!("removing {fd:?}");
+    sockets.remove(&fd);
+}
+
+unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    debug!("close called");
+    close(fd);
+    libc::close(fd)
+}
+
 pub fn enable_hooks(mut interceptor: Interceptor) {
+    hook!(interceptor, "close", close_detour);
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
