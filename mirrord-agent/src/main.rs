@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     hash::{Hash, Hasher},
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
 };
@@ -13,7 +13,7 @@ use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileResponse, Port,
-    ReadFileRequest, ReadFileResponse,
+    ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -91,10 +91,6 @@ impl FileManager {
         let mut file = self.open_files.get(&fd).unwrap();
 
         debug!("FileManager::read -> Trying to read file {file:#?}, with count {buffer_size:#?}");
-        debug!(
-            "FileManager::read -> File has len {:#?}",
-            file.metadata().unwrap().len()
-        );
 
         let mut buffer = vec![0; buffer_size];
         let read_amount = file.read(&mut buffer)?;
@@ -104,6 +100,17 @@ impl FileManager {
             read_amount,
         };
 
+        Ok(response)
+    }
+
+    pub(crate) fn seek(&self, fd: i32, seek_from: SeekFrom) -> Result<SeekFileResponse> {
+        let mut file = self.open_files.get(&fd).unwrap();
+
+        debug!("FileManager::seek -> Trying to seek file {file:#?}, with seek {seek_from:#?}");
+
+        let result_offset = file.seek(seek_from)?;
+
+        let response = SeekFileResponse { result_offset };
         Ok(response)
     }
 }
@@ -182,6 +189,20 @@ async fn handle_peer_messages(
 
                 let send_result = daemon_stream
                     .send(DaemonMessage::ReadFileResponse(read_file_response))
+                    .await;
+                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
+            }
+            ClientMessage::SeekFileRequest(SeekFileRequest { fd, seek_from }) => {
+                debug!(
+                    "handle_peer_messages -> peer id {:?} asked to seek file {fd:#?}",
+                    message.peer_id
+                );
+
+                let seek_file_response = file_manager.seek(fd, seek_from.into())?;
+                debug!("handle_peer_messages -> file seek operation was successful.");
+
+                let send_result = daemon_stream
+                    .send(DaemonMessage::SeekFileResponse(seek_file_response))
                     .await;
                 debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
             }
@@ -308,6 +329,10 @@ async fn start() -> Result<()> {
                         unreachable!();
                     }
                     ClientMessage::ReadFileRequest(_) => {
+                        // NOTE(alex): Same as the `OpenFileRequest` case.
+                        unreachable!();
+                    }
+                    ClientMessage::SeekFileRequest(_) => {
                         // NOTE(alex): Same as the `OpenFileRequest` case.
                         unreachable!();
                     }

@@ -14,7 +14,9 @@ use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest};
+use mirrord_protocol::{
+    ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest, SeekFileRequest,
+};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -184,7 +186,7 @@ async fn handle_hook_message(
 
             let seek_file_request = SeekFileRequest {
                 fd: seek.fd,
-                seek_from: seek.seek_from,
+                seek_from: seek.seek_from.into(),
             };
 
             codec
