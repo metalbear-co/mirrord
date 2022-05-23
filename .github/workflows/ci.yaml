@@ -43,8 +43,9 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
+        components: rustfmt
     - run: sudo apt install -y libpcap-dev cmake
-    - run: sudo PATH=/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --manifest-path mirrord-agent/Cargo.toml 
+    - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest

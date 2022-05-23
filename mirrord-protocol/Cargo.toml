@@ -1,15 +1,21 @@
+cargo-features = ["workspace-inheritance"]
+
 [package]
 name = "mirrord-protocol"
-version = "0.2.0"
-edition = "2021"
-license = "MIT"
-readme = "README.md"
-repository = "https://github.com/metalbear/mirrord"
-authors = ["Aviram <aviram@metalbear.co>", "Eyal <eyal@metalbear.co>"]
-description = "Mirrord protocol crate, used by mirrord client and agent to communicate."
-homepage = "https://mirrord.metalbear.co"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
 
 [dependencies]
-actix-codec = "0.5"
+actix-codec.workspace = true
+bytes.workspace = true
 bincode = "2.0.0-rc.1"
-bytes = "1"
