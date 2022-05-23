@@ -8,10 +8,7 @@
       "name": "Launch index.ts",
       "type": "pwa-node",
       "request": "launch",
-      "runtimeArgs": [
-        "-r",
-        "ts-node/register"
-      ],
+      "runtimeArgs": ["-r", "ts-node/register"],
       "args": [
         "${workspaceFolder}/cli/src/index.ts",
         "nginx-deployment-66b6c48dd5-zshg9"
@@ -19,13 +16,9 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
-      ],
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "name": "Launch Extension",
-      "outFiles": [
-        "${workspaceFolder}/vscode-ext/out/**/*.js"
-      ],
+      "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
       "request": "launch",
       "type": "pwa-extensionHost"
     },
@@ -34,9 +27,7 @@
       "request": "launch",
       "name": "app.js: Debug mirrord-layer",
       "program": "node",
-      "args": [
-        "${workspaceFolder}/sample/app.mjs"
-      ],
+      "args": ["${workspaceFolder}/sample/app.mjs"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
@@ -53,10 +44,10 @@
       "program": "${workspaceFolder}/target/debug/sample-rust",
       "args": [],
       "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
+      "sourceMap": {
+        "/rustc/e7575f9670f3c837def3d186ae09366c75c7632e/": "/home/lanedraex/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust"
+      },
+      "sourceLanguages": ["rust"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",

@@ -2,17 +2,23 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::{CStr, CString},
+    fs::OpenOptions,
     io::SeekFrom,
     lazy::SyncLazy,
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, prelude::OpenOptionsExt},
     path::PathBuf,
     ptr,
     sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use libc::{c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t};
-use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse, WriteFileResponse};
+use libc::{
+    c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t, O_ACCMODE, O_RDONLY, O_RDWR,
+    O_WRONLY,
+};
+use mirrord_protocol::{
+    OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
+};
 use regex::RegexSet;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
@@ -72,6 +78,9 @@ pub(crate) struct ReadFile {
 
 // TODO(alex) [high] 2022-05-22: Hook file `write`.
 
+// TODO(alex) [mid] 2022-05-22: Start dealing with errors in a better way. Ideally every response
+// type should return a proper result.
+
 /// Blocking wrapper around `libc::open` call.
 ///
 /// It's bypassed when trying to load system files, and files from the current working directory
@@ -80,7 +89,7 @@ pub(crate) struct ReadFile {
 /// When called for a valid file, it'll block, send a `ClientMessage::OpenFileRequest` to be handled
 /// by `mirrord-agent` (`handle_peer_message` function), and wait until it receives a
 /// `DaemonMessage::FileOpenResponse`.
-pub(crate) fn open(path: PathBuf) -> Result<RawFd, LayerError> {
+pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
     debug!("open -> trying to open valid file {path:?}.");
 
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
@@ -88,6 +97,7 @@ pub(crate) fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 
     let requesting_file = OpenFileHook {
         path,
+        open_options,
         file_channel_tx,
     };
 
@@ -117,7 +127,7 @@ pub(crate) fn open(path: PathBuf) -> Result<RawFd, LayerError> {
 /// Bypassed when trying to load system files, and files from the current working directory, see
 /// `open`.
 pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError> {
-    debug!("read -> trying to read valid file {fd:?}.");
+    debug!("read -> trying to read valid file {fd:?}");
 
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
@@ -176,7 +186,7 @@ pub(crate) fn write(fd: RawFd, write_bytes: Vec<u8>) -> Result<isize, LayerError
 
     let write_file_response = file_channel_rx.blocking_recv()?;
 
-    Ok(write_file_response.written_amount)
+    Ok(write_file_response.written_amount.try_into().unwrap())
 }
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -193,7 +203,13 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
 
         bypassed_fd
     } else {
-        match open(path).map_err(|fail| {
+        let open_options = OpenOptionsInternal {
+            read: (oflag & O_ACCMODE == O_RDONLY) || (oflag & O_ACCMODE == O_RDWR),
+            write: (oflag & O_ACCMODE == O_WRONLY) || (oflag & O_ACCMODE == O_RDWR),
+            flags: oflag,
+        };
+
+        match open(path, open_options).map_err(|fail| {
             error!("Failed opening file with {fail:#?}");
             libc::EFAULT
         }) {
@@ -205,10 +221,12 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
 
 unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> ssize_t {
     // NOTE(alex): We're only interested in files that are handled by `mirrord-agent`.
-    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd).cloned() {
+        // TODO(alex) [high] 2022-05-23: After changing things to `OpenOptions`, running sample
+        // just hangs here, why?
         debug!("read_detour -> managed_fd {remote_fd:#?} | fd {fd:#?} | count {count:#?}");
 
-        match read(*remote_fd, count).map_err(|fail| {
+        match read(remote_fd, count).map_err(|fail| {
             error!("Failed reading file with {fail:#?}");
             -1
         }) {
@@ -230,6 +248,7 @@ unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> 
             Err(fail) => fail,
         }
     } else {
+        debug!("read_detour -> fd {fd:#?}");
         let read_count = libc::read(fd, buf, count);
         read_count
     }

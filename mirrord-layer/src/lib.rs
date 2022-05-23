@@ -1,4 +1,5 @@
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 use std::{
     collections::HashMap,
@@ -15,7 +16,8 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, DaemonMessage, ReadFileRequest, SeekFileRequest, WriteFileRequest,
+    ClientCodec, ClientMessage, DaemonMessage, OpenFileRequest, ReadFileRequest, SeekFileRequest,
+    WriteFileRequest,
 };
 use tokio::{
     io::AsyncWriteExt,
@@ -105,7 +107,7 @@ fn init() {
 
     let config = Config::init_from_env().unwrap();
 
-    let pf = RUNTIME.block_on(pod_api::create_agent(
+    let port_forwarder = RUNTIME.block_on(pod_api::create_agent(
         &config.impersonated_pod_name,
         &config.impersonated_pod_namespace,
         &config.agent_namespace,
@@ -120,7 +122,7 @@ fn init() {
 
     enable_hooks();
 
-    RUNTIME.spawn(poll_agent(pf, receiver));
+    RUNTIME.spawn(poll_agent(port_forwarder, receiver));
 }
 
 async fn handle_hook_message(
@@ -160,8 +162,13 @@ async fn handle_hook_message(
             // using a `HashMap` of request id / response id.
             open_file_handler.lock().unwrap().push(open.file_channel_tx);
 
+            let open_file_request = OpenFileRequest {
+                path: open.path,
+                open_options: open.open_options,
+            };
+
             codec
-                .send(ClientMessage::OpenFileRequest(open.path))
+                .send(ClientMessage::OpenFileRequest(open_file_request))
                 .await
                 .unwrap();
         }

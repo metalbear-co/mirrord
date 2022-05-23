@@ -41,6 +41,13 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
+pub struct OpenOptionsInternal {
+    pub read: bool,
+    pub write: bool,
+    pub flags: i32,
+}
+
 /// Alternative to `std::io::SeekFrom`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
 pub enum SeekFromInternal {
@@ -70,6 +77,12 @@ impl const From<SeekFrom> for SeekFromInternal {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
+pub struct OpenFileRequest {
+    pub path: PathBuf,
+    pub open_options: OpenOptionsInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct SeekFileRequest {
     pub fd: i32,
     pub seek_from: SeekFromInternal,
@@ -87,7 +100,7 @@ pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
-    OpenFileRequest(PathBuf),
+    OpenFileRequest(OpenFileRequest),
     ReadFileRequest(ReadFileRequest),
     SeekFileRequest(SeekFileRequest),
     WriteFileRequest(WriteFileRequest),
@@ -111,7 +124,7 @@ pub struct SeekFileResponse {
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct WriteFileResponse {
-    pub written_amount: isize,
+    pub written_amount: usize,
 }
 
 /// `-agent` --> `-layer` messages.

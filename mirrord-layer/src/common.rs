@@ -1,6 +1,8 @@
 use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use mirrord_protocol::{OpenFileResponse, ReadFileResponse, SeekFileResponse, WriteFileResponse};
+use mirrord_protocol::{
+    OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
+};
 use thiserror::Error;
 use tokio::sync::{
     mpsc::error::SendError,
@@ -41,6 +43,7 @@ impl FileOperation for OpenHook {
 pub struct OpenFileHook {
     pub(crate) path: PathBuf,
     pub(crate) file_channel_tx: oneshot::Sender<OpenFileResponse>,
+    pub(crate) open_options: OpenOptionsInternal,
 }
 
 #[derive(Debug)]

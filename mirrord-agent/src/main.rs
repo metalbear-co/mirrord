@@ -1,19 +1,19 @@
+#![feature(result_option_inspect)]
+
 use std::{
     borrow::Borrow,
     collections::HashSet,
     fs::File,
     hash::{Hash, Hasher},
-    io::{Read, Seek},
     net::{Ipv4Addr, SocketAddrV4},
-    path::PathBuf,
 };
 
 use actix_codec::Framed;
 use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileResponse, Port,
-    ReadFileRequest, SeekFileRequest, WriteFileRequest,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileRequest, OpenFileResponse,
+    Port, ReadFileRequest, SeekFileRequest, WriteFileRequest,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -117,13 +117,15 @@ async fn handle_peer_messages(
         debug!("handle_peer_message -> client sent message {:?}", &message);
 
         match message.client_message {
-            ClientMessage::OpenFileRequest(path) => {
+            ClientMessage::OpenFileRequest(OpenFileRequest { path, open_options }) => {
                 debug!(
                     "handle_peer_messages -> peer id {:?} asked to open file {path:?}",
                     message.peer_id
                 );
 
-                let file_fd = file_manager.open(path)?;
+                let file_fd = file_manager.open(path, open_options)?;
+                debug!("handle_peer_messages -> file is open {:#?}", file_fd);
+
                 let open_file_response =
                     DaemonMessage::OpenFileResponse(OpenFileResponse { fd: file_fd });
 
@@ -183,7 +185,7 @@ async fn handle_peer_messages(
             "handle_peer_messages -> Have no idea yet what is supposed to happen here {:#?}.",
             message
         );
-        todo!()
+        Ok(())
     }
 }
 
