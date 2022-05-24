@@ -1,59 +1,128 @@
 name: Release
-on:
-  workflow_dispatch:
-    inputs:
-      version:
-        type: string
-        description: Version to release
-        required: true
-  push:
-    tags:        
-    - "*.*.*"
+on: workflow_dispatch
 
 jobs:
-  release_crates:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-      - uses: katyo/publish-crates@v1
-        with:
-            registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-  # add publish docker image
-  release_vscode_ext:
+  build_binaries:
     strategy:
       matrix:
         include:
           - os: ubuntu-18.04
             extension: so
             target: x86_64-unknown-linux-gnu
-            code-target: linux-x64
-          - os: ubuntu-18.04
-            extension: so
-            target: aarch64-unknown-linux-gnu
-            code-target: linux-arm64
           - os: macos-11
             extension: dylib
             target: x86_64-apple-darwin
-            code-target: darwin-x64
           - os: macos-11
             extension: dylib
             target: aarch64-apple-darwin
-            code-target: darwin-arm64    
+            code-target: darwin-arm64
     runs-on: ${{matrix.os}}
-    steps:  
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        target: ${{matrix.target}}
-    - run: npm install -g vsce typescript esbuild
-    - run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml --target=${{matrix.target}}
-    - run: mv target/release/libmirrord_layer.${{matrix.extension}} vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && vsce publish  {{github.event.inputs.version}} --allow-star-activation --target ${{matrix.code-target}} --pre-release
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.target}}
+
+      - name: build mirrord-layer and cli
+        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{matrix.target}}
+          path: |
+            target/${{matrix.target}}/release/mirrord
+            target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
+          if-no-files-found: error
+
+  release_docker_image:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get release version
+        run: |
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+        id: version
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: mirrord-agent/Dockerfile
+          platforms: linux/amd64 # linux/arm64 arm64 is too slow on github, try to make it work later?
+          push: true
+          tags: |
+            ghcr.io/metalbear-co/mirrord:latest
+            ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
+
+  release_vscode_ext:
+    needs: [build_binaries, release_docker_image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 17
+          cache: "npm"
+      # This downloads all artifacts of the job
+      - uses: actions/download-artifact@v3
+        with:
+          path: /tmp/artifacts
+      - name: for debug
+        run: find /tmp/artifacts
+      - name: Get release version
+        run: |
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+        id: version
+      - run: npm install -g vsce typescript esbuild
+      - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - run: rm vscode-ext/libmirrord_layer.so
+      - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - run: rm vscode-ext/libmirrord_layer.dylib
+      - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  release_gh:
+    needs: [build_binaries, release_docker_image, release_vscode_ext]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - uses: actions/download-artifact@v3
+        with:
+          path: /tmp/artifacts
+      # Consider to add changelog generation..
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
+            /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.so
+            /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.so
+            /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/mirrord
+            /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/mirrord
+            /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/mirrord

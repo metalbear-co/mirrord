@@ -17,6 +17,7 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v1
     # Needed for agent
     - run: sudo apt install libpcap-dev cmake
     - run: cargo fmt --all -- --check
@@ -33,6 +34,7 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
+    - uses: Swatinem/rust-cache@v1
     - run: cd mirrord-protocol && cargo test
 
   test_agent:
@@ -44,6 +46,7 @@ jobs:
         profile: minimal
         toolchain: nightly
         components: rustfmt
+    - uses: Swatinem/rust-cache@v1
     - run: sudo apt install -y libpcap-dev cmake
     - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
@@ -66,5 +69,6 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly
+    - uses: Swatinem/rust-cache@v1
     # For now, just evrify it compiles.
     - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
