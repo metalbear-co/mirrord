@@ -6,9 +6,10 @@ on:
         type: string
         description: Version to release
         required: true
-  push:
-    tags:        
-    - "*.*.*"
+  push
+    # tags:        
+    # - "*.*.*"
+
 
 
 jobs:
