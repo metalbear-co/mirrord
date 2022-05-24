@@ -7,50 +7,48 @@ on:
         description: Version to release
         required: true
   push:
-    branches: [ main, v2.0 ]
+    branches: [main, v2.0]
   pull_request:
-    branches: [ main, v2.0 ]
-    # tags:        
+    branches: [main, v2.0]
+    # tags:
     # - "*.*.*"
-
-
 
 jobs:
   build_binaries:
     strategy:
-        matrix:
-          include:
-            - os: ubuntu-18.04
-              extension: so
-              target: x86_64-unknown-linux-gnu
-            - os: macos-11
-              extension: dylib
-              target: x86_64-apple-darwin
-            - os: macos-11
-              extension: dylib
-              target: aarch64-apple-darwin
-              code-target: darwin-arm64    
+      matrix:
+        include:
+          - os: ubuntu-18.04
+            extension: so
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            extension: dylib
+            target: x86_64-apple-darwin
+          - os: macos-11
+            extension: dylib
+            target: aarch64-apple-darwin
+            code-target: darwin-arm64
     runs-on: ${{matrix.os}}
-    steps:  
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        target: ${{matrix.target}}
-    - uses: Swatinem/rust-cache@v1
-      with:
-        key: ${{matrix.target}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.target}}
 
-    - name: build mirrord-layer and cli
-      run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
-    - uses: actions/upload-artifact@v3
-      with:
-        name: ${{matrix.target}}
-        path: |
-          target/${{matrix.target}}/release/mirrord
-          target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
-        if-no-files-found: error
+      - name: build mirrord-layer and cli
+        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{matrix.target}}
+          path: |
+            target/${{matrix.target}}/release/mirrord
+            target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
+          if-no-files-found: error
 
   release_docker_image:
     runs-on: ubuntu-latest
@@ -79,7 +77,7 @@ jobs:
         with:
           context: .
           file: mirrord-agent/Dockerfile
-          platforms: linux/amd64 # linux/arm64 arm64 is too slow on github, try to make it work later? 
+          platforms: linux/amd64 # linux/arm64 arm64 is too slow on github, try to make it work later?
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord:latest
@@ -89,36 +87,36 @@ jobs:
     needs: [build_binaries, release_docker_image]
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-node@v3
-      with:
-        node-version: 17
-        cache: 'npm'
-    # This downloads all artifacts of the job
-    - uses: actions/download-artifact@v3
-      with:
-        path: /tmp/artifacts
-    - name: for debug
-      run: find /tmp/artifacts
-    - name: Get release version
-      run: |
-        echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
-      id: version
-    - run: npm install -g vsce typescript esbuild
-    - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64 --pre-release
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-    - run: rm vscode-ext/libmirrord_layer.so
-    - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64 --pre-release
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-    - run: rm vscode-ext/libmirrord_layer.dylib
-    - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
-    - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64 --pre-release
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 17
+          cache: "npm"
+      # This downloads all artifacts of the job
+      - uses: actions/download-artifact@v3
+        with:
+          path: /tmp/artifacts
+      - name: for debug
+        run: find /tmp/artifacts
+      - name: Get release version
+        run: |
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+        id: version
+      - run: npm install -g vsce typescript esbuild
+      - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - run: rm vscode-ext/libmirrord_layer.so
+      - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - run: rm vscode-ext/libmirrord_layer.dylib
+      - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64 --pre-release
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   release_gh:
     needs: [build_binaries, release_docker_image, release_vscode_ext]
