@@ -39,7 +39,8 @@ jobs:
         toolchain: nightly
         target: ${{matrix.target}}
     - uses: Swatinem/rust-cache@v1
-      key: ${{matrix.target}}
+      with:
+        key: ${{matrix.target}}
 
     - name: build mirrord-layer and cli
       run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
