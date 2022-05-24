@@ -1,0 +1,12 @@
+name: Release
+on:
+  workflow_dispatch:
+  push:
+    tags:        
+    - "*.*.*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo just so we can work on other branches
