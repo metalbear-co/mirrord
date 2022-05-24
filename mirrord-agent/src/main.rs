@@ -15,6 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
+use tracing_subscriber::prelude::*;
 
 mod cli;
 mod runtime;
@@ -277,7 +278,10 @@ async fn start() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     match start().await {
         Ok(_) => {
             info!("Exiting successfuly")

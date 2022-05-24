@@ -539,13 +539,23 @@ unsafe extern "C" fn accept4_detour(
     accept(sockfd, address, address_len, res)
 }
 
+fn close(fd: c_int) {
+    SOCKETS.lock().unwrap().remove(&fd);
+}
+
+unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    close(fd);
+    libc::close(fd)
+}
+
 pub fn enable_hooks(mut interceptor: Interceptor) {
+    hook!(interceptor, "close", close_detour);
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
     hook!(interceptor, "connect", connect_detour);
-    hook!(interceptor, "getpeername", getpeername_detour);
-    hook!(interceptor, "getsockname", getsockname_detour);
+    try_hook!(interceptor, "getpeername", getpeername_detour);
+    try_hook!(interceptor, "getsockname", getsockname_detour);
     // hook!(interceptor, "setsockopt", setsockopt_detour);
     #[cfg(target_os = "linux")]
     {
