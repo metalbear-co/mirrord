@@ -47,10 +47,10 @@ jobs:
       run: find .
     - uses: actions/upload-artifact@v3
       with:
-        name: $${matrix.target}
+        name: $${{matrix.target}}
         path: |
           target/${{matrix.target}}/release/mirrord
-          target/${{matrix.target}}/release/mirrord-layer.${{matrix.extension}}
+          target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
         if-no-files-found: error
 
   # build_docker_image:
