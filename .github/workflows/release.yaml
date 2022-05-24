@@ -6,7 +6,7 @@ on:
         type: string
         description: Version to release
         required: true
-  push
+  pull_request
     # tags:        
     # - "*.*.*"
 
