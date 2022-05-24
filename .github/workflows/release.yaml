@@ -24,10 +24,6 @@ jobs:
               extension: so
               target: x86_64-unknown-linux-gnu
               code-target: linux-x64
-            - os: ubuntu-18.04
-              extension: so
-              target: aarch64-unknown-linux-gnu
-              code-target: linux-arm64
             - os: macos-11
               extension: dylib
               target: x86_64-apple-darwin
