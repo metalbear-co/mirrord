@@ -5,14 +5,22 @@ use std::{
 };
 
 fn main() -> Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:80")?;
-
     let mut file = File::open("/var/log/dpkg.log")?;
     println!("\t>>> open file {file:#?} \n");
 
     let mut buffer = vec![0; u16::MAX as usize];
     println!("\t>>> preparing to read \n");
+
     let count = file.read(&mut buffer)?;
+    // TODO(alex) [high] 2022-05-23: Reading fails there.
+    // It just calls back into our hooked `read_detour`, so it's falling on my code.
+    /*
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+           self.inner.read(buf)
+       }
+
+    */
+
     println!("\t>>> read {count:#?} bytes from file \n");
 
     let new_start = file.seek(SeekFrom::Start(10))?;
@@ -40,6 +48,7 @@ fn main() -> Result<()> {
 
     println!("\t>>> file contains message {read_str:#?} \n");
 
+    let listener = TcpListener::bind("127.0.0.1:80")?;
     for stream in listener.incoming() {
         let stream = stream.unwrap();
 

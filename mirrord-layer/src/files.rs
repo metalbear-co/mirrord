@@ -13,8 +13,8 @@ use std::{
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{
-    c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t, O_ACCMODE, O_RDONLY, O_RDWR,
-    O_WRONLY,
+    c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t, O_ACCMODE, O_CREAT, O_RDONLY,
+    O_RDWR, O_WRONLY, S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
@@ -89,11 +89,17 @@ pub(crate) struct ReadFile {
 /// When called for a valid file, it'll block, send a `ClientMessage::OpenFileRequest` to be handled
 /// by `mirrord-agent` (`handle_peer_message` function), and wait until it receives a
 /// `DaemonMessage::FileOpenResponse`.
-pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
+pub(crate) fn open(path: PathBuf, open_flags: c_int) -> Result<RawFd, LayerError> {
     debug!("open -> trying to open valid file {path:?}.");
 
     let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<OpenFileResponse>();
+
+    let open_options = OpenOptionsInternal {
+        read: (open_flags & O_ACCMODE == O_RDONLY) || (open_flags & O_ACCMODE == O_RDWR),
+        write: (open_flags & O_ACCMODE == O_WRONLY) || (open_flags & O_ACCMODE == O_RDWR),
+        flags: open_flags,
+    };
 
     let requesting_file = OpenFileHook {
         path,
@@ -107,7 +113,28 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
     let open_file = file_channel_rx.blocking_recv()?;
 
     let fake_file_name = CString::new(open_file.fd.to_string()).unwrap();
-    let local_file_fd = unsafe { libc::memfd_create(fake_file_name.as_ptr(), 0) };
+
+    let mode = (open_flags & O_RDONLY) | (open_flags | O_RDONLY) | O_CREAT;
+    // TODO(alex) [mid] 2022-05-24: Be very careful here, if a call to create the local fd fails,
+    // the remote one stays up (basically a leak). So I need a way to `close` the remote on failure
+    // here.
+    //
+    // NOTE(alex): The pair `shm_open`, `shm_unlink` are used to create a temporary file
+    // (in `/dev/shm/`), and then remove it, as we only care about the `fd`. This is done to
+    // preserve `open_flags`, as `memfd_create` will always return a `File` with read and write
+    // permissions.
+    let local_file_fd = unsafe {
+        // NOTE(alex): `mode` is access rights: user, root.
+        let local_file_fd = libc::shm_open(
+            fake_file_name.as_ptr(),
+            O_RDONLY | O_CREAT,
+            S_IRUSR | S_IWUSR | S_IXUSR,
+        );
+
+        libc::shm_unlink(fake_file_name.as_ptr());
+
+        local_file_fd
+    };
 
     debug!(
         "open -> local_fd {local_file_fd:#?} | remote_fd {:#?}",
@@ -191,25 +218,19 @@ pub(crate) fn write(fd: RawFd, write_bytes: Vec<u8>) -> Result<isize, LayerError
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
 /// trying to intercept them all will result in an `InterceptorAlreadyReplaced` error.
-pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_int) -> RawFd {
+pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path: PathBuf = CStr::from_ptr(raw_path)
         .to_str()
         .expect("Failed converting path from c_char!")
         .into();
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        let bypassed_fd = libc::open(raw_path, oflag);
+        let bypassed_fd = libc::open(raw_path, open_flags);
         debug!("open_detour -> bypassed_fd {bypassed_fd:#?}");
 
         bypassed_fd
     } else {
-        let open_options = OpenOptionsInternal {
-            read: (oflag & O_ACCMODE == O_RDONLY) || (oflag & O_ACCMODE == O_RDWR),
-            write: (oflag & O_ACCMODE == O_WRONLY) || (oflag & O_ACCMODE == O_RDWR),
-            flags: oflag,
-        };
-
-        match open(path, open_options).map_err(|fail| {
+        match open(path, open_flags).map_err(|fail| {
             error!("Failed opening file with {fail:#?}");
             libc::EFAULT
         }) {
@@ -221,9 +242,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, oflag: c_in
 
 unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> ssize_t {
     // NOTE(alex): We're only interested in files that are handled by `mirrord-agent`.
-    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd).cloned() {
-        // TODO(alex) [high] 2022-05-23: After changing things to `OpenOptions`, running sample
-        // just hangs here, why?
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    if let Some(remote_fd) = remote_fd {
         debug!("read_detour -> managed_fd {remote_fd:#?} | fd {fd:#?} | count {count:#?}");
 
         match read(remote_fd, count).map_err(|fail| {
@@ -255,9 +275,10 @@ unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> 
 }
 
 unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
-    if let Some(managed_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    if let Some(remote_fd) = remote_fd {
         debug!(
-            "lseek_detour -> managed_fd {managed_fd:#?} | offset {offset:#?} | whence {whence:#?}"
+            "lseek_detour -> managed_fd {remote_fd:#?} | offset {offset:#?} | whence {whence:#?}"
         );
 
         let seek_from = match whence {
@@ -272,7 +293,7 @@ unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> of
             }
         };
 
-        match lseek(*managed_fd, seek_from).map_err(|fail| {
+        match lseek(remote_fd, seek_from).map_err(|fail| {
             error!("Failed lseek operation with {fail:#?}");
             libc::EFAULT
         }) {
@@ -286,12 +307,13 @@ unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> of
 }
 
 unsafe extern "C" fn write_detour(fd: RawFd, buf: *const c_void, count: size_t) -> ssize_t {
-    if let Some(remote_fd) = OPEN_FILES.lock().unwrap().get(&fd) {
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    if let Some(remote_fd) = remote_fd {
         debug!("write_detour -> managed_fd {remote_fd:#?} | count {count:#?}");
 
         let write_bytes: Vec<u8> = Vec::from_raw_parts(buf as *mut _, count, count);
 
-        match write(*remote_fd, write_bytes).map_err(|fail| {
+        match write(remote_fd, write_bytes).map_err(|fail| {
             error!("Failed reading file with {fail:#?}");
             -1 as isize
         }) {
@@ -334,6 +356,10 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
+
+    // TODO(alex) [high] 2022-05-23: Here lies the culprit for breaking read.
+    // I think when we open a file with some options, it may call `write` or something, and I'm not
+    // handling this `write` on `open` case correctly.
 
     interceptor
         .replace(

@@ -22,6 +22,14 @@ impl FileManager {
     // TODO(alex) [mid] 2022-05-19: Need to do a better job handling errors here (and in `read`)?
     // Ideally we would send the error back in the `Response`, to be handled by the mirrod-layer
     // side, and converted into some `libc::X` value.
+    //
+    // TODO(alex) [high] 2022-05-24: Somehow the proper `OpenOptions` are not being used here, as
+    // it doesn't create a file if it doesn't exist.
+    /*
+    [2022-05-24T04:21:38Z DEBUG mirrord_agent::files] FileManager::open -> Trying to open file "/tmp/meow.txt"
+    [2022-05-24T04:21:38Z DEBUG mirrord_agent::files] FileManager::open -> read true | write true | flags 524354
+    [2022-05-24T04:21:38Z ERROR mirrord_agent] Peer encountered error No such file or directory (os error 2)
+        */
     pub(crate) fn open(&mut self, path: PathBuf, open_options: OpenOptionsInternal) -> Result<i32> {
         debug!("FileManager::open -> Trying to open file {path:#?}");
 
