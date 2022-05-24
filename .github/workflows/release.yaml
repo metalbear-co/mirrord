@@ -1,17 +1,5 @@
 name: Release
-on:
-  workflow_dispatch:
-    inputs:
-      version:
-        type: string
-        description: Version to release
-        required: true
-  push:
-    branches: [main, v2.0]
-  pull_request:
-    branches: [main, v2.0]
-    # tags:
-    # - "*.*.*"
+on: workflow_dispatch
 
 jobs:
   build_binaries:
