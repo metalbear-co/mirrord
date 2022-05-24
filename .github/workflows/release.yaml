@@ -54,6 +54,9 @@ jobs:
 
   release_docker_image:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v2
