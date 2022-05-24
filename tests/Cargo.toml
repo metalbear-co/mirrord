@@ -1,5 +1,5 @@
 [package]
-name = "e2e"
+name = "tests"
 version = "0.1.0"
 edition = "2021"
 

@@ -7,8 +7,9 @@ members = [
     "mirrord-cli",    
 ]
 
+# CI: test_agent_image fails if "tests" is no excluded from the workspace
 exclude = [
-    "e2e"
+    "tests"
 ]
 
 [workspace.package]

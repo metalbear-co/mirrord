@@ -87,9 +87,11 @@ jobs:
         uses: medyagh/setup-minikube@master
         with:
           container-runtime: containerd
+      - run: docker build -t test . --file mirrord-agent/Dockerfile
+      - run: minikube image load test:latest
       - name: setup nginx
-        run: kubectl apply -f e2e/app.yaml      
+        run: kubectl apply -f tests/app.yaml      
       - name: build mirrord
         run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: run node tests
-        run: cargo test --manifest-path ./e2e/Cargo.toml  -- --test-threads 1
+        run: cargo test --manifest-path ./tests/Cargo.toml  -- --test-threads 1

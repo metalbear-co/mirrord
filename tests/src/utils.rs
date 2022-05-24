@@ -99,7 +99,7 @@ pub async fn delete_namespace(client: &Client, namespace: &str) {
         .unwrap();
 }
 
-pub async fn reqwest_request(url: &str, method: Method) {
+pub async fn http_request(url: &str, method: Method) {
     let client = reqwest::Client::new();
     let res = client
         .request(method.clone(), url)
@@ -116,7 +116,7 @@ pub async fn reqwest_request(url: &str, method: Method) {
     }
 }
 
-// kubectl apply -f e2e/app.yaml -n name
+// kubectl apply -f tests/app.yaml -n name
 pub async fn create_nginx_pod(client: &Client, namespace: &str) {
     let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
     let deployment = serde_json::from_value(json!({
@@ -199,34 +199,59 @@ pub async fn create_nginx_pod(client: &Client, namespace: &str) {
 
 // to all requests the express API prints {request_name}: Request completed
 // PUT - creates /tmp/test, DELETE - deletes /tmp/test
-pub async fn validate_requests(stdout: ChildStdout, service_url: &str, server: &mut Child) {
+pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
     let mut buffer = BufReader::new(stdout);
     let mut stream = String::new();
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("Server listening on port 80"));
 
-    reqwest_request(service_url, Method::GET).await;
+    http_request(service_url, Method::GET).await;
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("GET: Request completed"));
 
-    reqwest_request(service_url, Method::POST).await;
+    http_request(service_url, Method::POST).await;
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("POST: Request completed"));
 
-    reqwest_request(service_url, Method::PUT).await;
+    http_request(service_url, Method::PUT).await;
     sleep(Duration::from_secs(2)).await;
     assert!(Path::new("/tmp/test").exists());
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("PUT: Request completed"));
 
-    reqwest_request(service_url, Method::DELETE).await;
+    http_request(service_url, Method::DELETE).await;
     sleep(Duration::from_secs(2)).await;
     assert!(!Path::new("/tmp/test").exists());
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("DELETE: Request completed"));
-    server.kill().await.unwrap();
 }
 
+pub async fn validate_no_requests(stdout: ChildStdout, service_url: &str) {
+    let mut buffer = BufReader::new(stdout);
+    let mut stream = String::new();
+    buffer.read_line(&mut stream).await.unwrap();
+    assert!(stream.contains("Server listening on port 80"));
+    http_request(service_url, Method::PUT).await;
+    sleep(Duration::from_secs(5)).await;
+    assert!(!Path::new("/tmp/test").exists()); // the API creates a file in /tmp/, which should not
+                                               // exist
+}
+
+// initializes the test/runs the node process
+pub async fn test_server_init(
+    client: &Client,
+    pod_namespace: &str,
+    mut env: HashMap<&str, &str>,
+) -> Child {
+    let pod_name = get_nginx_pod_name(&client, pod_namespace).await.unwrap();
+    let command = vec!["node", "node-e2e/app.js"];
+    env.insert("MIRRORD_AGENT_IMAGE", "test");
+    let server = start_node_server(&pod_name, command, env);
+    setup_panic_hook();
+    server
+}
+
+// can't panic from a task, this utility just exits the process with an error code
 pub fn setup_panic_hook() {
     let orig_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {

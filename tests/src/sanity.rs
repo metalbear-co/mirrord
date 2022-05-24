@@ -1,8 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
 use kube::{api::ListParams, Api};
-use reqwest::Method;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     time::{sleep, timeout, Duration},
@@ -18,17 +17,14 @@ mod tests {
     // stops the server and validates if the agent job and pod are deleted
     async fn test_complete_node_api() {
         let client = setup_kube_client().await;
-
-        let service_url = get_service_url(&client, "default").await.unwrap();
-        let pod_name = get_nginx_pod_name(&client, "default").await.unwrap();
-        let command = vec!["node", "node-e2e/app.js"];
+        let pod_namespace = "default";
         let env: HashMap<&str, &str> = HashMap::new(); // for adding more environment variables
-        let mut server = start_node_server(&pod_name, command, env);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
+
+        let service_url = get_service_url(&client, pod_namespace).await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
         let child_stdout = server.stdout.take().unwrap();
-
-        setup_panic_hook();
 
         tokio::spawn(async move {
             loop {
@@ -46,14 +42,14 @@ mod tests {
 
         // since we are reading from the stdout, we could block at any point in case the server
         // does not write to its stdout, so we need a timeout here
-        let validation_duration = Duration::from_secs(30);
+        let validation_timeout = Duration::from_secs(20);
         timeout(
-            validation_duration,
-            validate_requests(child_stdout, service_url.as_str(), &mut server),
+            validation_timeout,
+            validate_requests(child_stdout, service_url.as_str()),
         )
         .await
         .unwrap();
-
+        server.kill().await.unwrap();
         // look for the agent job and pod
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
@@ -61,31 +57,30 @@ mod tests {
         // to make the tests parallel we need to figure a way to get the exact job name when len() >
         // 1
         assert_eq!(jobs.items.len(), 1);
-        let job_name = jobs.items[0].metadata.name.clone().unwrap();
 
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), "default");
         let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        let pod_name = pods
-            .items
-            .iter()
-            .filter_map(|pod| {
-                if pod.metadata.name.clone().unwrap().contains(&job_name) {
-                    Some(pod.metadata.name.clone().unwrap())
-                } else {
-                    None
+        assert_eq!(pods.items.len(), 2);
+
+        let cleanup_timeout = Duration::from_secs(35);
+        timeout(
+            cleanup_timeout,
+            tokio::spawn(async move {
+                // verify cleanup
+                loop {
+                    let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
+                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the nginx pod should exist
+                    if updated_pods.items.len() == 1 && updated_jobs.items.len() == 0 {
+                        let nginx_pod = updated_pods.items[0].metadata.name.clone().unwrap();
+                        assert!(nginx_pod.contains("nginx"));
+                        break;
+                    }
                 }
-            })
-            .next()
-            .unwrap();
-        assert!(pod_name.contains(&job_name));
-        sleep(Duration::from_secs(35)).await;
-
-        //verify cleanup
-        let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(updated_jobs.items.len(), 0);
-
-        let updated_pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(updated_pods.items.len(), 1); // only the nginx pod should exist
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     }
 
     #[tokio::test]
@@ -94,20 +89,16 @@ mod tests {
     // as the agent pod is impersonating the pod running in the default namespace
     async fn test_different_pod_in_cluster() {
         let client = setup_kube_client().await;
-
-        let namespace = "test-namespace";
-        create_namespace(&client, namespace).await;
-        create_nginx_pod(&client, namespace).await;
-        sleep(Duration::from_secs(2)).await; // we need a short sleep here, otherwise the test panics
-
-        let service_url = get_service_url(&client, namespace).await.unwrap();
-        let pod_name = get_nginx_pod_name(&client, "default").await.unwrap();
-        let command = vec!["node", "node-e2e/app.js"];
+        let test_namespace = "test-namespace";
+        let pod_namespace = "default";
         let env: HashMap<&str, &str> = HashMap::new();
-        let mut server = start_node_server(&pod_name, command, env);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
+        create_namespace(&client, test_namespace).await;
+        create_nginx_pod(&client, test_namespace).await;
+        sleep(Duration::from_secs(2)).await; // we need a short sleep here, otherwise the test panics
+        let service_url = get_service_url(&client, test_namespace).await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-        setup_panic_hook();
 
         tokio::spawn(async move {
             loop {
@@ -119,22 +110,18 @@ mod tests {
             }
         });
 
-        let mut reader = BufReader::new(server.stdout.take().unwrap());
-        let mut line = String::new();
+        let stdout = server.stdout.take().unwrap();
 
         let timeout_duration = Duration::from_secs(10);
-        timeout(timeout_duration, reader.read_line(&mut line))
-            .await
-            .unwrap()
-            .unwrap();
+        timeout(
+            timeout_duration,
+            validate_no_requests(stdout, service_url.as_str()),
+        )
+        .await
+        .unwrap();
 
-        assert!(line.contains("Server listening on port 80"));
-        reqwest_request(service_url.as_str(), Method::PUT).await;
-        sleep(Duration::from_secs(5)).await;
-        assert!(!Path::new("/tmp/test").exists()); // the API creates a file in /tmp/, which should not exist
-                                                   // cleanup
         server.kill().await.unwrap();
-        delete_namespace(&client, namespace).await;
+        delete_namespace(&client, test_namespace).await;
     }
 
     // agent namespace tests
@@ -142,21 +129,18 @@ mod tests {
     async fn test_good_agent_namespace() {
         // creates a new k8s namespace, starts the API server with env:
         // MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
-        // validate data through requests to the API
+        // validate data through requests to the API server
         let client = setup_kube_client().await;
+        let agent_namespace = "test-namespace-agent-good";
+        let pod_namespace = "default";
+        let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
+        create_namespace(&client, agent_namespace).await;
 
-        let namespace = "test-namespace-agent-good";
-        create_namespace(&client, namespace).await;
         let service_url = get_service_url(&client, "default").await.unwrap();
-        let pod_name = get_nginx_pod_name(&client, "default").await.unwrap();
-        let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", namespace)]);
-        let command = vec!["node", "node-e2e/app.js"];
-        let mut server = start_node_server(&pod_name, command, env);
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
         let child_stdout = server.stdout.take().unwrap();
-
-        setup_panic_hook();
 
         tokio::spawn(async move {
             loop {
@@ -168,35 +152,22 @@ mod tests {
             }
         });
 
-        let validation_duration = Duration::from_secs(30);
+        let validation_timeout = Duration::from_secs(20);
         timeout(
-            validation_duration,
-            validate_requests(child_stdout, service_url.as_str(), &mut server),
+            validation_timeout,
+            validate_requests(child_stdout, service_url.as_str()),
         )
         .await
         .unwrap();
-
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), namespace);
+        server.kill().await.unwrap();
+        let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
         assert_eq!(jobs.items.len(), 1);
-        let job_name = jobs.items[0].metadata.name.clone().unwrap();
 
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+        let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
         let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        let pod_name = pods
-            .items
-            .iter()
-            .filter_map(|pod| {
-                if pod.metadata.name.clone().unwrap().contains(&job_name) {
-                    Some(pod.metadata.name.clone().unwrap())
-                } else {
-                    None
-                }
-            })
-            .next()
-            .unwrap();
-        assert!(pod_name.contains(&job_name));
-        delete_namespace(&client, namespace).await;
+        assert_eq!(pods.items.len(), 1);
+        delete_namespace(&client, agent_namespace).await;
     }
 
     #[tokio::test]
@@ -204,15 +175,12 @@ mod tests {
         // starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
         // asserts the process crashes: "NotFound" as the namespace does not exist
         let client = setup_kube_client().await;
-
-        let nonexistent_namespace = "nonexistent-namespace";
-        let pod_name = get_nginx_pod_name(&client, "default").await.unwrap();
-        let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", nonexistent_namespace)]);
-        let mut server = start_node_server(&pod_name, vec!["node", "node-e2e/app.js"], env);
+        let agent_namespace = "nonexistent-namespace";
+        let pod_namespace = "default";
+        let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-
-        setup_panic_hook();
 
         let timeout_duration = Duration::from_secs(5);
         timeout(
@@ -243,25 +211,19 @@ mod tests {
         // MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
         // requests
         let client = setup_kube_client().await;
-
-        let namespace = "test-pod-namespace";
-        create_namespace(&client, namespace).await;
-        create_nginx_pod(&client, namespace).await;
-
-        // need to sleep here, otherwise pod_api.rs panics
+        let pod_namespace = "test-pod-namespace";
+        create_namespace(&client, pod_namespace).await;
+        create_nginx_pod(&client, pod_namespace).await;
         sleep(Duration::from_secs(5)).await;
+        // need to sleep here, otherwise pod_api.rs panics
 
-        let service_url = get_service_url(&client, namespace).await.unwrap();
-
-        let pod_name = get_nginx_pod_name(&client, namespace).await.unwrap();
-        let command = vec!["node", "node-e2e/app.js"];
-        let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", namespace)]);
-        let mut server = start_node_server(&pod_name, command, env);
+        let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace)]);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
         let child_stdout = server.stdout.take().unwrap();
 
-        setup_panic_hook();
+        let service_url = get_service_url(&client, pod_namespace).await.unwrap();
 
         tokio::spawn(async move {
             loop {
@@ -273,15 +235,15 @@ mod tests {
             }
         });
 
-        let validation_duration = Duration::from_secs(30);
+        let validation_timeout = Duration::from_secs(20);
         timeout(
-            validation_duration,
-            validate_requests(child_stdout, service_url.as_str(), &mut server),
+            validation_timeout,
+            validate_requests(child_stdout, service_url.as_str()),
         )
         .await
         .unwrap();
-
-        delete_namespace(&client, namespace).await;
+        server.kill().await.unwrap();
+        delete_namespace(&client, pod_namespace).await;
     }
 
     #[tokio::test]
@@ -290,17 +252,13 @@ mod tests {
         // (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
         // exist
         let client = setup_kube_client().await;
-
-        let nonexistent_namespace = "nonexistent-pod-namespace";
-        let pod_name = get_nginx_pod_name(&client, "default").await.unwrap();
+        let pod_namespace = "default";
         let env = HashMap::from([(
             "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",
-            nonexistent_namespace,
+            "nonexistent-namespace",
         )]);
-        let mut server = start_node_server(&pod_name, vec!["node", "node-e2e/app.js"], env);
+        let mut server = test_server_init(&client, pod_namespace, env).await;
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-
-        setup_panic_hook();
 
         let timeout_duration = Duration::from_secs(5);
         timeout(
