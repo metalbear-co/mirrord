@@ -103,7 +103,9 @@ fn init() {
         &config.impersonated_pod_namespace,
         &config.agent_namespace,
         config.agent_rust_log,
-        config.agent_image,
+        config.agent_image.unwrap_or_else(|| {
+            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+        }),
     ));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
