@@ -46,8 +46,6 @@ jobs:
         target: ${{matrix.target}}
     - name: build mirrord-layer and cli
       run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
-    - name: build mirrord-cli
-      run: cargo +nightly build --release --manifest-path=mirrord-layer/Cargo.toml --target=${{matrix.target}}
     - uses: actions/upload-artifact@v3
       with:
         name: $${matrix.target}
