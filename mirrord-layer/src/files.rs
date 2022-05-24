@@ -1,27 +1,26 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env,
     ffi::{CStr, CString},
-    fs::OpenOptions,
     io::SeekFrom,
     lazy::SyncLazy,
-    os::unix::{io::RawFd, prelude::OpenOptionsExt},
+    os::unix::io::RawFd,
     path::PathBuf,
-    ptr,
+    ptr, slice,
     sync::Mutex,
 };
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{
-    c_char, c_int, c_long, c_void, off64_t, off_t, size_t, ssize_t, O_ACCMODE, O_CREAT, O_RDONLY,
-    O_RDWR, O_WRONLY, S_IRUSR, S_IWUSR, S_IXUSR,
+    c_char, c_int, c_void, off_t, size_t, ssize_t, O_ACCMODE, O_CREAT, O_RDONLY, O_RDWR, O_WRONLY,
+    S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use regex::RegexSet;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::{
     common::{HookMessage, LayerError, OpenFileHook, ReadFileHook, SeekFileHook, WriteFileHook},
@@ -74,6 +73,7 @@ static OPEN_FILES: SyncLazy<Mutex<HashMap<LocalFd, RemoteFd>>> =
 pub(crate) struct ReadFile {
     bytes: Vec<u8>,
     read_amount: usize,
+    is_eof: bool,
 }
 
 // TODO(alex) [high] 2022-05-22: Hook file `write`.
@@ -114,7 +114,6 @@ pub(crate) fn open(path: PathBuf, open_flags: c_int) -> Result<RawFd, LayerError
 
     let fake_file_name = CString::new(open_file.fd.to_string()).unwrap();
 
-    let mode = (open_flags & O_RDONLY) | (open_flags | O_RDONLY) | O_CREAT;
     // TODO(alex) [mid] 2022-05-24: Be very careful here, if a call to create the local fd fails,
     // the remote one stays up (basically a leak). So I need a way to `close` the remote on failure
     // here.
@@ -153,6 +152,9 @@ pub(crate) fn open(path: PathBuf, open_flags: c_int) -> Result<RawFd, LayerError
 ///
 /// Bypassed when trying to load system files, and files from the current working directory, see
 /// `open`.
+///
+/// If you call `read` and it returns `0` bytes read, it might be because the file cursor is at the
+/// end, so a call to `seek` is required.
 pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError> {
     debug!("read -> trying to read valid file {fd:?}");
 
@@ -172,6 +174,7 @@ pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFile, LayerError
     let read_file = ReadFile {
         bytes: read_file_response.bytes,
         read_amount: read_file_response.read_amount,
+        is_eof: read_file_response.is_eof,
     };
 
     Ok(read_file)
@@ -251,7 +254,11 @@ unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> 
             -1
         }) {
             Ok(read_file) => {
-                let ReadFile { bytes, read_amount } = read_file;
+                let ReadFile {
+                    bytes,
+                    read_amount,
+                    is_eof,
+                } = read_file;
 
                 let read_ptr = bytes.as_ptr();
                 let out_buffer = buf.cast();
@@ -259,7 +266,13 @@ unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: size_t) -> 
 
                 // WARN(alex): Must be careful when it comes to `EOF`, incorrect handling appears
                 // as the `read` call being repeated.
-                if read_amount == 0 {
+
+                // TODO(alex) [high] 2022-05-24: Gotta properly handle `0` return now, as it can be
+                // returned from -agent if we indeed read 0 bytes.
+                /*
+                does not handle blank line case (at least not in windows with edition 2018). you will need to check file size as well.
+                 */
+                if is_eof {
                     libc::EOF.try_into().unwrap()
                 } else {
                     read_amount.try_into().unwrap()
@@ -287,7 +300,7 @@ unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> of
             libc::SEEK_END => SeekFrom::End(offset),
             libc::SEEK_DATA => todo!(),
             libc::SEEK_HOLE => todo!(),
-            other => {
+            _other => {
                 error!("lseek_detour -> invalid value for whence {whence:#?}");
                 return libc::EINVAL.into();
             }
@@ -311,10 +324,17 @@ unsafe extern "C" fn write_detour(fd: RawFd, buf: *const c_void, count: size_t) 
     if let Some(remote_fd) = remote_fd {
         debug!("write_detour -> managed_fd {remote_fd:#?} | count {count:#?}");
 
-        let write_bytes: Vec<u8> = Vec::from_raw_parts(buf as *mut _, count, count);
+        if buf.is_null() {
+            return libc::EFAULT.try_into().unwrap();
+        }
+
+        // WARN(alex): Be veeery careful here, you cannot construct the `Vec` directly, as the
+        // buffer allocation is handled on the C side.
+        let outside_buffer = slice::from_raw_parts(buf as *const u8, count);
+        let write_bytes = outside_buffer.to_vec();
 
         match write(remote_fd, write_bytes).map_err(|fail| {
-            error!("Failed reading file with {fail:#?}");
+            error!("Failed writing file with {fail:#?}");
             -1 as isize
         }) {
             Ok(written_amount) => {
@@ -356,10 +376,6 @@ pub(super) fn enable_file_hooks(interceptor: &mut Interceptor) {
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
-
-    // TODO(alex) [high] 2022-05-23: Here lies the culprit for breaking read.
-    // I think when we open a file with some options, it may call `write` or something, and I'm not
-    // handling this `write` on `open` case correctly.
 
     interceptor
         .replace(

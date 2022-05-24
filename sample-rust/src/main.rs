@@ -39,7 +39,7 @@ fn main() -> Result<()> {
 
     println!("\t>>> written {written_count:#?} bytes to file \n");
 
-    let mut read_buf = vec![0; 32];
+    let mut read_buf = vec![0; 16];
     let read_count = write_file.read(&mut read_buf).unwrap();
 
     println!("\t>>> read {read_count:#?} bytes from file \n");

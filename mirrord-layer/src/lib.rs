@@ -290,21 +290,18 @@ async fn handle_daemon_message(
                 .unwrap()
                 .pop()
                 .unwrap()
-                .send(open_file)
+                .send(open_file.unwrap())
                 .unwrap();
         }
         DaemonMessage::ReadFileResponse(read_file) => {
-            debug!(
-                "DaemonMessage::ReadFileResponse {:#?}!",
-                read_file.bytes.len()
-            );
+            debug!("DaemonMessage::ReadFileResponse {:#?}!", read_file);
 
             read_file_handler
                 .lock()
                 .unwrap()
                 .pop()
                 .unwrap()
-                .send(read_file)
+                .send(read_file.unwrap())
                 .unwrap();
         }
         DaemonMessage::SeekFileResponse(seek_file) => {
@@ -315,7 +312,7 @@ async fn handle_daemon_message(
                 .unwrap()
                 .pop()
                 .unwrap()
-                .send(seek_file)
+                .send(seek_file.unwrap())
                 .unwrap();
         }
         DaemonMessage::WriteFileResponse(write_file) => {
@@ -326,7 +323,7 @@ async fn handle_daemon_message(
                 .unwrap()
                 .pop()
                 .unwrap()
-                .send(write_file)
+                .send(write_file.unwrap())
                 .unwrap();
         }
         DaemonMessage::Close => todo!(),

@@ -3,7 +3,6 @@
 use std::{
     borrow::Borrow,
     collections::HashSet,
-    fs::File,
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
 };
@@ -12,8 +11,8 @@ use actix_codec::Framed;
 use anyhow::Result;
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileRequest, OpenFileResponse,
-    Port, ReadFileRequest, SeekFileRequest, WriteFileRequest,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, OpenFileRequest, Port,
+    ReadFileRequest, SeekFileRequest, WriteFileRequest,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -24,7 +23,8 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
 mod cli;
-mod files;
+mod error;
+mod file;
 mod runtime;
 mod sniffer;
 mod util;
@@ -107,7 +107,7 @@ async fn handle_peer_messages(
     daemon_stream: &mut Framed<TcpStream, DaemonCodec>,
     peer_id: PeerID,
     message: Option<Result<ClientMessage, std::io::Error>>,
-    file_manager: &mut files::FileManager,
+    file_manager: &mut file::FileManager,
 ) -> Result<()> {
     if let Some(message) = message {
         let message = PeerMessage {
@@ -123,11 +123,10 @@ async fn handle_peer_messages(
                     message.peer_id
                 );
 
-                let file_fd = file_manager.open(path, open_options)?;
-                debug!("handle_peer_messages -> file is open {:#?}", file_fd);
+                let open_result = file_manager.open(path, open_options);
+                debug!("handle_peer_messages -> file is open {:#?}", open_result);
 
-                let open_file_response =
-                    DaemonMessage::OpenFileResponse(OpenFileResponse { fd: file_fd });
+                let open_file_response = DaemonMessage::OpenFileResponse(open_result);
 
                 daemon_stream.send(open_file_response).await?;
             }
@@ -137,13 +136,12 @@ async fn handle_peer_messages(
                     message.peer_id
                 );
 
-                let read_file_response = file_manager.read(fd, buffer_size)?;
+                let read_result = file_manager.read(fd, buffer_size);
                 debug!("handle_peer_messages -> file read operation was successful.");
 
-                let send_result = daemon_stream
-                    .send(DaemonMessage::ReadFileResponse(read_file_response))
-                    .await;
-                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
+                daemon_stream
+                    .send(DaemonMessage::ReadFileResponse(read_result))
+                    .await?;
             }
             ClientMessage::SeekFileRequest(SeekFileRequest { fd, seek_from }) => {
                 debug!(
@@ -151,13 +149,12 @@ async fn handle_peer_messages(
                     message.peer_id
                 );
 
-                let seek_file_response = file_manager.seek(fd, seek_from.into())?;
+                let seek_result = file_manager.seek(fd, seek_from.into());
                 debug!("handle_peer_messages -> file seek operation was successful.");
 
-                let send_result = daemon_stream
-                    .send(DaemonMessage::SeekFileResponse(seek_file_response))
-                    .await;
-                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
+                daemon_stream
+                    .send(DaemonMessage::SeekFileResponse(seek_result))
+                    .await?;
             }
             ClientMessage::WriteFileRequest(WriteFileRequest { fd, write_bytes }) => {
                 debug!(
@@ -165,13 +162,12 @@ async fn handle_peer_messages(
                     message.peer_id
                 );
 
-                let write_file_response = file_manager.write(fd, write_bytes)?;
+                let write_result = file_manager.write(fd, write_bytes);
                 debug!("handle_peer_messages -> file write operation was successful.");
 
-                let send_result = daemon_stream
-                    .send(DaemonMessage::WriteFileResponse(write_file_response))
-                    .await;
-                debug!("handle_peer_messages -> `send_result` {send_result:#?}.");
+                daemon_stream
+                    .send(DaemonMessage::WriteFileResponse(write_result))
+                    .await?;
             }
             ClientMessage::Close => daemon_messages_tx.send(message).await?,
             ClientMessage::PortSubscribe(_) => daemon_messages_tx.send(message).await?,
@@ -185,7 +181,7 @@ async fn handle_peer_messages(
             "handle_peer_messages -> Have no idea yet what is supposed to happen here {:#?}.",
             message
         );
-        todo!()
+        Ok(())
     }
 }
 
@@ -197,7 +193,7 @@ async fn peer_handler(
 ) -> Result<()> {
     let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
-    let mut file_manager = files::FileManager::default();
+    let mut file_manager = file::FileManager::default();
 
     loop {
         select! {

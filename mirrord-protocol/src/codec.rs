@@ -76,6 +76,99 @@ impl const From<SeekFrom> for SeekFromInternal {
     }
 }
 
+/// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
+pub enum ErrorKindInternal {
+    NotFound,
+    PermissionDenied,
+    ConnectionRefused,
+    ConnectionReset,
+    HostUnreachable,
+    NetworkUnreachable,
+    ConnectionAborted,
+    NotConnected,
+    AddrInUse,
+    AddrNotAvailable,
+    NetworkDown,
+    BrokenPipe,
+    AlreadyExists,
+    WouldBlock,
+    NotADirectory,
+    IsADirectory,
+    DirectoryNotEmpty,
+    ReadOnlyFilesystem,
+    FilesystemLoop,
+    StaleNetworkFileHandle,
+    InvalidInput,
+    InvalidData,
+    TimedOut,
+    WriteZero,
+    StorageFull,
+    NotSeekable,
+    FilesystemQuotaExceeded,
+    FileTooLarge,
+    ResourceBusy,
+    ExecutableFileBusy,
+    Deadlock,
+    CrossesDevices,
+    TooManyLinks,
+    InvalidFilename,
+    ArgumentListTooLong,
+    Interrupted,
+    Unsupported,
+    UnexpectedEof,
+    OutOfMemory,
+    Other,
+}
+
+impl const From<io::ErrorKind> for ErrorKindInternal {
+    fn from(error_kind: io::ErrorKind) -> Self {
+        match error_kind {
+            io::ErrorKind::NotFound => ErrorKindInternal::NotFound,
+            io::ErrorKind::PermissionDenied => ErrorKindInternal::PermissionDenied,
+            io::ErrorKind::ConnectionRefused => ErrorKindInternal::ConnectionRefused,
+            io::ErrorKind::ConnectionReset => ErrorKindInternal::ConnectionReset,
+            io::ErrorKind::HostUnreachable => ErrorKindInternal::HostUnreachable,
+            io::ErrorKind::NetworkUnreachable => ErrorKindInternal::NetworkUnreachable,
+            io::ErrorKind::ConnectionAborted => ErrorKindInternal::ConnectionAborted,
+            io::ErrorKind::NotConnected => ErrorKindInternal::NotConnected,
+            io::ErrorKind::AddrInUse => ErrorKindInternal::AddrInUse,
+            io::ErrorKind::AddrNotAvailable => ErrorKindInternal::AddrNotAvailable,
+            io::ErrorKind::NetworkDown => ErrorKindInternal::NetworkDown,
+            io::ErrorKind::BrokenPipe => ErrorKindInternal::BrokenPipe,
+            io::ErrorKind::AlreadyExists => ErrorKindInternal::AlreadyExists,
+            io::ErrorKind::WouldBlock => ErrorKindInternal::WouldBlock,
+            io::ErrorKind::NotADirectory => ErrorKindInternal::NotADirectory,
+            io::ErrorKind::IsADirectory => ErrorKindInternal::IsADirectory,
+            io::ErrorKind::DirectoryNotEmpty => ErrorKindInternal::DirectoryNotEmpty,
+            io::ErrorKind::ReadOnlyFilesystem => ErrorKindInternal::ReadOnlyFilesystem,
+            io::ErrorKind::FilesystemLoop => ErrorKindInternal::FilesystemLoop,
+            io::ErrorKind::StaleNetworkFileHandle => ErrorKindInternal::StaleNetworkFileHandle,
+            io::ErrorKind::InvalidInput => ErrorKindInternal::InvalidInput,
+            io::ErrorKind::InvalidData => ErrorKindInternal::InvalidData,
+            io::ErrorKind::TimedOut => ErrorKindInternal::TimedOut,
+            io::ErrorKind::WriteZero => ErrorKindInternal::WriteZero,
+            io::ErrorKind::StorageFull => ErrorKindInternal::StorageFull,
+            io::ErrorKind::NotSeekable => ErrorKindInternal::NotSeekable,
+            io::ErrorKind::FilesystemQuotaExceeded => ErrorKindInternal::FilesystemQuotaExceeded,
+            io::ErrorKind::FileTooLarge => ErrorKindInternal::FileTooLarge,
+            io::ErrorKind::ResourceBusy => ErrorKindInternal::ResourceBusy,
+            io::ErrorKind::ExecutableFileBusy => ErrorKindInternal::ExecutableFileBusy,
+            io::ErrorKind::Deadlock => ErrorKindInternal::Deadlock,
+            io::ErrorKind::CrossesDevices => ErrorKindInternal::CrossesDevices,
+            io::ErrorKind::TooManyLinks => ErrorKindInternal::TooManyLinks,
+            io::ErrorKind::InvalidFilename => ErrorKindInternal::InvalidFilename,
+            io::ErrorKind::ArgumentListTooLong => ErrorKindInternal::ArgumentListTooLong,
+            io::ErrorKind::Interrupted => ErrorKindInternal::Interrupted,
+            io::ErrorKind::Unsupported => ErrorKindInternal::Unsupported,
+            io::ErrorKind::UnexpectedEof => ErrorKindInternal::UnexpectedEof,
+            io::ErrorKind::OutOfMemory => ErrorKindInternal::OutOfMemory,
+            io::ErrorKind::Other => ErrorKindInternal::Other,
+            _ => unimplemented!(),
+        }
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct OpenFileRequest {
     pub path: PathBuf,
@@ -115,6 +208,7 @@ pub struct OpenFileResponse {
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: usize,
+    pub is_eof: bool,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
@@ -135,10 +229,10 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
-    OpenFileResponse(OpenFileResponse),
-    ReadFileResponse(ReadFileResponse),
-    SeekFileResponse(SeekFileResponse),
-    WriteFileResponse(WriteFileResponse),
+    OpenFileResponse(Result<OpenFileResponse, ErrorKindInternal>),
+    ReadFileResponse(Result<ReadFileResponse, ErrorKindInternal>),
+    SeekFileResponse(Result<SeekFileResponse, ErrorKindInternal>),
+    WriteFileResponse(Result<WriteFileResponse, ErrorKindInternal>),
 }
 
 pub struct ClientCodec {
