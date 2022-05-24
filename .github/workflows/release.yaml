@@ -99,7 +99,6 @@ jobs:
       run: |
         echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
       id: version
-      
     - run: npm install -g vsce typescript esbuild
     - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so vscode-ext/
     - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64 --pre-release
