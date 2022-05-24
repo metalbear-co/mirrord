@@ -2,10 +2,10 @@ name: CI
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [ main, v2.0 ]
-  # pull_request:
-  #   branches: [ main, v2.0 ]
+  push:
+    branches: [ main, v2.0 ]
+  pull_request:
+    branches: [ main, v2.0 ]
 
 jobs:
   lint:
