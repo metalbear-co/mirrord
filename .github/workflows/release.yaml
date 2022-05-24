@@ -76,7 +76,7 @@ jobs:
         with:
           context: .
           file: mirrord-agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64 # linux/arm64 arm64 is too slow on github, try to make it work later? 
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord:latest
@@ -107,12 +107,12 @@ jobs:
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
     - run: rm vscode-ext/libmirrord_layer.so
-    - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.so vscode-ext/
+    - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
     - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64 --pre-release
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
     - run: rm vscode-ext/libmirrord_layer.dylib
-    - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.so vscode-ext/
+    - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
     - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64 --pre-release
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
