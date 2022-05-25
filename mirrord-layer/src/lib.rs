@@ -181,8 +181,7 @@ async fn handle_daemon_message(
         }
         DaemonMessage::TCPData(msg) => {
             debug!("Received data from connection id {}", msg.connection_id);
-            let connection = active_connections
-                .get(&msg.connection_id);
+            let connection = active_connections.get(&msg.connection_id);
             if connection.is_none() {
                 debug!("Connection {} not found", msg.connection_id);
                 return;
