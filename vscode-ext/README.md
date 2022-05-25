@@ -74,6 +74,3 @@ Contributions are welcome via PRs.
 Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun. 
 
 ---
-
-
-<i>Icon Credit: flaticon.com</i>
