@@ -1,5 +1,8 @@
 name: Release
-on: workflow_dispatch
+on:
+  push:
+    tags:
+      - "*.*.*"
 
 jobs:
   build_binaries:
@@ -79,28 +82,28 @@ jobs:
         with:
           node-version: 17
           cache: "npm"
+          cache-dependency-path: vscode-ext/package-lock.json
       # This downloads all artifacts of the job
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
-      - name: for debug
-        run: find /tmp/artifacts
       - name: Get release version
+        # VSCode doesn't support pre release versions https://github.com/microsoft/vsmarketplace/issues/50#issuecomment-990764201
         run: |
-          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
         id: version
       - run: npm install -g vsce typescript esbuild
-      - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so vscode-ext/
+      - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64 --pre-release
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
-      - run: mv /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: mv /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib vscode-ext/
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64 --pre-release
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.dylib
-      - run: mv /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.dylib vscode-ext/
+      - run: mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib vscode-ext/
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64 --pre-release
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -119,9 +122,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
-            /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/libmirrord_layer.so
-            /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/libmirrord_layer.so
-            /tmp/artifacts/x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/mirrord
-            /tmp/artifacts/x86_64-apple-darwin/target/x86_64-apple-darwin/release/mirrord
-            /tmp/artifacts/aarch64-apple-darwin/target/aarch64-apple-darwin/release/mirrord
+            /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so
+            /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.so
+            /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.so
+            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord
+            /tmp/artifacts/x86_64-apple-darwin/mirrord
+            /tmp/artifacts/aarch64-apple-darwin/mirrord
