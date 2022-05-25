@@ -120,12 +120,12 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 					libraryPath = globalContext.extensionPath;
 				}
 				
-				config.env = {
+				config.env = {...config.env, ...{
 					// eslint-disable-next-line @typescript-eslint/naming-convention
-					'DYLD_INSERT_LIBRARIES': path.join(libraryPath, LIBRARIES[os.platform()]),
+				'DYLD_INSERT_LIBRARIES': path.join(libraryPath, LIBRARIES[os.platform()]),
 					// eslint-disable-next-line @typescript-eslint/naming-convention
 					'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
-				};
+				}};
 				return resolve(config);
 			});
 		});
