@@ -1247,7 +1247,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "2.0.0-rc.1"
+version = "2.0.1-rc.1"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.0.0-rc.1"
+version = "2.0.1-rc.1"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "2.0.0-rc.1"
+version = "2.0.1-rc.1"
 dependencies = [
  "actix-codec",
  "bytes",
@@ -1312,7 +1312,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "2.0.0-rc.1"
+version = "2.0.1-rc.1"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1480,9 +1480,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b10983b38c53aebdf33f542c6275b0f58a238129d00c4ae0e6fb59738d783ca"
+checksum = "7709cef83f0c1f58f666e746a08b21e0085f7440fa6a29cc194d68aac97a4225"
 
 [[package]]
 name = "openssl"
