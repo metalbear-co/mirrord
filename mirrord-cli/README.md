@@ -20,17 +20,3 @@ We do have plan to support static binaries, so let us know if you encountered a 
 [Source](https://theevilbit.github.io/posts/dyld_insert_libraries_dylib_injection_in_macos_osx_deep_dive/)
 
 Please let us know if you encountered a use case where it doesn't work for you, of whether it's documented that it isn't supported, so we know there's demand to implement that use case.
-
-
-# Changelog
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## Contributing
-Anyone is welcome to contribute. Please feel free to create PRs with proper documentation, formatting and changelog record.
-
-## License
-
-mirrord-cli is MIT licensed.
