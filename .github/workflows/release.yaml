@@ -112,20 +112,27 @@ jobs:
   release_gh:
     needs: [build_binaries, release_docker_image, release_vscode_ext]
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
+      deployments: write
     steps:
       - name: Checkout
         uses: actions/checkout@v2
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
+      - name: Prepare binaries for upload
+        run: |
+          mkdir /tmp/release
+          mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
+          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
+          mv /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_x86_64.dylib
+          mv /tmp/artifacts/x86_64-apple-darwin/mirrord /tmp/release/mirrord_mac_x86_64
+          mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_aarch64.dylib
+          mv /tmp/artifacts/aarch64-apple-darwin/mirrord /tmp/release/mirrord_mac_aarch64
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so
-            /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib
-            /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib
-            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord
-            /tmp/artifacts/x86_64-apple-darwin/mirrord
-            /tmp/artifacts/aarch64-apple-darwin/mirrord
+          files: /tmp/release/**
