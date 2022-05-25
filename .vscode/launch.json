@@ -55,6 +55,7 @@
         "MIRRORD_AGENT_RUST_LOG": "debug",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-c47lc",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_FILE_OPS": "",
         "RUST_BACKTRACE": "short",
         "USER": "lanedraex",
         "VSCODE_WSL_EXT_LOCATION": "/mnt/c/Users/laned/.vscode/extensions/ms-vscode-remote.remote-wsl-0.66.2",

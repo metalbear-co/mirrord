@@ -69,7 +69,6 @@ impl FileManager {
 
                 ReadFileResponse {
                     bytes: buffer,
-                    is_eof: read_amount == 0,
                     read_amount,
                 }
             })

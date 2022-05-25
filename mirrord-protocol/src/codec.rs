@@ -208,7 +208,6 @@ pub struct OpenFileResponse {
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: usize,
-    pub is_eof: bool,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]

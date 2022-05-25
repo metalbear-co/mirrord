@@ -12,15 +12,6 @@ fn main() -> Result<()> {
     println!("\t>>> preparing to read \n");
 
     let count = file.read(&mut buffer)?;
-    // TODO(alex) [high] 2022-05-23: Reading fails there.
-    // It just calls back into our hooked `read_detour`, so it's falling on my code.
-    /*
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-           self.inner.read(buf)
-       }
-
-    */
-
     println!("\t>>> read {count:#?} bytes from file \n");
 
     let new_start = file.seek(SeekFrom::Start(10))?;
@@ -41,11 +32,9 @@ fn main() -> Result<()> {
 
     let mut read_buf = vec![0; 16];
     let read_count = write_file.read(&mut read_buf).unwrap();
-
     println!("\t>>> read {read_count:#?} bytes from file \n");
 
     let read_str = String::from_utf8_lossy(&read_buf);
-
     println!("\t>>> file contains message {read_str:#?} \n");
 
     let listener = TcpListener::bind("127.0.0.1:80")?;

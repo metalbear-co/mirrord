@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashMap,
+    env,
     lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -35,7 +36,7 @@ use tracing_subscriber::prelude::*;
 
 mod common;
 mod config;
-mod files;
+mod file;
 mod macros;
 mod pod_api;
 mod sockets;
@@ -387,9 +388,9 @@ fn enable_hooks() {
 
     sockets::enable_socket_hooks(&mut interceptor);
 
-    // TODO(alex) [mid] 2022-05-19: Make this configurable (enabled / disabled by default).
-    // Possible solutions: `env` variable, or `cfg`.
-    files::enable_file_hooks(&mut interceptor);
+    if env::var("MIRROD_FILE_OPS").is_ok() {
+        file::hooks::enable_file_hooks(&mut interceptor);
+    }
 
     interceptor.end_transaction();
 }
