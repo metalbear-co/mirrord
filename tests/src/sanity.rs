@@ -95,7 +95,7 @@ mod tests {
         let mut server = test_server_init(&client, pod_namespace, env).await;
         create_namespace(&client, test_namespace).await;
         create_nginx_pod(&client, test_namespace).await;
-        sleep(Duration::from_secs(2)).await; // we need a short sleep here, otherwise the test panics
+        sleep(Duration::from_secs(2)).await; // we need a short sleep here, otherwise the test panics (operations happen too fast)
         let service_url = get_service_url(&client, test_namespace).await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());

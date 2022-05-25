@@ -26,8 +26,7 @@ jobs:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ${{matrix.target}}
-
+          key: ${{matrix.target}}-${{matrix.os}}
       - name: build mirrord-layer and cli
         run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3

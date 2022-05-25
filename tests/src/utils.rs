@@ -61,7 +61,7 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
         .into_iter()
         .next()
         .and_then(|pod| pod.status)
-        .and_then(|status| status.pod_ip.clone());
+        .and_then(|status| status.host_ip.clone());
     let port = services
         .into_iter()
         .next()
@@ -261,6 +261,9 @@ pub async fn test_server_init(
 ) -> Child {
     let pod_name = get_nginx_pod_name(&client, pod_namespace).await.unwrap();
     let command = vec!["node", "node-e2e/app.js"];
+    // used by the CI, to load the image locally:
+    // docker build -t test . -f mirrord-agent/Dockerfile
+    // minikube load image test:latest
     env.insert("MIRRORD_AGENT_IMAGE", "test");
     let server = start_node_server(&pod_name, command, env);
     setup_panic_hook();

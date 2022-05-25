@@ -11,17 +11,17 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        components: rustfmt, clippy
-    - uses: Swatinem/rust-cache@v1
-    # Needed for agent
-    - run: sudo apt install libpcap-dev cmake
-    - run: cargo fmt --all -- --check
-    - run: cargo clippy -- -D warnings
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v1
+      # Needed for agent
+      - run: sudo apt install libpcap-dev cmake
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
 
   test_mirrord_protocol:
     strategy:
@@ -29,26 +29,28 @@ jobs:
         os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11, macos-10.15]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-    - uses: Swatinem/rust-cache@v1
-    - run: cd mirrord-protocol && cargo test
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: cd mirrord-protocol && cargo test
 
   test_agent:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        components: rustfmt
-    - uses: Swatinem/rust-cache@v1
-    - run: sudo apt install -y libpcap-dev cmake
-    - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+      - run: sudo apt install -y libpcap-dev cmake
+      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -69,6 +71,8 @@ jobs:
           profile: minimal
           toolchain: nightly
       - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
       # For now, just evrify it compiles.
       - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
 
@@ -77,7 +81,7 @@ jobs:
     name: e2e
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1      
+      - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
@@ -94,7 +98,7 @@ jobs:
       - run: docker build -t test . --file mirrord-agent/Dockerfile
       - run: minikube image load test:latest
       - name: setup nginx
-        run: kubectl apply -f tests/app.yaml      
+        run: kubectl apply -f tests/app.yaml
       - name: build mirrord
         run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: run node tests
