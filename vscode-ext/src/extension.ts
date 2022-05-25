@@ -93,7 +93,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		if (!globalContext.globalState.get('enabled')) {
 			return new Promise(resolve => { resolve(config) });
 		}
-		if (config.runtimeExecutable === undefined) { // For some reason resolveDebugConfiguration runs twice. runTimeExecutable is undefined the second time.
+		
+		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
 			return new Promise(resolve => {
 				return resolve(config);
 			});
