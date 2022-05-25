@@ -130,6 +130,7 @@ async fn handle_hook_message(
     hook_message: HookMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+    // TODO(alex) [low] 2022-05-25: The time to abstract this horrible thing is coming.
     open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
     seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,

@@ -1,13 +1,16 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use tracing::{debug, error};
 
 use super::{IGNORE_FILES, OPEN_FILES};
-use crate::file::{
-    ops::{lseek, open, read, write},
-    ReadFile,
+use crate::{
+    file::{
+        ops::{lseek, open, read, write},
+        ReadFile,
+    },
+    HOOK_SENDER,
 };
 
 /// NOTE(alex): libc also has an `open64` function. Both functions point to the same address, so
@@ -24,13 +27,75 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 
         bypassed_fd
     } else {
-        match open(path, open_flags).map_err(|fail| {
-            error!("Failed opening file with {fail:#?}");
-            libc::EFAULT
-        }) {
-            Ok(fd) => fd,
-            Err(fail) => fail,
-        }
+        let sender = HOOK_SENDER.as_ref().unwrap();
+        let open_result = open(sender, path, open_flags);
+
+        open_result
+            .map_err(|fail| {
+                error!("Failed opening file with {fail:#?}");
+                libc::EFAULT
+            })
+            .unwrap_or_else(|fail| fail)
+    }
+}
+
+pub(super) unsafe extern "C" fn fopen_detour(
+    raw_path: *const c_char,
+    raw_mode: *const c_char,
+) -> *mut FILE {
+    let path: PathBuf = CStr::from_ptr(raw_path)
+        .to_str()
+        .expect("Failed converting path from c_char!")
+        .into();
+
+    let mode: PathBuf = CStr::from_ptr(raw_path)
+        .to_str()
+        .expect("Failed converting mode from c_char!")
+        .into();
+
+    if IGNORE_FILES.is_match(path.to_str().unwrap()) {
+        let bypassed_file = libc::fopen(raw_path, raw_mode);
+        debug!("fopen_detour -> bypassed_file {bypassed_file:#?}");
+
+        bypassed_file
+    } else {
+        todo!()
+    }
+}
+
+// TODO(alex) [mid] 2022-05-25: Implement this? It has some tricky parts around relative
+// directories.
+pub(super) unsafe extern "C" fn openat_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    open_flags: c_int,
+) -> RawFd {
+    let path: PathBuf = CStr::from_ptr(raw_path)
+        .to_str()
+        .expect("Failed converting path from c_char!")
+        .into();
+
+    if IGNORE_FILES.is_match(path.to_str().unwrap()) {
+        let bypassed_fd = libc::openat(fd, raw_path, open_flags);
+
+        bypassed_fd
+    } else {
+        let sender = HOOK_SENDER.as_ref().unwrap();
+
+        // NOTE(alex): `openat` docs talk about this special case where `fd` is set as `AT_FDCWD`,
+        // when this happens `openat` behaves exactly like `open`.
+        let open_result = if fd & AT_FDCWD != 0 {
+            open(sender, path, open_flags)
+        } else {
+            todo!()
+        };
+
+        open_result
+            .map_err(|fail| {
+                error!("Failed opening file with {fail:#?}");
+                libc::EFAULT
+            })
+            .unwrap_or_else(|fail| fail)
     }
 }
 
@@ -40,28 +105,30 @@ pub(crate) unsafe extern "C" fn read_detour(fd: RawFd, buf: *mut c_void, count: 
     if let Some(remote_fd) = remote_fd {
         debug!("read_detour -> managed_fd {remote_fd:#?} | fd {fd:#?} | count {count:#?}");
 
-        match read(remote_fd, count).map_err(|fail| {
-            error!("Failed reading file with {fail:#?}");
-            -1
-        }) {
-            Ok(read_file) => {
-                let ReadFile { bytes, read_amount } = read_file;
+        let sender = HOOK_SENDER.as_ref().unwrap();
+        let read_result = read(sender, remote_fd, count).map(|read_file| {
+            let ReadFile { bytes, read_amount } = read_file;
 
-                // NOTE(alex): There is no distinction between reading 0 bytes or if we hit EOF.
-                if read_amount > 0 {
-                    let read_ptr = bytes.as_ptr();
-                    let out_buffer = buf.cast();
-                    ptr::copy(read_ptr, out_buffer, read_amount);
-                }
-
-                // WARN(alex): Must be careful when it comes to `EOF`, incorrect handling
-                // appears as the `read` call being repeated.
-                read_amount.try_into().unwrap()
+            // NOTE(alex): There is no distinction between reading 0 bytes or if we hit EOF, but we
+            // only copy to buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = buf.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount);
             }
-            Err(fail) => fail,
-        }
+
+            // WARN(alex): Must be careful when it comes to `EOF`, incorrect handling
+            // appears as the `read` call being repeated.
+            read_amount.try_into().unwrap()
+        });
+
+        read_result
+            .map_err(|fail| {
+                error!("Failed reading file with {fail:#?}");
+                -1
+            })
+            .unwrap_or_else(|fail| fail)
     } else {
-        debug!("read_detour -> fd {fd:#?}");
         let read_count = libc::read(fd, buf, count);
         read_count
     }
@@ -86,13 +153,16 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             }
         };
 
-        match lseek(remote_fd, seek_from).map_err(|fail| {
-            error!("Failed lseek operation with {fail:#?}");
-            libc::EFAULT
-        }) {
-            Ok(result_offset) => result_offset as off_t,
-            Err(fail) => fail.into(),
-        }
+        let sender = HOOK_SENDER.as_ref().unwrap();
+        let lseek_result =
+            lseek(sender, remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
+
+        lseek_result
+            .map_err(|fail| {
+                error!("Failed lseek operation with {fail:#?}");
+                libc::EFAULT.into()
+            })
+            .unwrap_or_else(|fail| fail)
     } else {
         let result_offset = libc::lseek(fd, offset, whence);
         result_offset
@@ -117,22 +187,18 @@ pub(crate) unsafe extern "C" fn write_detour(
         let outside_buffer = slice::from_raw_parts(buf as *const u8, count);
         let write_bytes = outside_buffer.to_vec();
 
-        match write(remote_fd, write_bytes).map_err(|fail| {
-            error!("Failed writing file with {fail:#?}");
-            -1 as isize
-        }) {
-            Ok(written_amount) => {
-                if written_amount == -1 {
-                    libc::EOF.try_into().unwrap()
-                } else {
-                    written_amount.try_into().unwrap()
-                }
-            }
-            Err(fail) => fail,
-        }
+        let sender = HOOK_SENDER.as_ref().unwrap();
+        let write_result = write(sender, remote_fd, write_bytes);
+
+        write_result
+            .map_err(|fail| {
+                error!("Failed writing file with {fail:#?}");
+                -1 as isize
+            })
+            .unwrap_or_else(|fail| fail)
     } else {
-        let written_count = libc::write(fd, buf, count);
-        written_count.try_into().unwrap()
+        let written_amount = libc::write(fd, buf, count);
+        written_amount
     }
 }
 
@@ -141,6 +207,14 @@ pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
         .replace(
             Module::find_export_by_name(None, "open").unwrap(),
             NativePointer(open_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
+
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "fopen").unwrap(),
+            NativePointer(fopen_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();
