@@ -124,8 +124,8 @@ jobs:
         with:
           files: |
             /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so
-            /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.so
-            /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.so
+            /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib
+            /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib
             /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord
             /tmp/artifacts/x86_64-apple-darwin/mirrord
             /tmp/artifacts/aarch64-apple-darwin/mirrord
