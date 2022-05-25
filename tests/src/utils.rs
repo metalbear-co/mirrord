@@ -48,30 +48,46 @@ pub async fn setup_kube_client() -> Client {
 // minikube service nginx --url
 pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String> {
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
+    let services = service_api
+        .list(&ListParams::default().labels("app=nginx"))
+        .await
+        .unwrap();
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-    for pod in pod_api.list(&ListParams::default()).await.unwrap() {
-        if pod.metadata.name.unwrap().contains("nginx") {
-            let host_ip = pod.status.unwrap().host_ip.unwrap();
-            for service in service_api.list(&ListParams::default()).await.unwrap() {
-                if service.metadata.name.unwrap().contains("nginx") {
-                    let port = service.spec.unwrap().ports.unwrap()[0].node_port.unwrap();
-                    return Some(format!("http://{}:{}", host_ip, port));
-                }
-            }
-        }
-    }
-    None
+    let pods = pod_api
+        .list(&ListParams::default().labels("app=nginx"))
+        .await
+        .unwrap();
+    let host_ip = pods
+        .into_iter()
+        .next()
+        .and_then(|pod| pod.status)
+        .and_then(|status| status.pod_ip.clone());
+    let port = services
+        .into_iter()
+        .next()
+        .and_then(|service| service.spec)
+        .and_then(|spec| spec.ports.clone())
+        .and_then(|mut ports| ports.pop());
+    Some(format!(
+        "http://{}:{}",
+        host_ip.unwrap(),
+        port.unwrap().node_port.unwrap()
+    ))
 }
 
 // kubectl get pods | grep nginx
 pub async fn get_nginx_pod_name(client: &Client, namespace: &str) -> Option<String> {
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-    for pod in pod_api.list(&ListParams::default()).await.unwrap() {
-        if pod.metadata.name.as_ref().unwrap().contains("nginx") {
-            return Some(pod.metadata.name.unwrap());
-        }
-    }
-    None
+    let pods = pod_api
+        .list(&ListParams::default().labels("app=nginx"))
+        .await
+        .unwrap();
+    let pod = pods
+        .iter()
+        .next()
+        .map(|pod| pod.metadata.name.clone())
+        .flatten();
+    pod
 }
 
 // kubectl create namespace name
