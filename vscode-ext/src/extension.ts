@@ -3,9 +3,10 @@ import * as vscode from 'vscode';
 const k8s = require('@kubernetes/client-node');
 const path = require('path');
 const os = require('os');
-const LIBRARIES: {[platform: string] : string} = {
-	'darwin' : 'libmirrord_layer.dylib',
-	'linux' : 'libmirrord_layer.so'
+
+const LIBRARIES: {[platform: string] : [var_name: string, lib_name: string]}  = {
+	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
+	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
 };
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
@@ -120,13 +121,12 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				} else {
 					libraryPath = globalContext.extensionPath;
 				}
-				
+				let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
 				config.env = {...config.env, ...{
-					// eslint-disable-next-line @typescript-eslint/naming-convention
-				'DYLD_INSERT_LIBRARIES': path.join(libraryPath, LIBRARIES[os.platform()]),
 					// eslint-disable-next-line @typescript-eslint/naming-convention
 					'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
 				}};
+				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 				return resolve(config);
 			});
 		});
