@@ -1,79 +1,25 @@
 <p align="center">
-  <img src="images/icon.png">
+  <img src="images/icon.png" width="20%">
 </p>
 <h1 align="center">mirrord</h1>
 
-mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
+mirrord lets you easily mirror traffic from your Kubernetes cluster to your local service. For more info on mirrord, check our [docs](https://mirrord.dev)
 
+## How to use
 
-## Getting Started
-- [VSCode Extension](#vscode-extension)
-- [CLI Tool](#cli-tool)
-> mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
----
-## VSCode Extension
-### Installation
-Get the extension [here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
-
-### How to use
-
+* Click "Enable mirrord" on the status bar
 * Start debugging your project
-* Click "Start mirrord" on the status bar
 * Choose pod to mirror traffic from
-* To stop mirroring, click "Stop mirrord" (or stop debugging)
+* The debugged process will start with mirrord, and receive traffic 
 
 <p align="center">
-  <img src="https://i.imgur.com/LujQb1u.gif" width="738">
+  <img src="https://i.imgur.com/FFiir2G.gif" width="60%">
 </p>
 
-The extension listens on the remote port 80, and uses the k8s namespace 'default', but both of those are configurable through the settings button. The extension automatically detects which local port your debugged process listens on and directs the mirrored traffic to it.
-If you prefer to direct traffic to a different local port, edit launch.json:
+> mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
 
-`{
-  "mirrord": {
-                "port": "<port to send traffic to>"
-            }
-}`
+> Make sure your local process is listening on the same port as the remote pod.
+## Settings
 
----
-## CLI Tool
-### Installation
-`npm install -g mirrord`
-
-### How to use
-`mirrord <pod name>`
-
-<p align="center">
-  <img src="https://i.imgur.com/EgyBxI9.gif" width="538">
-</p>
-
-For more options, run:
-
-`mirrord --help`
-
----
-## How it works
-mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same nodewhich enters the namespace of the selected pod and captures traffic from it.
-
-
-
-For more technical information, see [TECHNICAL.md](./TECHNICAL.md)
-
-### Caveats
-* mirrord currently supports Kubernetes clusters using containerd runtime only. Support for more runtimes will be added if there's demand.
-
-
-
-
-## Contributing
-Contributions are welcome via PRs.
-
-
-## Help & Community 🎉✉️
-
-Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun. 
-
----
-
-
-<i>Icon Credit: flaticon.com</i>
+- You can control the namespace mirrord will find pods by changing the impersonated pod namespace by clicking the settings button next to the Enable/Disable mirrord button
+- You can also control in which k8s namespace the mirrord-agent will spawn using the same setting button.
