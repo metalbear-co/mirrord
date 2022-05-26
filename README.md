@@ -1,10 +1,10 @@
-<div align="center">
+<div align="center" width="70%">
 
 ![mirrord logo dark](./images/logo_dark.png#gh-dark-mode-only)
 
 </div>
 
-<div align="center">
+<div align="center" width="70%">
 
 ![mirrord logo light](./images/logo_light.png#gh-light-mode-only)
 
@@ -12,7 +12,12 @@
 
 mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
 
+<div align="center" width="70%">
+
 ![vs code demo gif](./images/demo.gif)
+
+</div>
+
 ## Install (macOS/Linux)
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
