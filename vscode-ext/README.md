@@ -13,7 +13,7 @@ mirrord lets you easily mirror traffic from your Kubernetes cluster to your loca
 * The debugged process will start with mirrord, and receive traffic 
 
 <p align="center">
-  <img src="../images/demo.gif" width="60%">
+  <img src="https://i.imgur.com/FFiir2G.gif" width="60%">
 </p>
 
 > mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
