@@ -27,5 +27,6 @@ Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support 
 ## Code of Conduct
 We take our community seriously and we are dedicated to providing a safe and welcoming environment for everyone.
 Please take a few minutes to review our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
 ## License
 [MIT](./LICENSE)
