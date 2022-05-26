@@ -6,7 +6,7 @@
 
 <div align="center">
 
-![mirrord logo dark](./images/logo_light.png#gh-light-mode-only)
+![mirrord logo light](./images/logo_light.png#gh-light-mode-only)
 
 </div>
 
