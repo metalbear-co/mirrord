@@ -180,8 +180,13 @@ async fn handle_daemon_message(
                 });
         }
         DaemonMessage::TCPData(msg) => {
-            if let Err(fail) = active_connections
-                .get(&msg.connection_id)
+            debug!("Received data from connection id {}", msg.connection_id);
+            let connection = active_connections.get(&msg.connection_id);
+            if connection.is_none() {
+                debug!("Connection {} not found", msg.connection_id);
+                return;
+            }
+            if let Err(fail) = connection
                 .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
                 .unwrap()
                 .await
@@ -191,6 +196,7 @@ async fn handle_daemon_message(
             }
         }
         DaemonMessage::TCPClose(msg) => {
+            debug!("Closing connection {}", msg.connection_id);
             if let Err(fail) = active_connections
                 .get(&msg.connection_id)
                 .map(|sender| sender.send(TcpTunnelMessages::Close))
