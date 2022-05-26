@@ -1,10 +1,15 @@
-use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
+use std::{
+    ffi::CStr, intrinsics::transmute, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice,
+};
 
 use frida_gum::{interceptor::Interceptor, Module, NativePointer};
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use tracing::{debug, error};
 
-use super::{IGNORE_FILES, OPEN_FILES};
+use super::{
+    ops::{fdopen, fopen, OpenMode},
+    IGNORE_FILES, OPEN_FILES,
+};
 use crate::{
     file::{
         ops::{lseek, open, read, write},
@@ -48,7 +53,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
         .expect("Failed converting path from c_char!")
         .into();
 
-    let mode: PathBuf = CStr::from_ptr(raw_path)
+    let mode: String = CStr::from_ptr(raw_mode)
         .to_str()
         .expect("Failed converting mode from c_char!")
         .into();
@@ -59,7 +64,39 @@ pub(super) unsafe extern "C" fn fopen_detour(
 
         bypassed_file
     } else {
-        todo!()
+        let sender = HOOK_SENDER.as_ref().unwrap();
+        let fopen_result = fopen(sender, path, OpenMode(mode));
+
+        fopen_result
+            .map_err(|fail| {
+                error!("Failed opening file with {fail:#?}");
+                ptr::null_mut()
+            })
+            .unwrap_or_else(|fail| fail)
+    }
+}
+
+pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
+    let mode: String = CStr::from_ptr(raw_mode)
+        .to_str()
+        .expect("Failed converting mode from c_char!")
+        .into();
+
+    let open_files = OPEN_FILES.lock().unwrap();
+    let open_file = open_files.get_key_value(&fd);
+
+    if let Some((local_fd, remote_fd)) = open_file {
+        let fdopen_result = fdopen(local_fd, *remote_fd, OpenMode(mode));
+
+        fdopen_result
+            .map_err(|fail| {
+                error!("Failed fdopen file with {fail:#?}");
+                ptr::null_mut()
+            })
+            .unwrap_or_else(|fail| fail)
+    } else {
+        let file_stream = libc::fdopen(fd, raw_mode);
+        file_stream
     }
 }
 
@@ -215,6 +252,14 @@ pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
         .replace(
             Module::find_export_by_name(None, "fopen").unwrap(),
             NativePointer(fopen_detour as *mut c_void),
+            NativePointer(std::ptr::null_mut()),
+        )
+        .unwrap();
+
+    interceptor
+        .replace(
+            Module::find_export_by_name(None, "fdopen").unwrap(),
+            NativePointer(fdopen_detour as *mut c_void),
             NativePointer(std::ptr::null_mut()),
         )
         .unwrap();

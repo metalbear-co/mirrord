@@ -1,4 +1,5 @@
 use std::{
+    ffi::{CStr, CString},
     fs::{File, OpenOptions},
     io::{prelude::*, Result, SeekFrom},
     net::{TcpListener, TcpStream},
@@ -36,6 +37,13 @@ fn main() -> Result<()> {
 
     let read_str = String::from_utf8_lossy(&read_buf);
     println!("\t>>> file contains message {read_str:#?} \n");
+
+    unsafe {
+        let filepath = CString::new("/var/log/dpkg.log").unwrap();
+        let file_mode = CString::new("rw").unwrap();
+        let local_fd = libc::fopen(filepath.as_ptr(), file_mode.as_ptr());
+        println!("\t>>> fopen local fd {:#?} \n", local_fd);
+    }
 
     let listener = TcpListener::bind("127.0.0.1:80")?;
     for stream in listener.incoming() {

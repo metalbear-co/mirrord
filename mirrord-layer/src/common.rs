@@ -84,4 +84,7 @@ pub enum LayerError {
 
     #[error("Receiver failed with `{0}`!")]
     RecvError(#[from] RecvError),
+
+    #[error("Failed to find local fd `{0}`!")]
+    LocalFDNotFound(RawFd),
 }
