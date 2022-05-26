@@ -25,8 +25,6 @@ curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/i
 
 * Windows isn't supported currently (you can use WSL)
 
-## Getting Started
-Check our [quick start](https://mirrord.dev/docs/prologue/quick-start/)
 
 ## Contributing
 Contributions are welcome via PRs.
