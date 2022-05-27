@@ -7,6 +7,7 @@ COPY mirrord-protocol /app/mirrord-protocol
 COPY mirrord-agent /app/mirrord-agent
 COPY mirrord-layer /app/mirrord-layer
 COPY mirrord-cli /app/mirrord-cli
+COPY tests /app/tests
 COPY .cargo /app/.cargo
 RUN cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release
 
