@@ -75,3 +75,31 @@ jobs:
           key: ${{matrix.os}}
       # For now, just evrify it compiles.
       - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
+
+  e2e:
+    runs-on: ubuntu-latest
+    name: e2e
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express
+      - run: sudo apt-get update -y && sudo apt-get install -y libpcap-dev cmake
+      - name: start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: containerd
+      - run: docker build -t test . --file mirrord-agent/Dockerfile
+      - run: minikube image load test:latest
+      - name: setup nginx
+        run: kubectl apply -f tests/app.yaml
+      - name: build mirrord
+        run: cargo +nightly build --manifest-path=./Cargo.toml
+      - name: run node tests
+        run: cargo test --manifest-path ./tests/Cargo.toml  -- --test-threads 1

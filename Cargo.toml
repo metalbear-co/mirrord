@@ -5,6 +5,7 @@ members = [
     "mirrord-agent",
     "mirrord-layer",
     "mirrord-cli",
+    "tests"
 ]
 
 [workspace.package]
