@@ -22,8 +22,9 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    runtime::{get_container_namespace, set_namespace},
-    util::IndexAllocator, docker::DockerRuntime, namespace::Namespace,
+    docker::DockerRuntime,
+    namespace::Namespace,    
+    util::IndexAllocator,
 };
 
 const DUMMY_BPF: &str =
@@ -236,12 +237,17 @@ pub async fn packet_worker(
     mut rx: Receiver<SnifferCommand>,
     interface: String,
     container_id: Option<String>,
+    container_runtime: Option<String>,
 ) -> Result<()> {
     debug!("setting namespace");
-    if let Some(container_id) = container_id {
-        let mut runtime = DockerRuntime::new(container_id);
-        let ns_path = runtime.get_namespace().await?;
-        runtime.set_namespace(ns_path).unwrap();
+    if let (Some(container_id), Some(container_runtime)) = (container_id, container_runtime) {
+        let runtime = match container_runtime.as_str() {
+            "docker" => DockerRuntime::new(container_id),
+            // "containerd" => Box::new(ContainerdRuntime::new(container_id)),
+            _ => return Err(anyhow!("Unsupported runtime")),
+        };
+        let ns_path = &*runtime.get_namespace().await?;
+        runtime.set_namespace(ns_path.to_string()).unwrap();
     }
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;

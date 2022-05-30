@@ -18,11 +18,11 @@ use tracing::{debug, error, info};
 use tracing_subscriber::prelude::*;
 
 mod cli;
+mod docker;
+mod namespace;
 mod runtime;
 mod sniffer;
 mod util;
-mod docker;
-mod namespace;
 
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
@@ -160,6 +160,7 @@ async fn start() -> Result<()> {
         packet_command_rx,
         args.interface.clone(),
         args.container_id.clone(),
+        args.container_runtime.clone(),
     ));
     loop {
         select! {
