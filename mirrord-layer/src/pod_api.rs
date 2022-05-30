@@ -23,15 +23,17 @@ impl RuntimeData {
         let pod = pods_api.get(pod_name).await.unwrap();
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-        let container_id = container_statuses
+        let container_info = container_statuses
             .first()
             .unwrap()
             .container_id
             .as_ref()
             .unwrap()
-            .split("//")
-            .last()
-            .unwrap();
+            .split("://")
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let runtime = container_info.first().unwrap();
+        let container_id = container_info.last().unwrap();
         RuntimeData {
             container_id: container_id.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
