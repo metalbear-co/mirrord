@@ -21,6 +21,8 @@ mod cli;
 mod runtime;
 mod sniffer;
 mod util;
+mod docker;
+mod namespace;
 
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};

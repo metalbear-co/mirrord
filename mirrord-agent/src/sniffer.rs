@@ -23,7 +23,7 @@ use tracing::{debug, error};
 
 use crate::{
     runtime::{get_container_namespace, set_namespace},
-    util::IndexAllocator,
+    util::IndexAllocator, docker::DockerRuntime, namespace::Namespace,
 };
 
 const DUMMY_BPF: &str =
@@ -239,9 +239,9 @@ pub async fn packet_worker(
 ) -> Result<()> {
     debug!("setting namespace");
     if let Some(container_id) = container_id {
-        let namespace = get_container_namespace(container_id).await?;
-        debug!("Found namespace to attach to {:?}", &namespace);
-        set_namespace(&namespace)?;
+        let mut runtime = DockerRuntime::new(container_id);
+        let ns_path = runtime.get_namespace().await?;
+        runtime.set_namespace(ns_path).unwrap();
     }
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;
