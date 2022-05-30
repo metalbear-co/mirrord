@@ -9,7 +9,7 @@ use nix::sched::setns;
 use serde::{Deserialize, Serialize};
 
 #[async_trait]
-pub trait Namespace {
+pub trait Namespace: Send + Sync {
     async fn get_namespace(&self) -> Result<String>;
     fn set_namespace(&self, ns_path: String) -> Result<()> {
         let fd: RawFd = File::open(ns_path)?.into_raw_fd();
@@ -17,7 +17,6 @@ pub trait Namespace {
         Ok(())
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct NamespaceInfo {

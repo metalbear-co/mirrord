@@ -14,6 +14,7 @@ use tracing::{error, warn};
 use crate::config;
 struct RuntimeData {
     container_id: String,
+    container_runtime: String,
     node_name: String,
 }
 
@@ -30,12 +31,12 @@ impl RuntimeData {
             .as_ref()
             .unwrap()
             .split("://")
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>();
-        let runtime = container_info.first().unwrap();
+            .collect::<Vec<&str>>();
+        let container_runtime = container_info.first().unwrap();
         let container_id = container_info.last().unwrap();
         RuntimeData {
             container_id: container_id.to_string(),
+            container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
         }
     }
@@ -104,6 +105,8 @@ pub async fn create_agent(
                                 "./mirrord-agent",
                                 "--container-id",
                                 runtime_data.container_id,
+                                "--container-runtime",
+                                runtime_data.container_runtime,
                                 "-t",
                                 "30"
                             ],

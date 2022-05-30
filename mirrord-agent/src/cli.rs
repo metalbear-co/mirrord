@@ -8,7 +8,7 @@ pub struct Args {
     pub container_id: Option<String>,
 
     /// Container runtime to use
-    #[clap(short, long)]
+    #[clap(short = 'r', long)]
     pub container_runtime: Option<String>,
 
     /// Port to use for communication

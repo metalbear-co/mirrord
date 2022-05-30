@@ -22,9 +22,7 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    docker::DockerRuntime,
-    namespace::Namespace,    
-    util::IndexAllocator,
+    docker::DockerRuntime, namespace::Namespace, runtime::ContainerdRuntime, util::IndexAllocator,
 };
 
 const DUMMY_BPF: &str =
@@ -241,13 +239,13 @@ pub async fn packet_worker(
 ) -> Result<()> {
     debug!("setting namespace");
     if let (Some(container_id), Some(container_runtime)) = (container_id, container_runtime) {
-        let runtime = match container_runtime.as_str() {
-            "docker" => DockerRuntime::new(container_id),
-            // "containerd" => Box::new(ContainerdRuntime::new(container_id)),
+        let runtime: Box<dyn Namespace> = match container_runtime.as_str() {
+            "docker" => Box::new(DockerRuntime::new(container_id)),
+            "containerd" => Box::new(ContainerdRuntime::new(container_id)),
             _ => return Err(anyhow!("Unsupported runtime")),
         };
-        let ns_path = &*runtime.get_namespace().await?;
-        runtime.set_namespace(ns_path.to_string()).unwrap();
+        let ns_path = runtime.get_namespace().await?;
+        runtime.set_namespace(ns_path).unwrap();
     }
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;

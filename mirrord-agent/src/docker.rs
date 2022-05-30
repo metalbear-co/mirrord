@@ -5,14 +5,12 @@ use bollard::{container::InspectContainerOptions, Docker};
 use crate::namespace::Namespace;
 
 pub struct DockerRuntime {
-    container_id: String,    
+    container_id: String,
 }
 
 impl DockerRuntime {
     pub fn new(container_id: String) -> Self {
-        DockerRuntime {
-            container_id,            
-        }
+        DockerRuntime { container_id }
     }
 }
 
@@ -26,7 +24,7 @@ impl Namespace for DockerRuntime {
             .await?;
         let pid = inspect_response.state.unwrap().pid.unwrap();
 
-        let ns_path = format!("/proc/{}/ns/net", pid).to_string();        
+        let ns_path = format!("/proc/{}/ns/net", pid);
         Ok(ns_path)
     }
 }
