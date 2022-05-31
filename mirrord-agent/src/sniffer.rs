@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
 };
 
 use anyhow::{anyhow, Result};
@@ -22,7 +23,7 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    runtime::{get_namespace, set_namespace, Runtime},
+    runtime::{set_namespace, Runtime},
     util::IndexAllocator,
 };
 
@@ -239,6 +240,7 @@ pub async fn packet_worker(
     container_runtime: Option<String>,
 ) -> Result<()> {
     debug!("setting namespace");
+
     let default_runtime = "containerd";
     let pid = match (container_id, container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
@@ -253,12 +255,9 @@ pub async fn packet_worker(
         _ => None,
     };
 
-    match pid {
-        Some(pid) => {
-            let namespace = get_namespace(pid, "net");
-            set_namespace(namespace).unwrap();
-        }
-        None => (),
+    if let Some(pid) = pid {
+        let namespace = PathBuf::from("/proc").join(pid).join("ns/net");
+        set_namespace(namespace).unwrap();
     }
 
     debug!("preparing sniffer");

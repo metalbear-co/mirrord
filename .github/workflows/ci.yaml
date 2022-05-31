@@ -103,4 +103,4 @@ jobs:
       - name: build mirrord
         run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: run node tests
-        run: cargo test --manifest-path ./tests/Cargo.toml  -- --test-threads 1
+        run: cargo test --manifest-path ./tests/Cargo.toml  -- --nocapture --test-threads 1

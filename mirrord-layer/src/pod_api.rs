@@ -32,8 +32,20 @@ impl RuntimeData {
             .unwrap()
             .split("://")
             .collect::<Vec<&str>>();
-        let container_runtime = container_info.first().unwrap();
+
+        let container_runtime = match container_info.first() {
+            Some(container_runtime) => {
+                let runtimes = vec!["docker", "containerd"];
+                if !runtimes.contains(container_runtime) {
+                    panic!("Unknown container runtime: {}", container_runtime);
+                }
+                container_runtime
+            }
+            None => panic!("No container runtime found"),
+        };
+
         let container_id = container_info.last().unwrap();
+
         RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
