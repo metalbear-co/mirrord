@@ -18,8 +18,6 @@ use tracing::{debug, error, info};
 use tracing_subscriber::prelude::*;
 
 mod cli;
-mod docker;
-mod namespace;
 mod runtime;
 mod sniffer;
 mod util;
