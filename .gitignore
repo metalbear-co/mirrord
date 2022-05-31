@@ -3,4 +3,13 @@ dist
 node_modules
 .vscode-test/
 *.vsix
-.vscode/
+.DS_Store
+**/.DS_Store
+target
+
+### VSCode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

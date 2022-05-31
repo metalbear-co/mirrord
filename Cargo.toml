@@ -1,0 +1,43 @@
+[workspace]
+
+members = [
+    "mirrord-protocol",
+    "mirrord-agent",
+    "mirrord-layer",
+    "mirrord-cli",
+    "tests"
+]
+
+[workspace.package]
+version = "2.0.4"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/metalbear/mirrord"
+documentation = "https://mirrord.dev/docs"
+authors = ["MetalBear <hi@metalbear.co>"]
+description = "run a local process in the context of a remote environment"
+homepage = "https://mirrord.dev"
+publish = false
+keywords = ["cli", "backend", "debug", "test", "kubernetes", "cloud", "native", "local", "ide", "devtool", "developer", "tool"]
+categories = ["development-tools", "backend", "devtool"]
+
+[workspace.dependencies]
+actix-codec = "0.5"
+bytes = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1.8"
+serde_json = "1"
+anyhow = "1"
+nix = "0.23.1"
+clap = { version = "3.1.2", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3.21"
+
+# latest commits on rustls suppress certificate verification 
+# https://github.com/rustls/rustls/pull/1032
+# so we patch crates.io to use the latest commits from rustls
+# this should be changed once a newer version of rustls is ou
+[patch.crates-io]
+rustls = { git = 'https://github.com/rustls/rustls' }
