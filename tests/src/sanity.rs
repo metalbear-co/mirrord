@@ -288,4 +288,11 @@ mod tests {
         .unwrap()
         .unwrap();
     }
+
+    // docker runtime test
+    #[tokio::test]
+    async fn test_docker_runtime() {
+        set_minikube_runtime("docker").await;
+        test_complete_node_api();
+    }
 }
