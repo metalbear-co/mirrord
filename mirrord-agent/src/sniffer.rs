@@ -21,7 +21,10 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-use crate::{runtime::Runtime, util::IndexAllocator};
+use crate::{
+    runtime::{get_namespace, set_namespace, Runtime},
+    util::IndexAllocator,
+};
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
@@ -236,17 +239,28 @@ pub async fn packet_worker(
     container_runtime: Option<String>,
 ) -> Result<()> {
     debug!("setting namespace");
-    if let (Some(container_id), Some(container_runtime)) = (container_id, container_runtime) {
-        let runtime = match container_runtime.as_str() {
-            "docker" => Runtime::Docker(container_id),
-            "containerd" => Runtime::Containerd(container_id),
-            _ => return Err(anyhow!("Unsupported runtime")),
-        };
-        runtime
-            .get_namespace()
+    let default_runtime = "containerd";
+    let pid = match (container_id, container_runtime) {
+        (Some(container_id), Some(container_runtime)) => {
+            Runtime::get_container_pid(&container_id, &container_runtime)
+                .await
+                .ok()
+        }
+        (Some(container_id), None) => Runtime::get_container_pid(&container_id, default_runtime)
             .await
-            .and_then(|ns| runtime.set_namespace(ns))?;
+            .ok(),
+        (None, Some(_)) => return Err(anyhow!("Container ID not specified")),
+        _ => None,
+    };
+
+    match pid {
+        Some(pid) => {
+            let namespace = get_namespace(pid, "net");
+            set_namespace(namespace).unwrap();
+        }
+        None => (),
     }
+
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;
     debug!("done prepare sniffer");
