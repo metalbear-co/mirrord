@@ -15,13 +15,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_complete_node_api() {
-        _inner_test_complete_node_api().await;
+        _test_complete_node_api().await;
     }
 
-    // inner function
+    // actual test function used with "container", "docker" runtimes
     // starts the node(express.js) api server, sends four different requests, validates data,
     // stops the server and validates if the agent job and pod are deleted
-    async fn _inner_test_complete_node_api() {
+    async fn _test_complete_node_api() {
         let client = setup_kube_client().await;
 
         let pod_namespace = "default";
@@ -298,6 +298,6 @@ mod tests {
     #[tokio::test]
     async fn test_docker_runtime() {
         set_minikube_runtime("docker").await;
-        _inner_test_complete_node_api().await;
+        _test_complete_node_api().await;
     }
 }

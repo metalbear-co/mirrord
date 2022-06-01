@@ -16,6 +16,7 @@ struct RuntimeData {
     container_id: String,
     container_runtime: String,
     node_name: String,
+    socket_path: String,
 }
 
 impl RuntimeData {
@@ -33,15 +34,10 @@ impl RuntimeData {
             .split("://")
             .collect::<Vec<&str>>();
 
-        let container_runtime = match container_info.first() {
-            Some(container_runtime) => {
-                let runtimes = vec!["docker", "containerd"];
-                if !runtimes.contains(container_runtime) {
-                    panic!("Unknown container runtime: {}", container_runtime);
-                }
-                container_runtime
-            }
-            None => panic!("No container runtime found"),
+        let (container_runtime, socket_path) = match container_info.first() {
+            Some(&"docker") => ("docker", "/var/run/docker.sock"),
+            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
+            _ => panic!("unspported container runtime"),
         };
 
         let container_id = container_info.last().unwrap();
@@ -50,6 +46,7 @@ impl RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
+            socket_path: socket_path.to_string(),
         }
     }
 }
@@ -93,9 +90,9 @@ pub async fn create_agent(
                     "restartPolicy": "Never",
                     "volumes": [
                         {
-                            "name": "containerd",
+                            "name": "sockpath",
                             "hostPath": {
-                                "path": "/run/containerd/containerd.sock"
+                                "path": runtime_data.socket_path
                             }
                         }
                     ],
@@ -109,8 +106,8 @@ pub async fn create_agent(
                             },
                             "volumeMounts": [
                                 {
-                                    "mountPath": "/run/containerd/containerd.sock",
-                                    "name": "containerd"
+                                    "mountPath": runtime_data.socket_path,
+                                    "name": "sockpath"
                                 }
                             ],
                             "command": [
@@ -120,7 +117,7 @@ pub async fn create_agent(
                                 "--container-runtime",
                                 runtime_data.container_runtime,
                                 "-t",
-                                "30"
+                                "30",
                             ],
                             "env": [{"name": "RUST_LOG", "value": log_level}],
                         }
