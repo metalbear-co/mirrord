@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 
+const semver = require('semver');
+const https = require('https');
 const k8s = require('@kubernetes/client-node');
 const path = require('path');
 const os = require('os');
 
-const LIBRARIES: {[platform: string] : [var_name: string, lib_name: string]}  = {
+const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = {
 	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
 	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
 };
@@ -53,11 +55,34 @@ async function toggle(state: vscode.Memento, button: vscode.StatusBarItem) {
 	}
 }
 
+async function checkVersion(version: string) {
+	https.get('https://us-central1-mirrord.cloudfunctions.net/get-latest-version?source=vscode-ext', (res: any) => {
+		res.on('data', (d: any) => {
+			const config = vscode.workspace.getConfiguration();
+			if (config.get('mirrord.promptOutdated') !== false) {
+				if (semver.lt(version, d.toString())) {
+					vscode.window.showInformationMessage('Your version of mirrord is outdated, you should update.', 'Update', "Don't show again").then(item => {
+						if (item === 'Update') {
+							vscode.env.openExternal(vscode.Uri.parse('vscode:extension/MetalBear.mirrord'));
+						} else if (item === "Don't show again") {
+							config.update('mirrord.promptOutdated', false);
+						}
+					});
+				}
+			}
+		});
+
+	}).on('error', (e: any) => {
+		console.error(e);
+	});
+}
+
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 	// TODO: Download mirrord according to platform
-
+	checkVersion(context.extension.packageJSON.version);
 	globalContext = context;
 	let k8sConfig = new k8s.KubeConfig();
 	k8sConfig.loadFromDefault();
@@ -66,7 +91,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.globalState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 	buttons = { toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0) };
-	
+
 	const toggleCommandId = 'mirrord.toggleMirroring';
 	context.subscriptions.push(vscode.commands.registerCommand(toggleCommandId, async function () {
 		toggle(context.globalState, buttons.toggle);
@@ -92,9 +117,9 @@ export async function activate(context: vscode.ExtensionContext) {
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 		if (!globalContext.globalState.get('enabled')) {
-			return new Promise(resolve => { resolve(config) });
+			return new Promise(resolve => { resolve(config); });
 		}
-		
+
 		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
 			return new Promise(resolve => {
 				return resolve(config);
@@ -122,10 +147,12 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 					libraryPath = globalContext.extensionPath;
 				}
 				let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
-				config.env = {...config.env, ...{
-					// eslint-disable-next-line @typescript-eslint/naming-convention
-					'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
-				}};
+				config.env = {
+					...config.env, ...{
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
+					}
+				};
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 				return resolve(config);
 			});

@@ -95,17 +95,17 @@ jobs:
       - run: npm install -g vsce typescript esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target linux-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
       - run: mv /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.dylib
       - run: mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 

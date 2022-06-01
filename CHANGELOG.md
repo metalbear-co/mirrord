@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.0.5
+### Added
+- Prompt user to update if their version is outdated in the VS Code extension or CLI.
+
 ## 2.0.0
 
 Complete refactor and re-write of everything.
