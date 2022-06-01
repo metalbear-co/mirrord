@@ -24,3 +24,5 @@ tracing-subscriber.workspace = true
 mirrord-layer = { artifact = "cdylib", path="../mirrord-layer" }
 exec = "0.3"
 anyhow.workspace = true
+reqwest = "0.11.10"
+semver = "1.0.9"

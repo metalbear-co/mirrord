@@ -5,6 +5,8 @@ use clap::{Args, Parser, Subcommand};
 use exec::execvp;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use semver::Version;
+
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -92,7 +94,15 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn exec(args: &ExecArgs) -> Result<()> {
+    let resp = reqwest::blocking::get("https://version.mirrord.dev/get-latest-version?source=2&currentVersion=0").unwrap().text().unwrap();
+    let latest_version = Version::parse(&resp).unwrap();
+    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+        println!("New mirrord version available! To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`");
+    }
+
     info!(
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args

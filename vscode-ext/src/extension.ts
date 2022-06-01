@@ -10,7 +10,7 @@ const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = 
 	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
 	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
 };
-const versionCheckEndpoint = `https://us-central1-mirrord.cloudfunctions.net/get-latest-version`;
+const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
@@ -112,7 +112,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		button.show();
 	};
 
-	// vscode.commands.executeCommand('setContext', 'mirrord.activated', true);
 }
 
 
