@@ -295,9 +295,10 @@ mod tests {
     }
 
     // docker runtime test
+    #[ignore]
     #[tokio::test]
     async fn test_docker_runtime() {
-        set_minikube_runtime("docker").await;
+        // set_minikube_runtime("docker").await;
         _test_complete_node_api().await;
     }
 }

@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+- Added support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
+
 ## 2.0.0
 
 Complete refactor and re-write of everything.
