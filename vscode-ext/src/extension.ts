@@ -10,6 +10,7 @@ const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = 
 	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
 	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
 };
+const versionCheckEndpoint = `https://us-central1-mirrord.cloudfunctions.net/get-latest-version`;
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
@@ -56,7 +57,8 @@ async function toggle(state: vscode.Memento, button: vscode.StatusBarItem) {
 }
 
 async function checkVersion(version: string) {
-	https.get('https://us-central1-mirrord.cloudfunctions.net/get-latest-version?source=vscode-ext', (res: any) => {
+	let versionUrl = versionCheckEndpoint + '?source=1&version=' + version;
+	https.get(versionUrl, (res: any) => {
 		res.on('data', (d: any) => {
 			const config = vscode.workspace.getConfiguration();
 			if (config.get('mirrord.promptOutdated') !== false) {

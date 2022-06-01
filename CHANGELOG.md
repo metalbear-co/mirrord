@@ -6,8 +6,6 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
-
-## 2.0.5
 ### Added
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
 
