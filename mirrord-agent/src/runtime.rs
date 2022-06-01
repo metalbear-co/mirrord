@@ -13,6 +13,10 @@ use containerd_client::{
     with_namespace,
 };
 use nix::sched::setns;
+use tracing::debug;
+
+const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
+const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 pub(crate) enum Runtime {}
 
 impl Runtime {
@@ -32,6 +36,7 @@ pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
 }
 
 async fn get_docker_container_pid(container_id: String) -> Result<PathBuf> {
+    debug!("setting docker");
     let client = Docker::connect_with_local_defaults()?;
     let inspect_options = Some(InspectContainerOptions { size: false });
     let inspect_response = client
@@ -43,18 +48,18 @@ async fn get_docker_container_pid(container_id: String) -> Result<PathBuf> {
         .and_then(|state| state.pid)
         .ok_or_else(|| anyhow!("No pid found"))?;
 
+    debug!("got pid {:?}", pid);
     Ok(PathBuf::from(pid.to_string()))
 }
 
 async fn get_containerd_container_pid(container_id: String) -> Result<PathBuf> {
-    let (containerd_socket, default_namespace) = ("/run/containerd/containerd.sock", "k8s.io");
-    let channel = connect(&containerd_socket).await?;
+    let channel = connect(CONTAINERD_SOCK_PATH).await?;
     let mut client = TasksClient::new(channel);
     let request = GetRequest {
         container_id,
         ..Default::default()
     };
-    let request = with_namespace!(request, default_namespace);
+    let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
     let response = client.get(request).await?;
     let process = response
         .into_inner()

@@ -30,6 +30,8 @@ use crate::{
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
 
+const DEFAULT_RUNTIME: &str = "containerd";
+
 type ConnectionID = u16;
 
 #[derive(Debug)]
@@ -241,14 +243,13 @@ pub async fn packet_worker(
 ) -> Result<()> {
     debug!("setting namespace");
 
-    let default_runtime = "containerd";
     let pid = match (container_id, container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
             Runtime::get_container_pid(&container_id, &container_runtime)
                 .await
                 .ok()
         }
-        (Some(container_id), None) => Runtime::get_container_pid(&container_id, default_runtime)
+        (Some(container_id), None) => Runtime::get_container_pid(&container_id, DEFAULT_RUNTIME)
             .await
             .ok(),
         (None, Some(_)) => return Err(anyhow!("Container ID not specified")),
