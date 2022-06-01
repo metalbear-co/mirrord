@@ -21,6 +21,7 @@ mod cli;
 mod runtime;
 mod sniffer;
 mod util;
+mod steal;
 
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
