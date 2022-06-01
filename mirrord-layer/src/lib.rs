@@ -19,8 +19,9 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::{sleep, Duration},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 mod common;
 mod config;
@@ -143,6 +144,11 @@ async fn handle_hook_message(
                 });
         }
     }
+    loop {
+        codec.send(ClientMessage::Ping).await.unwrap();
+        trace!("client sent ping");
+        sleep(Duration::from_secs(30)).await;
+    }
 }
 
 #[inline]
@@ -207,6 +213,7 @@ async fn handle_daemon_message(
                 active_connections.remove(&msg.connection_id);
             }
         }
+        DaemonMessage::Pong => trace!("Daemon sent pong!"),
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
