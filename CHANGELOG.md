@@ -8,6 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 ### Added
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
+- Set `MIRRORD_CHECK_VERSION` to false to make E2E tests not read update messages. 
 
 ## 2.0.0
 
