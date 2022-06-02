@@ -144,7 +144,9 @@ fn main() {
 }
 
 fn prompt_outdated_version() {
-    let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION").map(|s| s.parse().unwrap_or(true)).unwrap_or(true);
+    let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
+        .map(|s| s.parse().unwrap_or(true))
+        .unwrap_or(true);
     if check_version {
         if let Ok(client) = reqwest::blocking::Client::builder().build() {
             if let Ok(result) = client
