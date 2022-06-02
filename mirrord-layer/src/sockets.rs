@@ -13,11 +13,12 @@ use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use lazy_static::lazy_static;
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error};
 
 use crate::{
-    common::{HookMessage, Listen, Port},
+    common::{HookMessage, Listen},
     macros::{hook, try_hook},
     HOOK_SENDER,
 };
