@@ -144,11 +144,6 @@ async fn handle_hook_message(
                 });
         }
     }
-    loop {
-        codec.send(ClientMessage::Ping).await.unwrap();
-        trace!("client sent ping");
-        sleep(Duration::from_secs(30)).await;
-    }
 }
 
 #[inline]
@@ -156,6 +151,7 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+    ping: &mut bool,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -213,7 +209,14 @@ async fn handle_daemon_message(
                 active_connections.remove(&msg.connection_id);
             }
         }
-        DaemonMessage::Pong => trace!("Daemon sent pong!"),
+        DaemonMessage::Pong => {
+            if *ping {
+                *ping = false;
+                trace!("Daemon sent pong!");
+            } else {
+                panic!("Daemon: unmatched pong!");
+            }
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -227,13 +230,23 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
+    let mut ping = false;
     loop {
         select! {
             hook_message = receiver.recv() => {
                 handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &mut ping).await;
+            }
+            _ = sleep(Duration::from_secs(60)) => {
+                if !ping {
+                    codec.send(ClientMessage::Ping).await.unwrap();
+                    trace!("sent ping to daemon");
+                    ping = true;
+                } else {
+                    panic!("Client: unmatched ping");
+                }
             }
         }
     }

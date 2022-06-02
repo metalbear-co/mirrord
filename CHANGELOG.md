@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+Added a keep-alive to keep the agent-pod from exiting
+
 ## 2.0.0
 
 Complete refactor and re-write of everything.

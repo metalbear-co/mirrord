@@ -32,11 +32,6 @@ pub struct LogMessage {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct PingMessage {
-    pub message: String,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
