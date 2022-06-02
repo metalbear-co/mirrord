@@ -106,5 +106,7 @@ jobs:
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: switch minikube runtime
         run: minikube delete && minikube start --container-runtime docker && minikube image load test:latest
+      - name: setup nginx
+        run: kubectl apply -f tests/app.yaml
       - name: test with docker runtime
         run: cargo test --package tests --lib -- tests --nocapture --ignored
