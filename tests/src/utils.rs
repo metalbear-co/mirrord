@@ -290,6 +290,7 @@ pub async fn test_server_init(
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
     env.insert("MIRRORD_AGENT_IMAGE", "test");
+    env.insert("MIRRORD_CHECK_VERSION", "false");
     let server = start_node_server(&pod_name, command, env);
     setup_panic_hook();
     server
