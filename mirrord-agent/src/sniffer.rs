@@ -23,7 +23,7 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    runtime::{set_namespace, Runtime},
+    runtime::{get_container_pid, set_namespace},
     util::IndexAllocator,
 };
 
@@ -245,19 +245,19 @@ pub async fn packet_worker(
 
     let pid = match (container_id, container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
-            Runtime::get_container_pid(&container_id, &container_runtime)
+            get_container_pid(&container_id, &container_runtime)
                 .await
                 .ok()
         }
-        (Some(container_id), None) => Runtime::get_container_pid(&container_id, DEFAULT_RUNTIME)
-            .await
-            .ok(),
+        (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
         (None, Some(_)) => return Err(anyhow!("Container ID not specified")),
         _ => None,
     };
 
     if let Some(pid) = pid {
-        let namespace = PathBuf::from("/proc").join(pid).join("ns/net");
+        let namespace = PathBuf::from("/proc")
+            .join(PathBuf::from(pid.to_string()))
+            .join(PathBuf::from("ns/net"));
         set_namespace(namespace).unwrap();
     }
 

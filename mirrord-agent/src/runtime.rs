@@ -13,30 +13,19 @@ use containerd_client::{
     with_namespace,
 };
 use nix::sched::setns;
-use tracing::debug;
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
-pub(crate) enum Runtime {}
 
-impl Runtime {
-    pub async fn get_container_pid(container_id: &str, container_runtime: &str) -> Result<PathBuf> {
-        match container_runtime {
-            "docker" => get_docker_container_pid(container_id.to_string()).await,
-            "containerd" => get_containerd_container_pid(container_id.to_string()).await,
-            _ => Err(anyhow!("Unknown runtime: {}", container_runtime)),
-        }
+pub async fn get_container_pid(container_id: &str, container_runtime: &str) -> Result<u64> {
+    match container_runtime {
+        "docker" => get_docker_container_pid(container_id.to_string()).await,
+        "containerd" => get_containerd_container_pid(container_id.to_string()).await,
+        _ => Err(anyhow!("Unknown runtime: {}", container_runtime)),
     }
 }
 
-pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
-    let fd: RawFd = File::open(ns_path)?.into_raw_fd();
-    setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
-    Ok(())
-}
-
-async fn get_docker_container_pid(container_id: String) -> Result<PathBuf> {
-    debug!("setting docker");
+async fn get_docker_container_pid(container_id: String) -> Result<u64> {
     let client = Docker::connect_with_local_defaults()?;
     let inspect_options = Some(InspectContainerOptions { size: false });
     let inspect_response = client
@@ -46,13 +35,12 @@ async fn get_docker_container_pid(container_id: String) -> Result<PathBuf> {
     let pid = inspect_response
         .state
         .and_then(|state| state.pid)
+        .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
         .ok_or_else(|| anyhow!("No pid found"))?;
-
-    debug!("got pid {:?}", pid);
-    Ok(PathBuf::from(pid.to_string()))
+    Ok(pid)
 }
 
-async fn get_containerd_container_pid(container_id: String) -> Result<PathBuf> {
+async fn get_containerd_container_pid(container_id: String) -> Result<u64> {
     let channel = connect(CONTAINERD_SOCK_PATH).await?;
     let mut client = TasksClient::new(channel);
     let request = GetRequest {
@@ -61,10 +49,17 @@ async fn get_containerd_container_pid(container_id: String) -> Result<PathBuf> {
     };
     let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
     let response = client.get(request).await?;
-    let process = response
+    let pid = response
         .into_inner()
         .process
-        .ok_or_else(|| anyhow!("No pid found"))?;
+        .ok_or_else(|| anyhow!("No pid found"))?
+        .pid;
 
-    Ok(PathBuf::from(process.pid.to_string()))
+    Ok(pid as u64)
+}
+
+pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
+    let fd: RawFd = File::open(ns_path)?.into_raw_fd();
+    setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
+    Ok(())
 }
