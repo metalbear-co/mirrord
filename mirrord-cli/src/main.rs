@@ -132,10 +132,20 @@ fn main() {
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
-    let check_version = match option_env!("MIRRORD_CHECK_VERSION") {
-        Some(check_version) => check_version.parse::<bool>().unwrap(),
-        None => true,
-    };
+    prompt_outdated_version();
+
+    let cli = Cli::parse();
+    match cli.commands {
+        Commands::Exec(args) => exec(&args).unwrap(),
+        Commands::Extract { path } => {
+            extract_library(Some(path));
+        }
+    }
+}
+
+fn prompt_outdated_version() {
+    let check_version = std::env::var("MIRRORD_CHECK_VERSION").unwrap_or_else(|_| "true".to_owned());
+    let check_version = check_version.parse::<bool>().unwrap_or(true);
     if check_version {
         if let Ok(client) = reqwest::blocking::Client::builder().build() {
             if let Ok(result) = client
@@ -148,18 +158,11 @@ fn main() {
             {
                 if let Ok(latest_version) = Version::parse(&result.text().unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-                        println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`", latest_version);
+                        println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`.", latest_version);
+                        println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
                     }
                 }
             }
-        }
-    }
-
-    let cli = Cli::parse();
-    match cli.commands {
-        Commands::Exec(args) => exec(&args).unwrap(),
-        Commands::Extract { path } => {
-            extract_library(Some(path));
         }
     }
 }
