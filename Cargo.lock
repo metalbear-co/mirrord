@@ -1320,7 +1320,6 @@ dependencies = [
  "test_bin",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.2",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1351,6 +1350,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.2",
  "tracing",
  "tracing-subscriber",
 ]

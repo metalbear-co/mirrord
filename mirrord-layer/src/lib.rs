@@ -2,19 +2,20 @@ use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    thread::JoinHandle,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use ctor::ctor;
 use envconfig::Envconfig;
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{stream::FuturesUnordered, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use lazy_static::lazy_static;
-use mirrord_protocol::{ClientCodec, ClientMessage, ConnectionID, DaemonMessage, TCPClose};
+use mirrord_protocol::{
+    ClientCodec, ClientMessage, ConnectionID, DaemonMessage, TCPClose, TCPData,
+};
 use tokio::{
-    io::{copy_bidirectional, duplex, split, AsyncWriteExt, DuplexStream},
+    io::{copy_bidirectional, duplex, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::TcpStream,
     runtime::Runtime,
     select,
@@ -22,6 +23,7 @@ use tokio::{
     task,
 };
 use tokio_stream::StreamMap;
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, warn};
 
 mod common;
@@ -29,6 +31,9 @@ mod config;
 mod macros;
 mod pod_api;
 mod sockets;
+mod steal;
+mod tcp;
+
 use tracing_subscriber::prelude::*;
 
 use crate::{
@@ -156,7 +161,7 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<ConnectionID, Sender<TcpTunnelMessages>>,
-    stolen_reads: &mut StreamMap<ConnectionID, ReadHalf<ReaderStream>>,
+    stolen_reads: &mut StreamMap<ConnectionID, ReaderStream<ReadHalf<DuplexStream>>>,
     stolen_writes: &mut HashMap<ConnectionID, WriteHalf<DuplexStream>>,
 ) {
     match &daemon_message {
@@ -188,14 +193,14 @@ async fn handle_daemon_message(
                             });
                         }
                         DaemonMessage::NewStolenConnection(_) => {
-                            let (a, b) = duplex(1024);
+                            let (mut a, b) = duplex(1024);
                             let (read_half, write_half) = split(b);
                             stolen_writes.insert(conn.connection_id, write_half);
-                            stolen_reads.push(conn.connection_id, ReaderStream::new(read_half));
+                            stolen_reads.insert(conn.connection_id, ReaderStream::new(read_half));
                             task::spawn(async move {
-                                copy_bidirectional(&mut a, &mut stream);
+                                let mut stream = stream.await.unwrap();
+                                copy_bidirectional(&mut a, &mut stream).await.unwrap();
                             });
-                            stolen_futures.push(task);
                         }
                         _ => unreachable!("can't get here"),
                     };
@@ -209,7 +214,7 @@ async fn handle_daemon_message(
                 return;
             }
             if let Err(fail) = connection
-                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
+                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data.clone())))
                 .unwrap()
                 .await
             {
@@ -234,7 +239,7 @@ async fn handle_daemon_message(
         DaemonMessage::LogMessage(_) => todo!(),
         DaemonMessage::StolenTCPData(msg) => {
             debug!("Received data from connection id {}", msg.connection_id);
-            let connection = stolen_writes.get(&msg.connection_id);
+            let connection = stolen_writes.get_mut(&msg.connection_id);
             if connection.is_none() {
                 debug!("Connection {} not found", msg.connection_id);
                 return;
@@ -245,12 +250,16 @@ async fn handle_daemon_message(
                 .await
             {
                 error!("DaemonMessage::StolenTCPData error {fail:#?}");
-                stolen_connections.remove(&msg.connection_id);
+                stolen_reads.remove(&msg.connection_id);
+                stolen_writes.remove(&msg.connection_id);
             }
         }
         DaemonMessage::StolenTCPClose(msg) => {
             debug!("Closing connection {}", msg.connection_id);
-            if stolen_connections.remove(&msg.connection_id).is_none() {
+            if stolen_writes.remove(&msg.connection_id).is_none() {
+                warn!("Connection wasn't found {:?}", msg.connection_id);
+            }
+            if stolen_reads.remove(&msg.connection_id).is_none() {
                 warn!("Connection wasn't found {:?}", msg.connection_id);
             }
         }
@@ -279,24 +288,28 @@ async fn poll_agent(
             daemon_message = codec.next() => {
                 handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &mut stolen_reads, &mut stolen_writes).await;
             },
-            connection_id, message = stolen_reads.next() => {
+            Some((connection_id, message)) = stolen_reads.next() => {
+                debug!("{message:?}");
                 match message {
-                    None => {
-                        debug!("connection ended {connection_id:?}");
-                        stolen_reads.remove(connection_id);
-                        stolen_writes.remove(connection_id);
-                        codec.send(ClientMessage::CloseStolenConnection(TCPClose {
-                            connection_id
-                        })).await;
-                    },
-                    Some(data) => {
-                        codec.send(ClientMessage::StolenTCPData(TCPData {connection_id, data.to_vec()})).await;
+                    Err(err) => {
+
                     }
+                    // Err(err) => {
+                    //     debug!("connection ended {connection_id:?}");
+                    //     stolen_reads.remove(&connection_id);
+                    //     stolen_writes.remove(&connection_id);
+                    //     codec.send(ClientMessage::CloseStolenConnection(TCPClose {
+                    //         connection_id
+                    //     })).await;
+                    // },
+                    // Some(data) => {
+                    //     codec.send(ClientMessage::StolenTCPData(TCPData {connection_id, data: data.to_vec()})).await;
+                    // }
 
                 }
 
             }
-        }
+        };
     }
 }
 

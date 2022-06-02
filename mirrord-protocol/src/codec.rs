@@ -4,27 +4,11 @@ use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
-pub type ConnectionID = u16;
-pub type Port = u16;
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct NewTCPConnection {
-    pub connection_id: ConnectionID,
-    pub address: IpAddr,
-    pub destination_port: Port,
-    pub source_port: Port,
-}
+use crate::types::*;
+use crate::steal::{StealClientMessage, StealDaemonMessage};
+use crate::tcp::*;
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct TCPData {
-    pub connection_id: ConnectionID,
-    pub data: Vec<u8>,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct TCPClose {
-    pub connection_id: ConnectionID,
-}
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
@@ -37,8 +21,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     PortSteal(Port),
-    StolenTCPData(TCPData),
-    CloseStolenConnection(TCPClose),
+    StealClientMessage
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -48,9 +31,7 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
-    NewStolenConnection(NewTCPConnection),
-    StolenTCPData(TCPData),
-    StolenTCPClose(TCPClose),
+    StealDaemonMessage
 }
 
 pub struct ClientCodec {
