@@ -1,12 +1,11 @@
-use std::{env::temp_dir, fs::File, io::Write};
+use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
+use semver::Version;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
-use semver::Version;
-
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -94,15 +93,7 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
 fn exec(args: &ExecArgs) -> Result<()> {
-    let resp = reqwest::blocking::get("https://version.mirrord.dev/get-latest-version?source=2&currentVersion=0").unwrap().text().unwrap();
-    let latest_version = Version::parse(&resp).unwrap();
-    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-        println!("New mirrord version available! To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`");
-    }
-
     info!(
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
@@ -135,11 +126,35 @@ fn exec(args: &ExecArgs) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() {
     registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
+    let check_version = match option_env!("MIRRORD_CHECK_VERSION") {
+        Some(check_version) => check_version.parse::<bool>().unwrap(),
+        None => true,
+    };
+    if check_version {
+        if let Ok(client) = reqwest::blocking::Client::builder().build() {
+            if let Ok(result) = client
+                .get(format!(
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}",
+                    CURRENT_VERSION
+                ))
+                .timeout(Duration::from_secs(1))
+                .send()
+            {
+                if let Ok(latest_version) = Version::parse(&result.text().unwrap()) {
+                    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+                        println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`", latest_version);
+                    }
+                }
+            }
+        }
+    }
+
     let cli = Cli::parse();
     match cli.commands {
         Commands::Exec(args) => exec(&args).unwrap(),
