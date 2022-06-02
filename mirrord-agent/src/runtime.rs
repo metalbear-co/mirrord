@@ -21,7 +21,7 @@ pub async fn get_container_pid(container_id: &str, container_runtime: &str) -> R
     match container_runtime {
         "docker" => get_docker_container_pid(container_id.to_string()).await,
         "containerd" => get_containerd_container_pid(container_id.to_string()).await,
-        _ => Err(anyhow!("Unknown runtime: {}", container_runtime)),
+        _ => Err(anyhow!("Unsupported runtime: {}", container_runtime)),
     }
 }
 

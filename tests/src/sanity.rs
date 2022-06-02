@@ -18,7 +18,7 @@ mod tests {
         _test_complete_node_api().await;
     }
 
-    // actual test function used with "container", "docker" runtimes
+    // actual test function used with "containerd", "docker" runtimes
     // starts the node(express.js) api server, sends four different requests, validates data,
     // stops the server and validates if the agent job and pod are deleted
     async fn _test_complete_node_api() {
@@ -298,7 +298,6 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_docker_runtime() {
-        // set_minikube_runtime("docker").await;
         _test_complete_node_api().await;
     }
 }
