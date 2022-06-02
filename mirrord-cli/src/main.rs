@@ -1,8 +1,9 @@
-use std::{env::temp_dir, fs::File, io::Write};
+use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
+use semver::Version;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
@@ -125,16 +126,44 @@ fn exec(args: &ExecArgs) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() {
     registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
+    prompt_outdated_version();
+
     let cli = Cli::parse();
     match cli.commands {
         Commands::Exec(args) => exec(&args).unwrap(),
         Commands::Extract { path } => {
             extract_library(Some(path));
+        }
+    }
+}
+
+fn prompt_outdated_version() {
+    let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
+        .map(|s| s.parse().unwrap_or(true))
+        .unwrap_or(true);
+    if check_version {
+        if let Ok(client) = reqwest::blocking::Client::builder().build() {
+            if let Ok(result) = client
+                .get(format!(
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}",
+                    CURRENT_VERSION
+                ))
+                .timeout(Duration::from_secs(1))
+                .send()
+            {
+                if let Ok(latest_version) = Version::parse(&result.text().unwrap()) {
+                    if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
+                        println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`.", latest_version);
+                        println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
+                    }
+                }
+            }
         }
     }
 }
