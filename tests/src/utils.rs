@@ -303,13 +303,3 @@ pub fn setup_panic_hook() {
         process::exit(1);
     }));
 }
-
-pub async fn set_minikube_runtime(runtime: &str) {
-    let mut cmd = Command::new("minikube")
-        .args(&["start", "--container-runtime", runtime])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    cmd.wait().await.unwrap();
-}
