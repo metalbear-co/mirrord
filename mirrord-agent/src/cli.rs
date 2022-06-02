@@ -18,7 +18,6 @@ pub struct Args {
     /// Interface to use
     #[clap(short = 'i', long, default_value = "eth0")]
     pub interface: String,
-
 }
 
 pub fn parse_args() -> Args {

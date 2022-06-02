@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, net::SocketAddr};
 
 use const_format::concatcp;
 use drain::Watch;
@@ -11,7 +11,6 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tracing::{debug, error};
-use std::net::SocketAddr;
 
 use crate::runtime::{get_container_namespace, set_namespace};
 
@@ -156,8 +155,8 @@ async fn steal_worker(
 // https://github.com/linkerd/linkerd2-proxy/blob/main/linkerd/proxy/transport/src/orig_dst.rs
 // copyright 2018 the linkerd2-proxy authors
 mod orig_dst {
-    use std::io;
-    use std::net::SocketAddr;
+    use std::{io, net::SocketAddr};
+
     use tokio::net::TcpStream;
 
     #[cfg(target_os = "linux")]
@@ -211,7 +210,10 @@ mod orig_dst {
         // https://github.com/rust-lang-nursery/net2-rs/blob/1b4cb4fb05fbad750b271f38221eab583b666e5e/src/socket.rs#L103
         //
         // Copyright (c) 2014 The Rust Project Developers
-        fn mk_addr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> io::Result<SocketAddr> {
+        fn mk_addr(
+            storage: &libc::sockaddr_storage,
+            len: libc::socklen_t,
+        ) -> io::Result<SocketAddr> {
             match storage.ss_family as libc::c_int {
                 libc::AF_INET => {
                     assert!(len as usize >= mem::size_of::<libc::sockaddr_in>());

@@ -38,7 +38,7 @@ pub enum ClientMessage {
     ConnectionUnsubscribe(ConnectionID),
     PortSteal(Port),
     StolenTCPData(TCPData),
-    CloseStolenConnection(TCPClose)
+    CloseStolenConnection(TCPClose),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -50,7 +50,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     NewStolenConnection(NewTCPConnection),
     StolenTCPData(TCPData),
-    StolenTCPClose(TCPClose)
+    StolenTCPClose(TCPClose),
 }
 
 pub struct ClientCodec {
