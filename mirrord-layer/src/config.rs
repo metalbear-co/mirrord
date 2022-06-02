@@ -22,4 +22,7 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_AGENT_TTL", default = "0")]
     pub agent_ttl: u16,
+
+    #[envconfig(from = "MIRRORD_AGENT_STEAL_TRAFFIC", default = "false")]
+    pub agent_steal_traffic: bool,
 }

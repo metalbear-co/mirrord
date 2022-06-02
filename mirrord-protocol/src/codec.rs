@@ -36,6 +36,9 @@ pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
     ConnectionUnsubscribe(ConnectionID),
+    PortSteal(Port),
+    StolenTCPData(TCPData),
+    CloseStolenConnection(TCPClose)
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -45,6 +48,9 @@ pub enum DaemonMessage {
     TCPData(TCPData),
     TCPClose(TCPClose),
     LogMessage(LogMessage),
+    NewStolenConnection(NewTCPConnection),
+    StolenTCPData(TCPData),
+    StolenTCPClose(TCPClose)
 }
 
 pub struct ClientCodec {
