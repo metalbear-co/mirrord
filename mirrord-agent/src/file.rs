@@ -45,7 +45,7 @@ impl FileManager {
             })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
-                    operation: format!("open"),
+                    operation: "open".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
@@ -78,7 +78,7 @@ impl FileManager {
             })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
-                    operation: format!("open"),
+                    operation: "open".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
@@ -115,7 +115,7 @@ impl FileManager {
             })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
-                    operation: format!("read"),
+                    operation: "read".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
@@ -141,7 +141,7 @@ impl FileManager {
             .map(|result_offset| SeekFileResponse { result_offset })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
-                    operation: format!("seek"),
+                    operation: "seek".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
@@ -164,7 +164,7 @@ impl FileManager {
             .map(|written_amount| WriteFileResponse { written_amount })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
-                    operation: format!("write"),
+                    operation: "write".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })

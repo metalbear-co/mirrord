@@ -79,7 +79,7 @@ mod tests {
                 loop {
                     let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
                     let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the nginx pod should exist
-                    if updated_pods.items.len() == 1 && updated_jobs.items.len() == 0 {
+                    if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
                         let nginx_pod = updated_pods.items[0].metadata.name.clone().unwrap();
                         assert!(nginx_pod.contains("nginx"));
                         break;

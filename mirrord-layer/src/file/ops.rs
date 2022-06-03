@@ -112,7 +112,7 @@ pub(crate) fn openat(
 
     let requesting_file = OpenRelativeFileHook {
         relative_fd,
-        path: path.clone(),
+        path,
         open_options,
         file_channel_tx,
     };

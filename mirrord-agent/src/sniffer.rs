@@ -263,7 +263,7 @@ pub async fn packet_worker(
                 .ok()
         }
         (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
-        (None, Some(_)) => return Err(AgentError::NotFound(format!("Container ID not specified"))),
+        (None, Some(_)) => return Err(AgentError::NotFound("Container ID not specified".to_string())),
 
         _ => None,
     };

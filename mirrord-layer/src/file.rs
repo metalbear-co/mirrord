@@ -52,16 +52,16 @@ pub(crate) trait OpenOptionsInternalExt {
 
 impl OpenOptionsInternalExt for OpenOptionsInternal {
     fn from_flags(flags: c_int) -> Self {
-        let open_options = OpenOptionsInternal {
+        
+
+        OpenOptionsInternal {
             read: (flags & O_ACCMODE == O_RDONLY) || (flags & O_ACCMODE == O_RDWR),
             write: (flags & O_ACCMODE == O_WRONLY) || (flags & O_ACCMODE == O_RDWR),
             append: (flags & O_APPEND != 0),
             truncate: (flags & O_TRUNC != 0),
             create: (flags & O_CREAT != 0),
             create_new: false,
-        };
-
-        open_options
+        }
     }
 
     /// WARN: Using the wrong mode is undefined behavior, according to the C standard, we're not

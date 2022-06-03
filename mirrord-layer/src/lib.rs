@@ -535,24 +535,22 @@ fn enable_hooks() {
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     if SOCKETS.lock().unwrap().remove(&fd) {
         libc::close(fd)
-    } else {
-        if env::var("MIRRORD_FILE_OPS").is_ok() {
-            let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
+    } else if env::var("MIRRORD_FILE_OPS").is_ok() {
+        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
-            if let Some(remote_fd) = remote_fd {
-                let close_file_result = file::ops::close(remote_fd);
+        if let Some(remote_fd) = remote_fd {
+            let close_file_result = file::ops::close(remote_fd);
 
-                close_file_result
-                    .map_err(|fail| {
-                        error!("Failed writing file with {fail:#?}");
-                        -1
-                    })
-                    .unwrap_or_else(|fail| fail)
-            } else {
-                libc::close(fd)
-            }
+            close_file_result
+                .map_err(|fail| {
+                    error!("Failed writing file with {fail:#?}");
+                    -1
+                })
+                .unwrap_or_else(|fail| fail)
         } else {
             libc::close(fd)
         }
+    } else {
+        libc::close(fd)
     }
 }

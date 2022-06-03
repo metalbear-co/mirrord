@@ -44,7 +44,7 @@ async fn get_docker_container_pid(container_id: String) -> Result<u64, AgentErro
         .state
         .and_then(|state| state.pid)
         .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
-        .ok_or_else(|| AgentError::NotFound(format!("No pid found!")))?;
+        .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?;
     Ok(pid)
 }
 
@@ -60,7 +60,7 @@ async fn get_containerd_container_pid(container_id: String) -> Result<u64, Agent
     let pid = response
         .into_inner()
         .process
-        .ok_or_else(|| AgentError::NotFound(format!("No pid found!")))?
+        .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
         .pid;
 
     Ok(pid as u64)

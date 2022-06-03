@@ -37,7 +37,7 @@ pub struct LogMessage {
     pub message: String,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadFileRequest {
     pub fd: i32,
     pub buffer_size: usize,
@@ -104,37 +104,37 @@ impl const From<SeekFrom> for SeekFromInternal {
         }
     }
 }
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenFileRequest {
     pub path: PathBuf,
     pub open_options: OpenOptionsInternal,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenRelativeFileRequest {
     pub relative_fd: i32,
     pub path: PathBuf,
     pub open_options: OpenOptionsInternal,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SeekFileRequest {
     pub fd: i32,
     pub seek_from: SeekFromInternal,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct WriteFileRequest {
     pub fd: i32,
     pub write_bytes: Vec<u8>,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileRequest {
     pub fd: i32,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
@@ -145,7 +145,7 @@ pub enum FileRequest {
 }
 
 /// `-layer` --> `-agent` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     PortSubscribe(Vec<u16>),
     Close,
@@ -154,31 +154,31 @@ pub enum ClientMessage {
     Ping,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenFileResponse {
     pub fd: i32,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: usize,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SeekFileResponse {
     pub result_offset: u64,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct WriteFileResponse {
     pub written_amount: usize,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileResponse;
 
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileResponse {
     Open(Result<OpenFileResponse, ResponseError>),
     Read(Result<ReadFileResponse, ResponseError>),
@@ -188,7 +188,7 @@ pub enum FileResponse {
 }
 
 /// `-agent` --> `-layer` messages.
-#[derive(Encode, Decode, Debug, PartialEq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
     Close,
     NewTCPConnection(NewTCPConnection),

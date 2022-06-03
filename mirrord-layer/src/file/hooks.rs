@@ -30,8 +30,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
-        let bypassed_fd = libc::open(raw_path, open_flags);
-        bypassed_fd
+
+        libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
         let open_result = open(path, open_options);
@@ -75,9 +75,9 @@ pub(super) unsafe extern "C" fn fopen_detour(
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-        let bypassed_file = libc::fopen(raw_path, raw_mode);
 
-        bypassed_file
+
+        libc::fopen(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fopen_result = fopen(path, open_options);
@@ -121,8 +121,8 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
             })
             .unwrap_or_else(|fail| fail)
     } else {
-        let file_stream = libc::fdopen(fd, raw_mode);
-        file_stream
+
+        libc::fdopen(fd, raw_mode)
     }
 }
 
@@ -177,8 +177,8 @@ pub(super) unsafe extern "C" fn openat_detour(
                 .unwrap_or_else(|fail| fail)
         } else {
             // Nope, it's relative outside of our hands.
-            let bypassed_fd = libc::openat(fd, raw_path, open_flags);
-            bypassed_fd
+
+            libc::openat(fd, raw_path, open_flags)
         }
     }
 }
@@ -218,8 +218,8 @@ pub(crate) unsafe extern "C" fn read_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-        let read_count = libc::read(fd, out_buffer, count);
-        read_count
+
+        libc::read(fd, out_buffer, count)
     }
 }
 
@@ -252,7 +252,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 
             // TODO: The function fread() does not distinguish between end-of-file and error,
             // and callers must use feof(3) and ferror(3) to determine which occurred.
-            read_amount.try_into().unwrap()
+            read_amount
         });
 
         read_result
@@ -262,8 +262,8 @@ pub(crate) unsafe extern "C" fn fread_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-        let read_count = libc::fread(out_buffer, element_size, number_of_elements, file_stream);
-        read_count
+
+        libc::fread(out_buffer, element_size, number_of_elements, file_stream)
     }
 }
 
@@ -309,8 +309,8 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             })
             .unwrap_or_else(|fail| fail)
     } else {
-        let result_offset = libc::lseek(fd, offset, whence);
-        result_offset
+
+        libc::lseek(fd, offset, whence)
     }
 }
 
@@ -343,8 +343,8 @@ pub(crate) unsafe extern "C" fn write_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-        let written_amount = libc::write(fd, buffer, count);
-        written_amount
+
+        libc::write(fd, buffer, count)
     }
 }
 
