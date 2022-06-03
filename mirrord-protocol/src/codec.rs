@@ -151,6 +151,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     FileRequest(FileRequest),
+    Ping,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
@@ -195,6 +196,7 @@ pub enum DaemonMessage {
     TCPClose(TCPClose),
     LogMessage(LogMessage),
     FileResponse(FileResponse),
+    Pong,
 }
 
 pub struct ClientCodec {

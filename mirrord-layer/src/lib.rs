@@ -37,8 +37,9 @@ use tokio::{
         oneshot,
     },
     task,
+    time::{sleep, Duration},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod common;
@@ -321,6 +322,7 @@ async fn handle_daemon_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::CloseFileResponse>>>,
+    ping: &mut bool,
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
@@ -433,6 +435,14 @@ async fn handle_daemon_message(
                 .send(close_file.unwrap())
                 .unwrap();
         }
+        DaemonMessage::Pong => {
+            if *ping {
+                *ping = false;
+                trace!("Daemon sent pong!");
+            } else {
+                panic!("Daemon: unmatched pong!");
+            }
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -463,6 +473,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
+    let mut ping = false;
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -474,7 +485,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &read_file_handler,
                     &seek_file_handler,
                     &write_file_handler,
-                    &close_file_handler
+                    &close_file_handler,
                 ).await;
             }
             daemon_message = codec.next() => {
@@ -485,8 +496,18 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &read_file_handler,
                     &seek_file_handler,
                     &write_file_handler,
-                    &close_file_handler
+                    &close_file_handler,
+                    &mut ping,
                 ).await;
+            }
+            _ = sleep(Duration::from_secs(60)) => {
+                if !ping {
+                    codec.send(ClientMessage::Ping).await.unwrap();
+                    trace!("sent ping to daemon");
+                    ping = true;
+                } else {
+                    panic!("Client: unmatched ping");
+                }
             }
         }
     }

@@ -20,7 +20,8 @@ use tokio::{
     sync::mpsc::{self},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
+use tracing_subscriber::prelude::*;
 
 mod cli;
 mod error;
@@ -31,7 +32,6 @@ mod util;
 
 use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
-use tracing_subscriber::prelude::*;
 use util::{IndexAllocator, Subscriptions};
 
 use crate::file::file_worker;
@@ -145,6 +145,11 @@ async fn handle_peer_messages(
             state
                 .connections_subscriptions
                 .unsubscribe(peer_message.peer_id, connection_id);
+        }
+        ClientMessage::Ping => {
+            trace!("peer id {:?} sent ping", &peer_message.peer_id);
+            let peer = state.peers.get(&peer_message.peer_id).unwrap();
+            peer.channel.send(DaemonMessage::Pong).await?;
         }
         ClientMessage::FileRequest(file_request) => {
             debug!(
@@ -271,6 +276,7 @@ async fn start_agent() -> Result<(), AgentError> {
             },
             Some(peer_message) = peer_messages_rx.recv() => {
                 handle_peer_messages(&mut state, sniffer_command_tx.clone(), file_request_tx.clone(), peer_message).await?;
+
             },
             Some((peer_id, file_response)) = file_response_rx.recv() => {
                 if let Some(peer) = state.peers.get(&peer_id) {

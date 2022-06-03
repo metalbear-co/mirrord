@@ -77,9 +77,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.53"
+version = "0.1.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed6aa3524a2dfcf9fe180c51eae2b58738348d819517ceadf95789c51fff7600"
+checksum = "96cf8829f67d2eab0b2dfa42c5d0ef737e0724e4a82b01b3e292456202b19716"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "2.0.4"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.0.4"
+version = "2.1.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1346,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "2.0.4"
+version = "2.1.0"
 dependencies = [
  "actix-codec",
  "bytes",
@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "2.0.4"
+version = "2.1.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2073,7 +2073,7 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 [[package]]
 name = "rustls"
 version = "0.20.6"
-source = "git+https://github.com/rustls/rustls#a748239220151d05dda571447e4a0956f1cd3e60"
+source = "git+https://github.com/rustls/rustls#136d2d46f97ce19d71175b7e129c3520491cbdb4"
 dependencies = [
  "log",
  "ring",
@@ -2389,9 +2389,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbaf6116ab8924f39d52792136fb74fd60a80194cf1b1c6ffa6453eef1c3f942"
+checksum = "0748dd251e24453cb8717f0354206b91557e4ec8703673a4b30208f2abaf1ebf"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -23,12 +23,14 @@ use tracing::{debug, error};
 
 use crate::{
     error::AgentError,
-    runtime::{set_namespace, Runtime},
+    runtime::{get_container_pid, set_namespace},
     util::IndexAllocator,
 };
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
+
+const DEFAULT_RUNTIME: &str = "containerd";
 
 type ConnectionID = u16;
 
@@ -252,24 +254,25 @@ pub async fn packet_worker(
     container_id: Option<String>,
     container_runtime: Option<String>,
 ) -> Result<(), AgentError> {
-    debug!("setting namespace");
+    debug!("packet_worker -> setting namespace");
 
-    let default_runtime = "containerd";
     let pid = match (container_id, container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
-            Runtime::get_container_pid(&container_id, &container_runtime)
+            get_container_pid(&container_id, &container_runtime)
                 .await
                 .ok()
         }
-        (Some(container_id), None) => Runtime::get_container_pid(&container_id, default_runtime)
-            .await
-            .ok(),
+        (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
         (None, Some(_)) => return Err(AgentError::NotFound(format!("Container ID not specified"))),
+
         _ => None,
     };
 
     if let Some(pid) = pid {
-        let namespace = PathBuf::from("/proc").join(pid).join("ns/net");
+        let namespace = PathBuf::from("/proc")
+            .join(PathBuf::from(pid.to_string()))
+            .join(PathBuf::from("ns/net"));
+
         set_namespace(namespace).unwrap();
     }
 

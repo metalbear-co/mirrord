@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.1.0
+
 ### Added
 
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
@@ -14,6 +16,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - File operations behind `MIRRORD_FILE_OPS` env variable.
 
 ## 2.0.0
+
+- Add support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
+- Add a keep-alive to keep the agent-pod from exiting, closes [#63](https://github.com/metalbear-co/mirrord/issues/63)
+
+## 2.0.4
 
 Complete refactor and re-write of everything.
 
