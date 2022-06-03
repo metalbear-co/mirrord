@@ -30,7 +30,6 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
-
         libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -75,8 +74,6 @@ pub(super) unsafe extern "C" fn fopen_detour(
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) {
-
-
         libc::fopen(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
@@ -121,7 +118,6 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
             })
             .unwrap_or_else(|fail| fail)
     } else {
-
         libc::fdopen(fd, raw_mode)
     }
 }
@@ -218,7 +214,6 @@ pub(crate) unsafe extern "C" fn read_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-
         libc::read(fd, out_buffer, count)
     }
 }
@@ -262,7 +257,6 @@ pub(crate) unsafe extern "C" fn fread_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-
         libc::fread(out_buffer, element_size, number_of_elements, file_stream)
     }
 }
@@ -309,7 +303,6 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             })
             .unwrap_or_else(|fail| fail)
     } else {
-
         libc::lseek(fd, offset, whence)
     }
 }
@@ -343,7 +336,6 @@ pub(crate) unsafe extern "C" fn write_detour(
             })
             .unwrap_or_else(|fail| fail)
     } else {
-
         libc::write(fd, buffer, count)
     }
 }

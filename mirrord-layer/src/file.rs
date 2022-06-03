@@ -52,8 +52,6 @@ pub(crate) trait OpenOptionsInternalExt {
 
 impl OpenOptionsInternalExt for OpenOptionsInternal {
     fn from_flags(flags: c_int) -> Self {
-        
-
         OpenOptionsInternal {
             read: (flags & O_ACCMODE == O_RDONLY) || (flags & O_ACCMODE == O_RDWR),
             write: (flags & O_ACCMODE == O_WRONLY) || (flags & O_ACCMODE == O_RDWR),
