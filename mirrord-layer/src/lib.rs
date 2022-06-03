@@ -138,6 +138,7 @@ fn init() {
     RUNTIME.spawn(poll_agent(port_forwarder, receiver));
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
@@ -312,6 +313,7 @@ async fn handle_hook_message(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
