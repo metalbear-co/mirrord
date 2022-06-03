@@ -15,6 +15,7 @@ pub enum ResponseError {
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 #[error("Failed performing file operation {operation:?} with {raw_os_error:?} and kind {kind:?}!")]
 pub struct FileError {
+    // TODO: `operation` could be an `enum` instead of a `String` value.
     pub operation: String,
     pub raw_os_error: Option<i32>,
     pub kind: ErrorKindInternal,
