@@ -14,7 +14,7 @@ use tokio::{
     sync::mpsc::{self},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod cli;
@@ -196,7 +196,11 @@ async fn start() -> Result<()> {
                     ClientMessage::ConnectionUnsubscribe(connection_id) => {
                         state.connections_subscriptions.unsubscribe(message.peer_id, connection_id);
                     }
-
+                    ClientMessage::Ping => {
+                        trace!("peer id {:?} sent ping", &message.peer_id);
+                        let peer = state.peers.get(&message.peer_id).unwrap();
+                        peer.channel.send(DaemonMessage::Pong).await?;
+                    }
 
                 }
             },
