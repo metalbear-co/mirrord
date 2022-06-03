@@ -1,6 +1,6 @@
 use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Context};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
 use semver::Version;
@@ -60,26 +60,22 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 #[cfg(target_os = "macos")]
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-fn extract_library(dest_dir: Option<String>) -> String {
+fn extract_library(dest_dir: Option<String>) -> Result<String> {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
     let library_path = std::path::Path::new(library_file);
     let file_name = library_path.components().last().unwrap();
-    let mut file_path = match dest_dir {
+    let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
-    let mut file = match File::create(&file_path) {
-        Ok(file) => file,
-        Err(_) => {
-            file_path.pop();
-            eprintln!("Directiory \"{}\" does not exist.", file_path.display());
-            std::process::exit(1);
-        }
-    };
+    let mut file = File::create(&file_path)
+                                .with_context(|| format!(
+                                    "Path \"{}\" does not exist", file_path.display()
+                                ))?;
     let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
     file.write_all(bytes).unwrap();
     debug!("Extracted library file to {:?}", &file_path);
-    file_path.to_str().unwrap().to_string()
+    Ok(file_path.to_str().unwrap().to_string())
 }
 
 fn add_to_preload(path: &str) -> Result<()> {
@@ -124,7 +120,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
-    let library_path = extract_library(None);
+    let library_path = extract_library(None).unwrap();
     add_to_preload(&library_path).unwrap();
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
@@ -145,7 +141,7 @@ fn main() {
     match cli.commands {
         Commands::Exec(args) => exec(&args).unwrap(),
         Commands::Extract { path } => {
-            extract_library(Some(path));
+            extract_library(Some(path)).unwrap();
         }
     }
 }
