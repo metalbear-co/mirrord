@@ -1,6 +1,6 @@
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse,
@@ -65,7 +65,7 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
         let local_file_fd = libc::shm_open(
             fake_local_file_name.as_ptr(),
             O_RDONLY | O_CREAT,
-            S_IRUSR | S_IWUSR | S_IXUSR,
+            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
         );
 
         libc::shm_unlink(fake_local_file_name.as_ptr());
@@ -131,7 +131,7 @@ pub(crate) fn openat(
         let local_file_fd = libc::shm_open(
             fake_file_name.as_ptr(),
             O_RDONLY | O_CREAT,
-            S_IRUSR | S_IWUSR | S_IXUSR,
+            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
         );
 
         libc::shm_unlink(fake_file_name.as_ptr());
@@ -192,6 +192,7 @@ pub(crate) fn fdopen(
 /// `open`.
 pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
     debug!("read -> trying to read valid file {:?}.", fd);
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
 
     let reading_file = ReadFileHook {

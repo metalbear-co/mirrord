@@ -22,6 +22,6 @@ pub enum LayerError {
     #[error("mirrord-layer: Failed to find local fd `{0}`!")]
     LocalFDNotFound(RawFd),
 
-    #[error("mirrord-layer: HOOK_SENDER is `None`!!")]
+    #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
 }

@@ -291,10 +291,11 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             libc::SEEK_SET => SeekFrom::Start(offset as u64),
             libc::SEEK_CUR => SeekFrom::Current(offset),
             libc::SEEK_END => SeekFrom::End(offset),
-            libc::SEEK_DATA => todo!(),
-            libc::SEEK_HOLE => todo!(),
-            _other => {
-                error!("lseek_detour -> invalid value for whence {:#?}", whence);
+            invalid => {
+                error!(
+                    "lseek_detour -> potential invalid value {:#?} for whence {:#?}",
+                    invalid, whence
+                );
                 return -1;
             }
         };
