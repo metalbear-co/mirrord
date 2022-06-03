@@ -6,6 +6,7 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+- Added a graceful exit for system paths that do not exist.
 
 ## 2.1.0
 ### Added
