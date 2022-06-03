@@ -1,174 +1,105 @@
 import * as vscode from 'vscode';
-import { MirrorD, MirrorEvent, K8SAPI } from '@metalbear/mirrord-core';
 
-class ProcessCapturer implements vscode.DebugAdapterTracker {
-	static pid: number;
+const semver = require('semver');
+const https = require('https');
+const k8s = require('@kubernetes/client-node');
+const path = require('path');
+const os = require('os');
 
-	onDidSendMessage(m: any) {
-		if (m.event === 'process' && m.body.systemProcessId) {
-			ProcessCapturer.pid = m.body.systemProcessId;
-		}
-	}
-}
+const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = {
+	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
+	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
+};
+const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 
-let running = false;
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-
-let openedPods = new Map<string, MirrorD>();
-let k8sApi: K8SAPI | null = null;
-
-
-
-async function cleanup(sessionId?: string, hideButtons: boolean = true) {
-	vscode.commands.executeCommand('setContext', 'mirrord.activated', false);
-	if (sessionId) {
-		const mirror = openedPods.get(sessionId);
-		await mirror?.stop();
-	}
-	else {
-		for (const mirror of openedPods.values()) {
-			try { await mirror.stop(); }
-			catch (e) { console.error(e); }
-		}
-	}
-	if (hideButtons) {
-		for (const button of Object.values(buttons)) {
-			button.hide();
-		}
-	}
-	buttons.toggle.text = "Start mirrord";
-	running = false;
-}
-
-async function runMirrorD() {
-	let session = vscode.debug.activeDebugSession;
-	if (session === undefined) {
-		return;
-	}
-	if (k8sApi === null) {
-		return;
-	}
-
-	if (running) {
-		cleanup(session.id, false);
-	} else {
-		running = true;
-		buttons.toggle.text = 'Stop mirrord (loading)';
-
-		const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
-		// Get pods from kubectl and let user select one to mirror
-		let pods = await k8sApi.listPods(namespace);
-		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
-
-		vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
-			if (session === undefined || podName === undefined || k8sApi === null) {
-				return;
-			}
-			// Infer container id from pod name
-			let selectedPod = pods.body.items.find((pod: { metadata: { name: any; }; }) => pod.metadata.name === podName);
-			let containerID = selectedPod.status.containerStatuses[0].containerID.split('//')[1];
-			let nodeName = selectedPod.spec.nodeName;
-
-			// Infer port from process ID
-			let port: string = '';
-			if (session.configuration.mirrord && session.configuration.mirrord.port) {
-				port = session.configuration.mirrord.port;
-			} else {
-				var netstat = require('node-netstat');
-				netstat.commands['darwin'].args.push('-a'); // The default args don't list LISTEN ports on OSX
-				// TODO: Check on other linux, windows
-				netstat({
-					filter: {
-						pid: ProcessCapturer.pid,
-						protocol: 'tcp',
-					},
-					sync: true,
-					limit: 5,
-				}, (data: { state: string; local: { port: string; }; }) => {
-					if (data.state === 'LISTEN') {
-						port = data.local.port;
-					}
-				});
-			}
-
-			if (!port) {
-				throw new Error("Could not find the debugged process' port");
-			}
-
-			let packetCount = 0;
-
-
-			function updateCallback(event: MirrorEvent, data: any) {
-				switch (event) {
-					case MirrorEvent.packetReceived:
-						packetCount++;
-						buttons.toggle.text = 'Stop mirrord (packets mirrored: ' + packetCount + ')';
-						break;
-				}
-			}
-
-			if (k8sApi === null) {
-				return;
-			}
-			let remotePort = globalContext.workspaceState.get<number>('remotePort', 80);
-			let mirrord = new MirrorD(nodeName, containerID, [{ remotePort: remotePort, localPort: parseInt(port) }], namespace, k8sApi, updateCallback);
-			openedPods.set(session.id, mirrord);
-			await mirrord.start();
-			buttons.toggle.text = 'Stop mirrord';
-		});
-	}
-};
+let k8sApi: any;
 
 async function changeSettings() {
-	let namespace = globalContext.workspaceState.get<string>('namespace', 'default');
-	let remotePort = globalContext.workspaceState.get<number>('remotePort', 80);
+	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
+	let impersonatedPodNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
 
-	const options = ['Change namespace (current: ' + namespace + ')', 'Change remote port (current: ' + remotePort + ')'];
+	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
+	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
 			return;
 		}
 
 		if (setting.startsWith('Change namespace')) {
-			let namespaces = await k8sApi?.api.listNamespace();
+			let namespaces = await k8sApi.listNamespace();
 			let namespaceNames = namespaces.body.items.map((namespace: { metadata: { name: any; }; }) => { return namespace.metadata.name; });
 			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
 				if (namespaceName === undefined) {
 					return;
 				}
-				globalContext.workspaceState.update('namespace', namespaceName);
+				if (setting.startsWith('Change namespace for mirrord agent')) {
+					globalContext.workspaceState.update('agentNamespace', namespaceName);
+				} else if (setting.startsWith('Change namespace for impersonated pod')) {
+					globalContext.workspaceState.update('impersonatedPodNamespace', namespaceName);
+				}
 			});
 
-		} else if (setting.startsWith('Change remote port')) {
-			vscode.window.showInputBox({ prompt: 'Enter new remote port' }).then(async port => {
-				if (port === undefined) {
-					return;
-				}
-				globalContext.workspaceState.update('remotePort', parseInt(port));
-			});
 		}
 	});
 }
 
+async function toggle(state: vscode.Memento, button: vscode.StatusBarItem) {
+	if (state.get('enabled')) {
+		// vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
+		state.update('enabled', false);
+		button.text = 'Enable mirrord';
+	} else {
+		state.update('enabled', true);
+		button.text = 'Disable mirrord';
+	}
+}
+
+async function checkVersion(version: string) {
+	let versionUrl = versionCheckEndpoint + '?source=1&version=' + version;
+	https.get(versionUrl, (res: any) => {
+		res.on('data', (d: any) => {
+			const config = vscode.workspace.getConfiguration();
+			if (config.get('mirrord.promptOutdated') !== false) {
+				if (semver.lt(version, d.toString())) {
+					vscode.window.showInformationMessage('Your version of mirrord is outdated, you should update.', 'Update', "Don't show again").then(item => {
+						if (item === 'Update') {
+							vscode.env.openExternal(vscode.Uri.parse('vscode:extension/MetalBear.mirrord'));
+						} else if (item === "Don't show again") {
+							config.update('mirrord.promptOutdated', false);
+						}
+					});
+				}
+			}
+		});
+
+	}).on('error', (e: any) => {
+		console.error(e);
+	});
+}
+
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
+	// TODO: Download mirrord according to platform
+	checkVersion(context.extension.packageJSON.version);
 	globalContext = context;
-	k8sApi = new K8SAPI();
-	openedPods = new Map();
-	let trackerDisposable = vscode.debug.registerDebugAdapterTrackerFactory('*', {
-		createDebugAdapterTracker(_session: vscode.DebugSession) {
-			return new ProcessCapturer();
-		}
-	});
-	context.subscriptions.push(trackerDisposable);
+	let k8sConfig = new k8s.KubeConfig();
+	k8sConfig.loadFromDefault();
+	k8sApi = k8sConfig.makeApiClient(k8s.CoreV1Api);
 
-	buttons = {toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0)};
-	
+	context.globalState.update('enabled', false);
+	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
+	buttons = { toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0) };
+
 	const toggleCommandId = 'mirrord.toggleMirroring';
-	context.subscriptions.push(vscode.commands.registerCommand(toggleCommandId, runMirrorD));
-	buttons.toggle.text = 'Start mirrord';
+	context.subscriptions.push(vscode.commands.registerCommand(toggleCommandId, async function () {
+		toggle(context.globalState, buttons.toggle);
+	}));
+
+	buttons.toggle.text = 'Enable mirrord';
 	buttons.toggle.command = toggleCommandId;
 
 	const settingsCommandId = 'mirrord.changeSettings';
@@ -178,27 +109,56 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	for (const button of Object.values(buttons)) {
 		context.subscriptions.push(button);
+		button.show();
 	};
 
+}
 
-	let debugDisposable = vscode.debug.onDidStartDebugSession(async _session => {
-		for (const button of Object.values(buttons)) {
-			button.show();
+
+class ConfigurationProvider implements vscode.DebugConfigurationProvider {
+	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
+		if (!globalContext.globalState.get('enabled')) {
+			return new Promise(resolve => { resolve(config); });
 		}
-	});
-	context.subscriptions.push(debugDisposable);
 
-	let debugEndedDisposable = vscode.debug.onDidTerminateDebugSession(async (session: vscode.DebugSession) => {
-		cleanup(session.id);
+		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
+			return new Promise(resolve => {
+				return resolve(config);
+			});
+		}
 
-	});
+		const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
+		// Get pods from kubectl and let user select one to mirror
+		let pods = await k8sApi.listNamespacedPod(namespace);
+		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
-	context.subscriptions.push(debugEndedDisposable);
-	vscode.commands.executeCommand('setContext', 'mirrord.activated', true);
+		return await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+			return new Promise(resolve => {
+				console.log(config);
+				const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
+				// Get pods from kubectl and let user select one to mirror
+				if (k8sApi === null) {
+					return;
+				}
 
+				let libraryPath;
+				if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
+					libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
+				} else {
+					libraryPath = globalContext.extensionPath;
+				}
+				let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
+				config.env = {
+					...config.env, ...{
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
+					}
+				};
+				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
+				return resolve(config);
+			});
+		});
+
+	}
 }
 
-// this method is called when your extension is deactivated
-export function deactivate() {
-	cleanup();
-}
