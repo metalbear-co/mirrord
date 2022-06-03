@@ -64,11 +64,18 @@ fn extract_library(dest_dir: Option<String>) -> String {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
     let library_path = std::path::Path::new(library_file);
     let file_name = library_path.components().last().unwrap();
-    let file_path = match dest_dir {
+    let mut file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
-    let mut file = File::create(file_path.clone()).unwrap();
+    let mut file = match File::create(&file_path) {
+        Ok(file) => file,
+        Err(_) => {
+            file_path.pop();
+            eprintln!("Directiory \"{}\" does not exist.", file_path.display());
+            std::process::exit(1);
+        }
+    };
     let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
     file.write_all(bytes).unwrap();
     debug!("Extracted library file to {:?}", &file_path);
