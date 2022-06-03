@@ -23,7 +23,7 @@ use crate::{
 };
 
 lazy_static! {
-    static ref SOCKETS: Mutex<HashSet<Socket>> = Mutex::new(HashSet::new());
+    pub(crate) static ref SOCKETS: Mutex<HashSet<Socket>> = Mutex::new(HashSet::new());
     pub static ref CONNECTION_QUEUE: Mutex<ConnectionQueue> =
         Mutex::new(ConnectionQueue::default());
 }
@@ -96,7 +96,7 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-struct Socket {
+pub(crate) struct Socket {
     fd: RawFd,
     domain: c_int,
     type_: c_int,
@@ -417,16 +417,6 @@ unsafe extern "C" fn getsockname_detour(
     getsockname(sockfd, address, address_len)
 }
 
-// unsafe extern "C" fn setsockopt_detour(
-//     _sockfd: i32,
-//     _level: i32,
-//     _optname: i32,
-//     _optval: *mut c_char,
-//     _optlen: socklen_t,
-// ) -> i32 {
-//     0
-// }
-
 /// Fill in the sockaddr structure for the given address.
 #[inline]
 fn fill_address(
@@ -508,21 +498,13 @@ unsafe extern "C" fn accept_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> i32 {
-    let res = libc::accept(sockfd, address, address_len);
-    if res < 0 {
-        return res;
+    let accept_fd = libc::accept(sockfd, address, address_len);
+
+    if accept_fd == -1 {
+        accept_fd
+    } else {
+        accept(sockfd, address, address_len, accept_fd)
     }
-    accept(sockfd, address, address_len, res)
-    //     let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
-
-    //     if !addr.is_null() {
-    //         debug!("received non-null address in accept");
-    //         let os_addr: OsSocketAddr = socket_addr.into();
-    //         std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
-    //     }
-
-    //     let connection_id = SOCKETS.read_single_connection(sockfd);
-    //     SOCKETS.create_data_socket(connection_id, socket_addr)
 }
 
 #[cfg(target_os = "linux")]
@@ -532,31 +514,22 @@ unsafe extern "C" fn accept4_detour(
     address_len: *mut socklen_t,
     flags: i32,
 ) -> i32 {
-    let res = libc::accept4(sockfd, address, address_len, flags);
-    if res < 0 {
-        return res;
+    let accept_fd = libc::accept4(sockfd, address, address_len, flags);
+
+    if accept_fd == -1 {
+        accept_fd
+    } else {
+        accept(sockfd, address, address_len, accept_fd)
     }
-    accept(sockfd, address, address_len, res)
 }
 
-fn close(fd: c_int) {
-    SOCKETS.lock().unwrap().remove(&fd);
-}
-
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    close(fd);
-    libc::close(fd)
-}
-
-pub fn enable_hooks(mut interceptor: Interceptor) {
-    hook!(interceptor, "close", close_detour);
+pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
     hook!(interceptor, "connect", connect_detour);
     try_hook!(interceptor, "getpeername", getpeername_detour);
     try_hook!(interceptor, "getsockname", getsockname_detour);
-    // hook!(interceptor, "setsockopt", setsockopt_detour);
     #[cfg(target_os = "linux")]
     {
         try_hook!(interceptor, "uv__accept4", accept4_detour);

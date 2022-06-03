@@ -8,10 +8,7 @@
       "name": "Launch index.ts",
       "type": "pwa-node",
       "request": "launch",
-      "runtimeArgs": [
-        "-r",
-        "ts-node/register"
-      ],
+      "runtimeArgs": ["-r", "ts-node/register"],
       "args": [
         "${workspaceFolder}/cli/src/index.ts",
         "nginx-deployment-66b6c48dd5-zshg9"
@@ -19,30 +16,47 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
-      ],
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "name": "Launch Extension",
-      "outFiles": [
-        "${workspaceFolder}/vscode-ext/out/**/*.js"
-      ],
+      "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
       "request": "launch",
       "type": "pwa-extensionHost"
     },
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug mirrord-layer with app.js",
+      "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/app.js"],
-
+      "args": ["${workspaceFolder}/sample/app.mjs"],
+      "sourceMap": {},
       "env": {
-          "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
-          "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-          "RUST_LOG": "warn,mirrord=trace",
-          "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-          "MIRRORD_AGENT_RUST_LOG": "trace",
-      },
-  }
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
+        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        "RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_FILE_OPS": "",
+        "RUST_BACKTRACE": "short"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "sample.rs: Debug mirrord-layer",
+      "program": "${workspaceFolder}/target/debug/sample-rust",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": ["rust"],
+      "env": {
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
+        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        "RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_FILE_OPS": "",
+        "RUST_BACKTRACE": "short"
+      }
+    }
   ]
 }

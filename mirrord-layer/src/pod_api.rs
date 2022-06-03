@@ -14,6 +14,7 @@ use tracing::{error, warn};
 use crate::config;
 struct RuntimeData {
     container_id: String,
+    container_runtime: String,
     node_name: String,
 }
 
@@ -23,17 +24,31 @@ impl RuntimeData {
         let pod = pods_api.get(pod_name).await.unwrap();
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-        let container_id = container_statuses
+        let container_info = container_statuses
             .first()
             .unwrap()
             .container_id
             .as_ref()
             .unwrap()
-            .split("//")
-            .last()
-            .unwrap();
+            .split("://")
+            .collect::<Vec<&str>>();
+
+        let container_runtime = match container_info.first() {
+            Some(container_runtime) => {
+                let runtimes = vec!["docker", "containerd"];
+                if !runtimes.contains(container_runtime) {
+                    panic!("Unknown container runtime: {}", container_runtime);
+                }
+                container_runtime
+            }
+            None => panic!("No container runtime found"),
+        };
+
+        let container_id = container_info.last().unwrap();
+
         RuntimeData {
             container_id: container_id.to_string(),
+            container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
         }
     }
@@ -90,7 +105,10 @@ pub async fn create_agent(
                             "image": agent_image,
                             "imagePullPolicy": "IfNotPresent",
                             "securityContext": {
-                                "privileged": true
+                                "privileged": true,
+                                "capabilities": {
+                                    "add": ["CAP_SYS_CHROOT", "CAP_SYS_ADMIN"],
+                                }
                             },
                             "volumeMounts": [
                                 {
@@ -102,6 +120,8 @@ pub async fn create_agent(
                                 "./mirrord-agent",
                                 "--container-id",
                                 runtime_data.container_id,
+                                "--container-runtime",
+                                runtime_data.container_runtime,
                                 "-t",
                                 "30"
                             ],
@@ -144,7 +164,8 @@ pub async fn create_agent(
     let pod = pods.items.first().unwrap();
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), running)
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
         .await
         .unwrap();
     let pf = pods_api.portforward(&pod_name, &[61337]).await.unwrap();
