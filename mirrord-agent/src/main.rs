@@ -217,7 +217,8 @@ async fn peer_handler(
     Ok(())
 }
 
-async fn start_agent() -> Result<(), AgentError> {
+/// WARN: **Never** returns `Ok`.
+async fn start_agent() -> Result<!, AgentError> {
     let args = parse_args();
 
     let listener = TcpListener::bind(SocketAddrV4::new(
@@ -365,7 +366,7 @@ async fn start_agent() -> Result<(), AgentError> {
     tokio::time::timeout(std::time::Duration::from_secs(10), packet_task).await???;
     tokio::time::timeout(std::time::Duration::from_secs(10), file_task).await???;
 
-    Ok(())
+    // Unreachable
 }
 
 #[tokio::main]
