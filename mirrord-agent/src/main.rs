@@ -158,6 +158,7 @@ async fn start() -> Result<()> {
         packet_command_rx,
         args.interface.clone(),
         args.container_id.clone(),
+        args.container_runtime.clone(),
     ));
     loop {
         select! {

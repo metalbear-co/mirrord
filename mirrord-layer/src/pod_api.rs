@@ -14,7 +14,9 @@ use tracing::{error, warn};
 use crate::config;
 struct RuntimeData {
     container_id: String,
+    container_runtime: String,
     node_name: String,
+    socket_path: String,
 }
 
 impl RuntimeData {
@@ -23,18 +25,28 @@ impl RuntimeData {
         let pod = pods_api.get(pod_name).await.unwrap();
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-        let container_id = container_statuses
+        let container_info = container_statuses
             .first()
             .unwrap()
             .container_id
             .as_ref()
             .unwrap()
-            .split("//")
-            .last()
-            .unwrap();
+            .split("://")
+            .collect::<Vec<&str>>();
+
+        let (container_runtime, socket_path) = match container_info.first() {
+            Some(&"docker") => ("docker", "/var/run/docker.sock"),
+            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
+            _ => panic!("unspported container runtime"),
+        };
+
+        let container_id = container_info.last().unwrap();
+
         RuntimeData {
             container_id: container_id.to_string(),
+            container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
+            socket_path: socket_path.to_string(),
         }
     }
 }
@@ -78,9 +90,9 @@ pub async fn create_agent(
                     "restartPolicy": "Never",
                     "volumes": [
                         {
-                            "name": "containerd",
+                            "name": "sockpath",
                             "hostPath": {
-                                "path": "/run/containerd/containerd.sock"
+                                "path": runtime_data.socket_path
                             }
                         }
                     ],
@@ -94,16 +106,18 @@ pub async fn create_agent(
                             },
                             "volumeMounts": [
                                 {
-                                    "mountPath": "/run/containerd/containerd.sock",
-                                    "name": "containerd"
+                                    "mountPath": runtime_data.socket_path,
+                                    "name": "sockpath"
                                 }
                             ],
                             "command": [
                                 "./mirrord-agent",
                                 "--container-id",
                                 runtime_data.container_id,
+                                "--container-runtime",
+                                runtime_data.container_runtime,
                                 "-t",
-                                "30"
+                                "30",
                             ],
                             "env": [{"name": "RUST_LOG", "value": log_level}],
                         }

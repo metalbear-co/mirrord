@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
 };
 
 use anyhow::{anyhow, Result};
@@ -22,12 +23,14 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
-    runtime::{get_container_namespace, set_namespace},
+    runtime::{get_container_pid, set_namespace},
     util::IndexAllocator,
 };
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
+
+const DEFAULT_RUNTIME: &str = "containerd";
 
 type ConnectionID = u16;
 
@@ -236,13 +239,28 @@ pub async fn packet_worker(
     mut rx: Receiver<SnifferCommand>,
     interface: String,
     container_id: Option<String>,
+    container_runtime: Option<String>,
 ) -> Result<()> {
     debug!("setting namespace");
-    if let Some(container_id) = container_id {
-        let namespace = get_container_namespace(container_id).await?;
-        debug!("Found namespace to attach to {:?}", &namespace);
-        set_namespace(&namespace)?;
+
+    let pid = match (container_id, container_runtime) {
+        (Some(container_id), Some(container_runtime)) => {
+            get_container_pid(&container_id, &container_runtime)
+                .await
+                .ok()
+        }
+        (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
+        (None, Some(_)) => return Err(anyhow!("Container ID not specified")),
+        _ => None,
+    };
+
+    if let Some(pid) = pid {
+        let namespace = PathBuf::from("/proc")
+            .join(PathBuf::from(pid.to_string()))
+            .join(PathBuf::from("ns/net"));
+        set_namespace(namespace).unwrap();
     }
+
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;
     debug!("done prepare sniffer");
