@@ -6,6 +6,8 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Changed
+- Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
 
 ## 2.1.0
 ### Added
