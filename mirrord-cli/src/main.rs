@@ -70,7 +70,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<String> {
     };
     let mut file = File::create(&file_path)
                                 .with_context(|| format!(
-                                    "Path \"{}\" does not exist", file_path.display()
+                                    "Path \"{}\" creation failed", file_path.display()
                                 ))?;
     let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
     file.write_all(bytes).unwrap();
