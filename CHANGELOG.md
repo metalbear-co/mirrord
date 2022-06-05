@@ -7,7 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Changed
-- Added a graceful exit for system paths that do not exist.
+- Added graceful exit for library extraction logic in case of error
 
 ## 2.1.0
 ### Added
