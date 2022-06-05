@@ -11,10 +11,9 @@ use tokio::{
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    task,
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 mod common;
 mod config;
@@ -92,8 +91,8 @@ async fn handle_hook_message(
 #[inline]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
+    mirror_api: &mut TCPApi,
     ping: &mut bool,
-    mirror_api: &mut TCPApi
 ) {
     match daemon_message {
         DaemonMessage::NewTCPConnection(conn) => {
