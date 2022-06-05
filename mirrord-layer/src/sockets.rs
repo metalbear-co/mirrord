@@ -592,6 +592,7 @@ unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     dup2_fd
 }
 
+#[cfg(target_os = "linux")]
 unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
     let dup3_fd = libc::dup3(oldfd, newfd, flags);
     if dup3_fd == -1 {
@@ -616,7 +617,6 @@ pub fn enable_hooks(mut interceptor: Interceptor) {
     hook!(interceptor, "fcntl", fcntl_detour);
     hook!(interceptor, "dup", dup_detour);
     hook!(interceptor, "dup2", dup2_detour);
-    hook!(interceptor, "dup3", dup3_detour);
     try_hook!(interceptor, "getpeername", getpeername_detour);
     try_hook!(interceptor, "getsockname", getsockname_detour);
     // hook!(interceptor, "setsockopt", setsockopt_detour);
@@ -624,6 +624,7 @@ pub fn enable_hooks(mut interceptor: Interceptor) {
     {
         try_hook!(interceptor, "uv__accept4", accept4_detour);
         try_hook!(interceptor, "accept4", accept4_detour);
+        try_hook!(interceptor, "dup3", dup3_detour);
     }
     try_hook!(interceptor, "accept", accept_detour);
 }

@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
 - Add support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
 - Add a keep-alive to keep the agent-pod from exiting, closes [#63](https://github.com/metalbear-co/mirrord/issues/63)
+- Add detours for fcntl/dup system calls, closes [#51](https://github.com/metalbear-co/mirrord/issues/51)
 
 ## 2.0.4
 Complete refactor and re-write of everything.
