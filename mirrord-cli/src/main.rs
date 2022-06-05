@@ -120,7 +120,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
-    let library_path = extract_library(None).unwrap();
+    let library_path = extract_library(None)?;
     add_to_preload(&library_path).unwrap();
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
@@ -130,7 +130,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-fn main() {
+fn main() -> Result<()> {
     registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -139,9 +139,10 @@ fn main() {
 
     let cli = Cli::parse();
     match cli.commands {
-        Commands::Exec(args) => exec(&args).unwrap(),
+        Commands::Exec(args) => exec(&args),
         Commands::Extract { path } => {
-            extract_library(Some(path)).unwrap();
+            extract_library(Some(path));
+            Ok(())
         }
     }
 }
