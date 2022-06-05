@@ -73,12 +73,10 @@ impl OpenOptionsInternalExt for OpenOptionsInternal {
                         open_options.write = true;
                         open_options.create = true;
                         open_options.truncate = true;
-                        // open_options.flags |= CREATION_FLAGS as i32;
                     }
                     'a' => {
                         open_options.append = true;
                         open_options.create = true;
-                        // open_options.flags |= CREATION_FLAGS as i32;
                     }
                     '+' => {
                         open_options.read = true;

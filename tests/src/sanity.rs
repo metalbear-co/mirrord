@@ -63,8 +63,8 @@ mod tests {
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
         // assuming only one job is running
-        // to make the tests parallel we need to figure a way to get the exact job name when len() >
-        // 1
+        // to make the tests parallel we need to figure a way to get the exact job name
+        // when len() > 1
         assert_eq!(jobs.items.len(), 1);
 
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), "default");

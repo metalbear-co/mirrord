@@ -18,7 +18,6 @@ use crate::{
     HOOK_SENDER,
 };
 
-#[inline]
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
         HOOK_SENDER

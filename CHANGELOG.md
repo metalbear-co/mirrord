@@ -7,13 +7,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+- Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
+- File operations are now available behind the `MIRRORD_FILE_OPS` env variable, this means that mirrod now hooks into the following file functions: `open`, `fopen`, `fdopen`, `openat`, `read`, `fread`, `fileno`, `lseek`, and `write` to provide a mirrored file system.
+
 ## 2.1.0
 
 ### Added
 
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
-- Set `MIRRORD_CHECK_VERSION` to false to make E2E tests not read update messages.
-- File operations behind `MIRRORD_FILE_OPS` env variable.
+- Add support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
+- Add a keep-alive to keep the agent-pod from exiting, closes [#63](https://github.com/metalbear-co/mirrord/issues/63)
 
 ## 2.0.0
 

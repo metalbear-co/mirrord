@@ -23,8 +23,9 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, DaemonMessage, FileRequest, FileResponse,
-    OpenFileRequest, OpenRelativeFileRequest, ReadFileRequest, SeekFileRequest, WriteFileRequest,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
+    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tokio::{
@@ -319,11 +320,11 @@ async fn handle_daemon_message(
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
     ping: &mut bool,
 ) {
     match daemon_message {
