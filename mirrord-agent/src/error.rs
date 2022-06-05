@@ -1,12 +1,18 @@
 use mirrord_protocol::{DaemonMessage, FileRequest, FileResponse};
 use thiserror::Error;
 
-use crate::sniffer::{SnifferCommand, SnifferOutput};
+use crate::{
+    sniffer::{SnifferCommand, SnifferOutput},
+    PeerMessage,
+};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
     #[error("Agent failed with `{0}`")]
     IO(#[from] std::io::Error),
+
+    #[error("PeerMessage sender failed with `{0}`")]
+    SendPeerMessage(#[from] tokio::sync::mpsc::error::SendError<PeerMessage>),
 
     #[error("SnifferCommand sender failed with `{0}`")]
     SendSnifferCommand(#[from] tokio::sync::mpsc::error::SendError<SnifferCommand>),

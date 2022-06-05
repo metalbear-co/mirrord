@@ -8,7 +8,6 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4},
 };
 
-use anyhow::Result;
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
@@ -100,7 +99,7 @@ impl State {
 }
 
 #[derive(Debug)]
-struct PeerMessage {
+pub struct PeerMessage {
     client_message: ClientMessage,
     peer_id: PeerID,
 }
@@ -171,7 +170,7 @@ async fn peer_handler(
     peer_messages_tx: mpsc::Sender<PeerMessage>,
     stream: TcpStream,
     peer_id: PeerID,
-) -> Result<()> {
+) -> Result<(), AgentError> {
     let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
     loop {
@@ -370,7 +369,7 @@ async fn start_agent() -> Result<!, AgentError> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), AgentError> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env())

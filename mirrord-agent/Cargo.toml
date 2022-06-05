@@ -24,7 +24,6 @@ serde_json.workspace = true
 pcap = { git = "https://github.com/aviramha/pcap.git", branch="make_codec_public", features =["capture-stream"] }
 pnet = "0.29.0"
 nix.workspace = true
-anyhow.workspace = true
 clap.workspace = true
 mirrord-protocol = { path = "../mirrord-protocol"}
 actix-codec.workspace = true
@@ -32,8 +31,8 @@ futures.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio-stream.workspace = true
+thiserror.workspace = true
 num-traits = "0.2.14"
-thiserror = "1"
 bollard = "0.12.0"
 
 [dev-dependencies]

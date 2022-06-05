@@ -4,6 +4,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
+    lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::Mutex,
@@ -11,7 +12,6 @@ use std::{
 
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
-use lazy_static::lazy_static;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error};
@@ -22,11 +22,11 @@ use crate::{
     HOOK_SENDER,
 };
 
-lazy_static! {
-    pub(crate) static ref SOCKETS: Mutex<HashSet<Socket>> = Mutex::new(HashSet::new());
-    pub static ref CONNECTION_QUEUE: Mutex<ConnectionQueue> =
-        Mutex::new(ConnectionQueue::default());
-}
+pub(crate) static SOCKETS: SyncLazy<Mutex<HashSet<Socket>>> =
+    SyncLazy::new(|| Mutex::new(HashSet::new()));
+
+pub static CONNECTION_QUEUE: SyncLazy<Mutex<ConnectionQueue>> =
+    SyncLazy::new(|| Mutex::new(ConnectionQueue::default()));
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
