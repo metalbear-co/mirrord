@@ -145,12 +145,12 @@ async fn handle_hook_message(
     port_mapping: &mut HashMap<Port, ListenData>,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
-    open_relative_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<mirrord_protocol::CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    open_relative_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
