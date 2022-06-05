@@ -1,3 +1,4 @@
+#![feature(c_variadic)]
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
