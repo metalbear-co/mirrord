@@ -18,11 +18,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
 - Add a keep-alive to keep the agent-pod from exiting, closes [#63](https://github.com/metalbear-co/mirrord/issues/63)
 
-## 2.0.0
-
-- Add support for docker runtime, closes [#95](https://github.com/metalbear-co/mirrord/issues/95).
-- Add a keep-alive to keep the agent-pod from exiting, closes [#63](https://github.com/metalbear-co/mirrord/issues/63)
-
 ## 2.0.4
 
 Complete refactor and re-write of everything.
