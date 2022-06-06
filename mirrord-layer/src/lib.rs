@@ -8,6 +8,7 @@ use std::{
     lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    str::FromStr,
     sync::Mutex,
 };
 
@@ -54,6 +55,7 @@ mod sockets;
 use crate::{
     common::{HookMessage, Port},
     config::Config,
+    error::LayerError,
     macros::hook,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
@@ -525,8 +527,23 @@ fn enable_hooks() {
 
     sockets::enable_socket_hooks(&mut interceptor);
 
-    if env::var("MIRRORD_FILE_OPS").is_ok() {
-        file::hooks::enable_file_hooks(&mut interceptor);
+    let enable_file_ops = env::var("MIRRORD_FILE_OPS")
+        .map_err(LayerError::from)
+        .and_then(|env_value| FromStr::from_str(&env_value).map_err(LayerError::from));
+
+    match enable_file_ops {
+        Ok(enabled) => {
+            if enabled {
+                file::hooks::enable_file_hooks(&mut interceptor);
+            }
+        }
+        Err(fail) => {
+            error!(
+                "Failed loading `MIRRORD_FILE_OPS` environment variable with {:#?}",
+                fail
+            );
+            panic!("mirrord-layer::enable_hooks failed with {:#?}", fail);
+        }
     }
 
     interceptor.end_transaction();

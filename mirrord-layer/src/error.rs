@@ -1,4 +1,4 @@
-use std::os::unix::io::RawFd;
+use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
 
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
@@ -7,6 +7,12 @@ use super::HookMessage;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
+    #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
+    VarError(#[from] VarError),
+
+    #[error("mirrord-layer: Parsing `bool` value failed with `{0}`!")]
+    ParseBoolError(#[from] ParseBoolError),
+
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendError(#[from] SendError<HookMessage>),
 
