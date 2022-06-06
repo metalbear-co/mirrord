@@ -5,7 +5,7 @@ members = [
     "mirrord-agent",
     "mirrord-layer",
     "mirrord-cli",
-    "sample-rust",
+    "sample/rust",
     "tests"
 ]
 

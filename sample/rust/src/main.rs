@@ -51,6 +51,7 @@ fn main() -> Result<()> {
         let filepath = CString::new("/tmp/rust_sample.txt").unwrap();
         let file_mode = CString::new("r").unwrap();
         let file_ptr = libc::fopen(filepath.as_ptr(), file_mode.as_ptr());
+
         let file_fd: i32 = *(file_ptr as *const _);
         println!(">>>>> fopen local fd {:#?}", file_fd);
 
@@ -88,5 +89,5 @@ fn handle_connection(mut stream: TcpStream) {
 
     let _ = stream.read(&mut buffer).unwrap();
 
-    println!("Request: {}", String::from_utf8_lossy(&buffer[..]));
+    println!(">>>>> request is {}", String::from_utf8_lossy(&buffer[..]));
 }

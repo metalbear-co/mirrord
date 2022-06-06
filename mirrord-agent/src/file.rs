@@ -192,13 +192,13 @@ pub async fn file_worker(
         Some(container_id) => {
             get_container_pid(
                 &container_id,
-                &container_runtime.unwrap_or(DEFAULT_RUNTIME.to_string()),
+                &container_runtime.unwrap_or_else(|| DEFAULT_RUNTIME.to_string()),
             )
             .await
         }
         None => Err(AgentError::NotFound(format!(
-            "Container ID not specified {:#?}!",
-            container_id
+            "file_worker -> Container ID not specified {:#?} for runtime {:#?}!",
+            container_id, container_runtime
         ))),
     }?;
 

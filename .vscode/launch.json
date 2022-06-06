@@ -27,7 +27,7 @@
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/app.mjs"],
+      "args": ["${workspaceFolder}/sample/node/app.mjs"],
       "sourceMap": {},
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
