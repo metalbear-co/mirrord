@@ -14,6 +14,7 @@ mod tests {
     use crate::utils::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_complete_node_api() {
         _test_complete_node_api().await;
     }

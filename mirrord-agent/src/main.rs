@@ -250,7 +250,6 @@ async fn start_agent() -> Result<!, AgentError> {
         file_response_tx,
         args.container_id.clone(),
         args.container_runtime.clone(),
-        args.enable_fs,
     ));
 
     loop {

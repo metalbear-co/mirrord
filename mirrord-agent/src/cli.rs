@@ -22,10 +22,6 @@ pub struct Args {
     /// Interface to use
     #[clap(short = 'i', long, default_value = "eth0")]
     pub interface: String,
-
-    /// Enable file hooking
-    #[clap(short = 'f', long)]
-    pub enable_fs: bool,
 }
 
 pub fn parse_args() -> Args {

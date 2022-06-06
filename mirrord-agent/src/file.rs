@@ -185,7 +185,6 @@ pub async fn file_worker(
     file_response_tx: Sender<(PeerID, FileResponse)>,
     container_id: Option<String>,
     container_runtime: Option<String>,
-    enable_fs: bool,
 ) -> Result<!, AgentError> {
     debug!("file_worker -> Setting namespace");
 
@@ -201,17 +200,12 @@ pub async fn file_worker(
             "file_worker -> Container ID not specified {:#?} for runtime {:#?}!",
             container_id, container_runtime
         ))),
-    }
-    .unwrap_or_default();
+    }?;
 
     let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");
     let mut file_manager = FileManager::default();
 
     loop {
-        if !enable_fs {
-            continue;
-        }
-
         if let Some(file_request) = file_request_rx.recv().await {
             match file_request {
                 (peer_id, FileRequest::Open(OpenFileRequest { path, open_options })) => {

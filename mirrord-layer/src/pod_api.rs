@@ -139,6 +139,7 @@ pub async fn create_agent(
     let params = ListParams::default()
         .labels(&format!("job-name={}", agent_job_name))
         .timeout(10);
+
     let mut stream = pods_api.watch(&params, "0").await.unwrap().boxed();
     while let Some(status) = stream.try_next().await.unwrap() {
         match status {
