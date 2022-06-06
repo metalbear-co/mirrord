@@ -139,12 +139,12 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.commands {
-        Commands::Exec(args) => exec(&args),
+        Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
-            extract_library(Some(path));
-            Ok(())
+            extract_library(Some(path))?;
         }
     }
+    Ok(())
 }
 
 fn prompt_outdated_version() {
