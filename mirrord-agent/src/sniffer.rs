@@ -30,7 +30,7 @@ use crate::{
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
 
-const DEFAULT_RUNTIME: &str = "containerd";
+pub(crate) const DEFAULT_RUNTIME: &str = "containerd";
 
 type ConnectionID = u16;
 
@@ -263,11 +263,7 @@ pub async fn packet_worker(
                 .ok()
         }
         (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
-        (None, Some(_)) => {
-            return Err(AgentError::NotFound(
-                "Container ID not specified".to_string(),
-            ))
-        }
+        (None, Some(_)) => return Err(AgentError::NotFound(format!("Container ID not specified"))),
 
         _ => None,
     };

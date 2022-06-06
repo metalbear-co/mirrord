@@ -15,7 +15,7 @@ use mirrord_protocol::{
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
-use crate::{error::AgentError, runtime::get_container_pid, PeerID};
+use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
 
 // TODO: To help with `openat`, instead of `HashMap<_, File>` this should be
 // `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
@@ -184,12 +184,22 @@ pub async fn file_worker(
     mut file_request_rx: Receiver<(PeerID, FileRequest)>,
     file_response_tx: Sender<(PeerID, FileResponse)>,
     container_id: Option<String>,
+    container_runtime: Option<String>,
 ) -> Result<!, AgentError> {
     debug!("file_worker -> Setting namespace");
 
     let pid = match container_id {
-        Some(container_id) => get_container_pid(&container_id, "containerd").await,
-        None => Err(AgentError::NotFound("Empty container_id!".to_string())),
+        Some(container_id) => {
+            get_container_pid(
+                &container_id,
+                &container_runtime.unwrap_or(DEFAULT_RUNTIME.to_string()),
+            )
+            .await
+        }
+        None => Err(AgentError::NotFound(format!(
+            "Container ID not specified {:#?}!",
+            container_id
+        ))),
     }?;
 
     let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");

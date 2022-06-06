@@ -249,6 +249,7 @@ async fn start_agent() -> Result<!, AgentError> {
         file_request_rx,
         file_response_tx,
         args.container_id.clone(),
+        args.container_runtime.clone(),
     ));
 
     loop {
@@ -381,10 +382,10 @@ async fn main() -> Result<(), AgentError> {
         Ok(_) => {
             info!("main -> mirrord-agent `start` exiting successfully.")
         }
-        Err(err) => {
+        Err(fail) => {
             error!(
-                "main -> mirrord-agent `start` exiting with error {:?}",
-                err.to_string()
+                "main -> mirrord-agent `start` exiting with error {:#?}",
+                fail
             )
         }
     }
