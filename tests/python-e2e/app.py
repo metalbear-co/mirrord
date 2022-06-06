@@ -14,17 +14,17 @@ cli.show_server_banner = lambda *x: click.echo("Server listening on port 80")
 app = Flask(__name__)
 
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-PATH = getcwd() + "test"
+PATH = getcwd() + "/test"
 
 @app.route('/', methods=['GET'])
 def get():    
-    print("GET: request received")
+    print("GET: Request received")
     return "OK"
 
 @app.route('/', methods=['POST'])
 def post():    
     if str(request.data) == TEXT:
-        print("POST: request received")
+        print("POST: Request received")
         return "OK"
     else:
         _exit(1)
@@ -33,13 +33,13 @@ def post():
 def put():
     with open(PATH, "w") as f:
         f.write(TEXT)
-    print("PUT: request received")
+    print("PUT: Request received")
     return "OK"
 
 @app.route('/', methods=['DELETE'])
 def delete():
     remove(PATH)
-    print("DELETE: request received")
+    print("DELETE: Request received")
     return "OK"
 
 if __name__ == '__main__':
