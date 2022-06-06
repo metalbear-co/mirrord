@@ -103,9 +103,6 @@ pub async fn create_agent(
                             "imagePullPolicy": "IfNotPresent",
                             "securityContext": {
                                 "privileged": true,
-                                "capabilities": {
-                                    "add": ["CAP_SYS_CHROOT", "CAP_SYS_ADMIN"],
-                                }
                             },
                             "volumeMounts": [
                                 {
