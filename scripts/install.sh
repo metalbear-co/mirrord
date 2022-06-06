@@ -28,7 +28,7 @@ copy() {
       fi
       mv /tmp/mirrord "$HOME/.local/bin/mirrord"
   else
-      echo "/usr/local/bin which is write protected, installing it requires sudo"
+      echo "installation target directory is write protected, run as root to override"
       sudo mv /tmp/mirrord /usr/local/bin/mirrord
   fi
 }
