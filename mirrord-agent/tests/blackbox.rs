@@ -118,17 +118,22 @@ mod tests {
             close_msg,
             DaemonMessage::TCPClose(TCPClose { connection_id: 0 })
         );
+
         drop(codec);
         drop(guard);
         drop(mutex);
+
         task.await.unwrap();
         let result = child.wait_with_output().unwrap();
         assert!(result.status.success());
+
         let stderr = String::from_utf8_lossy(&result.stderr);
-        print!("{:?}", stderr);
+        print!("stderr: {:?}", stderr);
+
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        print!("stdout: {:?}", stdout);
+
         assert!(!stderr.to_ascii_lowercase().contains("error"));
-        assert!(!String::from_utf8_lossy(&result.stdout)
-            .to_ascii_lowercase()
-            .contains("error"));
+        assert!(!stdout.to_ascii_lowercase().contains("error"));
     }
 }
