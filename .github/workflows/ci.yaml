@@ -37,7 +37,9 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}
-      - run: cd mirrord-protocol && cargo test
+      - run: |
+          cd mirrord-protocol 
+          cargo test
 
   test_agent:
     runs-on: ubuntu-latest
@@ -50,14 +52,28 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
+      - run: |
+          cd mirrord-agent 
+          cargo build
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Build image
-        run: docker build . --file mirrord-agent/Dockerfile
+      - uses: docker/setup-buildx-action@v2
+      - name: build and export
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          tag: test
+          file: mirrord-agent/Dockerfile
+          outputs: type=docker,dest=/tmp/test.tar
+      - name: upload image
+        uses: actions/upload-artifact@v2
+        with:
+          name: test
+          path: /tmp/test.tar
 
   test_mirrord_layer:
     strategy:
@@ -76,9 +92,9 @@ jobs:
       # For now, just evrify it compiles.
       - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
 
-  e2e:
+  build_mirrord:
     runs-on: ubuntu-latest
-    name: e2e
+    name: build mirrord
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -86,20 +102,58 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ubuntu-latest
+      - run: sudo apt install -y libpcap-dev cmake
+      - run: cargo +nightly build --manifest-path=./Cargo.toml
+
+  e2e:
+    runs-on: ubuntu-latest
+    name: e2e
+    needs: [build_mirrord, test_agent_image]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ubuntu-latest
       - uses: actions/setup-node@v3
         with:
           node-version: 14
       - run: npm install express
-      - run: sudo apt-get update -y && sudo apt-get install -y libpcap-dev cmake
+      - run: |
+          sudo apt-get update -y 
+          sudo apt-get install -y libpcap-dev cmake
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
           container-runtime: containerd
-      - run: docker build -t test . --file mirrord-agent/Dockerfile
+      - name: download image
+        uses: actions/download-artifact@v2
+        with:
+          name: test
+          path: /tmp
+      - name: load image
+        run: docker load --input /tmp/test.tar
+      - run: docker image tag $(docker images | awk '{print $3}' | awk 'NR==2') test:latest
       - run: minikube image load test:latest
       - name: setup nginx
         run: kubectl apply -f tests/app.yaml
-      - name: build mirrord
-        run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: run node tests
-        run: cargo test --manifest-path ./tests/Cargo.toml  -- --test-threads 1
+        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+      - name: switch minikube runtime
+        run: |
+          minikube delete 
+          minikube start --container-runtime=docker
+          minikube image load test:latest
+      - name: setup nginx
+        run: kubectl apply -f tests/app.yaml
+      - name: wait for nginx pod
+        run: kubectl wait --for=condition=ready pod -l app=nginx --timeout=20s
+      - name: test with docker runtime
+        run: cargo test --package tests --lib -- tests --nocapture --ignored

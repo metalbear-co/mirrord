@@ -7,11 +7,15 @@ pub struct Args {
     #[clap(short, long)]
     pub container_id: Option<String>,
 
+    /// Container runtime to use
+    #[clap(short = 'r', long)]
+    pub container_runtime: Option<String>,
+
     /// Port to use for communication
     #[clap(short = 'l', long, default_value_t = 61337)]
     pub communicate_port: u16,
 
-    /// Commuication timeout in seconds
+    /// Communication timeout in seconds
     #[clap(short = 't', long, default_value_t = 30)]
     pub communication_timeout: u16,
 

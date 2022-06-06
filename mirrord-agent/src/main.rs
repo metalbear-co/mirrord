@@ -158,6 +158,7 @@ async fn start() -> Result<()> {
         packet_command_rx,
         args.interface.clone(),
         args.container_id.clone(),
+        args.container_runtime.clone(),
     ));
     loop {
         select! {
@@ -288,10 +289,10 @@ async fn main() -> Result<()> {
         .init();
     match start().await {
         Ok(_) => {
-            info!("Exiting successfuly")
+            info!("Exiting successfully")
         }
         Err(err) => {
-            error!("error occured: {:?}", err.to_string())
+            error!("error occurred: {:?}", err.to_string())
         }
     }
     Ok(())
