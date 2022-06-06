@@ -518,6 +518,8 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     }
 }
 
+/// Check if user set up `MIRRORD_FILE_OPS` env variable properly, and if file hooking should be
+/// enabled.
 fn enabled_file_ops() -> bool {
     let enabled = env::var("MIRRORD_FILE_OPS")
         .map_err(LayerError::from)
