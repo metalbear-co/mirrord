@@ -204,8 +204,7 @@ pub async fn file_worker(
             ))),
         }?;
 
-        let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");
-        root_path
+        PathBuf::from("/proc").join(pid.to_string()).join("root")
     } else {
         PathBuf::from("/")
     };
