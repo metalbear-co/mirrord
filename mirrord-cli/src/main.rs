@@ -1,6 +1,6 @@
 use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
 use semver::Version;
@@ -69,9 +69,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<String> {
         None => temp_dir().as_path().join(file_name),
     };
     let mut file = File::create(&file_path)
-                                .with_context(|| format!(
-                                    "Path \"{}\" creation failed", file_path.display()
-                                ))?;
+        .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
     let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
     file.write_all(bytes).unwrap();
     debug!("Extracted library file to {:?}", &file_path);
