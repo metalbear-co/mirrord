@@ -129,6 +129,8 @@ jobs:
       - run: |
           sudo apt-get update -y 
           sudo apt-get install -y libpcap-dev cmake
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
