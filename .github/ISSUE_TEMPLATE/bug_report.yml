@@ -11,7 +11,7 @@ body:
     id: description
     attributes:
       label: Bug Description
-      description: Please provide a clear and concise description of what the bug is.
+      description: Please provide a clear description of the bug.
       placeholder: The bug is...
     validations:
       required: true
@@ -32,6 +32,12 @@ body:
       label: Backtrace
       description: If your bug produces a backtrace, please include it here.
       render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: If possible, reproduce the bug with the envrionment variable RUST_LOG set to 'trace', and attach the printed logs
+      render: shell
   - type: input
     id: os_version
     attributes:
@@ -39,12 +45,17 @@ body:
     validations:
       required: true
   - type: input
-    id: node_version
+    id: binary_type
     attributes:
-      label: Your Node version (`node --version`)
-      placeholder: ex. v16.13.1
+      label: Local process
+      description: What process are you trying to run with mirrord?
     validations:
       required: true
+  - type: input
+    id: binary_version
+    attributes:
+      label: Local process version
+      description: What's the version of the process you're trying to run with mirrord?
   - type: textarea
     id: additional-info
     attributes:
