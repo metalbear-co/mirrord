@@ -15,7 +15,7 @@ pub struct Args {
     #[clap(short = 'l', long, default_value_t = 61337)]
     pub communicate_port: u16,
 
-    /// Commuication timeout in seconds
+    /// Communication timeout in seconds
     #[clap(short = 't', long, default_value_t = 30)]
     pub communication_timeout: u16,
 
