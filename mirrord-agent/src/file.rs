@@ -189,28 +189,29 @@ pub async fn file_worker(
 ) -> Result<!, AgentError> {
     debug!("file_worker -> Setting namespace");
 
-    let root_path = if enable_fs {
-        let pid = match container_id {
-            Some(container_id) => {
-                get_container_pid(
-                    &container_id,
-                    &container_runtime.unwrap_or_else(|| DEFAULT_RUNTIME.to_string()),
-                )
-                .await
-            }
-            None => Err(AgentError::NotFound(format!(
-                "file_worker -> Container ID not specified {:#?} for runtime {:#?}!",
-                container_id, container_runtime
-            ))),
-        }?;
+    let pid = match container_id {
+        Some(container_id) => {
+            get_container_pid(
+                &container_id,
+                &container_runtime.unwrap_or_else(|| DEFAULT_RUNTIME.to_string()),
+            )
+            .await
+        }
+        None => Err(AgentError::NotFound(format!(
+            "file_worker -> Container ID not specified {:#?} for runtime {:#?}!",
+            container_id, container_runtime
+        ))),
+    }
+    .unwrap_or_default();
 
-        PathBuf::from("/proc").join(pid.to_string()).join("root")
-    } else {
-        PathBuf::from("/")
-    };
+    let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");
     let mut file_manager = FileManager::default();
 
     loop {
+        if !enable_fs {
+            continue;
+        }
+
         if let Some(file_request) = file_request_rx.recv().await {
             match file_request {
                 (peer_id, FileRequest::Open(OpenFileRequest { path, open_options })) => {
