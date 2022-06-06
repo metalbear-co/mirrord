@@ -37,7 +37,7 @@ impl RuntimeData {
         let (container_runtime, socket_path) = match container_info.first() {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
             Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
-            _ => panic!("unspported container runtime"),
+            _ => panic!("unsupported container runtime"),
         };
 
         let container_id = container_info.last().unwrap();

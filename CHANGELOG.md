@@ -9,6 +9,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
 
+### Fixed
+- Fix typos
+
 ## 2.1.0
 ### Added
 - Prompt user to update if their version is outdated in the VS Code extension or CLI.
