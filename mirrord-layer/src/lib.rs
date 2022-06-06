@@ -41,7 +41,7 @@ use tokio::{
     task,
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::prelude::*;
 
 mod common;
@@ -518,6 +518,20 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     }
 }
 
+fn enabled_file_ops() -> bool {
+    let enabled = env::var("MIRRORD_FILE_OPS")
+        .map_err(LayerError::from)
+        .and_then(|env_value| FromStr::from_str(&env_value).map_err(LayerError::from))
+        .inspect_err(|fail| {
+            warn!(
+                "Could not set up `MIRRORD_FILE_OPS` properly due to {:#?}",
+                fail
+            )
+        });
+
+    enabled.unwrap_or_default()
+}
+
 /// Enables file and socket hooks.
 fn enable_hooks() {
     let mut interceptor = Interceptor::obtain(&GUM);
@@ -527,23 +541,8 @@ fn enable_hooks() {
 
     sockets::enable_socket_hooks(&mut interceptor);
 
-    let enable_file_ops = env::var("MIRRORD_FILE_OPS")
-        .map_err(LayerError::from)
-        .and_then(|env_value| FromStr::from_str(&env_value).map_err(LayerError::from));
-
-    match enable_file_ops {
-        Ok(enabled) => {
-            if enabled {
-                file::hooks::enable_file_hooks(&mut interceptor);
-            }
-        }
-        Err(fail) => {
-            error!(
-                "Failed loading `MIRRORD_FILE_OPS` environment variable with {:#?}",
-                fail
-            );
-            panic!("mirrord-layer::enable_hooks failed with {:#?}", fail);
-        }
+    if enabled_file_ops() {
+        file::hooks::enable_file_hooks(&mut interceptor);
     }
 
     interceptor.end_transaction();
