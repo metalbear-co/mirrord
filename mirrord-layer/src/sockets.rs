@@ -127,7 +127,7 @@ fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 
-/// Create the socket, add it to SOCKETS if sucesssful and matching protocol and domain (TCPv4/v6)
+/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (TCPv4/v6)
 fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
