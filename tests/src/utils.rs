@@ -13,6 +13,7 @@ use kube::{
     core::WatchEvent,
     Api, Client, Config,
 };
+use lazy_static::lazy_static;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -24,8 +25,15 @@ use tokio::{
 
 static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
+lazy_static! {
+    static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
+        ("python", vec!["python3", "python-e2e/app.py"]),
+        ("node", vec!["node", "node-e2e/app.js"])
+    ]);
+}
+
 // target/debug/mirrord exec --pod-name pod_name  -c binary command
-pub fn start_node_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
+pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
     let path = env!("CARGO_BIN_FILE_MIRRORD");
     let args: Vec<&str> = vec!["exec", "--pod-name", pod_name, "-c"]
         .into_iter()
@@ -283,15 +291,16 @@ pub async fn test_server_init(
     client: &Client,
     pod_namespace: &str,
     mut env: HashMap<&str, &str>,
+    server: &str,
 ) -> Child {
     let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
-    let command = vec!["node", "node-e2e/app.js"];
+    let command = SERVERS.get(server).unwrap().clone();
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
     env.insert("MIRRORD_AGENT_IMAGE", "test");
     env.insert("MIRRORD_CHECK_VERSION", "false");
-    let server = start_node_server(&pod_name, command, env);
+    let server = start_server(&pod_name, command, env);
     setup_panic_hook();
     server
 }

@@ -2441,6 +2441,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "lazy_static",
  "mirrord",
  "reqwest",
  "serde",

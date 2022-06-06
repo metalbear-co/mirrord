@@ -15,18 +15,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_complete_node_api() {
-        _test_complete_node_api().await;
+        _test_complete_api("node").await;
     }
 
     // actual test function used with "containerd", "docker" runtimes
     // starts the node(express.js) api server, sends four different requests, validates data,
     // stops the server and validates if the agent job and pod are deleted
-    async fn _test_complete_node_api() {
+    async fn _test_complete_api(server: &str) {
         let client = setup_kube_client().await;
 
         let pod_namespace = "default";
         let env: HashMap<&str, &str> = HashMap::new(); // for adding more environment variables
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, server).await;
 
         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
 
@@ -102,7 +102,7 @@ mod tests {
         let test_namespace = "test-namespace";
         let pod_namespace = "default";
         let env: HashMap<&str, &str> = HashMap::new();
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         create_namespace(&client, test_namespace).await;
         create_nginx_pod(&client, test_namespace).await;
@@ -144,7 +144,7 @@ mod tests {
         let agent_namespace = "test-namespace-agent-good";
         let pod_namespace = "default";
         let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         create_namespace(&client, agent_namespace).await;
 
@@ -190,7 +190,7 @@ mod tests {
         let agent_namespace = "nonexistent-namespace";
         let pod_namespace = "default";
         let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
 
@@ -229,7 +229,7 @@ mod tests {
         create_nginx_pod(&client, pod_namespace).await;
 
         let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace)]);
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
 
@@ -269,7 +269,7 @@ mod tests {
             "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",
             "nonexistent-namespace",
         )]);
-        let mut server = test_server_init(&client, pod_namespace, env).await;
+        let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
         let timeout_duration = Duration::from_secs(5);
@@ -298,6 +298,12 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_docker_runtime() {
-        _test_complete_node_api().await;
+        _test_complete_api("node").await;
+    }
+
+    // python Flask test
+    #[tokio::test]
+    async fn test_complete_python_api() {
+        _test_complete_api("python").await;
     }
 }
