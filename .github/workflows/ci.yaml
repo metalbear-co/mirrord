@@ -38,9 +38,8 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cd mirrord-protocol 
+          cd mirrord-protocol
           cargo test
-
   test_agent:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +52,7 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
       - run: |
-          cd mirrord-agent 
+          cd mirrord-agent
           cargo build
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
@@ -127,7 +126,7 @@ jobs:
           node-version: 14
       - run: npm install express
       - run: |
-          sudo apt-get update -y 
+          sudo apt-get update -y
           sudo apt-get install -y libpcap-dev cmake
       - uses: actions/setup-python@v3
       - run: pip3 install flask
@@ -150,7 +149,7 @@ jobs:
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: switch minikube runtime
         run: |
-          minikube delete 
+          minikube delete
           minikube start --container-runtime=docker
           minikube image load test:latest
       - name: setup nginx
@@ -158,4 +157,4 @@ jobs:
       - name: wait for nginx pod
         run: kubectl wait --for=condition=ready pod -l app=nginx --timeout=20s
       - name: test with docker runtime
-        run: cargo test --package tests --lib -- tests --nocapture --ignored
+        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1

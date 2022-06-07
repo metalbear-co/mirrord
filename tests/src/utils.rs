@@ -247,6 +247,9 @@ pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
     let mut buffer = BufReader::new(stdout);
     let mut stream = String::new();
     buffer.read_line(&mut stream).await.unwrap();
+
+    println!("validate_requests -> stream is {:#?}", stream);
+
     assert!(stream.contains("Server listening on port 80"));
 
     http_request(service_url, Method::GET).await;

@@ -18,9 +18,8 @@ mod tests {
         _test_complete_api("node").await;
     }
 
-    // actual test function used with "containerd", "docker" runtimes
     // starts the node(express.js) api server, sends four different requests, validates data,
-    // stops the server and validates if the agent job and pod are deleted
+    // stops the server and validates if the agent job and pod are deleted    
     async fn _test_complete_api(server: &str) {
         let client = setup_kube_client().await;
 
@@ -80,11 +79,12 @@ mod tests {
                 loop {
                     let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
                     let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the nginx pod should exist
-                    if updated_pods.items.len() == 1 && updated_jobs.items.len() == 0 {
+                    if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
                         let nginx_pod = updated_pods.items[0].metadata.name.clone().unwrap();
                         assert!(nginx_pod.contains("nginx"));
                         break;
                     }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }),
         )
@@ -258,6 +258,8 @@ mod tests {
         delete_namespace(&client, pod_namespace).await;
     }
 
+    // TODO: This test fails: errors out with `error_stream.contains(\"NotFound\")` when running
+    // with docker runtime.
     #[tokio::test]
     // starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
     // (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
@@ -284,7 +286,10 @@ mod tests {
                         .await
                         .unwrap();
                     if !error_stream.is_empty() {
-                        assert!(error_stream.contains("NotFound")); //Todo: fix this when unwraps are removed in pod_api.rs
+                        assert!(
+                            error_stream.contains("NotFound"),
+                            "stream data: {error_stream:?}"
+                        ); //Todo: fix this when unwraps are removed in pod_api.rs
                         break;
                     }
                 }
@@ -294,14 +299,6 @@ mod tests {
         .unwrap()
         .unwrap();
     }
-
-    // docker runtime test
-    #[ignore]
-    #[tokio::test]
-    async fn test_docker_runtime() {
-        _test_complete_api("node").await;
-    }
-
     // python Flask test
     #[tokio::test]
     async fn test_complete_python_api() {
