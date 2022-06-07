@@ -80,8 +80,7 @@ mod tests {
                         assert!(nginx_pod.contains("nginx"));
                         break;
                     }
-                    println!("{updated_jobs:?}");
-                    println!("{updated_pods:?}");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }),
         )

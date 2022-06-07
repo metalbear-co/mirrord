@@ -185,7 +185,7 @@ pub async fn file_worker(
     file_response_tx: Sender<(PeerID, FileResponse)>,
     container_id: Option<String>,
     container_runtime: Option<String>,
-) -> Result<!, AgentError> {
+) -> Result<(), AgentError> {
     debug!("file_worker -> Setting namespace");
 
     let pid = match container_id {
@@ -279,6 +279,10 @@ pub async fn file_worker(
                         .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
                 }
             }
+        } else {
+            break;
         }
     }
+    debug!("file worker ends");
+    Ok(())
 }
