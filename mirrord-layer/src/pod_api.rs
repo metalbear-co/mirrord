@@ -163,6 +163,5 @@ pub async fn create_agent(
     let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
         .await
         .unwrap();
-    let pf = pods_api.portforward(&pod_name, &[61337]).await.unwrap();
-    pf
+    pods_api.portforward(&pod_name, &[61337]).await.unwrap()
 }

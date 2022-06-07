@@ -215,8 +215,7 @@ unsafe extern "C" fn bind_detour(
 fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match SOCKETS.lock().unwrap().take(&sockfd) {
             Some(socket) => socket,
             None => {
                 debug!("listen: no socket found for fd: {}", &sockfd);
@@ -312,8 +311,7 @@ fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     debug!("connect called");
 
     let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match SOCKETS.lock().unwrap().take(&sockfd) {
             Some(socket) => socket,
             None => {
                 debug!("connect: no socket found for fd: {}", &sockfd);
@@ -350,8 +348,7 @@ unsafe extern "C" fn connect_detour(
 fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getpeername called");
     let remote_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
+        match SOCKETS.lock().unwrap().get(&sockfd) {
             Some(socket) => match &socket.state {
                 SocketState::Connected(connected) => connected.remote_address,
                 _ => {
@@ -385,8 +382,7 @@ unsafe extern "C" fn getpeername_detour(
 fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getsockname called");
     let local_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
+        match SOCKETS.lock().unwrap().get(&sockfd) {
             Some(socket) => match &socket.state {
                 SocketState::Connected(connected) => connected.local_address,
                 SocketState::Bound(bound) => bound.address,
