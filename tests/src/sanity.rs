@@ -6,6 +6,10 @@ mod tests {
 
     use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
     use kube::{api::ListParams, Api};
+    use nix::{
+        sys::signal::{self, Signal},
+        unistd::Pid,
+    };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
         time::{timeout, Duration},
@@ -56,12 +60,18 @@ mod tests {
 
         // since we are reading from the stdout, we could block at any point in case the server
         // does not write to its stdout, so we need a timeout here
-        let validation_timeout = Duration::from_secs(20);
+        let validation_timeout = Duration::from_secs(30);
         timeout(
             validation_timeout,
             validate_requests(child_stdout, service_url.as_str()),
         )
         .await
+        .unwrap();
+
+        signal::kill(
+            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
+            Signal::SIGTERM,
+        )
         .unwrap();
         server.kill().await.unwrap();
 

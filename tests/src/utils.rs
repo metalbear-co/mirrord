@@ -304,7 +304,7 @@ pub async fn test_server_init(
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
-    env.insert("MIRRORD_AGENT_IMAGE", "test");
+    env.insert("MIRRORD_AGENT_IMAGE", "runtime");
     env.insert("MIRRORD_CHECK_VERSION", "false");
     let server = start_server(&pod_name, command, env);
     setup_panic_hook();
