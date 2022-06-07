@@ -154,6 +154,5 @@ jobs:
         run: kubectl apply -f tests/app.yaml
       - name: wait for nginx pod
         run: kubectl wait --for=condition=ready pod -l app=nginx --timeout=20s
-      - run: ls -la /tmp
       - name: test with docker runtime
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
