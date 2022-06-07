@@ -39,7 +39,6 @@ pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>
         .into_iter()
         .chain(command.into_iter())
         .collect();
-    println!("{:?}", args);
     let server = Command::new(path)
         .args(args)
         .envs(&env)
@@ -253,10 +252,12 @@ pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
     assert!(stream.contains("Server listening on port 80"));
 
     http_request(service_url, Method::GET).await;
+    sleep(Duration::from_secs(2)).await;
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("GET: Request completed"));
 
     http_request(service_url, Method::POST).await;
+    sleep(Duration::from_secs(2)).await;
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("POST: Request completed"));
 
@@ -300,12 +301,10 @@ pub async fn test_server_init(
 ) -> Child {
     let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
     let command = SERVERS.get(server).unwrap().clone();
-    println!("command={:?}", command);
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
-    env.insert("MIRRORD_AGENT_IMAGE", "runtime");
-    env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
+    env.insert("MIRRORD_AGENT_IMAGE", "test");
     env.insert("MIRRORD_CHECK_VERSION", "false");
     let server = start_server(&pod_name, command, env);
     setup_panic_hook();

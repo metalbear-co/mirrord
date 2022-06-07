@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
-use std::{    
-    collections::{HashMap, VecDeque},    
+use std::{
+    collections::{HashMap, VecDeque},
     lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,

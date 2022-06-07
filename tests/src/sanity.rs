@@ -18,8 +18,13 @@ mod tests {
         _test_complete_api("node").await;
     }
 
-    // starts the node(express.js) api server, sends four different requests, validates data,
-    // stops the server and validates if the agent job and pod are deleted    
+    #[tokio::test]
+    async fn test_complete_python_api() {
+        _test_complete_api("python").await;
+    }
+
+    // starts the node(express.js)/python(flask) api server, sends four different requests,
+    // validates data, stops the server and validates if the agent job and pod are deleted
     async fn _test_complete_api(server: &str) {
         let client = setup_kube_client().await;
 
@@ -298,10 +303,5 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-    }
-    // python Flask test
-    #[tokio::test]
-    async fn test_complete_python_api() {
-        _test_complete_api("python").await;
     }
 }
