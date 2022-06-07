@@ -1,4 +1,4 @@
-use std::{env::temp_dir, fs::File, io::Write, time::Duration};
+use std::{env::temp_dir, fs::File, io::Write, path::PathBuf, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -69,12 +69,13 @@ const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 mod mac_aarch {
     use std::{
         io::{Cursor, Read},
-        path::Path,
+        path::{Path, PathBuf},
     };
-    use tracing::warn;
+
     use mach_object::{OFile, CPU_TYPE_X86_64};
     use reqwest;
     use search_path::SearchPath;
+    use tracing::warn;
 
     use super::*;
     pub fn is_binary_different_arch(binary_path: &String) -> bool {
@@ -118,13 +119,13 @@ mod mac_aarch {
         }
     }
 
-    pub fn extract_intel_binary() -> Result<String> {
+    pub fn download_intel_binary() -> Result<PathBuf> {
         let file_name = format!("libmirrord_layer_intel_{}.so", env!("CARGO_PKG_VERSION"));
         let file_path = temp_dir().as_path().join(file_name);
         // Don't download file if not needed
         if file_path.exists() {
             info!("x86 mode, found existing dylib to use");
-            return Ok(file_path.to_str().unwrap().to_string());
+            return Ok(file_path);
         }
         info!("download x86 dylib for rosetta mode");
         let download_url = format!("https://github.com/metalbear-co/mirrord/releases/download/{}/libmirrord_layer_mac_x86_64.dylib", env!("CARGO_PKG_VERSION"));
@@ -134,14 +135,14 @@ mod mac_aarch {
         response
             .copy_to(&mut file)
             .context("Could not write intel binary")?;
-        Ok(file_path.to_str().unwrap().to_string())
+        Ok(file_path)
     }
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use mac_aarch::*;
 
-fn extract_library(dest_dir: Option<String>) -> Result<String> {
+fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
     let library_path = std::path::Path::new(library_file);
 
@@ -156,7 +157,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<String> {
     file.write_all(bytes).unwrap();
 
     debug!("Extracted library file to {:?}", &file_path);
-    Ok(file_path.to_str().unwrap().to_string())
+    Ok(file_path)
 }
 
 fn add_to_preload(path: &str) -> Result<()> {
@@ -215,7 +216,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
             if is_binary_different_arch(&args.binary) {
-                extract_intel_binary()?
+                download_intel_binary()?
             } else {
                 extract_library(None)?
             }
@@ -225,7 +226,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
             extract_library(None)?
         }
     };
-    add_to_preload(&library_path).unwrap();
+    add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
