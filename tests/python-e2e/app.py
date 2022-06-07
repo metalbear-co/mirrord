@@ -23,8 +23,8 @@ def get():
 
 @app.route('/', methods=['POST'])
 def post():     
-    if str(request.data, 'utf-8') == TEXT:
-        print("POST: Request completed", flush=True)
+    # if str(request.data, 'utf-8') == TEXT:
+    print("POST: Request completed", flush=True)
     return "OK"  
 
 @app.route('/', methods=['PUT'])        
