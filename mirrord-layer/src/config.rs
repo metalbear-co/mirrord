@@ -25,4 +25,10 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
+
+    /// ```text
+    /// MIRRORD_OVERRIDE_ENV="DB=foo.db;PORT=99;"
+    /// ```
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV", default = "default")]
+    pub override_env_vars: String,
 }

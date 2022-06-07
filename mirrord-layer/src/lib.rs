@@ -13,7 +13,8 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, RemoteEnvVarsHook,
+    SeekFileHook, WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -27,6 +28,7 @@ use mirrord_protocol::{
     FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
     ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
+use regex::RegexSet;
 use sockets::SOCKETS;
 use tokio::{
     io::AsyncWriteExt,
@@ -63,6 +65,12 @@ static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
+
+static IGNORE_ENV_VAR: SyncLazy<RegexSet> = SyncLazy::new(|| {
+    let ignored_vars = RegexSet::new(&[r"PATH"]).unwrap();
+
+    ignored_vars
+});
 
 #[derive(Debug)]
 enum TcpTunnelMessages {
@@ -109,6 +117,27 @@ async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunne
     debug!("exiting tcp tunnel");
 }
 
+fn env_vars_to_map(env_vars: String) -> HashMap<String, String> {
+    let overridden = env_vars
+        // "DB=foo.db;PORT=99;HOST=;PATH=/fake"
+        .split_terminator(';')
+        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
+        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
+        .filter(|(key, _)| IGNORE_ENV_VAR.is_match(key) == false)
+        // [("DB", "foo.db"), ("PORT", "99")]
+        .collect::<HashMap<_, _>>();
+
+    overridden
+}
+
 #[ctor]
 fn init() {
     tracing_subscriber::registry()
@@ -138,7 +167,11 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    RUNTIME.spawn(poll_agent(port_forwarder, receiver));
+    RUNTIME.spawn(poll_agent(
+        port_forwarder,
+        receiver,
+        env_vars_to_map(config.override_env_vars),
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -313,6 +346,19 @@ async fn handle_hook_message(
                 codec_result
             );
         }
+        HookMessage::RemoteEnvVarsHook(RemoteEnvVarsHook { load_env_vars }) => {
+            debug!("HookMessage::RemoteEnvVarsHook load {:#?}", load_env_vars);
+
+            let load_env_vars_request = RemoteEnvVarsRequest { override_env_vars };
+
+            let request = ClientMessage::RemoteEnvVars(request);
+            let codec_result = codec.send(request).await;
+
+            debug!(
+                "HookMessage::OverrideEnvVarsHook codec_result {:#?}",
+                codec_result
+            );
+        }
     }
 }
 
@@ -453,7 +499,11 @@ async fn handle_daemon_message(
     }
 }
 
-async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
+async fn poll_agent(
+    mut pf: Portforwarder,
+    mut receiver: Receiver<HookMessage>,
+    env_vars: HashMap<String, String>,
+) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
