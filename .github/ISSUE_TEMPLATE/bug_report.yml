@@ -48,7 +48,7 @@ body:
     id: binary_type
     attributes:
       label: Local process
-      description: What process are you trying to run with mirrord?
+      description: What process are you trying to run with mirrord? Please run `file $(which <process name>)` for best results.
     validations:
       required: true
   - type: input
