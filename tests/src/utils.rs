@@ -18,7 +18,7 @@ use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::{Child, ChildStdout, Command},
     time::{sleep, Duration},
 };
@@ -239,43 +239,30 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: Api
     }
 }
 
-// to all requests, the express API prints {request_name}: Request completed
-// PUT - creates cwd/test, DELETE - deletes cwd/test
-// this is verified by reading the stdout of the server
-pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
-    let mut buffer = BufReader::new(stdout);
-    let mut stream = String::new();
-    buffer.read_line(&mut stream).await.unwrap();
-
-    println!("validate_requests -> stream is {:#?}", stream);
-
-    assert!(stream.contains("Server listening on port 80"));
-
+pub async fn send_requests(service_url: &str) {
     http_request(service_url, Method::GET).await;
-    sleep(Duration::from_secs(2)).await;
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("GET: Request completed"));
-
     http_request(service_url, Method::POST).await;
-    sleep(Duration::from_secs(2)).await;
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("POST: Request completed"));
+    http_request(service_url, Method::PUT).await;
 
     let cwd = env::current_dir().unwrap();
     let path = cwd.join("test"); // 'test' is created in cwd, by PUT and deleted by DELETE
 
-    http_request(service_url, Method::PUT).await;
     sleep(Duration::from_secs(5)).await; // Todo: remove this sleep and replace with a filesystem watcher
     assert!(path.exists());
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("PUT: Request completed"));
 
     http_request(service_url, Method::DELETE).await;
+
     sleep(Duration::from_secs(5)).await;
     assert!(!path.exists());
-    buffer.read_line(&mut stream).await.unwrap();
-    println!("{}", stream);
-    assert!(stream.contains("DELETE: Request completed"));
+}
+
+// to all requests, the express API prints {request_name}: Request completed
+// PUT - creates cwd/test, DELETE - deletes cwd/test
+// this is verified by reading the stdout of the server
+pub async fn validate_requests(stdout: &mut ChildStdout) {
+    let mut out = String::new();
+    stdout.read_to_string(&mut out).await.unwrap();
+    println!("{}", out);
 }
 
 pub async fn validate_no_requests(stdout: ChildStdout, service_url: &str) {

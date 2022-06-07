@@ -40,7 +40,7 @@ mod tests {
         println!("service url: {}", service_url);
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-        let child_stdout = server.stdout.take().unwrap();
+        let mut child_stdout = server.stdout.take().unwrap();
 
         // Note: to run a task in the background, don't await on it.
         // spawn returns a JoinHandle
@@ -61,13 +61,11 @@ mod tests {
         // since we are reading from the stdout, we could block at any point in case the server
         // does not write to its stdout, so we need a timeout here
         let validation_timeout = Duration::from_secs(30);
-        timeout(
-            validation_timeout,
-            validate_requests(child_stdout, service_url.as_str()),
-        )
-        .await
-        .unwrap();
+        timeout(validation_timeout, send_requests(service_url.as_str()))
+            .await
+            .unwrap();
 
+        validate_requests(&mut child_stdout).await;
         signal::kill(
             Pid::from_raw(server.id().unwrap().try_into().unwrap()),
             Signal::SIGTERM,
@@ -167,7 +165,7 @@ mod tests {
         let service_url = get_service_url(&client, "default").await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-        let child_stdout = server.stdout.take().unwrap();
+        let mut child_stdout = server.stdout.take().unwrap();
 
         tokio::spawn(async move {
             loop {
@@ -180,12 +178,12 @@ mod tests {
         });
 
         let validation_timeout = Duration::from_secs(20);
-        timeout(
-            validation_timeout,
-            validate_requests(child_stdout, service_url.as_str()),
-        )
-        .await
-        .unwrap();
+        timeout(validation_timeout, send_requests(service_url.as_str()))
+            .await
+            .unwrap();
+
+        validate_requests(&mut child_stdout).await;
+
         server.kill().await.unwrap();
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
@@ -260,15 +258,15 @@ mod tests {
             }
         });
 
-        let child_stdout = server.stdout.take().unwrap();
+        let mut child_stdout = server.stdout.take().unwrap();
 
         let validation_timeout = Duration::from_secs(20);
-        timeout(
-            validation_timeout,
-            validate_requests(child_stdout, service_url.as_str()),
-        )
-        .await
-        .unwrap();
+        timeout(validation_timeout, send_requests(service_url.as_str()))
+            .await
+            .unwrap();
+
+        validate_requests(&mut child_stdout).await;
+
         server.kill().await.unwrap();
         delete_namespace(&client, pod_namespace).await;
     }
