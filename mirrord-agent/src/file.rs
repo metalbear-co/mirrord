@@ -205,82 +205,77 @@ pub async fn file_worker(
     let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");
     let mut file_manager = FileManager::default();
 
-    loop {
-        if let Some(file_request) = file_request_rx.recv().await {
-            match file_request {
-                (peer_id, FileRequest::Open(OpenFileRequest { path, open_options })) => {
-                    let path = path
-                        .strip_prefix("/")
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+    while let Some(file_request) = file_request_rx.recv().await {
+        match file_request {
+            (peer_id, FileRequest::Open(OpenFileRequest { path, open_options })) => {
+                let path = path
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                    // Should be something like `/proc/{pid}/root/{path}`
-                    let full_path = root_path.as_path().join(path);
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(path);
 
-                    let open_result = file_manager.open(full_path, open_options);
-                    let response = FileResponse::Open(open_result);
+                let open_result = file_manager.open(full_path, open_options);
+                let response = FileResponse::Open(open_result);
 
-                    file_response_tx.send((peer_id, response)).await?;
-                }
-                (
-                    peer_id,
-                    FileRequest::OpenRelative(OpenRelativeFileRequest {
-                        relative_fd,
-                        path,
-                        open_options,
-                    }),
-                ) => {
-                    let path = path
-                        .strip_prefix("/")
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                    // Should be something like `/proc/{pid}/root/{path}`
-                    let full_path = root_path.as_path().join(path);
-
-                    let open_result =
-                        file_manager.open_relative(relative_fd, full_path, open_options);
-                    let response = FileResponse::Open(open_result);
-
-                    file_response_tx.send((peer_id, response)).await?;
-                }
-                (peer_id, FileRequest::Read(ReadFileRequest { fd, buffer_size })) => {
-                    let read_result = file_manager.read(fd, buffer_size);
-                    let response = FileResponse::Read(read_result);
-
-                    file_response_tx
-                        .send((peer_id, response))
-                        .await
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-                }
-                (peer_id, FileRequest::Seek(SeekFileRequest { fd, seek_from })) => {
-                    let seek_result = file_manager.seek(fd, seek_from.into());
-                    let response = FileResponse::Seek(seek_result);
-
-                    file_response_tx
-                        .send((peer_id, response))
-                        .await
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-                }
-                (peer_id, FileRequest::Write(WriteFileRequest { fd, write_bytes })) => {
-                    let write_result = file_manager.write(fd, write_bytes);
-                    let response = FileResponse::Write(write_result);
-
-                    file_response_tx
-                        .send((peer_id, response))
-                        .await
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-                }
-                (peer_id, FileRequest::Close(CloseFileRequest { fd })) => {
-                    let close_result = file_manager.close(fd);
-                    let response = FileResponse::Close(close_result);
-
-                    file_response_tx
-                        .send((peer_id, response))
-                        .await
-                        .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-                }
+                file_response_tx.send((peer_id, response)).await?;
             }
-        } else {
-            break;
+            (
+                peer_id,
+                FileRequest::OpenRelative(OpenRelativeFileRequest {
+                    relative_fd,
+                    path,
+                    open_options,
+                }),
+            ) => {
+                let path = path
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(path);
+
+                let open_result = file_manager.open_relative(relative_fd, full_path, open_options);
+                let response = FileResponse::Open(open_result);
+
+                file_response_tx.send((peer_id, response)).await?;
+            }
+            (peer_id, FileRequest::Read(ReadFileRequest { fd, buffer_size })) => {
+                let read_result = file_manager.read(fd, buffer_size);
+                let response = FileResponse::Read(read_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            }
+            (peer_id, FileRequest::Seek(SeekFileRequest { fd, seek_from })) => {
+                let seek_result = file_manager.seek(fd, seek_from.into());
+                let response = FileResponse::Seek(seek_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            }
+            (peer_id, FileRequest::Write(WriteFileRequest { fd, write_bytes })) => {
+                let write_result = file_manager.write(fd, write_bytes);
+                let response = FileResponse::Write(write_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            }
+            (peer_id, FileRequest::Close(CloseFileRequest { fd })) => {
+                let close_result = file_manager.close(fd);
+                let response = FileResponse::Close(close_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            }
         }
     }
     debug!("file worker ends");
