@@ -39,6 +39,7 @@ pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>
         .into_iter()
         .chain(command.into_iter())
         .collect();
+    println!("{:?}", args);
     let server = Command::new(path)
         .args(args)
         .envs(&env)
@@ -246,12 +247,10 @@ pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
     let mut buffer = BufReader::new(stdout);
     let mut stream = String::new();
     buffer.read_line(&mut stream).await.unwrap();
-    println!("{}", stream);
     assert!(stream.contains("Server listening on port 80"));
 
     http_request(service_url, Method::GET).await;
     buffer.read_line(&mut stream).await.unwrap();
-    println!("{}", stream);
     assert!(stream.contains("GET: Request completed"));
 
     http_request(service_url, Method::POST).await;
@@ -262,15 +261,16 @@ pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
     let path = cwd.join("test"); // 'test' is created in cwd, by PUT and deleted by DELETE
 
     http_request(service_url, Method::PUT).await;
-    sleep(Duration::from_secs(2)).await; // Todo: remove this sleep and replace with a filesystem watcher
+    sleep(Duration::from_secs(5)).await; // Todo: remove this sleep and replace with a filesystem watcher
     assert!(path.exists());
     buffer.read_line(&mut stream).await.unwrap();
     assert!(stream.contains("PUT: Request completed"));
 
     http_request(service_url, Method::DELETE).await;
-    sleep(Duration::from_secs(2)).await;
+    sleep(Duration::from_secs(5)).await;
     assert!(!path.exists());
     buffer.read_line(&mut stream).await.unwrap();
+    println!("{}", stream);
     assert!(stream.contains("DELETE: Request completed"));
 }
 
@@ -297,10 +297,12 @@ pub async fn test_server_init(
 ) -> Child {
     let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
     let command = SERVERS.get(server).unwrap().clone();
+    println!("command={:?}", command);
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
-    env.insert("MIRRORD_AGENT_IMAGE", "test");
+    env.insert("MIRRORD_AGENT_IMAGE", "runtime");
+    env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
     env.insert("MIRRORD_CHECK_VERSION", "false");
     let server = start_server(&pod_name, command, env);
     setup_panic_hook();

@@ -1,4 +1,4 @@
-from os import _exit, getcwd, remove
+from os import getcwd, remove
 import click
 from flask import Flask, request
 import logging
@@ -18,28 +18,26 @@ PATH = getcwd() + "/test"
 
 @app.route('/', methods=['GET'])
 def get():    
-    print("GET: Request received")
+    print("GET: Request completed", flush=True)
     return "OK"
 
 @app.route('/', methods=['POST'])
-def post():    
-    if str(request.data) == TEXT:
-        print("POST: Request received")
-        return "OK"
-    else:
-        _exit(1)
+def post():     
+    if str(request.data, 'utf-8') == TEXT:
+        print("POST: Request completed", flush=True)
+    return "OK"  
 
 @app.route('/', methods=['PUT'])        
 def put():
     with open(PATH, "w") as f:
         f.write(TEXT)
-    print("PUT: Request received")
+    print("PUT: Request completed", flush=True)
     return "OK"
 
 @app.route('/', methods=['DELETE'])
 def delete():
     remove(PATH)
-    print("DELETE: Request received")
+    print("DELETE: Request completed", flush=True)
     return "OK"
 
 if __name__ == '__main__':

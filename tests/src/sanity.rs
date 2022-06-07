@@ -29,6 +29,7 @@ mod tests {
         let mut server = test_server_init(&client, pod_namespace, env, server).await;
 
         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
+        println!("service url: {}", service_url);
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
         let child_stdout = server.stdout.take().unwrap();
@@ -65,11 +66,11 @@ mod tests {
         // assuming only one job is running
         // to make the tests parallel we need to figure a way to get the exact job name when len() >
         // 1
-        assert_eq!(jobs.items.len(), 1);
+        assert!(jobs.items.len() > 0);
 
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), "default");
         let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(pods.items.len(), 2);
+        assert!(pods.items.len() > 1);
 
         let cleanup_timeout = Duration::from_secs(35);
         timeout(
