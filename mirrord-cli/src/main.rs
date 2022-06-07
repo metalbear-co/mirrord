@@ -135,7 +135,11 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
     let library_path = extract_library(None)?;
+    add_to_preload(&library_path).unwrap();
+
+    let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
+
     let err = execvp(args.binary.clone(), binary_args);
     error!("Couldn't execute {:?}", err);
     Err(anyhow!("Failed to execute binary"))
