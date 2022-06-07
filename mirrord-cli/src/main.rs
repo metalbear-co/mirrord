@@ -1,6 +1,6 @@
 use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
 use semver::Version;
@@ -64,7 +64,7 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 #[cfg(target_os = "macos")]
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-fn extract_library(dest_dir: Option<String>) -> String {
+fn extract_library(dest_dir: Option<String>) -> Result<String> {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
     let library_path = std::path::Path::new(library_file);
 
@@ -73,13 +73,13 @@ fn extract_library(dest_dir: Option<String>) -> String {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
-
-    let mut file = File::create(file_path.clone()).unwrap();
+    let mut file = File::create(&file_path)
+        .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
     let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
     file.write_all(bytes).unwrap();
 
     debug!("Extracted library file to {:?}", &file_path);
-    file_path.to_str().unwrap().to_string()
+    Ok(file_path.to_str().unwrap().to_string())
 }
 
 fn add_to_preload(path: &str) -> Result<()> {
@@ -134,20 +134,15 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
-
-    let library_path = extract_library(None);
-    add_to_preload(&library_path).unwrap();
-
-    let mut binary_args = args.binary_args.clone();
+    let library_path = extract_library(None)?;
     binary_args.insert(0, args.binary.clone());
-
     let err = execvp(args.binary.clone(), binary_args);
     error!("Couldn't execute {:?}", err);
     Err(anyhow!("Failed to execute binary"))
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-fn main() {
+fn main() -> Result<()> {
     registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -156,11 +151,12 @@ fn main() {
 
     let cli = Cli::parse();
     match cli.commands {
-        Commands::Exec(args) => exec(&args).unwrap(),
+        Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
-            extract_library(Some(path));
+            extract_library(Some(path))?;
         }
     }
+    Ok(())
 }
 
 fn prompt_outdated_version() {
