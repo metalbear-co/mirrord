@@ -80,6 +80,8 @@ mod tests {
                         assert!(nginx_pod.contains("nginx"));
                         break;
                     }
+                    println!("{updated_jobs:?}");
+                    println!("{updated_pods:?}");
                 }
             }),
         )
