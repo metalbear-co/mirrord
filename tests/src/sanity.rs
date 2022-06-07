@@ -286,7 +286,10 @@ mod tests {
                         .await
                         .unwrap();
                     if !error_stream.is_empty() {
-                        assert!(error_stream.contains("NotFound")); //Todo: fix this when unwraps are removed in pod_api.rs
+                        assert!(
+                            error_stream.contains("NotFound"),
+                            "stream data: {error_stream:?}"
+                        ); //Todo: fix this when unwraps are removed in pod_api.rs
                         break;
                     }
                 }
