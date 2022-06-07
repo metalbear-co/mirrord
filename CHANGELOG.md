@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added graceful exit for library extraction logic in case of error
 - Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
 - File operations are now available behind the `MIRRORD_FILE_OPS` env variable, this means that mirrod now hooks into the following file functions: `open`, `fopen`, `fdopen`, `openat`, `read`, `fread`, `fileno`, `lseek`, and `write` to provide a mirrored file system.
+- Update bug report template to apply to the latest version of mirrord.
 
 ### Fixed
 
