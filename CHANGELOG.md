@@ -7,6 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Changed
+- Added graceful exit for library extraction logic in case of error
 - Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
 
 ### Fixed
