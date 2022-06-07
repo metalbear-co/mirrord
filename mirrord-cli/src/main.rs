@@ -123,8 +123,10 @@ mod mac_aarch {
         let file_path = temp_dir().as_path().join(file_name);
         // Don't download file if not needed
         if file_path.exists() {
+            info!("x86 mode, found existing dylib to use");
             return Ok(file_path.to_str().unwrap().to_string());
         }
+        info!("download x86 dylib for rosetta mode");
         let download_url = format!("https://github.com/metalbear-co/mirrord/releases/download/{}/libmirrord_layer_mac_x86_64.dylib", env!("CARGO_PKG_VERSION"));
         let mut response =
             reqwest::blocking::get(download_url).context("Could not download intel binary")?;
