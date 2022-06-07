@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use exec::execvp;
 use semver::Version;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 #[derive(Parser)]
@@ -71,7 +71,7 @@ mod mac_aarch {
         io::{Cursor, Read},
         path::Path,
     };
-
+    use tracing::warn;
     use mach_object::{OFile, CPU_TYPE_X86_64};
     use reqwest;
     use search_path::SearchPath;
