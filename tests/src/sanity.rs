@@ -13,16 +13,11 @@ mod tests {
 
     use crate::utils::*;
 
-    #[tokio::test]
-    #[ignore]
-    async fn test_complete_node_api() {
-        _test_complete_node_api().await;
-    }
-
     // actual test function used with "containerd", "docker" runtimes
     // starts the node(express.js) api server, sends four different requests, validates data,
     // stops the server and validates if the agent job and pod are deleted
-    async fn _test_complete_node_api() {
+    #[tokio::test]
+    async fn test_complete_node_api() {
         let client = setup_kube_client().await;
 
         let pod_namespace = "default";
@@ -298,13 +293,5 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-    }
-
-    // docker runtime test
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_docker_runtime() {
-        _test_complete_node_api().await;
     }
 }
