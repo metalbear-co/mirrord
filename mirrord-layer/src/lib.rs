@@ -1,45 +1,67 @@
+#![feature(once_cell)]
+#![feature(result_option_inspect)]
+#![feature(const_trait_impl)]
+
 use std::{
     collections::HashMap,
+    env,
+    lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    str::FromStr,
+    sync::Mutex,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
+use common::{
+    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+};
 use ctor::ctor;
 use envconfig::Envconfig;
+use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
-use lazy_static::lazy_static;
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
+use libc::c_int;
+use mirrord_protocol::{
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
+    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+};
+use sockets::SOCKETS;
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     runtime::Runtime,
     select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
     task,
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::prelude::*;
 
 mod common;
 mod config;
+mod error;
+mod file;
 mod macros;
 mod pod_api;
 mod sockets;
-use tracing_subscriber::prelude::*;
 
 use crate::{
     common::{HookMessage, Port},
     config::Config,
+    error::LayerError,
+    macros::hook,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
-lazy_static! {
-    static ref GUM: Gum = unsafe { Gum::obtain() };
-    static ref RUNTIME: Runtime = Runtime::new().unwrap();
-}
+static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
+static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
@@ -73,7 +95,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunne
                 match local_stream.try_read(&mut data) {
                     Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                         continue
-                        },
+                    },
                     Err(err) => {
                         debug!("local stream ended with err {:?}", err);
                         break;
@@ -99,7 +121,7 @@ fn init() {
 
     let config = Config::init_from_env().unwrap();
 
-    let pf = RUNTIME.block_on(pod_api::create_agent(
+    let port_forwarder = RUNTIME.block_on(pod_api::create_agent(
         &config.impersonated_pod_name,
         &config.impersonated_pod_namespace,
         &config.agent_namespace,
@@ -116,14 +138,21 @@ fn init() {
 
     enable_hooks();
 
-    RUNTIME.spawn(poll_agent(pf, receiver));
+    RUNTIME.spawn(poll_agent(port_forwarder, receiver));
 }
 
-#[inline]
+#[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+    // TODO: There is probably a better abstraction for this.
+    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    open_relative_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -143,14 +172,161 @@ async fn handle_hook_message(
                     )
                 });
         }
+        HookMessage::OpenFileHook(OpenFileHook {
+            path,
+            file_channel_tx,
+            open_options,
+        }) => {
+            debug!(
+                "HookMessage::OpenFileHook path {:#?} | options {:#?}",
+                path, open_options
+            );
+
+            // Lock the file handler and insert a channel that will be used to retrieve the file
+            // data when it comes back from `DaemonMessage::OpenFileResponse`.
+            open_file_handler.lock().unwrap().push(file_channel_tx);
+
+            let open_file_request = OpenFileRequest { path, open_options };
+
+            let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
+        }
+        HookMessage::OpenRelativeFileHook(OpenRelativeFileHook {
+            relative_fd,
+            path,
+            file_channel_tx,
+            open_options,
+        }) => {
+            debug!(
+                "HookMessage::OpenRelativeFileHook fd {:#?} | path {:#?} | options {:#?}",
+                relative_fd, path, open_options
+            );
+
+            open_relative_file_handler
+                .lock()
+                .unwrap()
+                .push(file_channel_tx);
+
+            let open_relative_file_request = OpenRelativeFileRequest {
+                relative_fd,
+                path,
+                open_options,
+            };
+
+            let request =
+                ClientMessage::FileRequest(FileRequest::OpenRelative(open_relative_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
+        }
+        HookMessage::ReadFileHook(ReadFileHook {
+            fd,
+            buffer_size,
+            file_channel_tx,
+        }) => {
+            debug!(
+                "HookMessage::ReadFileHook fd {:#?} | buffer_size {:#?}",
+                fd, buffer_size
+            );
+
+            read_file_handler.lock().unwrap().push(file_channel_tx);
+
+            debug!(
+                "HookMessage::ReadFileHook read_file_handler {:#?}",
+                read_file_handler
+            );
+
+            let read_file_request = ReadFileRequest { fd, buffer_size };
+
+            debug!(
+                "HookMessage::ReadFileHook read_file_request {:#?}",
+                read_file_request
+            );
+
+            let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::ReadFileHook codec_result {:#?}", codec_result);
+        }
+        HookMessage::SeekFileHook(SeekFileHook {
+            fd,
+            seek_from,
+            file_channel_tx,
+        }) => {
+            debug!(
+                "HookMessage::SeekFileHook fd {:#?} | seek_from {:#?}",
+                fd, seek_from
+            );
+
+            seek_file_handler.lock().unwrap().push(file_channel_tx);
+
+            let seek_file_request = SeekFileRequest {
+                fd,
+                seek_from: seek_from.into(),
+            };
+
+            let request = ClientMessage::FileRequest(FileRequest::Seek(seek_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::SeekFileHook codec_result {:#?}", codec_result);
+        }
+        HookMessage::WriteFileHook(WriteFileHook {
+            fd,
+            write_bytes,
+            file_channel_tx,
+        }) => {
+            debug!(
+                "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
+                fd,
+                write_bytes.len()
+            );
+
+            write_file_handler.lock().unwrap().push(file_channel_tx);
+
+            let write_file_request = WriteFileRequest { fd, write_bytes };
+
+            let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!(
+                "HookMessage::WriteFileHook codec_result {:#?}",
+                codec_result
+            );
+        }
+        HookMessage::CloseFileHook(CloseFileHook {
+            fd,
+            file_channel_tx,
+        }) => {
+            debug!("HookMessage::CloseFileHook fd {:#?}", fd);
+
+            close_file_handler.lock().unwrap().push(file_channel_tx);
+
+            let close_file_request = CloseFileRequest { fd };
+
+            let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+            let codec_result = codec.send(request).await;
+
+            debug!(
+                "HookMessage::CloseFileHook codec_result {:#?}",
+                codec_result
+            );
+        }
     }
 }
 
-#[inline]
+#[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     port_mapping: &mut HashMap<Port, ListenData>,
     active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+    // TODO: There is probably a better abstraction for this.
+    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
     ping: &mut bool,
 ) {
     match daemon_message {
@@ -182,13 +358,8 @@ async fn handle_daemon_message(
                 });
         }
         DaemonMessage::TCPData(msg) => {
-            debug!("Received data from connection id {}", msg.connection_id);
-            let connection = active_connections.get(&msg.connection_id);
-            if connection.is_none() {
-                debug!("Connection {} not found", msg.connection_id);
-                return;
-            }
-            if let Err(fail) = connection
+            if let Err(fail) = active_connections
+                .get(&msg.connection_id)
                 .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
                 .unwrap()
                 .await
@@ -198,7 +369,6 @@ async fn handle_daemon_message(
             }
         }
         DaemonMessage::TCPClose(msg) => {
-            debug!("Closing connection {}", msg.connection_id);
             if let Err(fail) = active_connections
                 .get(&msg.connection_id)
                 .map(|sender| sender.send(TcpTunnelMessages::Close))
@@ -208,6 +378,67 @@ async fn handle_daemon_message(
                 error!("DaemonMessage::TCPClose error {fail:#?}");
                 active_connections.remove(&msg.connection_id);
             }
+        }
+        DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
+            debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
+
+            open_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(open_file.unwrap())
+                .unwrap();
+        }
+        DaemonMessage::FileResponse(FileResponse::Read(read_file)) => {
+            // The debug message is too big if we just log it directly.
+            let _ = read_file
+                .as_ref()
+                .inspect(|success| {
+                    debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
+                })
+                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+
+            read_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(read_file.unwrap())
+                .unwrap();
+        }
+        DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
+            debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
+
+            seek_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(seek_file.unwrap())
+                .unwrap();
+        }
+        DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
+            debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
+
+            write_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(write_file.unwrap())
+                .unwrap();
+        }
+        DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
+            debug!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
+
+            close_file_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(close_file.unwrap())
+                .unwrap();
         }
         DaemonMessage::Pong => {
             if *ping {
@@ -230,14 +461,49 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
     let mut active_connections = HashMap::new();
+
+    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
+    // pretty much just `std::fs::File` things, so I think the best approach would be to create
+    // a `FakeFile`, and implement `std::io` traits on it.
+    //
+    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
+    // `common` module above `XHook` structs.
+
+    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
+    // to -agent, and when we receive a message from -agent to -layer).
+    let open_file_handler = Mutex::new(Vec::with_capacity(4));
+    let open_relative_file_handler = Mutex::new(Vec::with_capacity(4));
+    let read_file_handler = Mutex::new(Vec::with_capacity(4));
+    let seek_file_handler = Mutex::new(Vec::with_capacity(4));
+    let write_file_handler = Mutex::new(Vec::with_capacity(4));
+    let close_file_handler = Mutex::new(Vec::with_capacity(4));
+
     let mut ping = false;
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec).await;
+                handle_hook_message(hook_message.unwrap(),
+                    &mut port_mapping,
+                    &mut codec,
+                    &open_file_handler,
+                    &open_relative_file_handler,
+                    &read_file_handler,
+                    &seek_file_handler,
+                    &write_file_handler,
+                    &close_file_handler,
+                ).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &mut ping).await;
+                handle_daemon_message(daemon_message.unwrap().unwrap(),
+                    &mut port_mapping,
+                    &mut active_connections,
+                    &open_file_handler,
+                    &read_file_handler,
+                    &seek_file_handler,
+                    &write_file_handler,
+                    &close_file_handler,
+                    &mut ping,
+                ).await;
             }
             _ = sleep(Duration::from_secs(60)) => {
                 if !ping {
@@ -252,7 +518,60 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     }
 }
 
+/// Check if user set up `MIRRORD_FILE_OPS` env variable properly, and if file hooking should be
+/// enabled.
+fn enabled_file_ops() -> bool {
+    let enabled = env::var("MIRRORD_FILE_OPS")
+        .map_err(LayerError::from)
+        .and_then(|env_value| FromStr::from_str(&env_value).map_err(LayerError::from))
+        .inspect_err(|fail| {
+            warn!(
+                "Could not set up `MIRRORD_FILE_OPS` properly due to {:#?}",
+                fail
+            )
+        });
+
+    enabled.unwrap_or_default()
+}
+
+/// Enables file and socket hooks.
 fn enable_hooks() {
-    let interceptor = Interceptor::obtain(&GUM);
-    sockets::enable_hooks(interceptor)
+    let mut interceptor = Interceptor::obtain(&GUM);
+    interceptor.begin_transaction();
+
+    hook!(interceptor, "close", close_detour);
+
+    sockets::enable_socket_hooks(&mut interceptor);
+
+    if enabled_file_ops() {
+        file::hooks::enable_file_hooks(&mut interceptor);
+    }
+
+    interceptor.end_transaction();
+}
+
+/// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
+/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
+/// so it tries to do the same for files.
+unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    if SOCKETS.lock().unwrap().remove(&fd) {
+        libc::close(fd)
+    } else if env::var("MIRRORD_FILE_OPS").is_ok() {
+        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
+
+        if let Some(remote_fd) = remote_fd {
+            let close_file_result = file::ops::close(remote_fd);
+
+            close_file_result
+                .map_err(|fail| {
+                    error!("Failed writing file with {fail:#?}");
+                    -1
+                })
+                .unwrap_or_else(|fail| fail)
+        } else {
+            libc::close(fd)
+        }
+    } else {
+        libc::close(fd)
+    }
 }

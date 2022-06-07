@@ -4,6 +4,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
+    lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::Mutex,
@@ -11,7 +12,6 @@ use std::{
 
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
-use lazy_static::lazy_static;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error};
@@ -22,11 +22,11 @@ use crate::{
     HOOK_SENDER,
 };
 
-lazy_static! {
-    static ref SOCKETS: Mutex<HashSet<Socket>> = Mutex::new(HashSet::new());
-    pub static ref CONNECTION_QUEUE: Mutex<ConnectionQueue> =
-        Mutex::new(ConnectionQueue::default());
-}
+pub(crate) static SOCKETS: SyncLazy<Mutex<HashSet<Socket>>> =
+    SyncLazy::new(|| Mutex::new(HashSet::new()));
+
+pub static CONNECTION_QUEUE: SyncLazy<Mutex<ConnectionQueue>> =
+    SyncLazy::new(|| Mutex::new(ConnectionQueue::default()));
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
@@ -96,7 +96,7 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-struct Socket {
+pub(crate) struct Socket {
     fd: RawFd,
     domain: c_int,
     type_: c_int,
@@ -161,6 +161,8 @@ unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int)
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     debug!("bind called sockfd: {:?}", sockfd);
     let mut socket = {
@@ -212,6 +214,8 @@ unsafe extern "C" fn bind_detour(
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
@@ -308,6 +312,8 @@ unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     listen(sockfd, backlog)
 }
 
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     debug!("connect called");
 
@@ -347,6 +353,8 @@ unsafe extern "C" fn connect_detour(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getpeername called");
     let remote_address = {
@@ -382,6 +390,8 @@ unsafe extern "C" fn getpeername_detour(
 }
 
 /// Resolve the fake local address to the real local address.
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getsockname called");
     let local_address = {
@@ -416,16 +426,6 @@ unsafe extern "C" fn getsockname_detour(
 ) -> i32 {
     getsockname(sockfd, address, address_len)
 }
-
-// unsafe extern "C" fn setsockopt_detour(
-//     _sockfd: i32,
-//     _level: i32,
-//     _optname: i32,
-//     _optval: *mut c_char,
-//     _optlen: socklen_t,
-// ) -> i32 {
-//     0
-// }
 
 /// Fill in the sockaddr structure for the given address.
 #[inline]
@@ -508,21 +508,13 @@ unsafe extern "C" fn accept_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> i32 {
-    let res = libc::accept(sockfd, address, address_len);
-    if res < 0 {
-        return res;
+    let accept_fd = libc::accept(sockfd, address, address_len);
+
+    if accept_fd == -1 {
+        accept_fd
+    } else {
+        accept(sockfd, address, address_len, accept_fd)
     }
-    accept(sockfd, address, address_len, res)
-    //     let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
-
-    //     if !addr.is_null() {
-    //         debug!("received non-null address in accept");
-    //         let os_addr: OsSocketAddr = socket_addr.into();
-    //         std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
-    //     }
-
-    //     let connection_id = SOCKETS.read_single_connection(sockfd);
-    //     SOCKETS.create_data_socket(connection_id, socket_addr)
 }
 
 #[cfg(target_os = "linux")]
@@ -532,31 +524,22 @@ unsafe extern "C" fn accept4_detour(
     address_len: *mut socklen_t,
     flags: i32,
 ) -> i32 {
-    let res = libc::accept4(sockfd, address, address_len, flags);
-    if res < 0 {
-        return res;
+    let accept_fd = libc::accept4(sockfd, address, address_len, flags);
+
+    if accept_fd == -1 {
+        accept_fd
+    } else {
+        accept(sockfd, address, address_len, accept_fd)
     }
-    accept(sockfd, address, address_len, res)
 }
 
-fn close(fd: c_int) {
-    SOCKETS.lock().unwrap().remove(&fd);
-}
-
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    close(fd);
-    libc::close(fd)
-}
-
-pub fn enable_hooks(mut interceptor: Interceptor) {
-    hook!(interceptor, "close", close_detour);
+pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
     hook!(interceptor, "connect", connect_detour);
     try_hook!(interceptor, "getpeername", getpeername_detour);
     try_hook!(interceptor, "getsockname", getsockname_detour);
-    // hook!(interceptor, "setsockopt", setsockopt_detour);
     #[cfg(target_os = "linux")]
     {
         try_hook!(interceptor, "uv__accept4", accept4_detour);

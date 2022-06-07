@@ -5,7 +5,6 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{anyhow, Result};
 use futures::StreamExt;
 use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
 use pcap::{stream::PacketCodec, Active, Capture, Device, Linktype};
@@ -23,6 +22,7 @@ use tokio::{
 use tracing::{debug, error};
 
 use crate::{
+    error::AgentError,
     runtime::{get_container_pid, set_namespace},
     util::IndexAllocator,
 };
@@ -30,7 +30,7 @@ use crate::{
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
 
-const DEFAULT_RUNTIME: &str = "containerd";
+pub(crate) const DEFAULT_RUNTIME: &str = "containerd";
 
 type ConnectionID = u16;
 
@@ -134,26 +134,37 @@ impl ConnectionManager {
         self.ports = HashSet::from_iter(ports.iter().cloned())
     }
 
+    /// Called by `packet_worker` to convert data packets into `SnifferOutput`s.
+    // TODO: Looks eerily similar to a custom `Into` implementation, or could be superseded by some
+    // `map` operation. It feels weird to return an `Option<Vec<T>>`, as an empty `Vec` is
+    // arguably the same as `None`.
     fn handle_packet(&mut self, eth_packet: &EthernetPacket) -> Option<Vec<SnifferOutput>> {
+        debug!("handle_packet -> handling eth_packet {:#?}", eth_packet);
         let mut messages = vec![];
+
         let ip_packet = match eth_packet.get_ethertype() {
             EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
             _ => return None,
         };
+
         let tcp_packet = match ip_packet.get_next_level_protocol() {
             IpNextHeaderProtocols::Tcp => TcpPacket::new(ip_packet.payload())?,
             _ => return None,
         };
+
         let dest_port = tcp_packet.get_destination();
         let tcp_flags = tcp_packet.get_flags();
         let source_port = tcp_packet.get_source();
+
         let identifier = TCPSessionIdentifier {
             source_addr: ip_packet.get_source(),
             dest_addr: ip_packet.get_destination(),
             source_port,
             dest_port,
         };
+
         let is_client_packet = self.qualified_port(dest_port);
+
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
@@ -177,8 +188,10 @@ impl ConnectionManager {
                 id
             }
         };
+
         if is_client_packet {
             let data = tcp_packet.payload();
+
             if !data.is_empty() {
                 messages.push(SnifferOutput::TCPData(TCPData {
                     data: data.to_vec(),
@@ -186,14 +199,17 @@ impl ConnectionManager {
                 }));
             }
         }
+
         if is_closed_connection(tcp_flags) {
             self.index_allocator.free_index(session);
+
             messages.push(SnifferOutput::TCPClose(TCPClose {
                 connection_id: session,
             }));
         } else {
             self.sessions.insert(identifier, session);
         }
+
         Some(messages)
     }
 }
@@ -205,43 +221,40 @@ impl PacketCodec for TCPManagerCodec {
 
     fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
         Ok(packet.data.to_vec())
-        // let res = match EthernetPacket::new(packet.data) {
-        //     Some(packet) => self
-        //         .connection_manager
-        //         .handle_packet(&packet)
-        //         .unwrap_or(vec![]),
-        //     _ => vec![],
-        // };
-        // Ok(res)
     }
 }
 
-fn prepare_sniffer(interface: String) -> Result<Capture<Active>> {
+fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
+    debug!("prepare_sniffer -> Preparing interface.");
+
     let interface_names_match = |iface: &Device| iface.name == interface;
     let interfaces = Device::list()?;
+
     let interface = interfaces
         .into_iter()
         .find(interface_names_match)
-        .ok_or_else(|| anyhow!("Interface not found"))?;
+        .ok_or_else(|| AgentError::NotFound("Interface not found!".to_string()))?;
 
-    let mut cap = Capture::from_device(interface)?
+    let mut capture = Capture::from_device(interface)?
         .immediate_mode(true)
         .open()?;
-    cap.set_datalink(Linktype::ETHERNET)?;
+
+    capture.set_datalink(Linktype::ETHERNET)?;
     // Set a dummy filter that shouldn't capture anything. This makes the code easier.
-    cap.filter(DUMMY_BPF, true)?;
-    cap = cap.setnonblock()?;
-    Ok(cap)
+    capture.filter(DUMMY_BPF, true)?;
+    capture = capture.setnonblock()?;
+
+    Ok(capture)
 }
 
 pub async fn packet_worker(
-    tx: Sender<SnifferOutput>,
-    mut rx: Receiver<SnifferCommand>,
+    sniffer_output_tx: Sender<SnifferOutput>,
+    mut sniffer_command_rx: Receiver<SnifferCommand>,
     interface: String,
     container_id: Option<String>,
     container_runtime: Option<String>,
-) -> Result<()> {
-    debug!("setting namespace");
+) -> Result<(), AgentError> {
+    debug!("packet_worker -> setting namespace");
 
     let pid = match (container_id, container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
@@ -250,7 +263,12 @@ pub async fn packet_worker(
                 .ok()
         }
         (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
-        (None, Some(_)) => return Err(anyhow!("Container ID not specified")),
+        (None, Some(_)) => {
+            return Err(AgentError::NotFound(
+                "packet_worker -> Container ID not specified".to_string(),
+            ))
+        }
+
         _ => None,
     };
 
@@ -258,59 +276,65 @@ pub async fn packet_worker(
         let namespace = PathBuf::from("/proc")
             .join(PathBuf::from(pid.to_string()))
             .join(PathBuf::from("ns/net"));
+
         set_namespace(namespace).unwrap();
     }
 
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;
-    debug!("done prepare sniffer");
     let codec = TCPManagerCodec {};
     let mut connection_manager = ConnectionManager::new();
-    let mut stream = sniffer.stream(codec)?;
+    let mut sniffer_stream = sniffer.stream(codec)?;
+
     loop {
         select! {
-            Some(Ok(packet)) = stream.next() => {
-                    let messages = match EthernetPacket::new(&packet) {
-                        Some(packet) =>
-                            connection_manager
-                            .handle_packet(&packet)
-                            .unwrap_or_default(),
-                        _ => vec![],
-                    };
-                    for message in messages.into_iter() {
-                        tx.send(message).await?;
-                    }
+            // Converts data packets into `SnifferOutput`s, then sends these to be handled by ?.
+            Some(Ok(packet)) = sniffer_stream.next() => {
+                debug!("packet_worker -> sniffer_stream has a packet.");
+
+                let sniffer_messages = EthernetPacket::new(&packet)
+                    .and_then(|packet| connection_manager.handle_packet(&packet))
+                    .unwrap_or_default();
+
+                debug!("packet_worker -> sniffer_messages");
+
+                for sniffer_output in sniffer_messages.into_iter() {
+                    sniffer_output_tx.send(sniffer_output).await?;
+                }
 
             },
-            message = rx.recv() => {
-                match message {
+            sniffer_command = sniffer_command_rx.recv() => {
+                match sniffer_command {
                     Some(SnifferCommand::SetPorts(ports)) => {
-                        debug!("setting ports {:?}", &ports);
+                        debug!("packet_worker -> setting ports {:?}", &ports);
+
                         connection_manager.set_ports(&ports);
-                        let sniffer = stream.inner_mut();
+                        let sniffer = sniffer_stream.inner_mut();
+
                         if ports.is_empty() {
-                            debug!("empty ports, setting dummy bpf");
+                            debug!("packet_worker -> empty ports, setting dummy bpf");
                             sniffer.filter(DUMMY_BPF, true)?
                         } else {
                             let bpf = format_bpf(&ports);
-                            debug!("setting bpf to {:?}", &bpf);
+                            debug!("packet_worker -> setting bpf to {:?}", &bpf);
+
                             sniffer.filter(&bpf, true)?
                         };
 
                     },
                     Some(SnifferCommand::Close) | None => {
-                        debug!("sniffer closed");
+                        debug!("packet_worker -> sniffer closed");
                         break;
                     }
                 }
             },
-            _ = tx.closed() => {
-                debug!("closing due to tx closed");
+            _ = sniffer_output_tx.closed() => {
+                debug!("packet_worker -> closing due to sniffer_tx closed");
                 break;
             },
 
         }
     }
-    debug!("end of packet_worker");
+    debug!("packet_worker -> finished");
     Ok(())
 }
