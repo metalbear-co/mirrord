@@ -161,7 +161,8 @@ unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int)
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-#[allow(clippy::significant_drop_in_scrutinee)] /// See https://github.com/rust-lang/rust-clippy/issues/8963
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     debug!("bind called sockfd: {:?}", sockfd);
     let mut socket = {
@@ -213,7 +214,8 @@ unsafe extern "C" fn bind_detour(
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-#[allow(clippy::significant_drop_in_scrutinee)] /// See https://github.com/rust-lang/rust-clippy/issues/8963
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
@@ -310,7 +312,8 @@ unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     listen(sockfd, backlog)
 }
 
-#[allow(clippy::significant_drop_in_scrutinee)] /// See https://github.com/rust-lang/rust-clippy/issues/8963
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     debug!("connect called");
 
@@ -350,7 +353,8 @@ unsafe extern "C" fn connect_detour(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[allow(clippy::significant_drop_in_scrutinee)] /// See https://github.com/rust-lang/rust-clippy/issues/8963
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getpeername called");
     let remote_address = {
@@ -386,7 +390,8 @@ unsafe extern "C" fn getpeername_detour(
 }
 
 /// Resolve the fake local address to the real local address.
-#[allow(clippy::significant_drop_in_scrutinee)] /// See https://github.com/rust-lang/rust-clippy/issues/8963
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     debug!("getsockname called");
     let local_address = {
