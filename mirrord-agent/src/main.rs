@@ -242,7 +242,6 @@ async fn start_agent() -> Result<(), AgentError> {
 
     let (file_request_tx, file_request_rx) = mpsc::channel::<(PeerID, FileRequest)>(1000);
     let (file_response_tx, mut file_response_rx) = mpsc::channel::<(PeerID, FileResponse)>(1000);
-
     // Create a task to handle file operations, similar to sniffer.
     let file_task = tokio::spawn(file_worker(
         file_request_rx,
@@ -359,8 +358,11 @@ async fn start_agent() -> Result<(), AgentError> {
         sniffer_command_tx.send(SnifferCommand::Close).await?;
     };
 
+    // To make tasks stop (need to add drain..)
     drop(sniffer_command_tx);
     drop(sniffer_output_rx);
+    drop(file_request_tx);
+    drop(file_response_rx);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), packet_task).await???;
     tokio::time::timeout(std::time::Duration::from_secs(10), file_task).await???;
