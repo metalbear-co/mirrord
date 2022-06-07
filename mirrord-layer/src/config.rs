@@ -22,4 +22,7 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_AGENT_TTL", default = "0")]
     pub agent_ttl: u16,
+
+    #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
+    pub enabled_file_ops: bool,
 }
