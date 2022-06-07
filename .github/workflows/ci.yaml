@@ -21,6 +21,7 @@ jobs:
       # Needed for agent
       - run: sudo apt install libpcap-dev cmake
       - run: cargo fmt --all -- --check
+      - run: cargo clippy -V
       - run: cargo clippy -- -D warnings
 
   test_mirrord_protocol:
