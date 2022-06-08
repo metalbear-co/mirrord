@@ -18,7 +18,7 @@ use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncReadExt, BufReader},
     process::{Child, ChildStdout, Command},
     time::{sleep, Duration},
 };
@@ -239,9 +239,12 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: Api
     }
 }
 
+// Sends GET, POST, PUT, and DELETE requests to the given service URL -> Express/Flask server.
+// PUT creates a file named "test" in cwd and DELETE deletes it.
 pub async fn send_requests(service_url: &str) {
     http_request(service_url, Method::GET).await;
     http_request(service_url, Method::POST).await;
+
     http_request(service_url, Method::PUT).await;
 
     let cwd = env::current_dir().unwrap();
@@ -256,21 +259,21 @@ pub async fn send_requests(service_url: &str) {
     assert!(!path.exists());
 }
 
-// to all requests, the express API prints {request_name}: Request completed
-// PUT - creates cwd/test, DELETE - deletes cwd/test
-// this is verified by reading the stdout of the server
-pub async fn validate_requests(stdout: &mut ChildStdout) {
+/// For all requests, the Express/Flask server prints "{request_name}: Request completed",
+/// this is verified by reading the stdout of the server
+pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
     let mut out = String::new();
     stdout.read_to_string(&mut out).await.unwrap();
-    println!("{}", out);
+
+    // Todo: change this assertions to assert_eq! when TCPClose is patched
+
+    assert!(out.contains("GET: Request completed"));
+    assert!(out.contains("POST: Request completed"));
+    assert!(out.contains("PUT: Request completed"));
+    assert!(out.contains("DELETE: Request completed"));
 }
 
-pub async fn validate_no_requests(stdout: ChildStdout, service_url: &str) {
-    let mut buffer = BufReader::new(stdout);
-    let mut stream = String::new();
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("Server listening on port 80"));
-
+pub async fn validate_no_requests(service_url: &str) {
     let cwd = env::current_dir().unwrap();
     let path = cwd.join("test");
 

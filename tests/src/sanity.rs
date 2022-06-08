@@ -27,8 +27,8 @@ mod tests {
         _test_complete_api("python").await;
     }
 
-    // starts the node(express.js)/python(flask) api server, sends four different requests,
-    // validates data, stops the server and validates if the agent job and pod are deleted
+    /// Starts the Node(express.js)/Python(flask) api server, sends four different requests,
+    /// validates data, stops the server and validates if the agent job and pod are deleted.
     async fn _test_complete_api(server: &str) {
         let client = setup_kube_client().await;
 
@@ -37,10 +37,9 @@ mod tests {
         let mut server = test_server_init(&client, pod_namespace, env, server).await;
 
         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
-        println!("service url: {}", service_url);
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-        let mut child_stdout = server.stdout.take().unwrap();
+        let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
 
         // Note: to run a task in the background, don't await on it.
         // spawn returns a JoinHandle
@@ -58,20 +57,28 @@ mod tests {
             }
         });
 
-        // since we are reading from the stdout, we could block at any point in case the server
-        // does not write to its stdout, so we need a timeout here
-        let validation_timeout = Duration::from_secs(30);
-        timeout(validation_timeout, send_requests(service_url.as_str()))
-            .await
-            .unwrap();
+        let mut is_running = String::new();
+        let start_timeout = Duration::from_secs(10);
 
-        validate_requests(&mut child_stdout).await;
+        timeout(start_timeout, async {
+            stdout_reader.read_line(&mut is_running).await.unwrap();
+            assert_eq!(is_running, "Server listening on port 80\n");
+        })
+        .await
+        .unwrap();
+
+        send_requests(service_url.as_str()).await;
+
+        // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
+        // blocking.
         signal::kill(
             Pid::from_raw(server.id().unwrap().try_into().unwrap()),
             Signal::SIGTERM,
         )
         .unwrap();
-        server.kill().await.unwrap();
+
+        validate_requests(&mut stdout_reader).await;
+        server.wait().await.unwrap();
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
@@ -107,9 +114,9 @@ mod tests {
     }
 
     #[tokio::test]
-    // we send a request to a different pod in the cluster (different namespace) and assert
-    // that no operation is performed as specified in the request by the server
-    // as the agent pod is impersonating the pod running in the default namespace
+    /// Sends a request to a different pod in the cluster (different namespace) and asserts
+    /// that no operation is performed as specified in the request by the server
+    /// as the agent pod is impersonating the pod running in the default namespace
     async fn test_different_pod_in_cluster() {
         let client = setup_kube_client().await;
 
@@ -124,6 +131,8 @@ mod tests {
         let service_url = get_service_url(&client, test_namespace).await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
+        let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
+
         tokio::spawn(async move {
             loop {
                 let mut error_stream = String::new();
@@ -134,14 +143,17 @@ mod tests {
             }
         });
 
-        let child_stdout = server.stdout.take().unwrap();
-        let timeout_duration = Duration::from_secs(10);
-        timeout(
-            timeout_duration,
-            validate_no_requests(child_stdout, service_url.as_str()),
-        )
+        let mut is_running = String::new();
+        let start_timeout = Duration::from_secs(10);
+
+        timeout(start_timeout, async {
+            stdout_reader.read_line(&mut is_running).await.unwrap();
+            assert_eq!(is_running, "Server listening on port 80\n");
+        })
         .await
         .unwrap();
+
+        validate_no_requests(service_url.as_str()).await;
 
         server.kill().await.unwrap();
         delete_namespace(&client, test_namespace).await;
@@ -149,9 +161,9 @@ mod tests {
 
     // agent namespace tests
     #[tokio::test]
-    // creates a new k8s namespace, starts the API server with env:
-    // MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
-    // validate data through requests to the API server
+    /// Creates a new k8s namespace, starts the API server with env:
+    /// MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
+    /// validate data through requests to the API server
     async fn test_good_agent_namespace() {
         let client = setup_kube_client().await;
 
@@ -165,7 +177,7 @@ mod tests {
         let service_url = get_service_url(&client, "default").await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-        let mut child_stdout = server.stdout.take().unwrap();
+        let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
 
         tokio::spawn(async move {
             loop {
@@ -177,14 +189,26 @@ mod tests {
             }
         });
 
-        let validation_timeout = Duration::from_secs(20);
-        timeout(validation_timeout, send_requests(service_url.as_str()))
-            .await
-            .unwrap();
+        let mut is_running = String::new();
+        let start_timeout = Duration::from_secs(10);
 
-        validate_requests(&mut child_stdout).await;
+        timeout(start_timeout, async {
+            stdout_reader.read_line(&mut is_running).await.unwrap();
+            assert_eq!(is_running, "Server listening on port 80\n");
+        })
+        .await
+        .unwrap();
 
-        server.kill().await.unwrap();
+        send_requests(service_url.as_str()).await;
+
+        signal::kill(
+            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
+            Signal::SIGTERM,
+        )
+        .unwrap();
+
+        validate_requests(&mut stdout_reader).await;
+        server.wait().await.unwrap();
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
@@ -197,8 +221,8 @@ mod tests {
     }
 
     #[tokio::test]
-    // starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
-    // asserts the process crashes: "NotFound" as the namespace does not exist
+    /// Starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
+    /// asserts the process crashes: "NotFound" as the namespace does not exist
     async fn test_nonexistent_agent_namespace() {
         let client = setup_kube_client().await;
         let agent_namespace = "nonexistent-namespace";
@@ -232,9 +256,9 @@ mod tests {
 
     // pod namespace tests
     #[tokio::test]
-    // creates a new k8s namespace, starts the API server with env:
-    // MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
-    // requests
+    /// Creates a new k8s namespace, starts the API server with env:
+    /// MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
+    /// requests
     async fn test_good_pod_namespace() {
         let client = setup_kube_client().await;
 
@@ -248,6 +272,8 @@ mod tests {
         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
 
         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
+        let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
+
         tokio::spawn(async move {
             loop {
                 let mut error_stream = String::new();
@@ -258,25 +284,34 @@ mod tests {
             }
         });
 
-        let mut child_stdout = server.stdout.take().unwrap();
+        let mut is_running = String::new();
+        let start_timeout = Duration::from_secs(10);
 
-        let validation_timeout = Duration::from_secs(20);
-        timeout(validation_timeout, send_requests(service_url.as_str()))
-            .await
-            .unwrap();
+        timeout(start_timeout, async {
+            stdout_reader.read_line(&mut is_running).await.unwrap();
+            assert_eq!(is_running, "Server listening on port 80\n");
+        })
+        .await
+        .unwrap();
 
-        validate_requests(&mut child_stdout).await;
+        send_requests(service_url.as_str()).await;
 
-        server.kill().await.unwrap();
+        signal::kill(
+            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
+            Signal::SIGTERM,
+        )
+        .unwrap();
+
+        validate_requests(&mut stdout_reader).await;
+        server.wait().await.unwrap();
+
         delete_namespace(&client, pod_namespace).await;
     }
 
-    // TODO: This test fails: errors out with `error_stream.contains(\"NotFound\")` when running
-    // with docker runtime.
     #[tokio::test]
-    // starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
-    // (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
-    // exist
+    /// Starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
+    /// (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
+    /// exist
     async fn test_bad_pod_namespace() {
         let client = setup_kube_client().await;
 

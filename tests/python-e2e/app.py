@@ -23,15 +23,15 @@ def get():
 
 @app.route('/', methods=['POST'])
 def post():     
-    # if str(request.data, 'utf-8') == TEXT:
-    print("POST: Request completed", flush=True)
+    if str(request.data, 'utf-8') == TEXT:
+        print("POST: Request completed", flush=True)
     return "OK"  
 
 @app.route('/', methods=['PUT'])        
 def put():
     with open(PATH, "w") as f:
         f.write(TEXT)
-    print("PUT: Request completed", flush=True)
+    print("PUT: Request completed", flush=True)    
     return "OK"
 
 @app.route('/', methods=['DELETE'])
