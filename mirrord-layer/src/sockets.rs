@@ -505,7 +505,11 @@ unsafe extern "C" fn accept4_detour(
     }
 }
 
-fn fcntl(fcntl_fd: c_int, orig_fd: c_int, cmd: c_int) -> c_int {
+fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
+    if fcntl_fd == -1 {
+        error!("fcntl failed");
+        return fcntl_fd;
+    }
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
             let mut sockets = SOCKETS.lock().unwrap();
@@ -521,15 +525,10 @@ fn fcntl(fcntl_fd: c_int, orig_fd: c_int, cmd: c_int) -> c_int {
 
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    if fcntl_fd == -1 {
-        error!("fcntl failed");
-        return fcntl_fd;
-    }
-    fcntl(fcntl_fd, fd, cmd)
+    fcntl(fd, cmd, fcntl_fd)
 }
 
-fn dup(fd: c_int) -> c_int {
-    let dup_fd = unsafe { libc::dup(fd) };
+fn dup(fd: c_int, dup_fd: i32) -> c_int {
     if dup_fd == -1 {
         error!("dup failed");
         return dup_fd;
@@ -543,50 +542,22 @@ fn dup(fd: c_int) -> c_int {
 }
 
 unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    dup(fd)
-}
-
-fn dup2(oldfd: c_int, newfd: c_int) -> c_int {
-    if oldfd == newfd {
-        return newfd;
-    }
-    let dup2_fd = unsafe { libc::dup2(oldfd, newfd) };
-    if dup2_fd == -1 {
-        error!("dup2 failed");
-        return dup2_fd;
-    }
-
-    let mut sockets = SOCKETS.lock().unwrap();
-    if let Some(socket) = sockets.get(&oldfd) {
-        let dup2_socket = socket.clone();
-        sockets.insert(dup2_fd as RawFd, dup2_socket);
-    }
-    dup2_fd
+    let dup_fd = libc::dup(fd);
+    dup(fd, dup_fd)
 }
 
 unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
-    dup2(oldfd, newfd)
-}
-
-#[cfg(target_os = "linux")]
-fn dup3(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = unsafe { libc::dup3(oldfd, newfd, flags) };
-    if dup3_fd == -1 {
-        error!("dup3 failed");
-        return dup3_fd;
+    if oldfd == newfd {
+        return newfd;
     }
-
-    let mut sockets = SOCKETS.lock().unwrap();
-    if let Some(socket) = sockets.get(&oldfd) {
-        let dup3_socket = socket.clone();
-        sockets.insert(dup3_fd as RawFd, dup3_socket);
-    }
-    dup3_fd
+    let dup2_fd = libc::dup2(oldfd, newfd);
+    dup(oldfd, dup2_fd)
 }
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    dup3(oldfd, newfd, flags)
+    let dup3_fd = libc::dup3(oldfd, newfd, flags);
+    dup(oldfd, dup3_fd)
 }
 
 pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
