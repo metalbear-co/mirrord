@@ -19,12 +19,17 @@ let k8sApi: any;
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
 	let impersonatedPodNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
-
+	let fileOps = globalContext.workspaceState.get<boolean>('fileOps', false);
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
-	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')'];
+	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')',
+	'Toggle file operations (current: ' + (fileOps ? 'enabled' : 'disabled') + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
 			return;
+		}
+
+		if (setting.startsWith('Toggle file')){
+			globalContext.workspaceState.update('fileOps', !fileOps);
 		}
 
 		if (setting.startsWith('Change namespace')) {
@@ -127,15 +132,14 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			});
 		}
 
-		const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
+		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
 		// Get pods from kubectl and let user select one to mirror
-		let pods = await k8sApi.listNamespacedPod(namespace);
+		let pods = await k8sApi.listNamespacedPod(podNamespace);
 		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
 
 		return await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 			return new Promise(resolve => {
 				console.log(config);
-				const namespace = globalContext.workspaceState.get<string>('namespace', 'default');
 				// Get pods from kubectl and let user select one to mirror
 				if (k8sApi === null) {
 					return;
@@ -151,7 +155,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				config.env = {
 					...config.env, ...{
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName
+						'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName,
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE': podNamespace,
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false')
 					}
 				};
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
