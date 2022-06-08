@@ -512,7 +512,11 @@ fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
     }
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
-            dup(orig_fd, fcntl_fd);
+            let mut sockets = SOCKETS.lock().unwrap();
+            if let Some(socket) = sockets.get(&orig_fd) {
+                let fcntl_socket = socket.clone();
+                sockets.insert(fcntl_fd as RawFd, fcntl_socket);
+            }
         }
         _ => (),
     }

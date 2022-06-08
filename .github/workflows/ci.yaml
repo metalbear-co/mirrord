@@ -145,7 +145,7 @@ jobs:
       - run: minikube image load test:latest
       - name: setup nginx
         run: kubectl apply -f tests/app.yaml
-      - name: run node tests
+      - name: cargo test
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: switch minikube runtime
         run: |
