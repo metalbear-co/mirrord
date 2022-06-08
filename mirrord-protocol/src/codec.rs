@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{self, SeekFrom},
     net::IpAddr,
     path::PathBuf,
@@ -135,6 +136,11 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct RemoteEnvVarsRequest {
+    pub load_env_vars: HashMap<String, String>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
@@ -151,6 +157,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     FileRequest(FileRequest),
+    RemoteEnvVarsRequest(RemoteEnvVarsRequest),
     Ping,
 }
 
@@ -197,6 +204,9 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
+    // TODO(alex) [mid] 2022-06-08: Refactor name and variant (make it a struct to return possible
+    // errors).
+    EnvVarsResponse(HashMap<String, String>),
 }
 
 pub struct ClientCodec {

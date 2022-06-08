@@ -1,4 +1,4 @@
-use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{collections::HashMap, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
@@ -81,7 +81,7 @@ pub struct CloseFileHook {
 
 #[derive(Debug)]
 pub struct RemoteEnvVarsHook {
-    pub(crate) load_env_vars: RawFd,
+    pub(crate) load_env_vars: HashMap<String, String>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.

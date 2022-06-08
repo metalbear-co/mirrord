@@ -3,7 +3,7 @@
 #![feature(const_trait_impl)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     lazy::{SyncLazy, SyncOnceCell},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -26,7 +26,8 @@ use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ReadFileResponse, RemoteEnvVarsRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+    WriteFileResponse,
 };
 use regex::RegexSet;
 use sockets::SOCKETS;
@@ -117,7 +118,10 @@ async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunne
     debug!("exiting tcp tunnel");
 }
 
-fn env_vars_to_map(env_vars: String) -> HashMap<String, String> {
+fn select_env_vars_as_map(
+    env_vars: String,
+    ignore_keys: HashSet<String>,
+) -> HashMap<String, String> {
     let overridden = env_vars
         // "DB=foo.db;PORT=99;HOST=;PATH=/fake"
         .split_terminator(';')
@@ -131,7 +135,7 @@ fn env_vars_to_map(env_vars: String) -> HashMap<String, String> {
             },
         )
         // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
-        .filter(|(key, _)| IGNORE_ENV_VAR.is_match(key) == false)
+        .filter(|(key, _)| ignore_keys.contains(key) == false)
         // [("DB", "foo.db"), ("PORT", "99")]
         .collect::<HashMap<_, _>>();
 
@@ -167,10 +171,14 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
+    // TODO(alex) [mid] 2022-06-08: Make this `static`.
+    let mut ignore_env_vars = HashSet::with_capacity(4);
+    ignore_env_vars.insert("PATH".to_string());
+
     RUNTIME.spawn(poll_agent(
         port_forwarder,
         receiver,
-        env_vars_to_map(config.override_env_vars),
+        select_env_vars_as_map(config.override_env_vars, ignore_env_vars),
     ));
 }
 
@@ -349,9 +357,9 @@ async fn handle_hook_message(
         HookMessage::RemoteEnvVarsHook(RemoteEnvVarsHook { load_env_vars }) => {
             debug!("HookMessage::RemoteEnvVarsHook load {:#?}", load_env_vars);
 
-            let load_env_vars_request = RemoteEnvVarsRequest { override_env_vars };
+            let load_env_vars_request = RemoteEnvVarsRequest { load_env_vars };
 
-            let request = ClientMessage::RemoteEnvVars(request);
+            let request = ClientMessage::RemoteEnvVarsRequest(load_env_vars_request);
             let codec_result = codec.send(request).await;
 
             debug!(
@@ -494,6 +502,19 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
+        DaemonMessage::EnvVarsResponse(remote_env_vars) => {
+            debug!("DaemonMessage::EnvVarsResponse {:#?}!", remote_env_vars);
+
+            for (key, value) in remote_env_vars.into_iter() {
+                unsafe {
+                    let setenv_result = libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
+                    debug!(
+                        "DaemonMessage::EnvVarsResponse setenv_result {:#?}",
+                        setenv_result
+                    );
+                }
+            }
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -529,6 +550,18 @@ async fn poll_agent(
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
+
+    let codec_result = codec
+        .send(ClientMessage::RemoteEnvVarsRequest(RemoteEnvVarsRequest {
+            load_env_vars: env_vars,
+        }))
+        .await;
+
+    debug!(
+        "ClientMessage::RemoteEnvVarsRequest codec_result {:#?}",
+        codec_result
+    );
+
     loop {
         select! {
             hook_message = receiver.recv() => {

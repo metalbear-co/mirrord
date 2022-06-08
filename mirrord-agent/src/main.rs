@@ -3,20 +3,23 @@
 
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
 };
 
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileRequest, FileResponse, Port,
+    RemoteEnvVarsRequest,
 };
 use tokio::{
+    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
+    sync::mpsc,
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
@@ -33,7 +36,7 @@ use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
 
-use crate::file::file_worker;
+use crate::{file::file_worker, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME};
 
 type PeerID = u32;
 
@@ -111,6 +114,8 @@ async fn handle_peer_messages(
     sniffer_command_tx: mpsc::Sender<SnifferCommand>,
     file_request_tx: mpsc::Sender<(PeerID, FileRequest)>,
     peer_message: PeerMessage,
+    container_id: &Option<String>,
+    container_runtime: &Option<String>,
 ) -> Result<(), AgentError> {
     match peer_message.client_message {
         ClientMessage::PortSubscribe(ports) => {
@@ -160,9 +165,78 @@ async fn handle_peer_messages(
                 .send((peer_message.peer_id, file_request))
                 .await?;
         }
+        ClientMessage::RemoteEnvVarsRequest(RemoteEnvVarsRequest { load_env_vars }) => {
+            debug!(
+                "ClientMessage::RemoteEnvVarsRequest peer id {:?} requesting {:?}",
+                peer_message.peer_id, load_env_vars
+            );
+
+            let container_runtime: &str = &container_runtime
+                .as_ref()
+                .map(String::as_str)
+                .unwrap_or(DEFAULT_RUNTIME);
+
+            let pid = match container_id {
+                Some(container_id) => get_container_pid(&container_id, container_runtime).await,
+                None => Err(AgentError::NotFound(format!(
+                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
+                    container_id, container_runtime
+                ))),
+            }?;
+
+            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
+            let mut environ_file = tokio::fs::File::open(environ_path).await?;
+
+            let mut env_vars = String::with_capacity(255);
+            let read_amount = environ_file.read_to_string(&mut env_vars).await?;
+
+            let env_vars = env_vars.trim().to_string();
+            debug!(
+                "ClientMessage::RemoteEnvVarsRequest read {:?} bytes with ENV_VARS {:?}",
+                read_amount, env_vars
+            );
+
+            let ignore_keys = load_env_vars.keys().cloned().collect::<HashSet<_>>();
+            let env_vars = select_env_vars_as_map(env_vars, ignore_keys);
+
+            debug!(
+                "ClientMessage::RemoteEnvVarsRequest selected env vars found {:?}",
+                env_vars
+            );
+
+            let peer = state.peers.get(&peer_message.peer_id).unwrap();
+            peer.channel
+                .send(DaemonMessage::EnvVarsResponse(env_vars))
+                .await?;
+        }
     }
 
     Ok(())
+}
+
+// TODO(alex) [mid] 2022-06-08: Function is common between `-layer` and `-agent`.
+fn select_env_vars_as_map(
+    env_vars: String,
+    ignore_keys: HashSet<String>,
+) -> HashMap<String, String> {
+    let env_vars = env_vars
+        // "DB=foo.db;PORT=99;HOST=;PATH=/fake"
+        .split_terminator(';')
+        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
+        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
+        .filter(|(key, _)| ignore_keys.contains(key) == false)
+        // [("DB", "foo.db"), ("PORT", "99")]
+        .collect::<HashMap<_, _>>();
+
+    env_vars
 }
 
 async fn peer_handler(
@@ -274,7 +348,13 @@ async fn start_agent() -> Result<(), AgentError> {
 
             },
             Some(peer_message) = peer_messages_rx.recv() => {
-                handle_peer_messages(&mut state, sniffer_command_tx.clone(), file_request_tx.clone(), peer_message).await?;
+                handle_peer_messages(&mut state,
+                    sniffer_command_tx.clone(),
+                    file_request_tx.clone(),
+                    peer_message,
+                    &args.container_id,
+                    &args.container_runtime,
+                ).await?;
 
             },
             Some((peer_id, file_response)) = file_response_rx.recv() => {
