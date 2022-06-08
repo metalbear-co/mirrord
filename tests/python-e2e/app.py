@@ -16,29 +16,34 @@ app = Flask(__name__)
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 PATH = getcwd() + "/test"
 
+
 @app.route('/', methods=['GET'])
-def get():    
+def get():
     print("GET: Request completed", flush=True)
     return "OK"
 
+
 @app.route('/', methods=['POST'])
-def post():     
+def post():
     if str(request.data, 'utf-8') == TEXT:
         print("POST: Request completed", flush=True)
-    return "OK"  
+    return "OK"
 
-@app.route('/', methods=['PUT'])        
+
+@app.route('/', methods=['PUT'])
 def put():
     with open(PATH, "w") as f:
         f.write(TEXT)
-    print("PUT: Request completed", flush=True)    
+    print("PUT: Request completed", flush=True)
     return "OK"
+
 
 @app.route('/', methods=['DELETE'])
 def delete():
     remove(PATH)
     print("DELETE: Request completed", flush=True)
     return "OK"
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=80)
