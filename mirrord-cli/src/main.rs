@@ -78,9 +78,9 @@ mod mac_aarch {
     use tracing::warn;
 
     use super::*;
-    pub fn is_binary_different_arch(binary_path: &String) -> bool {
+    pub fn is_binary_different_arch(binary_name: &String) -> bool {
         let search_path = SearchPath::new("PATH").unwrap();
-        let binary_path = match search_path.find(&Path::new(binary_path)) {
+        let binary_name = match search_path.find(&Path::new(binary_name)) {
             Some(path) => path,
             None => {
                 warn!("Could not find binary in PATH");
@@ -120,7 +120,7 @@ mod mac_aarch {
     }
 
     pub fn download_intel_binary() -> Result<PathBuf> {
-        let file_name = format!("libmirrord_layer_intel_{}.so", env!("CARGO_PKG_VERSION"));
+        let file_name = format!("libmirrord_layer_intel_{}.dylib", env!("CARGO_PKG_VERSION"));
         let file_path = temp_dir().as_path().join(file_name);
         // Don't download file if not needed
         if file_path.exists() {
