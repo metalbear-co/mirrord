@@ -170,7 +170,6 @@ impl TCPHandler for TCPMirrorHandler {
 
 unsafe impl Send for TCPMirrorHandler {}
 
-
 pub fn create_tcp_mirror_handler() -> (TCPMirrorHandler, TCPApi)
 where
 {

@@ -55,10 +55,10 @@ use tracing_subscriber::prelude::*;
 use crate::{
     common::HookMessage,
     config::Config,
-    tcp::{create_tcp_handler, TCPApi, TCPHandler},
-    tcp_mirror::TCPMirrorHandler,
     macros::hook,
     sockets::{SocketInformation, CONNECTION_QUEUE},
+    tcp::{create_tcp_handler, TCPApi, TCPHandler},
+    tcp_mirror::TCPMirrorHandler,
 };
 
 static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());

@@ -35,7 +35,7 @@ pub enum TrafficHandlerInput {
 /// Struct for controlling the traffic handler struct
 pub struct TCPApi {
     outgoing: Sender<TrafficHandlerInput>,
-    /// This is reserved for stealing API.
+    // This is reserved for stealing API.
     // #[allow(dead_code)]
     // incoming: Receiver<TrafficOut>,
 }
@@ -45,7 +45,7 @@ impl TCPApi {
         Ok(self.outgoing.send(msg).await?)
     }
 
-    /// This is reserved for stealing API.
+    // This is reserved for stealing API.
     // #[allow(dead_code)]
     // pub async fn recv(&mut self) -> Option<TrafficOut> {
     //     self.incoming.recv().await
@@ -98,7 +98,9 @@ pub trait TCPHandler {
     {
         if let Some(msg) = msg {
             match msg {
-                TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await?,
+                TrafficHandlerInput::NewConnection(conn) => {
+                    self.handle_new_connection(conn).await?
+                }
                 TrafficHandlerInput::Data(data) => self.handle_new_data(data).await?,
                 TrafficHandlerInput::Close(close) => self.handle_close(close).await?,
                 TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await?,
@@ -147,4 +149,3 @@ pub trait TCPHandler {
         Ok(())
     }
 }
-

@@ -1,17 +1,16 @@
 use std::{
     borrow::Borrow,
     hash::{Hash, Hasher},
+    io::SeekFrom,
     os::unix::io::RawFd,
+    path::PathBuf,
 };
-use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, Port, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
-
-use mirrord_protocol::Port;
 
 #[derive(Debug, Clone)]
 pub struct Listen {
