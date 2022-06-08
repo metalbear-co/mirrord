@@ -22,7 +22,7 @@ use crate::{
 const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug)]
-pub enum TrafficIn {
+pub enum TrafficHandlerInput {
     Listen(Listen),
     NewConnection(NewTCPConnection),
     Data(TCPData),
@@ -30,58 +30,46 @@ pub enum TrafficIn {
 }
 
 /// To be used by traffic stealer
-pub enum TrafficOut {}
+// pub enum TrafficOut {}
 
-/// Struct responsible for managing the traffic handler
-/// Communicates using incoming/outgoing channels.
-pub struct TCPConfig {
-    /// This is reserved for stealing API.
-    #[allow(dead_code)]
-    outgoing: Sender<TrafficOut>,
-    incoming: Receiver<TrafficIn>,
-}
-
-/// Struct for controlling the traffic stealing struct.
+/// Struct for controlling the traffic handler struct
 pub struct TCPApi {
-    outgoing: Sender<TrafficIn>,
+    outgoing: Sender<TrafficHandlerInput>,
     /// This is reserved for stealing API.
-    #[allow(dead_code)]
-    incoming: Receiver<TrafficOut>,
+    // #[allow(dead_code)]
+    // incoming: Receiver<TrafficOut>,
 }
 
 impl TCPApi {
-    pub async fn send(&self, msg: TrafficIn) -> Result<()> {
+    pub async fn send(&self, msg: TrafficHandlerInput) -> Result<()> {
         Ok(self.outgoing.send(msg).await?)
     }
 
     /// This is reserved for stealing API.
-    #[allow(dead_code)]
-    pub async fn recv(&mut self) -> Option<TrafficOut> {
-        self.incoming.recv().await
-    }
+    // #[allow(dead_code)]
+    // pub async fn recv(&mut self) -> Option<TrafficOut> {
+    //     self.incoming.recv().await
+    // }
 
     pub async fn listen_request(&self, listen: Listen) -> Result<()> {
-        self.send(TrafficIn::Listen(listen)).await
+        self.send(TrafficHandlerInput::Listen(listen)).await
     }
 
     pub async fn new_tcp_connection(&self, conn: NewTCPConnection) -> Result<()> {
-        self.send(TrafficIn::NewConnection(conn)).await
+        self.send(TrafficHandlerInput::NewConnection(conn)).await
     }
 
     pub async fn tcp_data(&self, data: TCPData) -> Result<()> {
-        self.send(TrafficIn::Data(data)).await
+        self.send(TrafficHandlerInput::Data(data)).await
     }
 
     pub async fn tcp_close(&self, close: TCPClose) -> Result<()> {
-        self.send(TrafficIn::Close(close)).await
+        self.send(TrafficHandlerInput::Close(close)).await
     }
 }
 
 #[async_trait]
 pub trait TCPHandler {
-    /// Create new TCP handler communicating using given TCPConfig
-    fn new() -> Self;
-
     /// Run the TCP Handler, usually as a spawned task.
     async fn run(mut self, mut config: TCPConfig) -> Result<()>
     where
@@ -104,16 +92,16 @@ pub trait TCPHandler {
     fn ports(&mut self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
-    async fn handle_incoming_message(&mut self, msg: Option<TrafficIn>) -> Result<()>
+    async fn handle_incoming_message(&mut self, msg: Option<TrafficHandlerInput>) -> Result<()>
     where
         Self: Send,
     {
         if let Some(msg) = msg {
             match msg {
-                TrafficIn::NewConnection(conn) => self.handle_new_connection(conn).await?,
-                TrafficIn::Data(data) => self.handle_new_data(data).await?,
-                TrafficIn::Close(close) => self.handle_close(close).await?,
-                TrafficIn::Listen(listen) => self.handle_listen(listen).await?,
+                TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await?,
+                TrafficHandlerInput::Data(data) => self.handle_new_data(data).await?,
+                TrafficHandlerInput::Close(close) => self.handle_close(close).await?,
+                TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await?,
             }
         } else {
             self.stop_running();
@@ -160,20 +148,3 @@ pub trait TCPHandler {
     }
 }
 
-pub fn create_tcp_handler<T>() -> (T, TCPApi, TCPConfig)
-where
-    T: TCPHandler,
-{
-    let (traffic_in_tx, traffic_in_rx) = channel(CHANNEL_SIZE);
-    let (traffic_out_tx, traffic_out_rx) = channel(CHANNEL_SIZE);
-    let handler = T::new();
-    let control = TCPApi {
-        incoming: traffic_out_rx,
-        outgoing: traffic_in_tx,
-    };
-    let config = TCPConfig {
-        outgoing: traffic_out_tx,
-        incoming: traffic_in_rx,
-    };
-    (handler, control, config)
-}

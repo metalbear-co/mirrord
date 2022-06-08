@@ -38,6 +38,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                     }
                 }
             },
+            // Read the application's response from the socket and discard the data, so that the socket doesn't fill up.
             res = local_stream.read(&mut buffer) => {
                 match res {
                     Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -168,3 +169,20 @@ impl TCPHandler for TCPMirrorHandler {
 }
 
 unsafe impl Send for TCPMirrorHandler {}
+
+
+pub fn create_tcp_mirror_handler() -> (TCPMirrorHandler, TCPApi)
+where
+{
+    let (traffic_in_tx, traffic_in_rx) = channel(CHANNEL_SIZE);
+    let handler = TCPMirrorHandler::new();
+    let control = TCPApi {
+        incoming: traffic_out_rx,
+        outgoing: traffic_in_tx,
+    };
+    let config = TCPConfig {
+        outgoing: traffic_out_tx,
+        incoming: traffic_in_rx,
+    };
+    (handler, control, config)
+}
