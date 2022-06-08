@@ -77,8 +77,8 @@ mod tests {
         )
         .unwrap();
 
-        validate_requests(&mut stdout_reader).await;
         server.wait().await.unwrap();
+        validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
@@ -207,8 +207,8 @@ mod tests {
         )
         .unwrap();
 
-        validate_requests(&mut stdout_reader).await;
         server.wait().await.unwrap();
+        validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
         let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
@@ -302,8 +302,8 @@ mod tests {
         )
         .unwrap();
 
-        validate_requests(&mut stdout_reader).await;
         server.wait().await.unwrap();
+        validate_requests(&mut stdout_reader).await;
 
         delete_namespace(&client, pod_namespace).await;
     }
