@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
+- Fix bug that caused configuration changes in the VS Code extension not to work
 - Fix typos
 
 ## 2.1.0
