@@ -37,7 +37,7 @@ impl RuntimeData {
         let (container_runtime, socket_path) = match container_info.first() {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
             Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
-            _ => panic!("unspported container runtime"),
+            _ => panic!("unsupported container runtime"),
         };
 
         let container_id = container_info.last().unwrap();
@@ -102,7 +102,7 @@ pub async fn create_agent(
                             "image": agent_image,
                             "imagePullPolicy": "IfNotPresent",
                             "securityContext": {
-                                "privileged": true
+                                "privileged": true,
                             },
                             "volumeMounts": [
                                 {
@@ -139,6 +139,7 @@ pub async fn create_agent(
     let params = ListParams::default()
         .labels(&format!("job-name={}", agent_job_name))
         .timeout(10);
+
     let mut stream = pods_api.watch(&params, "0").await.unwrap().boxed();
     while let Some(status) = stream.try_next().await.unwrap() {
         match status {
@@ -158,9 +159,9 @@ pub async fn create_agent(
     let pod = pods.items.first().unwrap();
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), running)
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
         .await
         .unwrap();
-    let pf = pods_api.portforward(&pod_name, &[61337]).await.unwrap();
-    pf
+    pods_api.portforward(&pod_name, &[61337]).await.unwrap()
 }

@@ -5,9 +5,11 @@ members = [
     "mirrord-agent",
     "mirrord-layer",
     "mirrord-cli",
+    "sample/rust",
     "tests"
 ]
 
+# latest commits on rustls suppress certificate verification
 [workspace.package]
 version = "2.1.0"
 edition = "2021"
@@ -34,10 +36,15 @@ clap = { version = "3.1.2", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3.21"
+thiserror = "1"
 
-# latest commits on rustls suppress certificate verification 
+# latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032
 # so we patch crates.io to use the latest commits from rustls
 # this should be changed once a newer version of rustls is ou
 [patch.crates-io]
 rustls = { git = 'https://github.com/rustls/rustls' }
+
+[profile.release]
+strip = "debuginfo"
+lto = true
