@@ -1,9 +1,10 @@
 #![feature(result_option_inspect)]
 #![feature(never_type)]
+#![feature(hash_drain_filter)]
 
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
@@ -12,8 +13,8 @@ use std::{
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileRequest, FileResponse, Port,
-    RemoteEnvVarsRequest,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, EnvVars, FileRequest, FileResponse,
+    OverrideEnvVarsRequest, Port,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -165,10 +166,10 @@ async fn handle_peer_messages(
                 .send((peer_message.peer_id, file_request))
                 .await?;
         }
-        ClientMessage::RemoteEnvVarsRequest(RemoteEnvVarsRequest { load_env_vars }) => {
+        ClientMessage::OverrideEnvVarsRequest(OverrideEnvVarsRequest { override_env_vars }) => {
             debug!(
                 "ClientMessage::RemoteEnvVarsRequest peer id {:?} requesting {:?}",
-                peer_message.peer_id, load_env_vars
+                peer_message.peer_id, override_env_vars
             );
 
             let container_runtime: &str = &container_runtime
@@ -190,14 +191,27 @@ async fn handle_peer_messages(
             let mut env_vars = String::with_capacity(255);
             let read_amount = environ_file.read_to_string(&mut env_vars).await?;
 
-            let env_vars = env_vars.trim().to_string();
+            // TODO(alex) [high] 2022-06-08: It only loads a weird `nginx - whatever` string.
+            let env_vars = env_vars
+                .trim()
+                .replace(char::from(0), "")
+                .trim_matches(char::from(0))
+                .to_string();
             debug!(
                 "ClientMessage::RemoteEnvVarsRequest read {:?} bytes with ENV_VARS {:?}",
                 read_amount, env_vars
             );
 
-            let ignore_keys = load_env_vars.keys().cloned().collect::<HashSet<_>>();
-            let env_vars = select_env_vars_as_map(env_vars, ignore_keys);
+            let select_env_keys = override_env_vars.keys().cloned().collect::<HashSet<_>>();
+            debug!(
+                "ClientMessage::RemoteEnvVarsRequest select_env_keys {:?}",
+                select_env_keys
+            );
+
+            let env_vars = EnvVars(env_vars)
+                .as_default_filtered_map(":")
+                .drain_filter(|key, _| select_env_keys.contains(key))
+                .collect();
 
             debug!(
                 "ClientMessage::RemoteEnvVarsRequest selected env vars found {:?}",
@@ -206,37 +220,12 @@ async fn handle_peer_messages(
 
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel
-                .send(DaemonMessage::EnvVarsResponse(env_vars))
+                .send(DaemonMessage::OverrideEnvVarsResponse(env_vars))
                 .await?;
         }
     }
 
     Ok(())
-}
-
-// TODO(alex) [mid] 2022-06-08: Function is common between `-layer` and `-agent`.
-fn select_env_vars_as_map(
-    env_vars: String,
-    ignore_keys: HashSet<String>,
-) -> HashMap<String, String> {
-    let env_vars = env_vars
-        // "DB=foo.db;PORT=99;HOST=;PATH=/fake"
-        .split_terminator(';')
-        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
-        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
-        .filter_map(
-            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
-                _ => None,
-            },
-        )
-        // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
-        .filter(|(key, _)| ignore_keys.contains(key) == false)
-        // [("DB", "foo.db"), ("PORT", "99")]
-        .collect::<HashMap<_, _>>();
-
-    env_vars
 }
 
 async fn peer_handler(
@@ -266,7 +255,7 @@ async fn peer_handler(
                 }
             },
             message = daemon_messages_rx.recv() => {
-                debug!("peer_handler -> daemon_messages_rx.recv received a message {:?}", message);
+                debug!("peer_handler -> daemon_messages_rx.recv received a message");
 
                 match message {
                     Some(message) => {

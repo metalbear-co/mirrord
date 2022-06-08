@@ -80,8 +80,8 @@ pub struct CloseFileHook {
 }
 
 #[derive(Debug)]
-pub struct RemoteEnvVarsHook {
-    pub(crate) load_env_vars: HashMap<String, String>,
+pub struct OverrideEnvVarsHook {
+    pub(crate) override_env_vars: HashMap<String, String>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
@@ -94,5 +94,5 @@ pub enum HookMessage {
     SeekFileHook(SeekFileHook),
     WriteFileHook(WriteFileHook),
     CloseFileHook(CloseFileHook),
-    RemoteEnvVarsHook(RemoteEnvVarsHook),
+    OverrideEnvVarsHook(OverrideEnvVarsHook),
 }

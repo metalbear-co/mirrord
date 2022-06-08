@@ -1,6 +1,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(hash_drain_filter)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -13,7 +14,7 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, RemoteEnvVarsHook,
+    CloseFileHook, OpenFileHook, OpenRelativeFileHook, OverrideEnvVarsHook, ReadFileHook,
     SeekFileHook, WriteFileHook,
 };
 use ctor::ctor;
@@ -24,10 +25,10 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, RemoteEnvVarsRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
+    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
+    OverrideEnvVarsRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use sockets::SOCKETS;
@@ -66,12 +67,6 @@ static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
-
-static IGNORE_ENV_VAR: SyncLazy<RegexSet> = SyncLazy::new(|| {
-    let ignored_vars = RegexSet::new(&[r"PATH"]).unwrap();
-
-    ignored_vars
-});
 
 #[derive(Debug)]
 enum TcpTunnelMessages {
@@ -118,30 +113,6 @@ async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunne
     debug!("exiting tcp tunnel");
 }
 
-fn select_env_vars_as_map(
-    env_vars: String,
-    ignore_keys: HashSet<String>,
-) -> HashMap<String, String> {
-    let overridden = env_vars
-        // "DB=foo.db;PORT=99;HOST=;PATH=/fake"
-        .split_terminator(';')
-        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
-        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
-        .filter_map(
-            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                (Some(key), Some(value)) => Some((key.to_string(), value.to_string())),
-                _ => None,
-            },
-        )
-        // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
-        .filter(|(key, _)| ignore_keys.contains(key) == false)
-        // [("DB", "foo.db"), ("PORT", "99")]
-        .collect::<HashMap<_, _>>();
-
-    overridden
-}
-
 #[ctor]
 fn init() {
     tracing_subscriber::registry()
@@ -171,15 +142,10 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    // TODO(alex) [mid] 2022-06-08: Make this `static`.
-    let mut ignore_env_vars = HashSet::with_capacity(4);
-    ignore_env_vars.insert("PATH".to_string());
+    let override_env_vars = EnvVars(config.override_env_vars).as_default_filtered_map(";");
+    debug!("init -> override_env_vars {:#?}", override_env_vars);
 
-    RUNTIME.spawn(poll_agent(
-        port_forwarder,
-        receiver,
-        select_env_vars_as_map(config.override_env_vars, ignore_env_vars),
-    ));
+    RUNTIME.spawn(poll_agent(port_forwarder, receiver, override_env_vars));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -354,12 +320,15 @@ async fn handle_hook_message(
                 codec_result
             );
         }
-        HookMessage::RemoteEnvVarsHook(RemoteEnvVarsHook { load_env_vars }) => {
-            debug!("HookMessage::RemoteEnvVarsHook load {:#?}", load_env_vars);
+        HookMessage::OverrideEnvVarsHook(OverrideEnvVarsHook { override_env_vars }) => {
+            debug!(
+                "HookMessage::OverrideEnvVarsHook load {:#?}",
+                override_env_vars
+            );
 
-            let load_env_vars_request = RemoteEnvVarsRequest { load_env_vars };
+            let override_env_vars_request = OverrideEnvVarsRequest { override_env_vars };
 
-            let request = ClientMessage::RemoteEnvVarsRequest(load_env_vars_request);
+            let request = ClientMessage::OverrideEnvVarsRequest(override_env_vars_request);
             let codec_result = codec.send(request).await;
 
             debug!(
@@ -502,14 +471,17 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
-        DaemonMessage::EnvVarsResponse(remote_env_vars) => {
-            debug!("DaemonMessage::EnvVarsResponse {:#?}!", remote_env_vars);
+        DaemonMessage::OverrideEnvVarsResponse(remote_env_vars) => {
+            debug!(
+                "DaemonMessage::OverrideEnvVarsResponse {:#?}!",
+                remote_env_vars
+            );
 
             for (key, value) in remote_env_vars.into_iter() {
                 unsafe {
                     let setenv_result = libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
                     debug!(
-                        "DaemonMessage::EnvVarsResponse setenv_result {:#?}",
+                        "DaemonMessage::OverrideEnvVarsResponse setenv_result {:#?}",
                         setenv_result
                     );
                 }
@@ -523,7 +495,7 @@ async fn handle_daemon_message(
 async fn poll_agent(
     mut pf: Portforwarder,
     mut receiver: Receiver<HookMessage>,
-    env_vars: HashMap<String, String>,
+    override_env_vars: HashMap<String, String>,
 ) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
@@ -551,16 +523,18 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    let codec_result = codec
-        .send(ClientMessage::RemoteEnvVarsRequest(RemoteEnvVarsRequest {
-            load_env_vars: env_vars,
-        }))
-        .await;
+    if override_env_vars.is_empty() == false {
+        let codec_result = codec
+            .send(ClientMessage::OverrideEnvVarsRequest(
+                OverrideEnvVarsRequest { override_env_vars },
+            ))
+            .await;
 
-    debug!(
-        "ClientMessage::RemoteEnvVarsRequest codec_result {:#?}",
-        codec_result
-    );
+        debug!(
+            "ClientMessage::OverrideEnvVarsRequest codec_result {:#?}",
+            codec_result
+        );
+    }
 
     loop {
         select! {

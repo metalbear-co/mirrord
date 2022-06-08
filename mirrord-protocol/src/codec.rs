@@ -136,8 +136,8 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct RemoteEnvVarsRequest {
-    pub load_env_vars: HashMap<String, String>,
+pub struct OverrideEnvVarsRequest {
+    pub override_env_vars: HashMap<String, String>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -157,7 +157,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     FileRequest(FileRequest),
-    RemoteEnvVarsRequest(RemoteEnvVarsRequest),
+    OverrideEnvVarsRequest(OverrideEnvVarsRequest),
     Ping,
 }
 
@@ -206,7 +206,7 @@ pub enum DaemonMessage {
     Pong,
     // TODO(alex) [mid] 2022-06-08: Refactor name and variant (make it a struct to return possible
     // errors).
-    EnvVarsResponse(HashMap<String, String>),
+    OverrideEnvVarsResponse(HashMap<String, String>),
 }
 
 pub struct ClientCodec {

@@ -37,6 +37,7 @@
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -57,6 +58,7 @@
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;",
         "RUST_BACKTRACE": "short"
       }
     }
