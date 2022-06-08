@@ -5,10 +5,9 @@
 use std::{
     collections::HashMap,
     env,
-    lazy::SyncLazy,
+    lazy::{SyncLazy, SyncOnceCell},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    str::FromStr,
     sync::Mutex,
 };
 
@@ -41,7 +40,7 @@ use tokio::{
     task,
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod common;
@@ -55,7 +54,6 @@ mod sockets;
 use crate::{
     common::{HookMessage, Port},
     config::Config,
-    error::LayerError,
     macros::hook,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
@@ -64,6 +62,7 @@ static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
 static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
 
 #[derive(Debug)]
 enum TcpTunnelMessages {
@@ -136,7 +135,8 @@ fn init() {
         HOOK_SENDER = Some(sender);
     };
 
-    enable_hooks();
+    let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
+    enable_hooks(*enabled_file_ops);
 
     RUNTIME.spawn(poll_agent(port_forwarder, receiver));
 }
@@ -518,24 +518,8 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     }
 }
 
-/// Check if user set up `MIRRORD_FILE_OPS` env variable properly, and if file hooking should be
-/// enabled.
-fn enabled_file_ops() -> bool {
-    let enabled = env::var("MIRRORD_FILE_OPS")
-        .map_err(LayerError::from)
-        .and_then(|env_value| FromStr::from_str(&env_value).map_err(LayerError::from))
-        .inspect_err(|fail| {
-            warn!(
-                "Could not set up `MIRRORD_FILE_OPS` properly due to {:#?}",
-                fail
-            )
-        });
-
-    enabled.unwrap_or_default()
-}
-
-/// Enables file and socket hooks.
-fn enable_hooks() {
+/// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
+fn enable_hooks(enabled_file_ops: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
@@ -543,7 +527,7 @@ fn enable_hooks() {
 
     sockets::enable_socket_hooks(&mut interceptor);
 
-    if enabled_file_ops() {
+    if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);
     }
 
@@ -554,9 +538,13 @@ fn enable_hooks() {
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get()
+        .expect("Should be set during initialization!");
+
     if SOCKETS.lock().unwrap().remove(&fd) {
         libc::close(fd)
-    } else if env::var("MIRRORD_FILE_OPS").is_ok() {
+    } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
         if let Some(remote_fd) = remote_fd {
