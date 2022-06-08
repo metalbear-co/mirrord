@@ -6,6 +6,8 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- Support for running x64 (Intel) binary on arm (Silicon) macOS using mirrord. This will download and use the x64 mirrord-layer binary when needed.   
 
 ### Added 
 - Add detours for fcntl/dup system calls, closes [#51](https://github.com/metalbear-co/mirrord/issues/51)
@@ -13,11 +15,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Added graceful exit for library extraction logic in case of error
 - Refactor the CI by splitting the building of mirrord-agent in a separate job and caching the agent image for E2E tests.
-- File operations are now available behind the `MIRRORD_FILE_OPS` env variable, this means that mirrod now hooks into the following file functions: `open`, `fopen`, `fdopen`, `openat`, `read`, `fread`, `fileno`, `lseek`, and `write` to provide a mirrored file system.
+- File operations are now available behind the `MIRRORD_FILE_OPS` env variable, this means that mirrord now hooks into the following file functions: `open`, `fopen`, `fdopen`, `openat`, `read`, `fread`, `fileno`, `lseek`, and `write` to provide a mirrored file system.
 - Update bug report template to apply to the latest version of mirrord.
+- Changed release profile to strip debuginfo and enable LTO.
+- VS Code extension - update dependencies.
 
 ### Fixed
 
+- Fix bug that caused configuration changes in the VS Code extension not to work
 - Fix typos
 
 ## 2.1.0
