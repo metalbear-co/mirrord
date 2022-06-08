@@ -505,11 +505,11 @@ unsafe extern "C" fn accept4_detour(
     }
 }
 
-fn fcntl(fcntl_fd: c_int, cmd: c_int) -> c_int {
+fn fcntl(fcntl_fd: c_int, orig_fd: c_int, cmd: c_int) -> c_int {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
             let mut sockets = SOCKETS.lock().unwrap();
-            if let Some(socket) = sockets.get(&fcntl_fd) {
+            if let Some(socket) = sockets.get(&orig_fd) {
                 let fcntl_socket = socket.clone();
                 sockets.insert(fcntl_fd as RawFd, fcntl_socket);
             }
@@ -521,11 +521,11 @@ fn fcntl(fcntl_fd: c_int, cmd: c_int) -> c_int {
 
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    if fcntl_fd < 0 {
+    if fcntl_fd == -1 {
         error!("fcntl failed");
         return fcntl_fd;
     }
-    fcntl(fcntl_fd, cmd)
+    fcntl(fcntl_fd, fd, cmd)
 }
 
 fn dup(fd: c_int) -> c_int {
