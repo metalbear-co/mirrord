@@ -128,6 +128,8 @@ jobs:
       - run: |
           sudo apt-get update -y
           sudo apt-get install -y libpcap-dev cmake
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
@@ -143,7 +145,7 @@ jobs:
       - run: minikube image load test:latest
       - name: setup nginx
         run: kubectl apply -f tests/app.yaml
-      - name: run node tests
+      - name: cargo test
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: switch minikube runtime
         run: |

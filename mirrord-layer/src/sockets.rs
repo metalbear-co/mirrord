@@ -1,13 +1,11 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    borrow::Borrow,
-    collections::{HashMap, HashSet, VecDeque},
-    hash::{Hash, Hasher},
+    collections::{HashMap, VecDeque},
     lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use errno::{errno, set_errno, Errno};
@@ -22,8 +20,8 @@ use crate::{
     HOOK_SENDER,
 };
 
-pub(crate) static SOCKETS: SyncLazy<Mutex<HashSet<Socket>>> =
-    SyncLazy::new(|| Mutex::new(HashSet::new()));
+pub(crate) static SOCKETS: SyncLazy<Mutex<HashMap<RawFd, Arc<Socket>>>> =
+    SyncLazy::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: SyncLazy<Mutex<ConnectionQueue>> =
     SyncLazy::new(|| Mutex::new(ConnectionQueue::default()));
@@ -75,7 +73,7 @@ pub struct Connected {
     local_address: SocketAddr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Bound {
     address: SocketAddr,
 }
@@ -96,32 +94,11 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) struct Socket {
-    fd: RawFd,
+pub struct Socket {
     domain: c_int,
     type_: c_int,
     protocol: c_int,
     pub state: SocketState,
-}
-
-impl PartialEq for Socket {
-    fn eq(&self, other: &Self) -> bool {
-        self.fd == other.fd
-    }
-}
-
-impl Eq for Socket {}
-
-impl Hash for Socket {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fd.hash(state);
-    }
-}
-
-impl Borrow<RawFd> for Socket {
-    fn borrow(&self) -> &RawFd {
-        &self.fd
-    }
 }
 
 #[inline]
@@ -144,13 +121,15 @@ fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
         return fd;
     }
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(Socket {
+    sockets.insert(
         fd,
-        domain,
-        type_,
-        protocol,
-        state: SocketState::default(),
-    });
+        Arc::new(Socket {
+            domain,
+            type_,
+            protocol,
+            state: SocketState::default(),
+        }),
+    );
     fd
 }
 
@@ -167,7 +146,7 @@ fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     debug!("bind called sockfd: {:?}", sockfd);
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match sockets.remove(&sockfd) {
             Some(socket) if !matches!(socket.state, SocketState::Initialized) => {
                 error!("socket is in invalid state for bind {:?}", socket.state);
                 return libc::EINVAL;
@@ -195,12 +174,12 @@ fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
         return unsafe { libc::bind(sockfd, addr, addrlen) };
     }
 
-    socket.state = SocketState::Bound(Bound {
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         address: parsed_addr,
     });
 
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(socket);
+    sockets.insert(sockfd, socket);
     0
 }
 
@@ -220,7 +199,7 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match sockets.remove(&sockfd) {
             Some(socket) => socket,
             None => {
                 debug!("listen: no socket found for fd: {}", &sockfd);
@@ -228,10 +207,10 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
             }
         }
     };
-    match socket.state {
+    match &socket.state {
         SocketState::Bound(bound) => {
             let real_port = bound.address.port();
-            socket.state = SocketState::Listening(bound);
+            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
             let mut os_addr = match socket.domain {
                 libc::AF_INET => {
                     OsSocketAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -304,7 +283,7 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     }
     debug!("listen: success");
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(socket);
+    sockets.insert(sockfd, socket);
     0
 }
 
@@ -319,7 +298,7 @@ fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
 
     let socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match sockets.remove(&sockfd) {
             Some(socket) => socket,
             None => {
                 debug!("connect: no socket found for fd: {}", &sockfd);
@@ -329,7 +308,7 @@ fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     };
 
     // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = socket.state {
+    if let SocketState::Bound(bound) = &socket.state {
         let os_addr = OsSocketAddr::from(bound.address);
         let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
         if ret != 0 {
@@ -459,16 +438,10 @@ fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> RawFd {
-    let (origin_fd, local_address, domain, protocol, type_) = {
+    let (local_address, domain, protocol, type_) = {
         if let Some(socket) = SOCKETS.lock().unwrap().get(&sockfd) {
             if let SocketState::Listening(bound) = &socket.state {
-                (
-                    socket.fd,
-                    bound.address,
-                    socket.domain,
-                    socket.protocol,
-                    socket.type_,
-                )
+                (bound.address, socket.domain, socket.protocol, socket.type_)
             } else {
                 error!("original socket is not listening");
                 return new_fd;
@@ -478,7 +451,7 @@ fn accept(
             return new_fd;
         }
     };
-    let socket_info = { CONNECTION_QUEUE.lock().unwrap().get(&origin_fd) };
+    let socket_info = { CONNECTION_QUEUE.lock().unwrap().get(&sockfd) };
     let remote_address = match socket_info {
         Some(socket_info) => socket_info,
         None => {
@@ -488,7 +461,6 @@ fn accept(
     }
     .address;
     let new_socket = Socket {
-        fd: new_fd,
         domain,
         protocol,
         type_,
@@ -499,7 +471,7 @@ fn accept(
     };
     fill_address(address, address_len, remote_address);
 
-    SOCKETS.lock().unwrap().insert(new_socket);
+    SOCKETS.lock().unwrap().insert(new_fd, Arc::new(new_socket));
     new_fd
 }
 
@@ -533,17 +505,72 @@ unsafe extern "C" fn accept4_detour(
     }
 }
 
+fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
+    if fcntl_fd == -1 {
+        error!("fcntl failed");
+        return fcntl_fd;
+    }
+    match cmd {
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
+            dup(orig_fd, fcntl_fd);
+        }
+        _ => (),
+    }
+    fcntl_fd
+}
+
+unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
+    let fcntl_fd = libc::fcntl(fd, cmd, arg);
+    fcntl(fd, cmd, fcntl_fd)
+}
+
+fn dup(fd: c_int, dup_fd: i32) -> c_int {
+    if dup_fd == -1 {
+        error!("dup failed");
+        return dup_fd;
+    }
+    let mut sockets = SOCKETS.lock().unwrap();
+    if let Some(socket) = sockets.get(&fd) {
+        let dup_socket = socket.clone();
+        sockets.insert(dup_fd as RawFd, dup_socket);
+    }
+    dup_fd
+}
+
+unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
+    let dup_fd = libc::dup(fd);
+    dup(fd, dup_fd)
+}
+
+unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
+    if oldfd == newfd {
+        return newfd;
+    }
+    let dup2_fd = libc::dup2(oldfd, newfd);
+    dup(oldfd, dup2_fd)
+}
+
+#[cfg(target_os = "linux")]
+unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
+    let dup3_fd = libc::dup3(oldfd, newfd, flags);
+    dup(oldfd, dup3_fd)
+}
+
 pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
     hook!(interceptor, "connect", connect_detour);
+    hook!(interceptor, "fcntl", fcntl_detour);
+    hook!(interceptor, "dup", dup_detour);
+    hook!(interceptor, "dup2", dup2_detour);
     try_hook!(interceptor, "getpeername", getpeername_detour);
     try_hook!(interceptor, "getsockname", getsockname_detour);
     #[cfg(target_os = "linux")]
     {
         try_hook!(interceptor, "uv__accept4", accept4_detour);
         try_hook!(interceptor, "accept4", accept4_detour);
+        try_hook!(interceptor, "dup3", dup3_detour);
     }
     try_hook!(interceptor, "accept", accept_detour);
 }
