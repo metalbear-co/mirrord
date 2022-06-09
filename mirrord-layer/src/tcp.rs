@@ -79,13 +79,12 @@ pub trait TCPHandler {
     {
         if let Some(msg) = msg {
             match msg {
-                TrafficHandlerInput::NewConnection(conn) => {
-                    self.handle_new_connection(conn).await?
-                }
-                TrafficHandlerInput::Data(data) => self.handle_new_data(data).await?,
-                TrafficHandlerInput::Close(close) => self.handle_close(close).await?,
-                TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await?,
+                TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await,
+                TrafficHandlerInput::Data(data) => self.handle_new_data(data).await,
+                TrafficHandlerInput::Close(close) => self.handle_close(close).await,
+                TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await,
             }
+            .unwrap_or_else(|err| error!("message handling failed with {err:?}"));
             Ok(true)
         } else {
             Ok(false)
