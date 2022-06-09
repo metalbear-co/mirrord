@@ -10,8 +10,8 @@ var path = process.cwd() + "/test";
 var deletePath = process.cwd() + "/deletetest";
 
 app.get("/", (req, res) => {
-  res.send("Request received"); // Todo: validate responses
   console.log("GET: Request completed");
+  res.send("Request received"); // Todo: validate responses
 });
 
 app.post("/", (req, res) => {
