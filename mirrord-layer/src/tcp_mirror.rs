@@ -97,30 +97,14 @@ impl Borrow<ConnectionID> for Connection {
 }
 
 /// Handles traffic mirroring
+#[derive(Default)]
 pub struct TCPMirrorHandler {
     ports: HashSet<Listen>,
-    running: bool,
     connections: HashSet<Connection>,
 }
 
 #[async_trait]
 impl TCPHandler for TCPMirrorHandler {
-    fn new() -> TCPMirrorHandler {
-        Self {
-            ports: HashSet::new(),
-            running: true,
-            connections: HashSet::new(),
-        }
-    }
-
-    fn is_running(&mut self) -> bool {
-        self.running
-    }
-
-    fn stop_running(&mut self) {
-        self.running = false
-    }
-
     async fn handle_listen(&mut self, listen: Listen) -> Result<()> {
         self.ports.insert(listen);
         Ok(())

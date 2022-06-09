@@ -75,24 +75,23 @@ pub trait TCPHandler {
     where
         Self: Sized,
     {
-        while self.is_running() {
+        loop {
             select! {
-                msg = config.incoming.recv() => {self.handle_incoming_message(msg).await?;},
+                msg = config.incoming.recv() => {
+                    if !self.handle_incoming_message(msg).await? {
+                        break
+                    }
+                },
             }
         }
         Ok(())
     }
 
-    /// Should the run loop keep running
-    fn is_running(&mut self) -> bool;
-
-    /// Changes the state so is_running will return False
-    fn stop_running(&mut self);
-
     fn ports(&mut self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
-    async fn handle_incoming_message(&mut self, msg: Option<TrafficHandlerInput>) -> Result<()>
+    /// Returns true to let caller know to keep running
+    async fn handle_incoming_message(&mut self, msg: Option<TrafficHandlerInput>) -> Result<bool>
     where
         Self: Send,
     {
@@ -105,11 +104,10 @@ pub trait TCPHandler {
                 TrafficHandlerInput::Close(close) => self.handle_close(close).await?,
                 TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await?,
             }
+            Ok(true)
         } else {
-            self.stop_running();
+            Ok(false)
         }
-
-        Ok(())
     }
 
     /// Handle NewConnection messages
