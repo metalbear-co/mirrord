@@ -1,4 +1,5 @@
-from os import getcwd, remove
+from os import getcwd, remove, getpid, kill
+from signal import SIGTERM
 import click
 from flask import Flask, request
 import logging
@@ -45,7 +46,7 @@ def put():
 def delete():
     remove(DELETE_PATH)
     print("DELETE: Request completed")
-    sys.exit(0)
+    kill(getpid(), SIGTERM)
     return "OK"
 
 

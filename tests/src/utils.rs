@@ -261,7 +261,6 @@ pub async fn send_requests(service_url: &str) {
 pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
     let mut out = String::new();
     stdout.read_to_string(&mut out).await.unwrap();
-
     // Todo: change this assertions to assert_eq! when TCPClose is patched
 
     assert_contains!(out, "GET: Request completed");
