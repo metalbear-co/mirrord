@@ -20,10 +20,20 @@ use serde_json::json;
 use tokio::{
     io::{AsyncReadExt, BufReader},
     process::{Child, ChildStdout, Command},
-    time::{sleep, Duration},
 };
 
 static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+
+macro_rules! assert_contains {
+    ($hay: ident, $needle: expr) => {
+        assert!(
+            $hay.contains($needle),
+            "{:?} not found in stream: {:?}",
+            $needle,
+            $hay
+        )
+    };
+}
 
 lazy_static! {
     static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
@@ -258,10 +268,10 @@ pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
 
     // Todo: change this assertions to assert_eq! when TCPClose is patched
 
-    assert!(out.contains("GET: Request completed"));
-    assert!(out.contains("POST: Request completed"));
-    assert!(out.contains("PUT: Request completed"));
-    assert!(out.contains("DELETE: Request completed"));
+    assert_contains!(out, "GET: Request completed");
+    assert_contains!(out, "POST: Request completed");
+    assert_contains!(out, "PUT: Request completed");
+    assert_contains!(out, "DELETE: Request completed");
     let cwd = env::current_dir().unwrap();
     let delete_path = cwd.join("deletetest"); // 'deletetest' is created in cwd, by PUT and deleted by DELETE
     let exist_path = cwd.join("test"); // 'test' is created in cwd, by PUT and **not** deleted by DELETE
