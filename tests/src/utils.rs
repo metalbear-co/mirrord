@@ -147,6 +147,8 @@ pub async fn http_request(url: &str, method: Method) {
         }
         _ => panic!("unexpected method"),
     }
+    // read all data sent back
+    res.bytes().await.unwrap();
 }
 
 // kubectl apply -f tests/app.yaml -n name
