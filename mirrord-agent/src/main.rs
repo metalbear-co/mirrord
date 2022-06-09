@@ -37,7 +37,7 @@ use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
 
-use crate::{file::file_worker, sniffer::DEFAULT_RUNTIME};
+use crate::{file::file_worker, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME};
 
 type PeerID = u32;
 
@@ -116,6 +116,11 @@ async fn select_env_vars(
     environ_path: PathBuf,
     override_env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, ResponseError> {
+    debug!(
+        "select_env_vars -> environ_path {:#?} override_env_vars {:#?}",
+        environ_path, override_env_vars
+    );
+
     let mut environ_file = tokio::fs::File::open(environ_path).await.map_err(|fail| {
         ResponseError::FileOperation(FileError {
             operation: "open".to_string(),
@@ -236,14 +241,15 @@ async fn handle_peer_messages(
                 .map(String::as_str)
                 .unwrap_or(DEFAULT_RUNTIME);
 
-            let pid = container_id.as_ref().ok_or_else(|| {
-                AgentError::NotFound(format!(
-                    "handle_peer_messages -> Container ID not specified for runtime {:#?}!",
-                    container_runtime
-                ))
-            })?;
+            let pid = match container_id {
+                Some(container_id) => get_container_pid(&container_id, container_runtime).await,
+                None => Err(AgentError::NotFound(format!(
+                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
+                    container_id, container_runtime
+                ))),
+            }?;
 
-            let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
             let env_vars_result = select_env_vars(environ_path, override_env_vars).await;
 
             let peer = state.peers.get(&peer_message.peer_id).unwrap();

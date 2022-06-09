@@ -480,6 +480,11 @@ async fn handle_daemon_message(
                 Ok(remote_env_vars) => {
                     for (key, value) in remote_env_vars.into_iter() {
                         unsafe {
+                            debug!(
+                                "DaemonMessage::OverrideEnvVarsResponse set key {:#?} value {:#?}",
+                                key, value
+                            );
+
                             let setenv_result =
                                 libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
 

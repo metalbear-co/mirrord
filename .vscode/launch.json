@@ -38,7 +38,8 @@
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;",
+        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;MIRRORD_FAKE_VAR_FIRST=mirrord.is.running;MIRRORD_FAKE_VAR_SECOND=7777",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "RUST_BACKTRACE": "short"
       }
     },
