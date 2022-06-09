@@ -19,6 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Update bug report template to apply to the latest version of mirrord.
 - Change release profile to strip debuginfo and enable LTO.
 - VS Code extension - update dependencies.
+- CLI & macOS: Extract to `/tmp/` instead of `$TMPDIR` as the executed process is getting killed for some reason.
 
 ### Fixed
 

@@ -1,4 +1,4 @@
-use std::{env::temp_dir, fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -73,14 +73,13 @@ mod mac_aarch {
     };
 
     use mach_object::{OFile, CPU_TYPE_X86_64};
-    use reqwest;
     use search_path::SearchPath;
     use tracing::warn;
 
     use super::*;
     pub fn is_binary_different_arch(binary_name: &String) -> bool {
         let search_path = SearchPath::new("PATH").unwrap();
-        let binary_name = match search_path.find(&Path::new(binary_name)) {
+        let binary_path = match search_path.find(Path::new(binary_name)) {
             Some(path) => path,
             None => {
                 warn!("Could not find binary in PATH");
@@ -141,6 +140,24 @@ mod mac_aarch {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use mac_aarch::*;
+
+/// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::str::FromStr;
+
+    use super::*;
+
+    pub fn temp_dir() -> PathBuf {
+        PathBuf::from_str("/tmp/").unwrap()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+use std::env::temp_dir;
+
+#[cfg(target_os = "macos")]
+use mac::temp_dir;
 
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
