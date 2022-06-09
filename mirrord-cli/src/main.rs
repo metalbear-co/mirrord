@@ -142,6 +142,7 @@ mod mac_aarch {
 use mac_aarch::*;
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
+#[cfg(target_os = "macos")]
 mod mac {
     use std::str::FromStr;
 
