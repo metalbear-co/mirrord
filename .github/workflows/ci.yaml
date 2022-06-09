@@ -26,7 +26,7 @@ jobs:
   test_mirrord_protocol:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11, macos-10.15]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
@@ -34,6 +34,7 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
+          target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}
@@ -74,10 +75,23 @@ jobs:
           name: test
           path: /tmp/test.tar
 
-  test_mirrord_layer:
+  test_mirrord_layer_cli:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11, macos-10.15]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-18.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-12
+            target: x86_64-apple-darwin
+          - os: macos-12
+            target: aarch64-apple-darwin
+          - os: macos-11
+            target: x86_64-apple-darwin
+          - os: macos-10/15
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
@@ -85,11 +99,12 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
+          target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}
-      # For now, just evrify it compiles.
-      - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
+      # For now, just verify it compiles.
+      - run: cargo +nightly build -p mirrord-layer -p mirrord-cli --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
