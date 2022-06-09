@@ -48,6 +48,7 @@ app.delete("/", (req, res) => {
     });
   });
   console.log("DELETE: Request completed");
+  server.close();
 });
 
 var server = app.listen(PORT, () => {

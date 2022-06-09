@@ -73,15 +73,7 @@ mod tests {
 
         send_requests(service_url.as_str()).await;
 
-        // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
-        // blocking.
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
-        .unwrap();
-
-        server.wait().await.unwrap();
+        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
@@ -207,21 +199,20 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
 
+
         send_requests(service_url.as_str()).await;
 
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
-        .unwrap();
-
-        server.wait().await.unwrap();
+        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
@@ -302,21 +293,19 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
 
         send_requests(service_url.as_str()).await;
 
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
-        .unwrap();
-
-        server.wait().await.unwrap();
+        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         delete_namespace(&client, pod_namespace).await;

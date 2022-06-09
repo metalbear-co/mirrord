@@ -45,6 +45,7 @@ def put():
 def delete():
     remove(DELETE_PATH)
     print("DELETE: Request completed")
+    sys.exit(0)
     return "OK"
 
 
