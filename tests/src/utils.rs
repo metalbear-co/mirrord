@@ -13,19 +13,27 @@ use kube::{
     core::WatchEvent,
     Api, Client, Config,
 };
+use lazy_static::lazy_static;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncReadExt, BufReader},
     process::{Child, ChildStdout, Command},
     time::{sleep, Duration},
 };
 
 static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
+lazy_static! {
+    static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
+        ("python", vec!["python3", "python-e2e/app.py"]),
+        ("node", vec!["node", "node-e2e/app.js"])
+    ]);
+}
+
 // target/debug/mirrord exec --pod-name pod_name  -c binary command
-pub fn start_node_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
+pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
     let path = env!("CARGO_BIN_FILE_MIRRORD");
     let args: Vec<&str> = vec!["exec", "--pod-name", pod_name, "-c"]
         .into_iter()
@@ -231,48 +239,41 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: Api
     }
 }
 
-// to all requests, the express API prints {request_name}: Request completed
-// PUT - creates cwd/test, DELETE - deletes cwd/test
-// this is verified by reading the stdout of the server
-pub async fn validate_requests(stdout: ChildStdout, service_url: &str) {
-    let mut buffer = BufReader::new(stdout);
-    let mut stream = String::new();
-    buffer.read_line(&mut stream).await.unwrap();
-
-    println!("validate_requests -> stream is {:#?}", stream);
-
-    assert!(stream.contains("Server listening on port 80"));
-
+// Sends GET, POST, PUT, and DELETE requests to the given service URL -> Express/Flask server.
+// PUT creates a file named "test" in cwd and DELETE deletes it.
+pub async fn send_requests(service_url: &str) {
     http_request(service_url, Method::GET).await;
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("GET: Request completed"));
-
     http_request(service_url, Method::POST).await;
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("POST: Request completed"));
+
+    http_request(service_url, Method::PUT).await;
 
     let cwd = env::current_dir().unwrap();
     let path = cwd.join("test"); // 'test' is created in cwd, by PUT and deleted by DELETE
 
-    http_request(service_url, Method::PUT).await;
-    sleep(Duration::from_secs(2)).await; // Todo: remove this sleep and replace with a filesystem watcher
+    sleep(Duration::from_secs(5)).await; // Todo: remove this sleep and replace with a filesystem watcher
     assert!(path.exists());
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("PUT: Request completed"));
 
     http_request(service_url, Method::DELETE).await;
-    sleep(Duration::from_secs(2)).await;
+
+    sleep(Duration::from_secs(5)).await;
     assert!(!path.exists());
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("DELETE: Request completed"));
 }
 
-pub async fn validate_no_requests(stdout: ChildStdout, service_url: &str) {
-    let mut buffer = BufReader::new(stdout);
-    let mut stream = String::new();
-    buffer.read_line(&mut stream).await.unwrap();
-    assert!(stream.contains("Server listening on port 80"));
+/// For all requests, the Express/Flask server prints "{request_name}: Request completed",
+/// this is verified by reading the stdout of the server
+pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
+    let mut out = String::new();
+    stdout.read_to_string(&mut out).await.unwrap();
 
+    // Todo: change this assertions to assert_eq! when TCPClose is patched
+
+    assert!(out.contains("GET: Request completed"));
+    assert!(out.contains("POST: Request completed"));
+    assert!(out.contains("PUT: Request completed"));
+    assert!(out.contains("DELETE: Request completed"));
+}
+
+pub async fn validate_no_requests(service_url: &str) {
     let cwd = env::current_dir().unwrap();
     let path = cwd.join("test");
 
@@ -286,15 +287,16 @@ pub async fn test_server_init(
     client: &Client,
     pod_namespace: &str,
     mut env: HashMap<&str, &str>,
+    server: &str,
 ) -> Child {
     let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
-    let command = vec!["node", "node-e2e/app.js"];
+    let command = SERVERS.get(server).unwrap().clone();
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
     // minikube load image test:latest
     env.insert("MIRRORD_AGENT_IMAGE", "test");
     env.insert("MIRRORD_CHECK_VERSION", "false");
-    let server = start_node_server(&pod_name, command, env);
+    let server = start_server(&pod_name, command, env);
     setup_panic_hook();
     server
 }

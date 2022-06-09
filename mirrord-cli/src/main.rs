@@ -1,4 +1,4 @@
-use std::{env::temp_dir, fs::File, io::Write, time::Duration};
+use std::{fs::File, io::Write, path::PathBuf, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -64,7 +64,102 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 #[cfg(target_os = "macos")]
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-fn extract_library(dest_dir: Option<String>) -> Result<String> {
+/// This is for Apple M1 running mirrord aarch trying to execute x86 binaries.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod mac_aarch {
+    use std::{
+        io::{Cursor, Read},
+        path::{Path, PathBuf},
+    };
+
+    use mach_object::{OFile, CPU_TYPE_X86_64};
+    use search_path::SearchPath;
+    use tracing::warn;
+
+    use super::*;
+    pub fn is_binary_different_arch(binary_name: &String) -> bool {
+        let search_path = SearchPath::new("PATH").unwrap();
+        let binary_path = match search_path.find(Path::new(binary_name)) {
+            Some(path) => path,
+            None => {
+                warn!("Could not find binary in PATH");
+                return false;
+            }
+        };
+        let mut binary_file = match File::open(binary_path) {
+            Ok(file) => file,
+            Err(err) => {
+                warn!("Could not open binary: {err:?}");
+                return false;
+            }
+        };
+        let mut binary_content = Vec::new();
+        let size = match binary_file.read_to_end(&mut binary_content) {
+            Ok(size) => size,
+            Err(err) => {
+                warn!("Could not read binary: {err:?}");
+                return false;
+            }
+        };
+        let mut binary_cursor = Cursor::new(&binary_content[..size]);
+        match OFile::parse(&mut binary_cursor) {
+            Ok(OFile::MachFile {
+                header,
+                commands: _,
+            }) => header.cputype == CPU_TYPE_X86_64,
+            Ok(_) => {
+                warn!("Could not parse binary as Mach-O File");
+                false
+            }
+            Err(err) => {
+                warn!("Could not open binary: {err:?}");
+                false
+            }
+        }
+    }
+
+    pub fn download_intel_binary() -> Result<PathBuf> {
+        let file_name = format!("libmirrord_layer_intel_{}.dylib", env!("CARGO_PKG_VERSION"));
+        let file_path = temp_dir().as_path().join(file_name);
+        // Don't download file if not needed
+        if file_path.exists() {
+            info!("x86 mode, found existing dylib to use");
+            return Ok(file_path);
+        }
+        info!("download x86 dylib for rosetta mode");
+        let download_url = format!("https://github.com/metalbear-co/mirrord/releases/download/{}/libmirrord_layer_mac_x86_64.dylib", env!("CARGO_PKG_VERSION"));
+        let mut response =
+            reqwest::blocking::get(download_url).context("Could not download intel binary")?;
+        let mut file = File::create(&file_path).context("Could not create intel binary")?;
+        response
+            .copy_to(&mut file)
+            .context("Could not write intel binary")?;
+        Ok(file_path)
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use mac_aarch::*;
+
+/// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::str::FromStr;
+
+    use super::*;
+
+    pub fn temp_dir() -> PathBuf {
+        PathBuf::from_str("/tmp/").unwrap()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+use std::env::temp_dir;
+
+#[cfg(target_os = "macos")]
+use mac::temp_dir;
+
+fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
     let library_path = std::path::Path::new(library_file);
 
@@ -79,7 +174,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<String> {
     file.write_all(bytes).unwrap();
 
     debug!("Extracted library file to {:?}", &file_path);
-    Ok(file_path.to_str().unwrap().to_string())
+    Ok(file_path)
 }
 
 fn add_to_preload(path: &str) -> Result<()> {
@@ -134,8 +229,21 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
-    let library_path = extract_library(None)?;
-    add_to_preload(&library_path).unwrap();
+    let library_path = {
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            if is_binary_different_arch(&args.binary) {
+                download_intel_binary()?
+            } else {
+                extract_library(None)?
+            }
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        {
+            extract_library(None)?
+        }
+    };
+    add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());

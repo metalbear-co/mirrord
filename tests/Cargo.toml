@@ -17,3 +17,5 @@ serde_json = "1.0.79"
 mirrord = { artifact = "bin", bin = true, path = "../mirrord-cli" }
 serde = "1.0.137"
 futures = "0.3.21"
+lazy_static = "1.4.0"
+nix = "0.24.1"

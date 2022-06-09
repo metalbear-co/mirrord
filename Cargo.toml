@@ -11,7 +11,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "2.1.0"
+version = "2.2.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -44,3 +44,7 @@ thiserror = "1"
 # this should be changed once a newer version of rustls is ou
 [patch.crates-io]
 rustls = { git = 'https://github.com/rustls/rustls' }
+
+[profile.release]
+strip = "debuginfo"
+lto = true
