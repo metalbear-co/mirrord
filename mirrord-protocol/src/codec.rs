@@ -204,9 +204,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
-    // TODO(alex) [mid] 2022-06-08: Refactor name and variant (make it a struct to return possible
-    // errors).
-    OverrideEnvVarsResponse(HashMap<String, String>),
+    OverrideEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
 }
 
 pub struct ClientCodec {

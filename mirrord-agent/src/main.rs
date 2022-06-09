@@ -4,7 +4,7 @@
 
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
@@ -13,8 +13,8 @@ use std::{
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, EnvVars, FileRequest, FileResponse,
-    OverrideEnvVarsRequest, Port,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, EnvVars, FileError, FileRequest,
+    FileResponse, OverrideEnvVarsRequest, Port, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -37,7 +37,7 @@ use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
 
-use crate::{file::file_worker, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME};
+use crate::{file::file_worker, sniffer::DEFAULT_RUNTIME};
 
 type PeerID = u32;
 
@@ -108,6 +108,65 @@ pub struct PeerMessage {
     peer_id: PeerID,
 }
 
+/// Helper function that loads the process' environment variables, and selects only those that were
+/// requested from `mirrord-layer`.
+///
+/// Returns an error if none of the requested environment variables were found.
+async fn select_env_vars(
+    environ_path: PathBuf,
+    override_env_vars: HashMap<String, String>,
+) -> Result<HashMap<String, String>, ResponseError> {
+    let mut environ_file = tokio::fs::File::open(environ_path).await.map_err(|fail| {
+        ResponseError::FileOperation(FileError {
+            operation: "open".to_string(),
+            raw_os_error: fail.raw_os_error(),
+            kind: fail.kind().into(),
+        })
+    })?;
+
+    let mut env_vars = String::with_capacity(255);
+
+    // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
+    // "nginx -g daemon off;".
+    let read_amount = environ_file
+        .read_to_string(&mut env_vars)
+        .await
+        .map_err(|fail| {
+            ResponseError::FileOperation(FileError {
+                operation: "read_to_string".to_string(),
+                raw_os_error: fail.raw_os_error(),
+                kind: fail.kind().into(),
+            })
+        })?;
+    debug!(
+        "ClientMessage::RemoteEnvVarsRequest read {:#?} bytes with pure ENV_VARS {:#?}",
+        read_amount, env_vars
+    );
+
+    let select_env_keys = override_env_vars.keys().cloned().collect::<HashSet<_>>();
+    debug!(
+        "ClientMessage::RemoteEnvVarsRequest select_env_keys {:?}",
+        select_env_keys
+    );
+
+    let env_vars = EnvVars(env_vars)
+        // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake"
+        .as_default_filtered_map(&char::from(0).to_string())
+        .drain_filter(|key, _| select_env_keys.contains(key))
+        .collect::<HashMap<_, _>>();
+
+    debug!(
+        "ClientMessage::RemoteEnvVarsRequest selected env vars found {:?}",
+        env_vars
+    );
+
+    if env_vars.is_empty() {
+        Err(ResponseError::NotFound)
+    } else {
+        Ok(env_vars)
+    }
+}
+
 async fn handle_peer_messages(
     // TODO: Possibly refactor `state` out to be more "independent", and live in its own worker
     // thread.
@@ -172,58 +231,24 @@ async fn handle_peer_messages(
                 peer_message.peer_id, override_env_vars
             );
 
-            let container_runtime: &str = &container_runtime
+            let container_runtime = container_runtime
                 .as_ref()
                 .map(String::as_str)
                 .unwrap_or(DEFAULT_RUNTIME);
 
-            let pid = match container_id {
-                Some(container_id) => get_container_pid(&container_id, container_runtime).await,
-                None => Err(AgentError::NotFound(format!(
-                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
-                    container_id, container_runtime
-                ))),
-            }?;
+            let pid = container_id.as_ref().ok_or_else(|| {
+                AgentError::NotFound(format!(
+                    "handle_peer_messages -> Container ID not specified for runtime {:#?}!",
+                    container_runtime
+                ))
+            })?;
 
-            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
-            let mut environ_file = tokio::fs::File::open(environ_path).await?;
-
-            let mut env_vars = String::with_capacity(255);
-            let read_amount = environ_file.read_to_string(&mut env_vars).await?;
-
-            // TODO(alex) [high] 2022-06-08: It only loads a weird `nginx - whatever` string.
-            //
-            // ADD(alex) [high] 2022-06-09: nginx is weird, use another image, throw error if
-            // env var is malformed like nginx's.
-            let env_vars = env_vars
-                .trim()
-                .replace(char::from(0), "")
-                .trim_matches(char::from(0))
-                .to_string();
-            debug!(
-                "ClientMessage::RemoteEnvVarsRequest read {:?} bytes with ENV_VARS {:?}",
-                read_amount, env_vars
-            );
-
-            let select_env_keys = override_env_vars.keys().cloned().collect::<HashSet<_>>();
-            debug!(
-                "ClientMessage::RemoteEnvVarsRequest select_env_keys {:?}",
-                select_env_keys
-            );
-
-            let env_vars = EnvVars(env_vars)
-                .as_default_filtered_map(":")
-                .drain_filter(|key, _| select_env_keys.contains(key))
-                .collect();
-
-            debug!(
-                "ClientMessage::RemoteEnvVarsRequest selected env vars found {:?}",
-                env_vars
-            );
+            let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+            let env_vars_result = select_env_vars(environ_path, override_env_vars).await;
 
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel
-                .send(DaemonMessage::OverrideEnvVarsResponse(env_vars))
+                .send(DaemonMessage::OverrideEnvVarsResponse(env_vars_result))
                 .await?;
         }
     }

@@ -4,7 +4,7 @@
 #![feature(hash_drain_filter)]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env,
     lazy::{SyncLazy, SyncOnceCell},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -30,7 +30,6 @@ use mirrord_protocol::{
     OverrideEnvVarsRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use regex::RegexSet;
 use sockets::SOCKETS;
 use tokio::{
     io::AsyncWriteExt,
@@ -322,7 +321,7 @@ async fn handle_hook_message(
         }
         HookMessage::OverrideEnvVarsHook(OverrideEnvVarsHook { override_env_vars }) => {
             debug!(
-                "HookMessage::OverrideEnvVarsHook load {:#?}",
+                "HookMessage::OverrideEnvVarsHook override vars {:#?}",
                 override_env_vars
             );
 
@@ -477,14 +476,24 @@ async fn handle_daemon_message(
                 remote_env_vars
             );
 
-            for (key, value) in remote_env_vars.into_iter() {
-                unsafe {
-                    let setenv_result = libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
-                    debug!(
-                        "DaemonMessage::OverrideEnvVarsResponse setenv_result {:#?}",
-                        setenv_result
-                    );
+            match remote_env_vars {
+                Ok(remote_env_vars) => {
+                    for (key, value) in remote_env_vars.into_iter() {
+                        unsafe {
+                            let setenv_result =
+                                libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
+
+                            debug!(
+                                "DaemonMessage::OverrideEnvVarsResponse setenv_result {:#?}",
+                                setenv_result
+                            );
+                        }
+                    }
                 }
+                Err(fail) => error!(
+                    "Loading remote environment variables failed with {:#?}",
+                    fail
+                ),
             }
         }
         DaemonMessage::Close => todo!(),
@@ -523,7 +532,7 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    if override_env_vars.is_empty() == false {
+    if !override_env_vars.is_empty() {
         let codec_result = codec
             .send(ClientMessage::OverrideEnvVarsRequest(
                 OverrideEnvVarsRequest { override_env_vars },
