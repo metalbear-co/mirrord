@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Update bug report template to apply to the latest version of mirrord.
 - Chang release profile to strip debuginfo and enable LTO.
 - VS Code extension - update dependencies.
+- E2E small improvements, removing sleeps.
 
 ### Fixed
 

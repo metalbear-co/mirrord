@@ -153,9 +153,19 @@ mod tests {
         .await
         .unwrap();
 
-        validate_no_requests(service_url.as_str()).await;
+        send_requests(service_url.as_str()).await;
 
-        server.kill().await.unwrap();
+        // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
+        // blocking.
+        signal::kill(
+            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
+            Signal::SIGTERM,
+        )
+        .unwrap();
+
+        server.wait().await.unwrap();
+
+        validate_no_requests(&mut stdout_reader).await;
         delete_namespace(&client, test_namespace).await;
     }
 

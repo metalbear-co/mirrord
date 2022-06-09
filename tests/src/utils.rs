@@ -247,16 +247,7 @@ pub async fn send_requests(service_url: &str) {
 
     http_request(service_url, Method::PUT).await;
 
-    let cwd = env::current_dir().unwrap();
-    let path = cwd.join("test"); // 'test' is created in cwd, by PUT and deleted by DELETE
-
-    sleep(Duration::from_secs(5)).await; // Todo: remove this sleep and replace with a filesystem watcher
-    assert!(path.exists());
-
     http_request(service_url, Method::DELETE).await;
-
-    sleep(Duration::from_secs(5)).await;
-    assert!(!path.exists());
 }
 
 /// For all requests, the Express/Flask server prints "{request_name}: Request completed",
@@ -271,14 +262,23 @@ pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
     assert!(out.contains("POST: Request completed"));
     assert!(out.contains("PUT: Request completed"));
     assert!(out.contains("DELETE: Request completed"));
+    let cwd = env::current_dir().unwrap();
+    let delete_path = cwd.join("deletetest"); // 'deletetest' is created in cwd, by PUT and deleted by DELETE
+    let exist_path = cwd.join("test"); // 'test' is created in cwd, by PUT and **not** deleted by DELETE
+    assert!(exist_path.exists());
+    assert!(!delete_path.exists());
 }
 
-pub async fn validate_no_requests(service_url: &str) {
+pub async fn validate_no_requests(stdout: &mut BufReader<ChildStdout>) {
+    let mut out = String::new();
+    stdout.read_to_string(&mut out).await.unwrap();
+
+    assert!(!out.contains("GET: Request completed"));
+    assert!(!out.contains("POST: Request completed"));
+    assert!(!out.contains("PUT: Request completed"));
+    assert!(!out.contains("DELETE: Request completed"));
     let cwd = env::current_dir().unwrap();
     let path = cwd.join("test");
-
-    http_request(service_url, Method::PUT).await;
-    sleep(Duration::from_secs(2)).await;
     assert!(!path.exists()); // the API creates a file called 'test' in cwd, which should not exist
 }
 
