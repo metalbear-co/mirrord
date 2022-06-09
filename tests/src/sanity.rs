@@ -73,7 +73,11 @@ mod tests {
 
         send_requests(service_url.as_str()).await;
 
-        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
+        .unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
@@ -209,10 +213,13 @@ mod tests {
         .await
         .unwrap();
 
-
         send_requests(service_url.as_str()).await;
 
-        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
+        .unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
@@ -305,7 +312,11 @@ mod tests {
 
         send_requests(service_url.as_str()).await;
 
-        timeout(Duration::from_secs(5), async {server.wait().await.unwrap()}).await.unwrap();
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
+        .unwrap();
         validate_requests(&mut stdout_reader).await;
 
         delete_namespace(&client, pod_namespace).await;
