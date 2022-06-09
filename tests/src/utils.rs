@@ -140,13 +140,7 @@ pub async fn http_request(url: &str, method: Method) {
         .send()
         .await
         .unwrap();
-    match method {
-        Method::GET => assert_eq!(res.status(), StatusCode::OK),
-        Method::POST | Method::PUT | Method::DELETE => {
-            assert_eq!(res.status(), StatusCode::from_u16(405).unwrap())
-        }
-        _ => panic!("unexpected method"),
-    }
+    assert_eq!(res.status(), StatusCode::OK);
     // read all data sent back
     res.bytes().await.unwrap();
 }
