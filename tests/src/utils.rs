@@ -284,7 +284,7 @@ pub async fn validate_no_requests(stdout: &mut BufReader<ChildStdout>) {
     assert!(!out.contains("PUT: Request completed"));
     assert!(!out.contains("DELETE: Request completed"));
     let cwd = env::current_dir().unwrap();
-    let path = cwd.join("test");
+    let path = cwd.join("deletetest");
     assert!(!path.exists()); // the API creates a file called 'test' in cwd, which should not exist
 }
 
