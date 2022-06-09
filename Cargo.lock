@@ -1432,7 +1432,7 @@ dependencies = [
  "containerd-client",
  "futures",
  "mirrord-protocol",
- "nix",
+ "nix 0.23.1",
  "num-traits",
  "pcap",
  "pnet",
@@ -1466,7 +1466,7 @@ dependencies = [
  "mirrord-protocol",
  "multi-map",
  "nanoid",
- "nix",
+ "nix 0.23.1",
  "os_socketaddr",
  "queues",
  "rand",
@@ -1536,6 +1536,18 @@ checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
 dependencies = [
  "bitflags",
  "cc",
+ "cfg-if",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+dependencies = [
+ "bitflags",
  "cfg-if",
  "libc",
  "memoffset",
@@ -2684,7 +2696,9 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "lazy_static",
  "mirrord",
+ "nix 0.24.1",
  "reqwest",
  "serde",
  "serde_json",
