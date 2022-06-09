@@ -46,6 +46,7 @@ def put():
 def delete():
     remove(DELETE_PATH)
     print("DELETE: Request completed")
+    # killing Flask is the hardest thing I've done in my life - A.H
     kill(getpid(), SIGTERM)
     return "OK"
 
