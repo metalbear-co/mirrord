@@ -61,8 +61,12 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
