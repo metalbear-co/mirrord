@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-deployment
+  name: http-echo-deployment
   labels:
-    app: nginx
+    app: http-echo
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: nginx
+      app: http-echo
   template:
     metadata:
       labels:
-        app: nginx
+        app: http-echo
     spec:
       containers:
-        - name: nginx
-          image: nginx:1.14.2
+        - name: http-echo
+          image: http-echo:1.14.2
           ports:
             - containerPort: 80
 
@@ -25,14 +25,14 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: nginx
-  name: nginx
+    app: http-echo
+  name: http-echo
 spec:
   ports:
     - port: 80
       protocol: TCP
       targetPort: 80
   selector:
-    app: nginx
+    app: http-echo
   sessionAffinity: None
   type: NodePort

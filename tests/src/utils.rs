@@ -65,16 +65,16 @@ pub async fn setup_kube_client() -> Client {
     Client::try_from(config).unwrap()
 }
 
-// minikube service nginx --url
+// minikube service http-echo --url
 pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String> {
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let services = service_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let host_ip = pods
@@ -95,11 +95,11 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
     ))
 }
 
-// kubectl get pods | grep nginx
-pub async fn get_nginx_pod_name(client: &Client, namespace: &str) -> Option<String> {
+// kubectl get pods | grep http-echo
+pub async fn get_http_echo_pod_name(client: &Client, namespace: &str) -> Option<String> {
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
@@ -152,35 +152,35 @@ pub async fn http_request(url: &str, method: Method) {
 }
 
 // kubectl apply -f tests/app.yaml -n name
-pub async fn create_nginx_pod(client: &Client, namespace: &str) {
+pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
     let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
     let deployment = serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": "nginx",
+            "name": "http-echo",
             "labels": {
-                "app": "nginx"
+                "app": "http-echo"
             }
         },
         "spec": {
             "replicas": 1,
             "selector": {
                 "matchLabels": {
-                    "app": "nginx"
+                    "app": "http-echo"
                 }
             },
             "template": {
                 "metadata": {
                     "labels": {
-                        "app": "nginx"
+                        "app": "http-echo"
                     }
                 },
                 "spec": {
                     "containers": [
                         {
-                            "name": "nginx",
-                            "image": "nginx:1.14.2",
+                            "name": "http-echo",
+                            "image": "http-echo:1.14.2",
                             "ports": [
                                 {
                                     "containerPort": 80
@@ -198,22 +198,22 @@ pub async fn create_nginx_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &deployment)
         .await
         .unwrap();
-    watch_resource_exists(deployment_api, "nginx").await;
+    watch_resource_exists(deployment_api, "http-echo").await;
 
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let service = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": {
-            "name": "nginx",
+            "name": "http-echo",
             "labels": {
-                "app": "nginx"
+                "app": "http-echo"
             }
         },
         "spec": {
             "type": "NodePort",
             "selector": {
-                "app": "nginx"
+                "app": "http-echo"
             },
             "sessionAffinity": "None",
             "ports": [
@@ -231,7 +231,7 @@ pub async fn create_nginx_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &service)
         .await
         .unwrap();
-    watch_resource_exists(service_api, "nginx").await;
+    watch_resource_exists(service_api, "http-echo").await;
 }
 
 // watch a resource until it exists
@@ -301,7 +301,7 @@ pub async fn test_server_init(
     mut env: HashMap<&str, &str>,
     server: &str,
 ) -> Child {
-    let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
+    let pod_name = get_http_echo_pod_name(client, pod_namespace).await.unwrap();
     let command = SERVERS.get(server).unwrap().clone();
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile

@@ -102,10 +102,10 @@ mod tests {
                 // verify cleanup
                 loop {
                     let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the nginx pod should exist
+                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the http-echo pod should exist
                     if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
-                        let nginx_pod = updated_pods.items[0].metadata.name.clone().unwrap();
-                        assert!(nginx_pod.contains("nginx"));
+                        let http_echo_pod = updated_pods.items[0].metadata.name.clone().unwrap();
+                        assert!(http_echo_pod.contains("http-echo"));
                         break;
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -130,7 +130,7 @@ mod tests {
         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         create_namespace(&client, test_namespace).await;
-        create_nginx_pod(&client, test_namespace).await;
+        create_http_echo_pod(&client, test_namespace).await;
 
         let service_url = get_service_url(&client, test_namespace).await.unwrap();
 
@@ -278,7 +278,7 @@ mod tests {
 
         let pod_namespace = "test-pod-namespace";
         create_namespace(&client, pod_namespace).await;
-        create_nginx_pod(&client, pod_namespace).await;
+        create_http_echo_pod(&client, pod_namespace).await;
 
         let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace)]);
         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
