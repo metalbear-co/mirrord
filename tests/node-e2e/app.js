@@ -50,6 +50,12 @@ app.delete("/", (req, res) => {
   console.log("DELETE: Request completed");
 });
 
-app.listen(PORT, () => {
+var server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+});
+
+// To exit gracefull
+process.on('SIGTERM', () => {
+  console.log("shutdown");
+  server.close();
 });

@@ -37,7 +37,7 @@ macro_rules! assert_contains {
 
 lazy_static! {
     static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
-        ("python", vec!["python3", "python-e2e/app.py"]),
+        ("python", vec!["python3", "-u", "python-e2e/app.py"]),
         ("node", vec!["node", "node-e2e/app.js"])
     ]);
 }
