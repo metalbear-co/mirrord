@@ -4,11 +4,8 @@
 #![feature(const_trait_impl)]
 
 use std::{
-    collections::HashMap,
     env,
     lazy::{SyncLazy, SyncOnceCell},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
     sync::Mutex,
 };
 
@@ -29,6 +26,7 @@ use mirrord_protocol::{
     ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
+use tcp_mirror::create_tcp_mirror_handler;
 use tokio::{
     runtime::Runtime,
     select,
@@ -36,7 +34,6 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         oneshot,
     },
-    task,
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, trace};
@@ -51,16 +48,8 @@ mod pod_api;
 mod sockets;
 mod tcp;
 mod tcp_mirror;
-use tracing_subscriber::prelude::*;
 
-use crate::{
-    common::HookMessage,
-    config::Config,
-    macros::hook,
-    sockets::{SocketInformation, CONNECTION_QUEUE},
-    tcp::{create_tcp_handler, TCPApi, TCPHandler},
-    tcp_mirror::TCPMirrorHandler,
-};
+use crate::{common::HookMessage, config::Config, macros::hook, tcp::TCPApi};
 
 static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
 static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
@@ -387,13 +376,13 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
-    let (tcp_mirror_handler, mut mirror_api, config) = create_tcp_handler::<TCPMirrorHandler>();
-    tokio::spawn(async move { tcp_mirror_handler.run(config).await });
+    let (tcp_mirror_handler, mut mirror_api, handler_receiver) = create_tcp_mirror_handler();
+    tokio::spawn(async move { tcp_mirror_handler.run(handler_receiver).await });
     loop {
         select! {
             hook_message = receiver.recv() => {
                 handle_hook_message(hook_message.unwrap(),
-                &mut mirror_api
+                &mut mirror_api,
                 &mut codec,
                 &open_file_handler,
                 &open_relative_file_handler,
@@ -405,7 +394,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
             }
             daemon_message = codec.next() => {
                 handle_daemon_message(daemon_message.unwrap().unwrap(),
-                    &mut mirror_api
+                    &mut mirror_api,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,

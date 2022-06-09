@@ -7,11 +7,7 @@ use anyhow::Result;
 /// TCP Traffic management, common code for stealing & mirroring
 use async_trait::async_trait;
 use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
-use tokio::{
-    net::TcpStream,
-    select,
-    sync::mpsc::{channel, Receiver, Sender},
-};
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tracing::error;
 
 use crate::{
@@ -19,7 +15,7 @@ use crate::{
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
-const CHANNEL_SIZE: usize = 1024;
+type TrafficHandlerInputSender = Sender<TrafficHandlerInput>;
 
 #[derive(Debug)]
 pub enum TrafficHandlerInput {
@@ -34,13 +30,16 @@ pub enum TrafficHandlerInput {
 
 /// Struct for controlling the traffic handler struct
 pub struct TCPApi {
-    outgoing: Sender<TrafficHandlerInput>,
+    outgoing: TrafficHandlerInputSender,
     // This is reserved for stealing API.
     // #[allow(dead_code)]
     // incoming: Receiver<TrafficOut>,
 }
 
 impl TCPApi {
+    pub fn new(outgoing: TrafficHandlerInputSender) -> Self {
+        Self { outgoing }
+    }
     pub async fn send(&self, msg: TrafficHandlerInput) -> Result<()> {
         Ok(self.outgoing.send(msg).await?)
     }
@@ -70,23 +69,6 @@ impl TCPApi {
 
 #[async_trait]
 pub trait TCPHandler {
-    /// Run the TCP Handler, usually as a spawned task.
-    async fn run(mut self, mut config: TCPConfig) -> Result<()>
-    where
-        Self: Sized,
-    {
-        loop {
-            select! {
-                msg = config.incoming.recv() => {
-                    if !self.handle_incoming_message(msg).await? {
-                        break
-                    }
-                },
-            }
-        }
-        Ok(())
-    }
-
     fn ports(&mut self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 

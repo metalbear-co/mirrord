@@ -17,7 +17,14 @@ use tokio::{
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error};
 
-use crate::{common::Listen, tcp::TCPHandler};
+use crate::{
+    common::Listen,
+    tcp::{TCPApi, TCPHandler, TrafficHandlerInput},
+};
+
+const CHANNEL_SIZE: usize = 1024;
+
+type TrafficHandlerReceiver = Receiver<TrafficHandlerInput>;
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
@@ -103,6 +110,21 @@ pub struct TCPMirrorHandler {
     connections: HashSet<Connection>,
 }
 
+impl TCPMirrorHandler {
+    pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<()> {
+        loop {
+            select! {
+                msg = incoming.recv() => {
+                    if !self.handle_incoming_message(msg).await? {
+                        break
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl TCPHandler for TCPMirrorHandler {
     async fn handle_listen(&mut self, listen: Listen) -> Result<()> {
@@ -115,7 +137,7 @@ impl TCPHandler for TCPMirrorHandler {
         let stream = self
             .create_local_stream(&conn)
             .await
-            .ok_or(anyhow::anyhow!("local stream failed"))?;
+            .ok_or_else(|| anyhow::anyhow!("local stream failed"))?;
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
 
@@ -130,7 +152,7 @@ impl TCPHandler for TCPMirrorHandler {
         let mut connection = self
             .connections
             .take(&data.connection_id)
-            .ok_or(anyhow::anyhow!("no connection found"))?;
+            .ok_or_else(|| anyhow::anyhow!("no connection found"))?;
         connection.write(data.data).await?;
         self.connections.insert(connection);
         Ok(())
@@ -154,18 +176,11 @@ impl TCPHandler for TCPMirrorHandler {
 
 unsafe impl Send for TCPMirrorHandler {}
 
-pub fn create_tcp_mirror_handler() -> (TCPMirrorHandler, TCPApi)
+pub fn create_tcp_mirror_handler() -> (TCPMirrorHandler, TCPApi, TrafficHandlerReceiver)
 where
 {
     let (traffic_in_tx, traffic_in_rx) = channel(CHANNEL_SIZE);
-    let handler = TCPMirrorHandler::new();
-    let control = TCPApi {
-        incoming: traffic_out_rx,
-        outgoing: traffic_in_tx,
-    };
-    let config = TCPConfig {
-        outgoing: traffic_out_tx,
-        incoming: traffic_in_rx,
-    };
-    (handler, control, config)
+    let handler = TCPMirrorHandler::default();
+    let control = TCPApi::new(traffic_in_tx);
+    (handler, control, traffic_in_rx)
 }
