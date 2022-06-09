@@ -6,6 +6,8 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Changed
+- E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0
 ### Added
@@ -20,7 +22,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Change release profile to strip debuginfo and enable LTO.
 - VS Code extension - update dependencies.
 - CLI & macOS: Extract to `/tmp/` instead of `$TMPDIR` as the executed process is getting killed for some reason.
-- E2E small improvements, removing sleeps. (Fixes #99)
 
 ### Fixed
 
