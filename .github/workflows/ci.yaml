@@ -104,7 +104,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       # For now, just verify it compiles.
-      - run: cargo +nightly build -p mirrord-layer -p mirrord-cli --target=${{matrix.target}}
+      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
