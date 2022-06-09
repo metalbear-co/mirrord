@@ -242,7 +242,7 @@ async fn handle_peer_messages(
                 .unwrap_or(DEFAULT_RUNTIME);
 
             let pid = match container_id {
-                Some(container_id) => get_container_pid(&container_id, container_runtime).await,
+                Some(container_id) => get_container_pid(container_id, container_runtime).await,
                 None => Err(AgentError::NotFound(format!(
                     "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
                     container_id, container_runtime

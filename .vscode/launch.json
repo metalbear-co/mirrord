@@ -33,13 +33,10 @@
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-phrpl",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;MIRRORD_FAKE_VAR_FIRST=mirrord.is.running;MIRRORD_FAKE_VAR_SECOND=7777",
-        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        "MIRRORD_OVERRIDE_ENV": "",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -56,14 +53,10 @@
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-phrpl",
-        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-7d959ff6cb-znx94",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_OVERRIDE_ENV": "PATH=/fake/path;PATH=/fake/another;DB=fake.db;MIRRORD_FAKE_VAR_FIRST=mirrord.is.running;MIRRORD_FAKE_VAR_SECOND=7777",
-        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        "MIRRORD_OVERRIDE_ENV": "",
         "RUST_BACKTRACE": "short"
       }
     }
