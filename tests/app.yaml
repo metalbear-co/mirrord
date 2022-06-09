@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: http-echo
-          image: http-echo:1.14.2
+          image: ealen/echo-server
           ports:
             - containerPort: 80
 

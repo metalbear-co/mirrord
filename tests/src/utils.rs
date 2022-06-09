@@ -180,7 +180,7 @@ pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
                     "containers": [
                         {
                             "name": "http-echo",
-                            "image": "http-echo:1.14.2",
+                            "image": "ealen/echo-server",
                             "ports": [
                                 {
                                     "containerPort": 80
