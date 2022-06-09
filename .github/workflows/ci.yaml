@@ -102,7 +102,7 @@ jobs:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ${{matrix.os}}
+          key: ${{matrix.os}}-${{matrix.target}}
       # For now, just verify it compiles.
       - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
