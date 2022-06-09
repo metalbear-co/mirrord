@@ -192,6 +192,9 @@ async fn handle_peer_messages(
             let read_amount = environ_file.read_to_string(&mut env_vars).await?;
 
             // TODO(alex) [high] 2022-06-08: It only loads a weird `nginx - whatever` string.
+            //
+            // ADD(alex) [high] 2022-06-09: nginx is weird, use another image, throw error if
+            // env var is malformed like nginx's.
             let env_vars = env_vars
                 .trim()
                 .replace(char::from(0), "")
