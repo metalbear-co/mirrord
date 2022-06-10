@@ -54,7 +54,7 @@ mod macros;
 mod pod_api;
 mod sockets;
 
-use mirrord_protocol::{DirRequest, OpenDirRequest};
+use mirrord_protocol::OpenDirRequest;
 
 use crate::{
     common::{HookMessage, Port},
@@ -329,7 +329,7 @@ async fn handle_hook_message(
 
             let open_dir_request = OpenDirRequest { path };
 
-            let request = ClientMessage::DirRequest(DirRequest::Open(open_dir_request));
+            let request = ClientMessage::FileRequest(FileRequest::OpenDir(open_dir_request));
             let codec_result = codec.send(request).await;
 
             debug!("HookMessage::OpenDirHook codec_result {:#?}", codec_result);

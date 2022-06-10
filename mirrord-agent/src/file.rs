@@ -7,10 +7,10 @@ use std::{
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenFileRequest,
-    OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse,
+    CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenDirRequest,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
@@ -275,6 +275,9 @@ pub async fn file_worker(
                     .send((peer_id, response))
                     .await
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            }
+            (peer_id, FileRequest::OpenDir(OpenDirRequest { path })) => {
+                todo!()
             }
         }
     }

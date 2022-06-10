@@ -142,18 +142,12 @@ pub enum FileRequest {
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
+    OpenDir(OpenDirRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenDirRequest {
     pub path: PathBuf,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum DirRequest {
-    Open(OpenDirRequest),
-    // Close(CloseDirRequest)
-    // Read(ReadDirRequest),
 }
 
 /// `-layer` --> `-agent` messages.
@@ -163,7 +157,6 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     FileRequest(FileRequest),
-    DirRequest(DirRequest),
     Ping,
 }
 
