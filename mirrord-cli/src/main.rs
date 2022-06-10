@@ -46,6 +46,14 @@ struct ExecArgs {
     #[clap(short = 'f', long)]
     pub enable_fs: bool,
 
+    /// Enable env vars override
+    #[clap(short = 'o', long)]
+    pub override_env_vars: bool,
+
+    /// The env vars to filter out
+    #[clap(short = 'v', long)]
+    pub override_filter_env_vars: Option<String>,
+
     /// Binary to execute and mirror traffic into.
     #[clap()]
     pub binary: String,
@@ -224,6 +232,14 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if args.enable_fs {
         std::env::set_var("MIRRORD_FILE_OPS", true.to_string());
+    }
+
+    if args.override_env_vars {
+        std::env::set_var("MIRRORD_OVERRIDE_ENV_VARS", true.to_string());
+    }
+
+    if let Some(override_filter_env_vars) = &args.override_filter_env_vars {
+        std::env::set_var("MIRRORD_OVERRIDE_FILTER_ENV_VARS", override_filter_env_vars);
     }
 
     if args.accept_invalid_certificates {
