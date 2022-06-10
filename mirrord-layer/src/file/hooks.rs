@@ -1,7 +1,7 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, DIR, FILE};
 use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
@@ -144,6 +144,12 @@ pub(super) unsafe extern "C" fn openat_detour(
             Ok(path_str) => path_str.into(),
             Err(fail) => return fail,
         };
+
+        // Todo(check): AT_FDCWD - refers to the CWD of the calling process.
+        // Do we really need to manipulate paths here since we already have the path for the given
+        // fd in the agent? since AT_FDCWD refers to the context of the calling process, do
+        // we need to check if the remote fd even exists?
+
         if path.is_absolute() || fd == AT_FDCWD {
             open_detour(raw_path, open_flags)
         } else {
@@ -321,6 +327,31 @@ pub(crate) unsafe extern "C" fn write_detour(
     }
 }
 
+// opendir -> DIR* | readdir | closedir
+pub(crate) unsafe extern "C" fn opendir_detour(raw_path: *const c_char) -> *mut DIR {
+    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
+        error!(
+            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
+            raw_path, fail
+        );
+        std::ptr::null_mut()
+    }) {
+        Ok(path_str) => path_str.into(),
+        Err(fail) => return fail,
+    };
+
+    //let directory_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NONBLOCK;
+
+    unimplemented!()
+}
+
+pub(crate) unsafe extern "C" fn closedir_detour() {
+    unimplemented!()
+}
+
+pub(crate) unsafe extern "C" fn readdir_detour() {
+    unimplemented!()
+}
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "open", open_detour);

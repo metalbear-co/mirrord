@@ -187,6 +187,25 @@ pub enum FileResponse {
     Close(Result<CloseFileResponse, ResponseError>),
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenDirResponse {
+    pub dir_fd: i32,
+    pub allocation: u64,
+    pub offset: u64,
+    pub filepos: u64,
+    pub errcode: i32,
+    // Todo: Directory block and mutex are missing here. (we probably don't need them)
+    // Refer: https://code.woboq.org/userspace/glibc/sysdeps/posix/dirstream.h.html#__dirstream
+}
+
+pub struct CloseDirResponse {
+    pub errcode: i32,
+}
+
+pub struct ReadDirResponse {
+    pub stream: Vec<u8>,
+}
+
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {

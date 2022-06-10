@@ -314,6 +314,7 @@ async fn handle_hook_message(
                 codec_result
             );
         }
+        HookMessage::OpenDirHook(_) => todo!(),
     }
 }
 

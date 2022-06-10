@@ -1,17 +1,17 @@
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    CloseFileResponse, OpenDirResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
     common::{
-        CloseFileHook, HookMessage, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
-        WriteFileHook,
+        CloseFileHook, HookMessage, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook,
+        SeekFileHook, WriteFileHook,
     },
     error::LayerError,
     file::{OpenOptionsInternalExt, OPEN_FILES},
@@ -252,3 +252,29 @@ pub(crate) fn close(fd: RawFd) -> Result<c_int, LayerError> {
     file_channel_rx.blocking_recv()?;
     Ok(0)
 }
+
+pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
+    debug!("opendir -> trying to opendir valid directory {:?}.", path);
+    let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<OpenDirResponse>();
+
+    let opening_dir = OpenDirHook {
+        path,
+        dir_channel_tx,
+    };
+
+    unimplemented!()
+}
+
+// pub(crate) fn closedir(dirfd: c_int) -> Result<c_int, LayerError> {
+//     debug!("closedir -> trying to closedir valid directory {:?}.", dirfd);
+//     let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<CloseFileResponse>();
+
+//     unimplemented!()
+// }
+
+// pub(crate) fn readdir(dirfd: c_int, dirent: *mut dirent) -> Result<c_int, LayerError> {
+//     debug!("readdir -> trying to readdir valid directory {:?}.", dirfd);
+//     let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<ReadFileResponse>();
+
+//     unimplemented!()
+// }
