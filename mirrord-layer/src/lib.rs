@@ -14,7 +14,8 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+    CloseFileHook, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
+    WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -25,8 +26,9 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    FileResponse, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+    WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tokio::{
@@ -51,6 +53,8 @@ mod file;
 mod macros;
 mod pod_api;
 mod sockets;
+
+use mirrord_protocol::{DirRequest, OpenDirRequest};
 
 use crate::{
     common::{HookMessage, Port},
@@ -154,6 +158,7 @@ async fn handle_hook_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_dir_handler: &Mutex<Vec<oneshot::Sender<OpenDirResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -314,7 +319,21 @@ async fn handle_hook_message(
                 codec_result
             );
         }
-        HookMessage::OpenDirHook(_) => todo!(),
+        HookMessage::OpenDirHook(OpenDirHook {
+            path,
+            dir_channel_tx,
+        }) => {
+            debug!("HookMessage::OpenDirHook path {:#?}", path);
+
+            open_dir_handler.lock().unwrap().push(dir_channel_tx);
+
+            let open_dir_request = OpenDirRequest { path };
+
+            let request = ClientMessage::DirRequest(DirRequest::Open(open_dir_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::OpenDirHook codec_result {:#?}", codec_result);
+        }
     }
 }
 
@@ -479,6 +498,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
+    let open_dir_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
     loop {
@@ -493,6 +513,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
+                    &open_dir_handler,
                 ).await;
             }
             daemon_message = codec.next() => {

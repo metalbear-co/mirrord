@@ -160,6 +160,10 @@ async fn handle_peer_messages(
                 .send((peer_message.peer_id, file_request))
                 .await?;
         }
+
+        ClientMessage::DirRequest(dir_request) => {
+            debug!("request -> {:?}", dir_request);
+        }
     }
 
     Ok(())

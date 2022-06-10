@@ -262,6 +262,10 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
         dir_channel_tx,
     };
 
+    blocking_send_hook_message(HookMessage::OpenDirHook(opening_dir))?;
+
+    let _opendir_response = dir_channel_rx.blocking_recv()?;
+
     unimplemented!()
 }
 
