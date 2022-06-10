@@ -132,50 +132,27 @@ pub(super) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        -1
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
-    };
-
-    // `openat` behaves the same as `open` when the path is absolute.
-    if path.is_absolute() {
-        open_detour(raw_path, open_flags)
-    } else if fd == AT_FDCWD {
-        error!(
-            r"Failed `openat_detour` as it cannot deal with `AT_FDCWD`,
-            cannot handle cwd in remote context.
-            `openat_detour` was called with arguments:
-            fd {:#?} | raw_path {:#?} | open_flags {:#?}",
-            fd, raw_path, open_flags
-        );
-
-        -1
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    if let Some(remote_fd) = remote_fd {
+        let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
+            error!(
+                "Failed converting raw_path {:#?} from `c_char` with {:#?}",
+                raw_path, fail
+            );
+            -1
+        }) {
+            Ok(path_str) => path_str.into(),
+            Err(fail) => return fail,
+        };
+        let openat_result = openat(path, open_flags, remote_fd);
+        openat_result
+            .map_err(|fail| {
+                error!("Failed opening file with {fail:#?}");
+                -1
+            })
+            .unwrap_or_else(|fail| fail)
     } else {
-        // Relative path requires special handling, we must identify the relative part (relative to
-        // what).
-        let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-
-        // Are we managing the relative part?
-        if let Some(remote_fd) = remote_fd {
-            let openat_result = openat(path, open_flags, remote_fd);
-
-            openat_result
-                .map_err(|fail| {
-                    error!("Failed opening file with {fail:#?}");
-                    -1
-                })
-                .unwrap_or_else(|fail| fail)
-        } else {
-            // Nope, it's relative outside of our hands.
-
-            libc::openat(fd, raw_path, open_flags)
-        }
+        libc::openat(fd, raw_path, open_flags)
     }
 }
 

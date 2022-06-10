@@ -21,7 +21,7 @@ use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNT
 // `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
 #[derive(Debug, Default)]
 pub struct FileManager {
-    pub open_files: HashMap<i32, File>,
+    pub open_files: HashMap<i32, (File, PathBuf)>,
 }
 
 impl FileManager {
@@ -36,10 +36,10 @@ impl FileManager {
         );
 
         OpenOptions::from(open_options)
-            .open(path)
+            .open(path.clone())
             .map(|file| {
                 let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
+                self.open_files.insert(fd, (file, path.clone()));
 
                 OpenFileResponse { fd }
             })
@@ -63,16 +63,18 @@ impl FileManager {
             path, open_options, relative_fd
         );
 
-        let _relative_dir = self
+        let (_, file_path) = self
             .open_files
             .get(&relative_fd)
             .ok_or(ResponseError::NotFound)?;
 
+        let full_path = file_path.join(&path);
+
         OpenOptions::from(open_options)
-            .open(path)
+            .open(&full_path)
             .map(|file| {
                 let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
+                self.open_files.insert(fd, (file, full_path));
 
                 OpenFileResponse { fd }
             })
@@ -90,7 +92,7 @@ impl FileManager {
         fd: i32,
         buffer_size: usize,
     ) -> Result<ReadFileResponse, ResponseError> {
-        let file = self
+        let (file, _) = self
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
@@ -127,7 +129,7 @@ impl FileManager {
         fd: i32,
         seek_from: SeekFrom,
     ) -> Result<SeekFileResponse, ResponseError> {
-        let file = self
+        let (file, _) = self
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
@@ -153,7 +155,7 @@ impl FileManager {
         fd: i32,
         write_bytes: Vec<u8>,
     ) -> Result<WriteFileResponse, ResponseError> {
-        let file = self
+        let (file, _) = self
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
@@ -232,10 +234,8 @@ pub async fn file_worker(
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = file_manager.open_relative(relative_fd, full_path, open_options);
+                let open_result =
+                    file_manager.open_relative(relative_fd, path.to_path_buf(), open_options);
                 let response = FileResponse::Open(open_result);
 
                 file_response_tx.send((peer_id, response)).await?;

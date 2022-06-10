@@ -6,6 +6,9 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- Add support for openat, closes [#120](https://github.com/metalbear-co/mirrord/issues/120)
+
 ### Changed
 - E2E small improvements, removing sleeps. (Fixes #99)
 
