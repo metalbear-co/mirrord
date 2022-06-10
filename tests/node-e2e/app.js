@@ -7,10 +7,11 @@ const PORT = 80;
 const TEXT =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 var path = process.cwd() + "/test";
+var deletePath = process.cwd() + "/deletetest";
 
 app.get("/", (req, res) => {
-  res.send("Request received"); // Todo: validate responses
   console.log("GET: Request completed");
+  res.send("Request received"); // Todo: validate responses
 });
 
 app.post("/", (req, res) => {
@@ -28,13 +29,18 @@ app.put("/", (req, res) => {
         throw err;
       }
     });
+    fs.writeFile(deletePath, data.toString(), (err) => {
+      if (err) {
+        throw err;
+      }
+    });
   });
   console.log("PUT: Request completed");
 });
 
 app.delete("/", (req, res) => {
   req.on("data", (data) => {
-    fs.unlink(path, (err) => {
+    fs.unlink(deletePath, (err) => {
       if (err) {
         console.err("app.js failed with ", err);
         throw err;
@@ -42,8 +48,15 @@ app.delete("/", (req, res) => {
     });
   });
   console.log("DELETE: Request completed");
+  server.close();
 });
 
-app.listen(PORT, () => {
+var server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+});
+
+// To exit gracefull
+process.on('SIGTERM', () => {
+  console.log("shutdown");
+  server.close();
 });

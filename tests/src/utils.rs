@@ -20,14 +20,24 @@ use serde_json::json;
 use tokio::{
     io::{AsyncReadExt, BufReader},
     process::{Child, ChildStdout, Command},
-    time::{sleep, Duration},
 };
 
 static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
+macro_rules! assert_contains {
+    ($hay: ident, $needle: expr) => {
+        assert!(
+            $hay.contains($needle),
+            "{:?} not found in stream: {:?}",
+            $needle,
+            $hay
+        )
+    };
+}
+
 lazy_static! {
     static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
-        ("python", vec!["python3", "python-e2e/app.py"]),
+        ("python", vec!["python3", "-u", "python-e2e/app.py"]),
         ("node", vec!["node", "node-e2e/app.js"])
     ]);
 }
@@ -35,7 +45,7 @@ lazy_static! {
 // target/debug/mirrord exec --pod-name pod_name  -c binary command
 pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
     let path = env!("CARGO_BIN_FILE_MIRRORD");
-    let args: Vec<&str> = vec!["exec", "--pod-name", pod_name, "-c"]
+    let args: Vec<&str> = vec!["exec", "--pod-name", pod_name, "-c", "--"]
         .into_iter()
         .chain(command.into_iter())
         .collect();
@@ -55,16 +65,16 @@ pub async fn setup_kube_client() -> Client {
     Client::try_from(config).unwrap()
 }
 
-// minikube service nginx --url
+// minikube service http-echo --url
 pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String> {
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let services = service_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let host_ip = pods
@@ -85,11 +95,11 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
     ))
 }
 
-// kubectl get pods | grep nginx
-pub async fn get_nginx_pod_name(client: &Client, namespace: &str) -> Option<String> {
+// kubectl get pods | grep http-echo
+pub async fn get_http_echo_pod_name(client: &Client, namespace: &str) -> Option<String> {
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=nginx"))
+        .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
     let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
@@ -130,45 +140,41 @@ pub async fn http_request(url: &str, method: Method) {
         .send()
         .await
         .unwrap();
-    match method {
-        Method::GET => assert_eq!(res.status(), StatusCode::OK),
-        Method::POST | Method::PUT | Method::DELETE => {
-            assert_eq!(res.status(), StatusCode::from_u16(405).unwrap())
-        }
-        _ => panic!("unexpected method"),
-    }
+    assert_eq!(res.status(), StatusCode::OK);
+    // read all data sent back
+    res.bytes().await.unwrap();
 }
 
 // kubectl apply -f tests/app.yaml -n name
-pub async fn create_nginx_pod(client: &Client, namespace: &str) {
+pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
     let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
     let deployment = serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": "nginx",
+            "name": "http-echo",
             "labels": {
-                "app": "nginx"
+                "app": "http-echo"
             }
         },
         "spec": {
             "replicas": 1,
             "selector": {
                 "matchLabels": {
-                    "app": "nginx"
+                    "app": "http-echo"
                 }
             },
             "template": {
                 "metadata": {
                     "labels": {
-                        "app": "nginx"
+                        "app": "http-echo"
                     }
                 },
                 "spec": {
                     "containers": [
                         {
-                            "name": "nginx",
-                            "image": "nginx:1.14.2",
+                            "name": "http-echo",
+                            "image": "ealen/echo-server",
                             "ports": [
                                 {
                                     "containerPort": 80
@@ -186,22 +192,22 @@ pub async fn create_nginx_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &deployment)
         .await
         .unwrap();
-    watch_resource_exists(deployment_api, "nginx").await;
+    watch_resource_exists(deployment_api, "http-echo").await;
 
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let service = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": {
-            "name": "nginx",
+            "name": "http-echo",
             "labels": {
-                "app": "nginx"
+                "app": "http-echo"
             }
         },
         "spec": {
             "type": "NodePort",
             "selector": {
-                "app": "nginx"
+                "app": "http-echo"
             },
             "sessionAffinity": "None",
             "ports": [
@@ -219,7 +225,7 @@ pub async fn create_nginx_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &service)
         .await
         .unwrap();
-    watch_resource_exists(service_api, "nginx").await;
+    watch_resource_exists(service_api, "http-echo").await;
 }
 
 // watch a resource until it exists
@@ -247,16 +253,7 @@ pub async fn send_requests(service_url: &str) {
 
     http_request(service_url, Method::PUT).await;
 
-    let cwd = env::current_dir().unwrap();
-    let path = cwd.join("test"); // 'test' is created in cwd, by PUT and deleted by DELETE
-
-    sleep(Duration::from_secs(5)).await; // Todo: remove this sleep and replace with a filesystem watcher
-    assert!(path.exists());
-
     http_request(service_url, Method::DELETE).await;
-
-    sleep(Duration::from_secs(5)).await;
-    assert!(!path.exists());
 }
 
 /// For all requests, the Express/Flask server prints "{request_name}: Request completed",
@@ -264,21 +261,29 @@ pub async fn send_requests(service_url: &str) {
 pub async fn validate_requests(stdout: &mut BufReader<ChildStdout>) {
     let mut out = String::new();
     stdout.read_to_string(&mut out).await.unwrap();
-
     // Todo: change this assertions to assert_eq! when TCPClose is patched
 
-    assert!(out.contains("GET: Request completed"));
-    assert!(out.contains("POST: Request completed"));
-    assert!(out.contains("PUT: Request completed"));
-    assert!(out.contains("DELETE: Request completed"));
+    assert_contains!(out, "GET: Request completed");
+    assert_contains!(out, "POST: Request completed");
+    assert_contains!(out, "PUT: Request completed");
+    assert_contains!(out, "DELETE: Request completed");
+    let cwd = env::current_dir().unwrap();
+    let delete_path = cwd.join("deletetest"); // 'deletetest' is created in cwd, by PUT and deleted by DELETE
+    let exist_path = cwd.join("test"); // 'test' is created in cwd, by PUT and **not** deleted by DELETE
+    assert!(exist_path.exists());
+    assert!(!delete_path.exists());
 }
 
-pub async fn validate_no_requests(service_url: &str) {
-    let cwd = env::current_dir().unwrap();
-    let path = cwd.join("test");
+pub async fn validate_no_requests(stdout: &mut BufReader<ChildStdout>) {
+    let mut out = String::new();
+    stdout.read_to_string(&mut out).await.unwrap();
 
-    http_request(service_url, Method::PUT).await;
-    sleep(Duration::from_secs(2)).await;
+    assert!(!out.contains("GET: Request completed"));
+    assert!(!out.contains("POST: Request completed"));
+    assert!(!out.contains("PUT: Request completed"));
+    assert!(!out.contains("DELETE: Request completed"));
+    let cwd = env::current_dir().unwrap();
+    let path = cwd.join("deletetest");
     assert!(!path.exists()); // the API creates a file called 'test' in cwd, which should not exist
 }
 
@@ -289,7 +294,7 @@ pub async fn test_server_init(
     mut env: HashMap<&str, &str>,
     server: &str,
 ) -> Child {
-    let pod_name = get_nginx_pod_name(client, pod_namespace).await.unwrap();
+    let pod_name = get_http_echo_pod_name(client, pod_namespace).await.unwrap();
     let command = SERVERS.get(server).unwrap().clone();
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord-agent/Dockerfile
