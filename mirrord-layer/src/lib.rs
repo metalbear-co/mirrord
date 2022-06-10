@@ -64,6 +64,7 @@ static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
+pub static ENABLED_OVERRIDE_ENV_VARS: SyncOnceCell<bool> = SyncOnceCell::new();
 
 #[derive(Debug)]
 enum TcpTunnelMessages {
@@ -139,6 +140,7 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
+    let _ = ENABLED_OVERRIDE_ENV_VARS.get_or_init(|| config.enabled_override_env_vars);
     let override_env_vars_filter = HashSet::from(EnvVarsFilter(config.override_filter_env_vars));
     debug!(
         "init -> override_env_vars_filter {:#?}",
@@ -526,16 +528,18 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    let codec_result = codec
-        .send(ClientMessage::OverrideEnvVarsRequest(
-            OverrideEnvVarsRequest { filter_env_vars },
-        ))
-        .await;
+    if ENABLED_OVERRIDE_ENV_VARS.get().is_some() {
+        let codec_result = codec
+            .send(ClientMessage::OverrideEnvVarsRequest(
+                OverrideEnvVarsRequest { filter_env_vars },
+            ))
+            .await;
 
-    debug!(
-        "ClientMessage::OverrideEnvVarsFilterRequest codec_result {:#?}",
-        codec_result
-    );
+        debug!(
+            "ClientMessage::OverrideEnvVarsFilterRequest codec_result {:#?}",
+            codec_result
+        );
+    }
 
     loop {
         select! {
