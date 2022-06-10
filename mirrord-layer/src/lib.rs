@@ -2,6 +2,8 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(type_alias_impl_trait)]
+#![feature(generic_associated_types)]
 
 use std::{
     env,
@@ -376,8 +378,10 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
+
     let (tcp_mirror_handler, mut mirror_api, handler_receiver) = create_tcp_mirror_handler();
     tokio::spawn(async move { tcp_mirror_handler.run(handler_receiver).await });
+
     loop {
         select! {
             hook_message = receiver.recv() => {

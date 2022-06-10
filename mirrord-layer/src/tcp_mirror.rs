@@ -19,6 +19,7 @@ use tracing::{debug, error};
 
 use crate::{
     common::Listen,
+    error::LayerError,
     tcp::{TCPApi, TCPHandler, TrafficHandlerInput},
 };
 
@@ -92,8 +93,8 @@ impl Connection {
         Self { id, writer }
     }
 
-    pub async fn write(&mut self, data: Vec<u8>) -> Result<()> {
-        Ok(self.writer.send(data).await?)
+    pub async fn write(&mut self, data: Vec<u8>) -> Result<(), LayerError> {
+        self.writer.send(data).await.map_err(From::from)
     }
 }
 
@@ -111,14 +112,11 @@ pub struct TCPMirrorHandler {
 }
 
 impl TCPMirrorHandler {
-    pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<()> {
+    pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<(), LayerError> {
         loop {
-            select! {
-                msg = incoming.recv() => {
-                    if !self.handle_incoming_message(msg).await? {
-                        break
-                    }
-                },
+            match incoming.recv().await {
+                Some(message) => self.handle_incoming_message(message).await?,
+                None => break,
             }
         }
         Ok(())
@@ -127,45 +125,42 @@ impl TCPMirrorHandler {
 
 #[async_trait]
 impl TCPHandler for TCPMirrorHandler {
-    async fn handle_listen(&mut self, listen: Listen) -> Result<()> {
-        self.ports.insert(listen);
-        Ok(())
-    }
-
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: NewTCPConnection) -> Result<()> {
-        let stream = self
-            .create_local_stream(&conn)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("local stream failed"))?;
+    async fn handle_new_connection(&mut self, conn: NewTCPConnection) -> Result<(), LayerError> {
+        let stream = self.create_local_stream(&conn).await?;
+        // .ok_or_else(|| LayerError::StreamFailed)?;
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
 
         let conn = Connection::new(conn.connection_id, sender);
         self.connections.insert(conn);
+
         task::spawn(async move { tcp_tunnel(stream, receiver).await });
+
         Ok(())
     }
 
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TCPData) -> Result<()> {
+    async fn handle_new_data(&mut self, data: TCPData) -> Result<(), LayerError> {
         let mut connection = self
             .connections
             .take(&data.connection_id)
-            .ok_or_else(|| anyhow::anyhow!("no connection found"))?;
-        connection.write(data.data).await?;
+            .ok_or_else(|| LayerError::NoConnection)?;
+
+        connection.write(data.bytes).await?;
         self.connections.insert(connection);
+
         Ok(())
     }
 
     /// Handle connection close
-    async fn handle_close(&mut self, close: TCPClose) -> Result<()> {
+    fn handle_close(&mut self, close: TCPClose) -> Result<(), LayerError> {
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
         self.connections.remove(&close.connection_id);
         Ok(())
     }
 
-    fn ports(&mut self) -> &HashSet<Listen> {
+    fn ports(&self) -> &HashSet<Listen> {
         &self.ports
     }
 

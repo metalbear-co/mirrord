@@ -24,7 +24,7 @@ pub struct NewTCPConnection {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TCPData {
     pub connection_id: ConnectionID,
-    pub data: Vec<u8>,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -331,7 +331,7 @@ mod tests {
 
         let msg = DaemonMessage::TCPData(TCPData {
             connection_id: 1,
-            data: vec![1, 2, 3],
+            bytes: vec![1, 2, 3],
         });
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();

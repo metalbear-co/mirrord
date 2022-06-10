@@ -3,15 +3,14 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use anyhow::Result;
 /// TCP Traffic management, common code for stealing & mirroring
 use async_trait::async_trait;
 use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::error;
 
 use crate::{
     common::Listen,
+    error::LayerError,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
 
@@ -40,8 +39,8 @@ impl TCPApi {
     pub fn new(outgoing: TrafficHandlerInputSender) -> Self {
         Self { outgoing }
     }
-    pub async fn send(&self, msg: TrafficHandlerInput) -> Result<()> {
-        Ok(self.outgoing.send(msg).await?)
+    pub async fn send(&self, msg: TrafficHandlerInput) -> Result<(), LayerError> {
+        self.outgoing.send(msg).await.map_err(From::from)
     }
 
     // This is reserved for stealing API.
@@ -50,54 +49,55 @@ impl TCPApi {
     //     self.incoming.recv().await
     // }
 
-    pub async fn listen_request(&self, listen: Listen) -> Result<()> {
+    pub async fn listen_request(&self, listen: Listen) -> Result<(), LayerError> {
         self.send(TrafficHandlerInput::Listen(listen)).await
     }
 
-    pub async fn new_tcp_connection(&self, conn: NewTCPConnection) -> Result<()> {
+    pub async fn new_tcp_connection(&self, conn: NewTCPConnection) -> Result<(), LayerError> {
         self.send(TrafficHandlerInput::NewConnection(conn)).await
     }
 
-    pub async fn tcp_data(&self, data: TCPData) -> Result<()> {
+    pub async fn tcp_data(&self, data: TCPData) -> Result<(), LayerError> {
         self.send(TrafficHandlerInput::Data(data)).await
     }
 
-    pub async fn tcp_close(&self, close: TCPClose) -> Result<()> {
+    pub async fn tcp_close(&self, close: TCPClose) -> Result<(), LayerError> {
         self.send(TrafficHandlerInput::Close(close)).await
     }
 }
 
 #[async_trait]
 pub trait TCPHandler {
-    fn ports(&mut self) -> &HashSet<Listen>;
+    fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
     /// Returns true to let caller know to keep running
-    async fn handle_incoming_message(&mut self, msg: Option<TrafficHandlerInput>) -> Result<bool>
-    where
-        Self: Send,
-    {
-        if let Some(msg) = msg {
-            match msg {
-                TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await,
-                TrafficHandlerInput::Data(data) => self.handle_new_data(data).await,
-                TrafficHandlerInput::Close(close) => self.handle_close(close).await,
-                TrafficHandlerInput::Listen(listen) => self.handle_listen(listen).await,
-            }
-            .unwrap_or_else(|err| error!("message handling failed with {err:?}"));
-            Ok(true)
-        } else {
-            Ok(false)
+    async fn handle_incoming_message(
+        &mut self,
+        message: TrafficHandlerInput,
+    ) -> Result<(), LayerError> {
+        match message {
+            TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await,
+            TrafficHandlerInput::Data(data) => self.handle_new_data(data).await,
+            TrafficHandlerInput::Close(close) => self.handle_close(close),
+            TrafficHandlerInput::Listen(listen) => self.handle_listen(listen),
         }
     }
 
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: NewTCPConnection) -> Result<()>;
+    async fn handle_new_connection(&mut self, conn: NewTCPConnection) -> Result<(), LayerError>;
 
     /// Connects to the local listening socket, add it to the queue and return the stream.
     /// Find better name
-    async fn create_local_stream(&mut self, conn: &NewTCPConnection) -> Option<TcpStream> {
-        let listen_data = self.ports().get(&conn.destination_port)?;
+    async fn create_local_stream(
+        &mut self,
+        conn: &NewTCPConnection,
+    ) -> Result<TcpStream, LayerError> {
+        let listen_data = self
+            .ports()
+            .get(&conn.destination_port)
+            .ok_or(LayerError::PortNotFound)?;
+
         let addr = match listen_data.ipv6 {
             false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.real_port),
             true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.real_port),
@@ -108,23 +108,20 @@ pub trait TCPHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
         }
 
-        TcpStream::connect(addr)
-            .await
-            .inspect_err(|err| {
-                error!("create local stream failed, couldn't connect {addr:?} with {err:?}")
-            })
-            .ok()
+        TcpStream::connect(addr).await.map_err(From::from)
     }
 
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TCPData) -> Result<()>;
+    async fn handle_new_data(&mut self, data: TCPData) -> Result<(), LayerError>;
 
     /// Handle connection close
-    async fn handle_close(&mut self, close: TCPClose) -> Result<()>;
+    fn handle_close(&mut self, close: TCPClose) -> Result<(), LayerError>;
 
     /// Handle listen request
-    async fn handle_listen(&mut self, listen: Listen) -> Result<()> {
-        self.ports_mut().insert(listen);
-        Ok(())
+    fn handle_listen(&mut self, listen: Listen) -> Result<(), LayerError> {
+        self.ports_mut()
+            .insert(listen)
+            .then_some(())
+            .ok_or(LayerError::PortNotFound)
     }
 }
