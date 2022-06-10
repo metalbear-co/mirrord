@@ -26,9 +26,7 @@ pub struct Config {
     #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
 
-    /// ```text
-    /// MIRRORD_OVERRIDE_ENV="DB=foo.db;PORT=99;"
-    /// ```
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV", default = "default")]
-    pub override_env_vars: String,
+    /// Overrides local env variables with remote ones, except for those specified here.
+    #[envconfig(from = "MIRRORD_OVERRIDE_FILTER_ENV_VARS", default = "PATH;HOME")]
+    pub override_filter_env_vars: String,
 }

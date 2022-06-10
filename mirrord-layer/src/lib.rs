@@ -5,7 +5,7 @@
 #![feature(hash_drain_filter)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     lazy::{SyncLazy, SyncOnceCell},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -15,8 +15,7 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, OverrideEnvVarsHook, ReadFileHook,
-    SeekFileHook, WriteFileHook,
+    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -26,7 +25,7 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVarsFilter,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
     OverrideEnvVarsRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
@@ -142,10 +141,17 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    let override_env_vars = EnvVars(config.override_env_vars).as_default_filtered_map(";");
-    debug!("init -> override_env_vars {:#?}", override_env_vars);
+    let override_env_vars_filter = HashSet::from(EnvVarsFilter(config.override_filter_env_vars));
+    debug!(
+        "init -> override_env_vars_filter {:#?}",
+        override_env_vars_filter
+    );
 
-    RUNTIME.spawn(poll_agent(port_forwarder, receiver, override_env_vars));
+    RUNTIME.spawn(poll_agent(
+        port_forwarder,
+        receiver,
+        override_env_vars_filter,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -317,22 +323,6 @@ async fn handle_hook_message(
 
             debug!(
                 "HookMessage::CloseFileHook codec_result {:#?}",
-                codec_result
-            );
-        }
-        HookMessage::OverrideEnvVarsHook(OverrideEnvVarsHook { override_env_vars }) => {
-            debug!(
-                "HookMessage::OverrideEnvVarsHook override vars {:#?}",
-                override_env_vars
-            );
-
-            let override_env_vars_request = OverrideEnvVarsRequest { override_env_vars };
-
-            let request = ClientMessage::OverrideEnvVarsRequest(override_env_vars_request);
-            let codec_result = codec.send(request).await;
-
-            debug!(
-                "HookMessage::OverrideEnvVarsHook codec_result {:#?}",
                 codec_result
             );
         }
@@ -510,7 +500,7 @@ async fn handle_daemon_message(
 async fn poll_agent(
     mut pf: Portforwarder,
     mut receiver: Receiver<HookMessage>,
-    override_env_vars: HashMap<String, String>,
+    filter_env_vars: HashSet<String>,
 ) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
@@ -538,18 +528,16 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    if !override_env_vars.is_empty() {
-        let codec_result = codec
-            .send(ClientMessage::OverrideEnvVarsRequest(
-                OverrideEnvVarsRequest { override_env_vars },
-            ))
-            .await;
+    let codec_result = codec
+        .send(ClientMessage::OverrideEnvVarsRequest(
+            OverrideEnvVarsRequest { filter_env_vars },
+        ))
+        .await;
 
-        debug!(
-            "ClientMessage::OverrideEnvVarsRequest codec_result {:#?}",
-            codec_result
-        );
-    }
+    debug!(
+        "ClientMessage::OverrideEnvVarsFilterRequest codec_result {:#?}",
+        codec_result
+    );
 
     loop {
         select! {

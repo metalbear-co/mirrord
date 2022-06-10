@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, SeekFrom},
     net::IpAddr,
     path::PathBuf,
@@ -137,7 +137,7 @@ pub struct CloseFileRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OverrideEnvVarsRequest {
-    pub override_env_vars: HashMap<String, String>,
+    pub filter_env_vars: HashSet<String>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
