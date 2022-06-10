@@ -93,10 +93,12 @@ pub trait TCPHandler {
         &mut self,
         conn: &NewTCPConnection,
     ) -> Result<TcpStream, LayerError> {
+        let destination_port = conn.destination_port;
+
         let listen_data = self
             .ports()
-            .get(&conn.destination_port)
-            .ok_or(LayerError::PortNotFound)?;
+            .get(&destination_port)
+            .ok_or(LayerError::PortNotFound(destination_port))?;
 
         let addr = match listen_data.ipv6 {
             false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.real_port),
@@ -122,6 +124,6 @@ pub trait TCPHandler {
         self.ports_mut()
             .insert(listen)
             .then_some(())
-            .ok_or(LayerError::PortNotFound)
+            .ok_or(LayerError::ListenAlreadyExists)
     }
 }

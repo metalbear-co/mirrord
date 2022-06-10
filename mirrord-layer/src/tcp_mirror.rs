@@ -155,9 +155,13 @@ impl TCPHandler for TCPMirrorHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TCPClose) -> Result<(), LayerError> {
+        let connection_id = close.connection_id;
+
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
-        self.connections.remove(&close.connection_id);
-        Ok(())
+        self.connections
+            .remove(&connection_id)
+            .then_some(())
+            .ok_or(LayerError::ConnectionIdNotFound(connection_id))
     }
 
     fn ports(&self) -> &HashSet<Listen> {

@@ -4,6 +4,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::{tcp::TrafficHandlerInput, HookMessage};
+use crate::common::Listen;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -43,6 +44,12 @@ pub enum LayerError {
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: Failed to find port!")]
-    PortNotFound,
+    #[error("mirrord-layer: Failed to find port `{0}`!")]
+    PortNotFound(u16),
+
+    #[error("mirrord-layer: Failed to find connection_id `{0}`!")]
+    ConnectionIdNotFound(u16),
+
+    #[error("mirrord-layer: Failed inserting listen, already exists!")]
+    ListenAlreadyExists,
 }
