@@ -1,8 +1,6 @@
 #![feature(c_variadic)]
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
-#![feature(const_trait_impl)]
-#![feature(hash_drain_filter)]
 
 use std::{
     collections::{HashMap, HashSet},

@@ -1,8 +1,5 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
-#![feature(core_ffi_c)]
-#![feature(hash_drain_filter)]
-#![feature(once_cell)]
 
 pub mod codec;
 pub mod error;
@@ -17,7 +14,7 @@ pub struct EnvVarsFilter(pub String);
 
 impl From<EnvVarsFilter> for HashSet<String> {
     fn from(env_vars: EnvVarsFilter) -> Self {
-        env_vars.split_terminator(";").map(String::from).collect()
+        env_vars.split_terminator(';').map(String::from).collect()
     }
 }
 
