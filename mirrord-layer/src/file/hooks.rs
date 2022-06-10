@@ -144,13 +144,17 @@ pub(super) unsafe extern "C" fn openat_detour(
             Ok(path_str) => path_str.into(),
             Err(fail) => return fail,
         };
-        let openat_result = openat(path, open_flags, remote_fd);
-        openat_result
-            .map_err(|fail| {
-                error!("Failed opening file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        if path.is_absolute() || fd == AT_FDCWD {
+            open_detour(raw_path, open_flags)
+        } else {
+            let openat_result = openat(path, open_flags, remote_fd);
+            openat_result
+                .map_err(|fail| {
+                    error!("Failed opening file with {fail:#?}");
+                    -1
+                })
+                .unwrap_or_else(|fail| fail)
+        }
     } else {
         libc::openat(fd, raw_path, open_flags)
     }
