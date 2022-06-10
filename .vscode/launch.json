@@ -36,7 +36,6 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_OVERRIDE_ENV": "",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -56,7 +55,6 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "RUST_BACKTRACE": "short"
       }
     }
