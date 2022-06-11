@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
+    os::unix::prelude::OpenOptionsExt,
     path::PathBuf,
 };
 
@@ -181,12 +182,30 @@ impl FileManager {
         Ok(CloseFileResponse)
     }
 
-    pub(crate) fn opendir(&mut self, path: PathBuf) -> Result<OpenDirResponse, ResponseError> {
+    pub(crate) fn opendir(
+        &mut self,
+        path: PathBuf,
+        flags: i32,
+    ) -> Result<OpenDirResponse, ResponseError> {
         debug!("FileManager::opendir -> Trying to opendir {:#?}", path);
 
         // Open with O_DIRECTORY
+        OpenOptions::new()
+            .custom_flags(flags)
+            .open(path.clone())
+            .map(|dir| {
+                let remote_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&dir);
+                self.open_files.insert(remote_fd, (dir, path));
 
-        todo!()
+                OpenDirResponse { remote_fd }
+            })
+            .map_err(|fail| {
+                ResponseError::FileOperation(FileError {
+                    operation: "open".to_string(),
+                    raw_os_error: fail.raw_os_error(),
+                    kind: fail.kind().into(),
+                })
+            })
     }
 }
 
@@ -284,8 +303,8 @@ pub async fn file_worker(
                     .await
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
             }
-            (peer_id, FileRequest::OpenDir(OpenDirRequest { path })) => {
-                let opendir_result = file_manager.opendir(path);
+            (peer_id, FileRequest::OpenDir(OpenDirRequest { path, flags })) => {
+                let opendir_result = file_manager.opendir(path, flags);
                 todo!()
             }
         }

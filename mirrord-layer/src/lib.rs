@@ -321,13 +321,14 @@ async fn handle_hook_message(
         }
         HookMessage::OpenDirHook(OpenDirHook {
             path,
+            flags,
             dir_channel_tx,
         }) => {
             debug!("HookMessage::OpenDirHook path {:#?}", path);
 
             open_dir_handler.lock().unwrap().push(dir_channel_tx);
 
-            let open_dir_request = OpenDirRequest { path };
+            let open_dir_request = OpenDirRequest { path, flags };
 
             let request = ClientMessage::FileRequest(FileRequest::OpenDir(open_dir_request));
             let codec_result = codec.send(request).await;

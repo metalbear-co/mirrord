@@ -148,6 +148,7 @@ pub enum FileRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenDirRequest {
     pub path: PathBuf,
+    pub flags: i32,
 }
 
 /// `-layer` --> `-agent` messages.

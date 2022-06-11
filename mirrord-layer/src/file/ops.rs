@@ -257,8 +257,11 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
     debug!("opendir -> trying to opendir valid directory {:?}.", path);
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<OpenDirResponse>();
 
+    let flags = libc::O_RDONLY | libc::O_NONBLOCK | libc::O_DIRECTORY;
+
     let opening_dir = OpenDirHook {
         path,
+        flags,
         dir_channel_tx,
     };
 

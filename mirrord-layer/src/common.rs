@@ -82,6 +82,7 @@ pub struct CloseFileHook {
 #[derive(Debug)]
 pub struct OpenDirHook {
     pub(crate) path: PathBuf,
+    pub(crate) flags: i32,
     pub(crate) dir_channel_tx: oneshot::Sender<OpenDirResponse>,
 }
 
