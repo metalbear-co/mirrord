@@ -6,7 +6,7 @@ use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
 use super::{
-    ops::{fdopen, fopen, openat},
+    ops::{fdopen, fopen, openat, opendir},
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
@@ -340,18 +340,30 @@ pub(crate) unsafe extern "C" fn opendir_detour(raw_path: *const c_char) -> *mut 
         Err(fail) => return fail,
     };
 
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
+        libc::opendir(raw_path)
+    } else {
+        // Todo: we really need to form the DIR struct here
+
+        let opendir_result = opendir(path);
+        opendir_result
+            .map_err(|fail| {
+                error!("Failed to open directory with {fail:#?}");
+                ptr::null_mut()
+            })
+            .unwrap_or_else(|fail| fail)
+    }
     //let directory_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NONBLOCK;
-
-    unimplemented!()
 }
 
-pub(crate) unsafe extern "C" fn closedir_detour() {
-    unimplemented!()
-}
+// pub(crate) unsafe extern "C" fn closedir_detour() {
+//     unimplemented!()
+// }
 
-pub(crate) unsafe extern "C" fn readdir_detour() {
-    unimplemented!()
-}
+// pub(crate) unsafe extern "C" fn readdir_detour() {
+//     unimplemented!()
+// }
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "open", open_detour);
@@ -363,4 +375,6 @@ pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "fileno", fileno_detour);
     hook!(interceptor, "lseek", lseek_detour);
     hook!(interceptor, "write", write_detour);
+
+    hook!(interceptor, "opendir", opendir_detour);
 }

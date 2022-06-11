@@ -194,13 +194,14 @@ pub enum FileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[repr(C)]
 pub struct OpenDirResponse {
-    pub dir_fd: i32,
-    pub allocation: u64,
-    pub offset: u64,
-    pub filepos: u64,
-    pub errcode: i32,
-    // Todo: Directory block and mutex are missing here. (we probably don't need them)
+    pub remote_fd: i32,
+    // pub allocation: u64,
+    // pub offset: u64,
+    // pub filepos: u64,
+    // pub errcode: i32,
+    // Todo: Do we even need these fields except the dir_fd?
     // Refer: https://code.woboq.org/userspace/glibc/sysdeps/posix/dirstream.h.html#__dirstream
 }
 

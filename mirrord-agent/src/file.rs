@@ -8,9 +8,9 @@ use std::{
 
 use mirrord_protocol::{
     CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenDirRequest,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest,
+    SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
@@ -180,6 +180,14 @@ impl FileManager {
 
         Ok(CloseFileResponse)
     }
+
+    pub(crate) fn opendir(&mut self, path: PathBuf) -> Result<OpenDirResponse, ResponseError> {
+        debug!("FileManager::opendir -> Trying to opendir {:#?}", path);
+
+        // Open with O_DIRECTORY
+
+        todo!()
+    }
 }
 
 pub async fn file_worker(
@@ -277,6 +285,7 @@ pub async fn file_worker(
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
             }
             (peer_id, FileRequest::OpenDir(OpenDirRequest { path })) => {
+                let opendir_result = file_manager.opendir(path);
                 todo!()
             }
         }

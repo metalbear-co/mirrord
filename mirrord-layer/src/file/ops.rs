@@ -264,9 +264,27 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
 
     blocking_send_hook_message(HookMessage::OpenDirHook(opening_dir))?;
 
-    let _opendir_response = dir_channel_rx.blocking_recv()?;
+    let OpenDirResponse { remote_fd } = dir_channel_rx.blocking_recv()?;
 
-    unimplemented!()
+    let fake_local_dir_name = CString::new(remote_fd.to_string())?;
+
+    // Todo: check if we need extra flags like O_DIRECTORY here
+
+    let local_dir_fd = unsafe {
+        let local_dir_fd = libc::shm_open(
+            fake_local_dir_name.as_ptr(),
+            O_RDONLY | O_CREAT,
+            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
+        );
+
+        libc::shm_unlink(fake_local_dir_name.as_ptr());
+
+        local_dir_fd
+    };
+
+    OPEN_FILES.lock().unwrap().insert(local_dir_fd, remote_fd);
+
+    Ok(local_dir_fd as *mut _)
 }
 
 // pub(crate) fn closedir(dirfd: c_int) -> Result<c_int, LayerError> {
