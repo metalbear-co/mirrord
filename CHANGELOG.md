@@ -6,7 +6,10 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+## 2.2.1
 ### Changed
+- Compile universal binaries for MacOS. (Fixes #131)
 - E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0
