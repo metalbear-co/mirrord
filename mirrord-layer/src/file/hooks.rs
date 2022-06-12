@@ -6,7 +6,7 @@ use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
 use super::{
-    ops::{fdopen, fopen, openat, opendir},
+    ops::{close, fdopen, fopen, openat, opendir},
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
@@ -356,9 +356,18 @@ pub(crate) unsafe extern "C" fn opendir_detour(raw_path: *const c_char) -> *mut 
     //let directory_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NONBLOCK;
 }
 
-// pub(crate) unsafe extern "C" fn closedir_detour() {
-//     unimplemented!()
-// }
+pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
+    // convert DIR to RawFd (just intuition, not sure if this is correct)
+    let fd = *(dirp as *const _);
+
+    let closedir_result = close(fd);
+    closedir_result
+        .map_err(|fail| {
+            error!("Failed to close directory with {fail:#?}");
+            -1
+        })
+        .unwrap_or_else(|fail| fail)
+}
 
 // pub(crate) unsafe extern "C" fn readdir_detour() {
 //     unimplemented!()
@@ -377,4 +386,5 @@ pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "write", write_detour);
 
     hook!(interceptor, "opendir", opendir_detour);
+    hook!(interceptor, "closedir", closedir_detour);
 }

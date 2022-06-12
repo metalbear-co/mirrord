@@ -2,8 +2,8 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenDirResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
-    SeekFileResponse, WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error};
@@ -249,13 +249,19 @@ pub(crate) fn close(fd: RawFd) -> Result<c_int, LayerError> {
 
     blocking_send_hook_message(HookMessage::CloseFileHook(closing_file))?;
 
-    file_channel_rx.blocking_recv()?;
-    Ok(0)
+    let CloseFileResponse { result } = file_channel_rx.blocking_recv()?;
+
+    if result == 0 {
+        // only remove the fd if everything went well in the agent
+        OPEN_FILES.lock().unwrap().remove(&fd);
+    }
+
+    Ok(result)
 }
 
 pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
     debug!("opendir -> trying to opendir valid directory {:?}.", path);
-    let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<OpenDirResponse>();
+    let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<OpenFileResponse>();
 
     let flags = libc::O_RDONLY | libc::O_NONBLOCK | libc::O_DIRECTORY;
 
@@ -267,9 +273,9 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
 
     blocking_send_hook_message(HookMessage::OpenDirHook(opening_dir))?;
 
-    let OpenDirResponse { remote_fd } = dir_channel_rx.blocking_recv()?;
+    let OpenFileResponse { fd } = dir_channel_rx.blocking_recv()?;
 
-    let fake_local_dir_name = CString::new(remote_fd.to_string())?;
+    let fake_local_dir_name = CString::new(fd.to_string())?;
 
     // Todo: check if we need extra flags like O_DIRECTORY here
 
@@ -285,17 +291,10 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
         local_dir_fd
     };
 
-    OPEN_FILES.lock().unwrap().insert(local_dir_fd, remote_fd);
+    OPEN_FILES.lock().unwrap().insert(local_dir_fd, fd);
 
     Ok(local_dir_fd as *mut _)
 }
-
-// pub(crate) fn closedir(dirfd: c_int) -> Result<c_int, LayerError> {
-//     debug!("closedir -> trying to closedir valid directory {:?}.", dirfd);
-//     let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<CloseFileResponse>();
-
-//     unimplemented!()
-// }
 
 // pub(crate) fn readdir(dirfd: c_int, dirent: *mut dirent) -> Result<c_int, LayerError> {
 //     debug!("readdir -> trying to readdir valid directory {:?}.", dirfd);

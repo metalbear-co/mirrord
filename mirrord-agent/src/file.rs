@@ -9,9 +9,9 @@ use std::{
 
 use mirrord_protocol::{
     CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenDirRequest,
-    OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest,
-    SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
@@ -179,14 +179,14 @@ impl FileManager {
 
         debug!("FileManager::write -> Trying to close file {:#?}", file);
 
-        Ok(CloseFileResponse)
+        Ok(CloseFileResponse { result: 0 })
     }
 
     pub(crate) fn opendir(
         &mut self,
         path: PathBuf,
         flags: i32,
-    ) -> Result<OpenDirResponse, ResponseError> {
+    ) -> Result<OpenFileResponse, ResponseError> {
         debug!("FileManager::opendir -> Trying to opendir {:#?}", path);
 
         // Open with O_DIRECTORY
@@ -194,10 +194,10 @@ impl FileManager {
             .custom_flags(flags)
             .open(path.clone())
             .map(|dir| {
-                let remote_fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&dir);
-                self.open_files.insert(remote_fd, (dir, path));
+                let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&dir);
+                self.open_files.insert(fd, (dir, path));
 
-                OpenDirResponse { remote_fd }
+                OpenFileResponse { fd }
             })
             .map_err(|fail| {
                 ResponseError::FileOperation(FileError {
@@ -305,6 +305,12 @@ pub async fn file_worker(
             }
             (peer_id, FileRequest::OpenDir(OpenDirRequest { path, flags })) => {
                 let opendir_result = file_manager.opendir(path, flags);
+                let response = FileResponse::Open(opendir_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
                 todo!()
             }
         }

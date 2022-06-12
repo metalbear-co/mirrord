@@ -183,7 +183,9 @@ pub struct WriteFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct CloseFileResponse;
+pub struct CloseFileResponse {
+    pub result: i32,
+}
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileResponse {
@@ -193,19 +195,6 @@ pub enum FileResponse {
     Write(Result<WriteFileResponse, ResponseError>),
     Close(Result<CloseFileResponse, ResponseError>),
 }
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-#[repr(C)]
-pub struct OpenDirResponse {
-    pub remote_fd: i32,
-    // pub allocation: u64,
-    // pub offset: u64,
-    // pub filepos: u64,
-    // pub errcode: i32,
-    // Todo: Do we even need these fields except the dir_fd?
-    // Refer: https://code.woboq.org/userspace/glibc/sysdeps/posix/dirstream.h.html#__dirstream
-}
-
 pub struct CloseDirResponse {
     pub errcode: i32,
 }

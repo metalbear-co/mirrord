@@ -1,8 +1,8 @@
 use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenDirResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
-    SeekFileResponse, WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse,
 };
 use tokio::sync::oneshot;
 
@@ -83,7 +83,7 @@ pub struct CloseFileHook {
 pub struct OpenDirHook {
     pub(crate) path: PathBuf,
     pub(crate) flags: i32,
-    pub(crate) dir_channel_tx: oneshot::Sender<OpenDirResponse>,
+    pub(crate) dir_channel_tx: oneshot::Sender<OpenFileResponse>,
 }
 
 // pub struct CloseDirHook {
