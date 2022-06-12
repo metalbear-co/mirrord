@@ -26,10 +26,11 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
 
+    /// Overrides local env variables with remote ones.
     #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS", default = "false")]
     pub enabled_override_env_vars: bool,
 
-    /// Overrides local env variables with remote ones, except for those specified here.
+    /// Filters out these env vars when overriding is enabled.
     #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_FILTER", default = "")]
     pub override_env_vars_filter: String,
 }
