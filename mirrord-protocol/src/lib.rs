@@ -14,7 +14,17 @@ pub struct EnvVarsFilter(pub String);
 
 impl From<EnvVarsFilter> for HashSet<String> {
     fn from(env_vars: EnvVarsFilter) -> Self {
-        env_vars.split_terminator(';').map(String::from).collect()
+        let mut filter = env_vars
+            .split_terminator(';')
+            .map(String::from)
+            .collect::<HashSet<_>>();
+
+        // TODO: These are env vars that should usually be ignored. Revisit this list if a user
+        // ever asks for a way to NOT filter out these.
+        filter.insert("PATH".to_string());
+        filter.insert("HOME".to_string());
+
+        filter
     }
 }
 

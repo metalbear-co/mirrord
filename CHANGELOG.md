@@ -6,10 +6,12 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
 ### Changed
+
 - E2E small improvements, removing sleeps. (Fixes #99)
 
-- Override the process environment variables with the remote equivalents by setting `MIRRORD_OVERRIDE_ENV`, like `MIRRORD_OVERRIDE_ENV="DB=fakedb;CONFIG=fake.config"`;
+- Added support for overriding a process' environment variables by setting `MIRRORD_OVERRIDE_ENV_VARS` to `true`. To filter out undesired variables, use the `MIRRORD_OVERRIDE_FILTER_ENV_VARS` configuration with arguments such as `FOO;BAR`.
 
 ## 2.2.0
 

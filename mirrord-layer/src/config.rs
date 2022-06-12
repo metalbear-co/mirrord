@@ -30,6 +30,6 @@ pub struct LayerConfig {
     pub enabled_override_env_vars: bool,
 
     /// Overrides local env variables with remote ones, except for those specified here.
-    #[envconfig(from = "MIRRORD_OVERRIDE_FILTER_ENV_VARS", default = "PATH;HOME")]
-    pub override_filter_env_vars: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_FILTER", default = "")]
+    pub override_env_vars_filter: String,
 }

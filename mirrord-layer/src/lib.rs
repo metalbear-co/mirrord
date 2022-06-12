@@ -506,7 +506,7 @@ async fn poll_agent(
     let mut ping = false;
 
     if config.enabled_override_env_vars {
-        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_filter_env_vars));
+        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_env_vars_filter));
 
         let codec_result = codec
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
