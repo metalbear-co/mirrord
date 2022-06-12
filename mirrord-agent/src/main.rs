@@ -13,7 +13,7 @@ use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, FileRequest, FileResponse,
-    OverrideEnvVarsRequest, Port, ResponseError,
+    GetEnvVarsRequest, Port, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -231,9 +231,11 @@ async fn handle_peer_messages(
                 .send((peer_message.peer_id, file_request))
                 .await?;
         }
-        ClientMessage::OverrideEnvVarsRequest(OverrideEnvVarsRequest { filter_env_vars }) => {
+        ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+            env_vars_filter: filter_env_vars,
+        }) => {
             debug!(
-                "ClientMessage::OverrideEnvVarsRequest peer id {:?} requesting {:?}",
+                "ClientMessage::GetEnvVarsRequest peer id {:?} requesting {:?}",
                 peer_message.peer_id, filter_env_vars
             );
 
@@ -255,7 +257,7 @@ async fn handle_peer_messages(
 
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel
-                .send(DaemonMessage::OverrideEnvVarsResponse(env_vars_result))
+                .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                 .await?;
         }
     }

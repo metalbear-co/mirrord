@@ -136,8 +136,8 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OverrideEnvVarsRequest {
-    pub filter_env_vars: HashSet<String>,
+pub struct GetEnvVarsRequest {
+    pub env_vars_filter: HashSet<String>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -157,7 +157,7 @@ pub enum ClientMessage {
     Close,
     ConnectionUnsubscribe(ConnectionID),
     FileRequest(FileRequest),
-    OverrideEnvVarsRequest(OverrideEnvVarsRequest),
+    GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
 }
 
@@ -204,7 +204,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
-    OverrideEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
+    GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
 }
 
 pub struct ClientCodec {

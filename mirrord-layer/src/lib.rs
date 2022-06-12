@@ -4,7 +4,6 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    env,
     lazy::{SyncLazy, SyncOnceCell},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -24,8 +23,8 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVarsFilter,
-    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
-    OverrideEnvVarsRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
+    FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
@@ -54,7 +53,7 @@ mod sockets;
 
 use crate::{
     common::{HookMessage, Port},
-    config::Config,
+    config::LayerConfig,
     macros::hook,
     sockets::{SocketInformation, CONNECTION_QUEUE},
 };
@@ -120,17 +119,9 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let config = Config::init_from_env().unwrap();
+    let config = LayerConfig::init_from_env().unwrap();
 
-    let port_forwarder = RUNTIME.block_on(pod_api::create_agent(
-        &config.impersonated_pod_name,
-        &config.impersonated_pod_namespace,
-        &config.agent_namespace,
-        config.agent_rust_log,
-        config.agent_image.unwrap_or_else(|| {
-            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-        }),
-    ));
+    let port_forwarder = RUNTIME.block_on(pod_api::create_agent(config.clone()));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -140,18 +131,7 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    let _ = ENABLED_OVERRIDE_ENV_VARS.get_or_init(|| config.enabled_override_env_vars);
-    let override_env_vars_filter = HashSet::from(EnvVarsFilter(config.override_filter_env_vars));
-    debug!(
-        "init -> override_env_vars_filter {:#?}",
-        override_env_vars_filter
-    );
-
-    RUNTIME.spawn(poll_agent(
-        port_forwarder,
-        receiver,
-        override_env_vars_filter,
-    ));
+    RUNTIME.spawn(poll_agent(port_forwarder, receiver, config));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -461,18 +441,15 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
-        DaemonMessage::OverrideEnvVarsResponse(remote_env_vars) => {
-            debug!(
-                "DaemonMessage::OverrideEnvVarsResponse {:#?}!",
-                remote_env_vars
-            );
+        DaemonMessage::GetEnvVarsResponse(remote_env_vars) => {
+            debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
             match remote_env_vars {
                 Ok(remote_env_vars) => {
                     for (key, value) in remote_env_vars.into_iter() {
                         unsafe {
                             debug!(
-                                "DaemonMessage::OverrideEnvVarsResponse set key {:#?} value {:#?}",
+                                "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
                                 key, value
                             );
 
@@ -480,7 +457,7 @@ async fn handle_daemon_message(
                                 libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
 
                             debug!(
-                                "DaemonMessage::OverrideEnvVarsResponse setenv_result {:#?}",
+                                "DaemonMessage::GetEnvVarsResponse setenv_result {:#?}",
                                 setenv_result
                             );
                         }
@@ -500,7 +477,7 @@ async fn handle_daemon_message(
 async fn poll_agent(
     mut pf: Portforwarder,
     mut receiver: Receiver<HookMessage>,
-    filter_env_vars: HashSet<String>,
+    config: LayerConfig,
 ) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
@@ -528,15 +505,17 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    if ENABLED_OVERRIDE_ENV_VARS.get().is_some() {
+    if config.enabled_override_env_vars {
+        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_filter_env_vars));
+
         let codec_result = codec
-            .send(ClientMessage::OverrideEnvVarsRequest(
-                OverrideEnvVarsRequest { filter_env_vars },
-            ))
+            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                env_vars_filter,
+            }))
             .await;
 
         debug!(
-            "ClientMessage::OverrideEnvVarsFilterRequest codec_result {:#?}",
+            "ClientMessage::GetEnvVarsFilterRequest codec_result {:#?}",
             codec_result
         );
     }
