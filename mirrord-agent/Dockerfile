@@ -1,4 +1,4 @@
-FROM rust:latest as build-env
+FROM rustlang/rust:nightly as build-env
 RUN apt update && apt install -y libpcap-dev cmake
 RUN rustup toolchain install nightly --component rustfmt
 WORKDIR /app

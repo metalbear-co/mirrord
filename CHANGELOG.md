@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Speed up agent container image building by using a more specific base image.
+
+
 ## 2.2.1
 ### Changed
 - Compile universal binaries for MacOS. (Fixes #131)
