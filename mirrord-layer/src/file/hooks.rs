@@ -377,7 +377,12 @@ pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> *mut dirent {
 
     let readdir_result = readdir(fd);
 
-    unimplemented!()
+    readdir_result
+        .map_err(|fail| {
+            error!("Failed to read directory with {fail:#?}");
+            ptr::null_mut()
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 // Todo: check for aarch or libc macros which define dirent64
@@ -414,4 +419,6 @@ pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
 
     hook!(interceptor, "opendir", opendir_detour);
     hook!(interceptor, "closedir", closedir_detour);
+    hook!(interceptor, "readdir", readdir_detour);
+    hook!(interceptor, "telldir", telldir_detour);
 }

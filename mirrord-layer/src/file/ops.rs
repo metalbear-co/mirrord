@@ -342,5 +342,11 @@ pub(crate) fn readdir(dirfd: c_int) -> Result<*mut dirent, LayerError> {
 }
 
 pub(crate) fn telldir(dirfd: c_int) -> Result<c_long, LayerError> {
-    todo!()
+    debug!("telldir -> trying to telldir valid directory {:?}.", dirfd);
+
+    if let Some((_, context)) = DIR_CONTEXT.lock().unwrap().get(&dirfd) {
+        Ok(context.clone().try_into().unwrap())
+    } else {
+        Err(LayerError::DirfdNotFound)
+    }
 }

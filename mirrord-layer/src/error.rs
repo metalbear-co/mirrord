@@ -30,4 +30,7 @@ pub enum LayerError {
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
+
+    #[error("mirrord-layer: dirfd not found")]
+    DirfdNotFound,
 }
