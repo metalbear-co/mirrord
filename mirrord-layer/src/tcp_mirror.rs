@@ -15,7 +15,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
     common::Listen,
@@ -30,34 +30,35 @@ type TrafficHandlerReceiver = Receiver<TrafficHandlerInput>;
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
+
     loop {
         select! {
-            message = remote_stream.next() => {
-                match message {
-                    Some(data) => {
-                        match local_stream.write_all(&data).await {
-                            Ok(_) => {},
-                            Err(err) => {error!("writing to local stream err {err:?}"); break;}
+            bytes = remote_stream.next() => {
+                match bytes {
+                    Some(bytes) => {
+                        if let Err(fail) = local_stream.write_all(&bytes).await {
+                            error!("Failed writing to local_stream with {:#?}!", fail);
+                            break;
                         }
                     },
                     None => {
-                        debug!("tcp tunnel exiting due to remote stream closed");
+                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
                         break;
                     }
                 }
             },
             // Read the application's response from the socket and discard the data, so that the socket doesn't fill up.
-            res = local_stream.read(&mut buffer) => {
-                match res {
-                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+            read = local_stream.read(&mut buffer) => {
+                match read {
+                    Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                         continue;
-                        },
-                    Err(err) => {
-                        error!("local stream received an error reading {err:?}");
+                    },
+                    Err(fail) => {
+                        error!("Failed reading local_stream with {:#?}", fail);
                         break;
                     }
-                    Ok(n) if n == 0 => {
-                        debug!("tcp tunnel exiting due to local stream closed");
+                    Ok(read_amount) if read_amount == 0 => {
+                        warn!("tcp_tunnel -> exiting due to local stream closed!");
                         break;
                     },
                     Ok(_) => {}
@@ -66,7 +67,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
             }
         }
     }
-    debug!("exiting tcp tunnel");
+    debug!("tcp_tunnel -> exiting");
 }
 
 struct Connection {
@@ -119,7 +120,9 @@ impl TCPMirrorHandler {
                     let _ = self
                         .handle_incoming_message(message)
                         .await
-                        .inspect_err(|fail| error!("{:#?}", fail));
+                        .inspect_err(|fail| {
+                            error!("TCPMirrorHandler::run failed with {:#?}", fail)
+                        });
                 }
                 None => break,
             }
@@ -131,14 +134,18 @@ impl TCPMirrorHandler {
 #[async_trait]
 impl TCPHandler for TCPMirrorHandler {
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: NewTCPConnection) -> Result<(), LayerError> {
-        let stream = self.create_local_stream(&conn).await?;
-        // .ok_or_else(|| LayerError::StreamFailed)?;
+    async fn handle_new_connection(
+        &mut self,
+        tcp_connection: NewTCPConnection,
+    ) -> Result<(), LayerError> {
+        debug!("handle_new_connection -> {:#?}", tcp_connection);
+
+        let stream = self.create_local_stream(&tcp_connection).await?;
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
 
-        let conn = Connection::new(conn.connection_id, sender);
-        self.connections.insert(conn);
+        let new_connection = Connection::new(tcp_connection.connection_id, sender);
+        self.connections.insert(new_connection);
 
         task::spawn(async move { tcp_tunnel(stream, receiver).await });
 
@@ -147,20 +154,35 @@ impl TCPHandler for TCPMirrorHandler {
 
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TCPData) -> Result<(), LayerError> {
+        debug!("handle_new_data -> id {:#?}", data.connection_id);
+
+        // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
+        // abstraction to use something that has mutable access.
         let mut connection = self
             .connections
             .take(&data.connection_id)
-            .ok_or_else(|| LayerError::NoConnection)?;
+            .ok_or_else(|| LayerError::NoConnectionId(data.connection_id))?;
 
+        debug!(
+            "handle_new_data -> writing {:#?} bytes to id {:#?}",
+            data.bytes.len(),
+            connection.id
+        );
+        // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be told
+        // that we just removed it).
         connection.write(data.bytes).await?;
+
         self.connections.insert(connection);
+        debug!("handle_new_data -> success");
 
         Ok(())
     }
 
     /// Handle connection close
     fn handle_close(&mut self, close: TCPClose) -> Result<(), LayerError> {
-        let connection_id = close.connection_id;
+        debug!("handle_close -> close {:#?}", close);
+
+        let TCPClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
         self.connections

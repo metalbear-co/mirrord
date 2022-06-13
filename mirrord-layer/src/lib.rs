@@ -271,15 +271,21 @@ async fn handle_daemon_message(
     ping: &mut bool,
 ) {
     match daemon_message {
-        DaemonMessage::NewTCPConnection(conn) => {
-            debug!("DaemonMessage::NewTCPConnection {conn:#?}");
-            mirror_api.new_tcp_connection(conn).await.unwrap();
+        DaemonMessage::NewTCPConnection(tcp_connection) => {
+            debug!("DaemonMessage::NewTCPConnection {:#?}", tcp_connection);
+            mirror_api.new_tcp_connection(tcp_connection).await.unwrap();
         }
-        DaemonMessage::TCPData(msg) => {
-            mirror_api.tcp_data(msg).await.unwrap();
+        DaemonMessage::TCPData(tcp_data) => {
+            debug!(
+                "DaemonMessage::TCPData id {:#?} | amount {:#?}",
+                tcp_data.connection_id,
+                tcp_data.bytes.len()
+            );
+            mirror_api.tcp_data(tcp_data).await.unwrap();
         }
-        DaemonMessage::TCPClose(msg) => {
-            mirror_api.tcp_close(msg).await.unwrap();
+        DaemonMessage::TCPClose(tcp_close) => {
+            debug!("DaemonMessage::TCPClose {:#?}", tcp_close);
+            mirror_api.tcp_close(tcp_close).await.unwrap();
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");

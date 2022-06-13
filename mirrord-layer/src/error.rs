@@ -4,7 +4,6 @@ use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::{tcp::TrafficHandlerInput, HookMessage};
-use crate::common::Listen;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -38,8 +37,8 @@ pub enum LayerError {
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
 
-    #[error("mirrord-layer: No connection found!")]
-    NoConnection,
+    #[error("mirrord-layer: No connection found for id `{0}`!")]
+    NoConnectionId(u16),
 
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),

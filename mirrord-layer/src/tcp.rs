@@ -7,6 +7,7 @@ use std::{
 use async_trait::async_trait;
 use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tracing::debug;
 
 use crate::{
     common::Listen,
@@ -53,16 +54,20 @@ impl TCPApi {
         self.send(TrafficHandlerInput::Listen(listen)).await
     }
 
-    pub async fn new_tcp_connection(&self, conn: NewTCPConnection) -> Result<(), LayerError> {
-        self.send(TrafficHandlerInput::NewConnection(conn)).await
+    pub async fn new_tcp_connection(
+        &self,
+        tcp_connection: NewTCPConnection,
+    ) -> Result<(), LayerError> {
+        self.send(TrafficHandlerInput::NewConnection(tcp_connection))
+            .await
     }
 
-    pub async fn tcp_data(&self, data: TCPData) -> Result<(), LayerError> {
-        self.send(TrafficHandlerInput::Data(data)).await
+    pub async fn tcp_data(&self, tcp_data: TCPData) -> Result<(), LayerError> {
+        self.send(TrafficHandlerInput::Data(tcp_data)).await
     }
 
-    pub async fn tcp_close(&self, close: TCPClose) -> Result<(), LayerError> {
-        self.send(TrafficHandlerInput::Close(close)).await
+    pub async fn tcp_close(&self, tcp_close: TCPClose) -> Result<(), LayerError> {
+        self.send(TrafficHandlerInput::Close(tcp_close)).await
     }
 }
 
@@ -76,12 +81,20 @@ pub trait TCPHandler {
         &mut self,
         message: TrafficHandlerInput,
     ) -> Result<(), LayerError> {
-        match message {
-            TrafficHandlerInput::NewConnection(conn) => self.handle_new_connection(conn).await,
-            TrafficHandlerInput::Data(data) => self.handle_new_data(data).await,
-            TrafficHandlerInput::Close(close) => self.handle_close(close),
+        debug!("handle_incoming_message -> message {:#?}", message);
+
+        let handled = match message {
+            TrafficHandlerInput::NewConnection(tcp_connection) => {
+                self.handle_new_connection(tcp_connection).await
+            }
+            TrafficHandlerInput::Data(tcp_data) => self.handle_new_data(tcp_data).await,
+            TrafficHandlerInput::Close(tcp_close) => self.handle_close(tcp_close),
             TrafficHandlerInput::Listen(listen) => self.handle_listen(listen),
-        }
+        };
+
+        debug!("handle_incoming_message -> handled {:#?}", handled);
+
+        handled
     }
 
     /// Handle NewConnection messages
@@ -91,9 +104,9 @@ pub trait TCPHandler {
     /// Find better name
     async fn create_local_stream(
         &mut self,
-        conn: &NewTCPConnection,
+        tcp_connection: &NewTCPConnection,
     ) -> Result<TcpStream, LayerError> {
-        let destination_port = conn.destination_port;
+        let destination_port = tcp_connection.destination_port;
 
         let listen_data = self
             .ports()
@@ -105,7 +118,10 @@ pub trait TCPHandler {
             true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.real_port),
         };
 
-        let info = SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
+        let info = SocketInformation::new(SocketAddr::new(
+            tcp_connection.address,
+            tcp_connection.source_port,
+        ));
         {
             CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
         }
@@ -121,6 +137,8 @@ pub trait TCPHandler {
 
     /// Handle listen request
     fn handle_listen(&mut self, listen: Listen) -> Result<(), LayerError> {
+        debug!("handle_listen -> ");
+
         self.ports_mut()
             .insert(listen)
             .then_some(())
