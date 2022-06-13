@@ -7,9 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Added
-- Add support for openat, closes [#120](https://github.com/metalbear-co/mirrord/issues/120)
+- Add support for openat, opendir, closedir, readdir, telldir, closes [#120](https://github.com/metalbear-co/mirrord/issues/120)
 
 ### Changed
+- Speed up agent container image building by using a more specific base image.
+- CI: Remove building agent before building & running tests (duplicate)
+
+## 2.2.1
+### Changed
+- Compile universal binaries for MacOS. (Fixes #131)
 - E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0
