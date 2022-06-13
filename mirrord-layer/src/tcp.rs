@@ -108,22 +108,19 @@ pub trait TCPHandler {
     ) -> Result<TcpStream, LayerError> {
         let destination_port = tcp_connection.destination_port;
 
-        let listen_data = self
+        let listen = self
             .ports()
             .get(&destination_port)
             .ok_or(LayerError::PortNotFound(destination_port))?;
 
-        let addr = match listen_data.ipv6 {
-            false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.real_port),
-            true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.real_port),
-        };
+        let addr: SocketAddr = listen.into();
 
         let info = SocketInformation::new(SocketAddr::new(
             tcp_connection.address,
             tcp_connection.source_port,
         ));
         {
-            CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
+            CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
         TcpStream::connect(addr).await.map_err(From::from)

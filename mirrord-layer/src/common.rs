@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     hash::{Hash, Hasher},
     io::SeekFrom,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     path::PathBuf,
 };
@@ -37,6 +38,19 @@ impl Hash for Listen {
 impl Borrow<Port> for Listen {
     fn borrow(&self) -> &Port {
         &self.real_port
+    }
+}
+
+impl From<&Listen> for SocketAddr {
+    fn from(listen: &Listen) -> Self {
+        let address = if listen.ipv6 {
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.fake_port)
+        } else {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.fake_port)
+        };
+
+        debug_assert_eq!(address.port(), listen.fake_port);
+        address
     }
 }
 // TODO: Some ideas around abstracting file operations:
