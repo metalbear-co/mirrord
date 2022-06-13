@@ -115,7 +115,12 @@ impl TCPMirrorHandler {
     pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<(), LayerError> {
         loop {
             match incoming.recv().await {
-                Some(message) => self.handle_incoming_message(message).await?,
+                Some(message) => {
+                    let _ = self
+                        .handle_incoming_message(message)
+                        .await
+                        .inspect_err(|fail| error!("{:#?}", fail));
+                }
                 None => break,
             }
         }
