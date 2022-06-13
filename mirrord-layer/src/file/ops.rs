@@ -1,9 +1,12 @@
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, DIR, FILE, O_CREAT, O_DIRECTORY, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{
+    c_int, c_long, c_uint, dirent, DIR, FILE, O_CREAT, O_DIRECTORY, O_RDONLY, S_IRUSR, S_IWUSR,
+    S_IXUSR,
+};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadDirResponse, ReadFileResponse,
-    SeekFileResponse, WriteFileResponse,
+    CloseFileResponse, DirEntry, OpenFileResponse, OpenOptionsInternal, ReadDirResponse,
+    ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error};
@@ -14,10 +17,9 @@ use crate::{
         ReadFileHook, SeekFileHook, WriteFileHook,
     },
     error::LayerError,
-    file::{OpenOptionsInternalExt, OPEN_FILES},
+    file::{OpenOptionsInternalExt, DIR_CONTEXT, OPEN_FILES},
     HOOK_SENDER,
 };
-
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
         HOOK_SENDER
@@ -296,16 +298,49 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
     Ok(local_dir_fd as *mut _)
 }
 
-pub(crate) fn readdir(dirfd: c_int) -> Result<c_int, LayerError> {
+pub(crate) fn readdir(dirfd: c_int) -> Result<*mut dirent, LayerError> {
     debug!("readdir -> trying to readdir valid directory {:?}.", dirfd);
-    let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<ReadDirResponse>();
 
-    let reading_dir = ReadDirHook {
-        dirfd,
-        dir_channel_tx,
-    };
+    // modify the DIR_CONTEXT hashmap to be used with telldir
+    // HashMap : (fd, (vector, read))
+    let mut res: &DirEntry;
 
-    // Just request with the fd, agent will find result with paths
+    if let Some((vec, context)) = DIR_CONTEXT.lock().unwrap().get(&dirfd) {
+        res = vec.get(context.clone()).unwrap();
 
-    unimplemented!()
+        //let d_name = vec.get(context.clone()).unwrap().d_name.clone().as_bytes();
+        // figure a way to convert String to [i8; 256]
+
+        Ok(&mut dirent {
+            d_ino: todo!(),
+            d_off: todo!(),
+            d_reclen: todo!(),
+            d_type: todo!(),
+            d_name: todo!(),
+        } as *mut _)
+    } else {
+        let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<ReadDirResponse>();
+
+        let reading_dir = ReadDirHook {
+            dirfd,
+            dir_channel_tx,
+        };
+
+        // Just request with the fd, agent will find result with paths
+        blocking_send_hook_message(HookMessage::ReadDirHook(reading_dir))?;
+
+        let ReadDirResponse { entries } = dir_channel_rx.blocking_recv()?;
+
+        Ok(&mut dirent {
+            d_ino: todo!(),
+            d_off: todo!(),
+            d_reclen: todo!(),
+            d_type: todo!(),
+            d_name: todo!(),
+        } as *mut _)
+    }
+}
+
+pub(crate) fn telldir(dirfd: c_int) -> Result<c_long, LayerError> {
+    todo!()
 }

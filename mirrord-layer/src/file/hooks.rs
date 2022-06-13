@@ -2,13 +2,14 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 
 use frida_gum::interceptor::Interceptor;
 use libc::{
-    self, c_char, c_int, c_void, dirent, dirent64, off_t, size_t, ssize_t, AT_FDCWD, DIR, FILE,
+    self, c_char, c_int, c_long, c_void, dirent, dirent64, off_t, size_t, ssize_t, AT_FDCWD, DIR,
+    FILE,
 };
 use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
 use super::{
-    ops::{close, fdopen, fopen, openat, opendir, readdir},
+    ops::{close, fdopen, fopen, openat, opendir, readdir, telldir},
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
@@ -386,6 +387,18 @@ pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> *mut dirent {
 
 //     unimplemented!()
 // }
+
+pub(crate) unsafe extern "C" fn telldir_detour(dirp: *mut DIR) -> c_long {
+    let fd = *(dirp as *const _);
+
+    let telldir_result = telldir(fd);
+    telldir_result
+        .map_err(|fail| {
+            error!("Failed to tell directory with {fail:#?}");
+            -1
+        })
+        .unwrap_or_else(|fail| fail)
+}
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {

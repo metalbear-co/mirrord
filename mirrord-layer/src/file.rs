@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, lazy::SyncLazy, os::unix::io::RawFd, sync::Mutex};
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
-use mirrord_protocol::OpenOptionsInternal;
+use mirrord_protocol::{DirEntry, OpenOptionsInternal};
 use regex::RegexSet;
 use tracing::warn;
 
@@ -44,6 +44,10 @@ struct RemoteFile {
 
 pub(crate) static OPEN_FILES: SyncLazy<Mutex<HashMap<LocalFd, RemoteFd>>> =
     SyncLazy::new(|| Mutex::new(HashMap::with_capacity(4)));
+
+// probably don't need usize there, .next() should handle that
+pub(crate) static DIR_CONTEXT: SyncLazy<Mutex<HashMap<LocalFd, (Vec<DirEntry>, usize)>>> =
+    SyncLazy::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) trait OpenOptionsInternalExt {
     fn from_flags(flags: c_int) -> Self;

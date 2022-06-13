@@ -13,7 +13,6 @@ use mirrord_protocol::{
     OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
-use nix::libc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
