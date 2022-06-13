@@ -7,6 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Changed
+- Removed `unwrap` from the `Future` that was waiting for Kube pod to spin up in `pod_api.rs`
 - E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0

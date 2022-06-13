@@ -160,13 +160,14 @@ pub async fn create_agent(
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
-    match tokio::time::timeout(std::time::Duration::from_secs(20), running)
-        .await
-        {
-            Ok(_) => {},
-            Err(elapsed) => {
-                error!("Failed to receive a running response from pod {:?}", elapsed);
-            }
+    match tokio::time::timeout(std::time::Duration::from_secs(20), running).await {
+        Ok(_) => {}
+        Err(elapsed) => {
+            error!(
+                "Failed to receive a running response from pod: {:?}",
+                elapsed
+            );
         }
+    }
     pods_api.portforward(&pod_name, &[61337]).await.unwrap()
 }
