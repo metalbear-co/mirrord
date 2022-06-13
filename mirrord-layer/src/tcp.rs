@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-};
+use std::{collections::HashSet, net::SocketAddr};
 
 /// TCP Traffic management, common code for stealing & mirroring
 use async_trait::async_trait;
