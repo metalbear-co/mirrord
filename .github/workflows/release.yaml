@@ -111,7 +111,7 @@ jobs:
 
   release_gh:
     needs: [build_binaries, release_docker_image, release_vscode_ext]
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       packages: write
       contents: write
@@ -131,9 +131,13 @@ jobs:
           mv /tmp/artifacts/x86_64-apple-darwin/mirrord /tmp/release/mirrord_mac_x86_64
           mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_aarch64.dylib
           mv /tmp/artifacts/aarch64-apple-darwin/mirrord /tmp/release/mirrord_mac_aarch64
+
+          # create universal2 binaries for macOS
+          cd /tmp/release
+          lipo -create -output libmirrord_layer_mac.dylib libmirrord_layer_mac_x86_64.dylib libmirrord_layer_mac_aarch64.dylib
+          lipo -create -output mirrord_mac mirrord_mac_x86_64 mirrord_mac_aarch64
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           files: /tmp/release/**
-
