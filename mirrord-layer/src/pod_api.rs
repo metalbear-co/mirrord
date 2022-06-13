@@ -100,8 +100,7 @@ pub async fn create_agent(
                         {
                             "name": "mirrord-agent",
                             "image": agent_image,
-                            // "imagePullPolicy": "IfNotPresent",
-                            "imagePullPolicy": "Always",
+                            "imagePullPolicy": "IfNotPresent",
                             "securityContext": {
                                 "privileged": true,
                             },
