@@ -1,8 +1,8 @@
 use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadDirResponse, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 
@@ -90,9 +90,11 @@ pub struct OpenDirHook {
 
 // }
 
-// pub struct ReadDirHook {
-
-// }
+#[derive(Debug)]
+pub struct ReadDirHook {
+    pub(crate) dirfd: RawFd,
+    pub(crate) dir_channel_tx: oneshot::Sender<ReadDirResponse>,
+}
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub enum HookMessage {
@@ -104,4 +106,5 @@ pub enum HookMessage {
     WriteFileHook(WriteFileHook),
     CloseFileHook(CloseFileHook),
     OpenDirHook(OpenDirHook),
+    ReadDirHook(ReadDirHook),
 }

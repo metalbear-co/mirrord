@@ -135,6 +135,11 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirRequest {
+    pub dirfd: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
@@ -143,6 +148,7 @@ pub enum FileRequest {
     Write(WriteFileRequest),
     Close(CloseFileRequest),
     OpenDir(OpenDirRequest),
+    ReadDir(ReadDirRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -188,19 +194,27 @@ pub struct CloseFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct DirEntry {
+    pub d_ino: u64,
+    pub d_name: String,
+    // pub d_off: u64,
+    // pub d_reclen: u16,
+    // pub d_type: u8,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirResponse {
+    pub entries: Vec<DirEntry>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileResponse {
     Open(Result<OpenFileResponse, ResponseError>),
     Read(Result<ReadFileResponse, ResponseError>),
     Seek(Result<SeekFileResponse, ResponseError>),
     Write(Result<WriteFileResponse, ResponseError>),
     Close(Result<CloseFileResponse, ResponseError>),
-}
-pub struct CloseDirResponse {
-    pub errcode: i32,
-}
-
-pub struct ReadDirResponse {
-    pub stream: Vec<u8>,
+    ReadDir(Result<ReadDirResponse, ResponseError>),
 }
 
 /// `-agent` --> `-layer` messages.

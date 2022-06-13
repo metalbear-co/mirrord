@@ -1,12 +1,14 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, DIR, FILE};
+use libc::{
+    self, c_char, c_int, c_void, dirent, dirent64, off_t, size_t, ssize_t, AT_FDCWD, DIR, FILE,
+};
 use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
 use super::{
-    ops::{close, fdopen, fopen, openat, opendir},
+    ops::{close, fdopen, fopen, openat, opendir, readdir},
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
@@ -369,7 +371,19 @@ pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
         .unwrap_or_else(|fail| fail)
 }
 
-// pub(crate) unsafe extern "C" fn readdir_detour() {
+pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> *mut dirent {
+    let fd = *(dirp as *const _);
+
+    let readdir_result = readdir(fd);
+
+    unimplemented!()
+}
+
+// Todo: check for aarch or libc macros which define dirent64
+
+// pub(crate) unsafe extern "C" fn readdir_detour() -> *mut dirent64 {
+//     let fd = *(dirp as *const _);
+
 //     unimplemented!()
 // }
 

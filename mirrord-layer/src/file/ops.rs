@@ -1,17 +1,17 @@
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, DIR, FILE, O_CREAT, O_DIRECTORY, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadDirResponse, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
     common::{
-        CloseFileHook, HookMessage, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook,
-        SeekFileHook, WriteFileHook,
+        CloseFileHook, HookMessage, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadDirHook,
+        ReadFileHook, SeekFileHook, WriteFileHook,
     },
     error::LayerError,
     file::{OpenOptionsInternalExt, OPEN_FILES},
@@ -282,7 +282,7 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
     let local_dir_fd = unsafe {
         let local_dir_fd = libc::shm_open(
             fake_local_dir_name.as_ptr(),
-            O_RDONLY | O_CREAT,
+            O_RDONLY | O_CREAT | O_DIRECTORY,
             (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
         );
 
@@ -296,9 +296,16 @@ pub(crate) fn opendir(path: PathBuf) -> Result<*mut DIR, LayerError> {
     Ok(local_dir_fd as *mut _)
 }
 
-// pub(crate) fn readdir(dirfd: c_int, dirent: *mut dirent) -> Result<c_int, LayerError> {
-//     debug!("readdir -> trying to readdir valid directory {:?}.", dirfd);
-//     let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<ReadFileResponse>();
+pub(crate) fn readdir(dirfd: c_int) -> Result<c_int, LayerError> {
+    debug!("readdir -> trying to readdir valid directory {:?}.", dirfd);
+    let (dir_channel_tx, dir_channel_rx) = oneshot::channel::<ReadDirResponse>();
 
-//     unimplemented!()
-// }
+    let reading_dir = ReadDirHook {
+        dirfd,
+        dir_channel_tx,
+    };
+
+    // Just request with the fd, agent will find result with paths
+
+    unimplemented!()
+}

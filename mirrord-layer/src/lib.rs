@@ -14,8 +14,8 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
-    WriteFileHook,
+    CloseFileHook, OpenDirHook, OpenFileHook, OpenRelativeFileHook, ReadDirHook, ReadFileHook,
+    SeekFileHook, WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -26,8 +26,9 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadDirRequest,
+    ReadDirResponse, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tokio::{
@@ -157,6 +158,7 @@ async fn handle_hook_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    read_dir_handler: &Mutex<Vec<oneshot::Sender<ReadDirResponse>>>,
 ) {
     match hook_message {
         HookMessage::Listen(listen_message) => {
@@ -333,6 +335,21 @@ async fn handle_hook_message(
 
             debug!("HookMessage::OpenDirHook codec_result {:#?}", codec_result);
         }
+        HookMessage::ReadDirHook(ReadDirHook {
+            dirfd,
+            dir_channel_tx,
+        }) => {
+            debug!("HookMessage::ReadDirHook dirfd {:#?}", dirfd);
+
+            read_dir_handler.lock().unwrap().push(dir_channel_tx);
+
+            let read_dir_request = ReadDirRequest { dirfd };
+
+            let request = ClientMessage::FileRequest(FileRequest::ReadDir(read_dir_request));
+            let codec_result = codec.send(request).await;
+
+            debug!("HookMessage::ReadDirHook codec_result {:#?}", codec_result);
+        }
     }
 }
 
@@ -347,6 +364,7 @@ async fn handle_daemon_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    read_dir_handler: &Mutex<Vec<oneshot::Sender<ReadDirResponse>>>,
     ping: &mut bool,
 ) {
     match daemon_message {
@@ -460,6 +478,17 @@ async fn handle_daemon_message(
                 .send(close_file.unwrap())
                 .unwrap();
         }
+        DaemonMessage::FileResponse(FileResponse::ReadDir(read_dir)) => {
+            debug!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
+
+            read_dir_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(read_dir.unwrap())
+                .unwrap();
+        }
         DaemonMessage::Pong => {
             if *ping {
                 *ping = false;
@@ -497,6 +526,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
+    let read_dir_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
     loop {
@@ -511,6 +541,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
+                    &read_dir_handler,
                 ).await;
             }
             daemon_message = codec.next() => {
@@ -522,6 +553,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
+                    &read_dir_handler,
                     &mut ping,
                 ).await;
             }

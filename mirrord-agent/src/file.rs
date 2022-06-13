@@ -3,16 +3,17 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
-    os::unix::prelude::OpenOptionsExt,
+    os::unix::prelude::{DirEntryExt, OpenOptionsExt},
     path::PathBuf,
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenDirRequest,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    CloseFileRequest, CloseFileResponse, DirEntry, FileError, FileRequest, FileResponse,
+    OpenDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+    OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
+use nix::libc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
@@ -22,6 +23,7 @@ use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNT
 // `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
 #[derive(Debug, Default)]
 pub struct FileManager {
+    // Todo: convert thus tuple to struct
     pub open_files: HashMap<i32, (File, PathBuf)>,
 }
 
@@ -207,6 +209,28 @@ impl FileManager {
                 })
             })
     }
+
+    pub(crate) fn readdir(&mut self, fd: i32) -> Result<ReadDirResponse, ResponseError> {
+        let (_, dir_path) = self.open_files.get(&fd).ok_or(ResponseError::NotFound)?;
+
+        // Todo: check if we need other fields not specified in POSIX.1 https://man7.org/linux/man-pages/man3/readdir.3.html
+        let mut dir_entries: Vec<DirEntry> = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(dir_path) {
+            for entry in entries {
+                dir_entries.push(DirEntry {
+                    d_ino: entry.as_ref().unwrap().ino(),
+                    d_name: entry.unwrap().file_name().into_string().unwrap(),
+                });
+            }
+        }
+
+        let response = ReadDirResponse {
+            entries: dir_entries,
+        };
+
+        Ok(response)
+    }
 }
 
 pub async fn file_worker(
@@ -306,6 +330,16 @@ pub async fn file_worker(
             (peer_id, FileRequest::OpenDir(OpenDirRequest { path, flags })) => {
                 let opendir_result = file_manager.opendir(path, flags);
                 let response = FileResponse::Open(opendir_result);
+
+                file_response_tx
+                    .send((peer_id, response))
+                    .await
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+                todo!()
+            }
+            (peer_id, FileRequest::ReadDir(ReadDirRequest { dirfd })) => {
+                let readdir_result = file_manager.readdir(dirfd);
+                let response = FileResponse::ReadDir(readdir_result);
 
                 file_response_tx
                     .send((peer_id, response))
