@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Speed up agent container image building by using a more specific base image.
+- CI: Remove building agent before building & running tests (duplicate)
+
 ## 2.2.1
 ### Changed
 - Removed `unwrap` from the `Future` that was waiting for Kube pod to spin up in `pod_api.rs`. (Fixes #110)
