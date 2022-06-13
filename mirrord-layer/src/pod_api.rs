@@ -57,6 +57,7 @@ pub async fn create_agent(config: LayerConfig) -> Portforwarder {
         agent_rust_log,
         agent_namespace,
         agent_image,
+        image_pull_policy,
         impersonated_pod_name,
         impersonated_pod_namespace,
         ..
@@ -116,8 +117,7 @@ pub async fn create_agent(config: LayerConfig) -> Portforwarder {
                         {
                             "name": "mirrord-agent",
                             "image": agent_image,
-                            "imagePullPolicy": "Always",
-                            // "imagePullPolicy": "IfNotPresent",
+                            "imagePullPolicy": image_pull_policy,
                             "securityContext": {
                                 "privileged": true,
                             },

@@ -11,6 +11,9 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_IMAGE")]
     pub agent_image: Option<String>,
 
+    #[envconfig(from = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
+    pub image_pull_policy: String,
+
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub impersonated_pod_name: String,
 

@@ -36,7 +36,9 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
@@ -56,8 +58,10 @@
         "RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
