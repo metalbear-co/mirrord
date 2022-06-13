@@ -114,18 +114,11 @@ pub struct TCPMirrorHandler {
 
 impl TCPMirrorHandler {
     pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<(), LayerError> {
-        loop {
-            match incoming.recv().await {
-                Some(message) => {
-                    let _ = self
-                        .handle_incoming_message(message)
-                        .await
-                        .inspect_err(|fail| {
-                            error!("TCPMirrorHandler::run failed with {:#?}", fail)
-                        });
-                }
-                None => break,
-            }
+        while let Some(message) = incoming.recv().await {
+            let _ = self
+                .handle_incoming_message(message)
+                .await
+                .inspect_err(|fail| error!("TCPMirrorHandler::run failed with {:#?}", fail));
         }
         Ok(())
     }
@@ -161,7 +154,7 @@ impl TCPHandler for TCPMirrorHandler {
         let mut connection = self
             .connections
             .take(&data.connection_id)
-            .ok_or_else(|| LayerError::NoConnectionId(data.connection_id))?;
+            .ok_or(LayerError::NoConnectionId(data.connection_id))?;
 
         debug!(
             "handle_new_data -> writing {:#?} bytes to id {:#?}",
