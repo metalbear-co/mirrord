@@ -52,9 +52,6 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
-      - run: |
-          cd mirrord-agent
-          cargo build
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
@@ -69,6 +66,8 @@ jobs:
           tag: test
           file: mirrord-agent/Dockerfile
           outputs: type=docker,dest=/tmp/test.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: upload image
         uses: actions/upload-artifact@v2
         with:

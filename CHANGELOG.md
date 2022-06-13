@@ -7,11 +7,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Changed
-
-- E2E small improvements, removing sleeps. (Fixes #99)
+### Added
 
 - Added support for overriding a process' environment variables by setting `MIRRORD_OVERRIDE_ENV_VARS` to `true`. To filter out undesired variables, use the `MIRRORD_OVERRIDE_FILTER_ENV_VARS` configuration with arguments such as `FOO;BAR`.
+
+### Changed
+
+- Speed up agent container image building by using a more specific base image.
+- CI: Remove building agent before building & running tests (duplicate)
+- CI: Add Docker cache to Docker build-push action to reduce build duration.
+
+## 2.2.1
+
+### Changed
+
+- Compile universal binaries for MacOS. (Fixes #131)
+- E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0
 
