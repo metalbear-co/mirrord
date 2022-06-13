@@ -61,23 +61,23 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
 
         send_requests(service_url.as_str()).await;
 
-        // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
-        // blocking.
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
         .unwrap();
-
-        server.wait().await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
@@ -98,10 +98,10 @@ mod tests {
                 // verify cleanup
                 loop {
                     let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the nginx pod should exist
+                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the http-echo pod should exist
                     if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
-                        let nginx_pod = updated_pods.items[0].metadata.name.clone().unwrap();
-                        assert!(nginx_pod.contains("nginx"));
+                        let http_echo_pod = updated_pods.items[0].metadata.name.clone().unwrap();
+                        assert!(http_echo_pod.contains("http-echo"));
                         break;
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -126,7 +126,7 @@ mod tests {
         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
 
         create_namespace(&client, test_namespace).await;
-        create_nginx_pod(&client, test_namespace).await;
+        create_http_echo_pod(&client, test_namespace).await;
 
         let service_url = get_service_url(&client, test_namespace).await.unwrap();
 
@@ -153,9 +153,19 @@ mod tests {
         .await
         .unwrap();
 
-        validate_no_requests(service_url.as_str()).await;
+        send_requests(service_url.as_str()).await;
 
-        server.kill().await.unwrap();
+        // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
+        // blocking.
+        signal::kill(
+            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
+            Signal::SIGTERM,
+        )
+        .unwrap();
+
+        server.wait().await.unwrap();
+
+        validate_no_requests(&mut stdout_reader).await;
         delete_namespace(&client, test_namespace).await;
     }
 
@@ -193,21 +203,23 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
 
         send_requests(service_url.as_str()).await;
 
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
         .unwrap();
-
-        server.wait().await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
@@ -264,7 +276,7 @@ mod tests {
 
         let pod_namespace = "test-pod-namespace";
         create_namespace(&client, pod_namespace).await;
-        create_nginx_pod(&client, pod_namespace).await;
+        create_http_echo_pod(&client, pod_namespace).await;
 
         let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace)]);
         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
@@ -288,21 +300,23 @@ mod tests {
         let start_timeout = Duration::from_secs(10);
 
         timeout(start_timeout, async {
-            stdout_reader.read_line(&mut is_running).await.unwrap();
-            assert_eq!(is_running, "Server listening on port 80\n");
+            loop {
+                stdout_reader.read_line(&mut is_running).await.unwrap();
+                if is_running == "Server listening on port 80\n" {
+                    break;
+                }
+            }
         })
         .await
         .unwrap();
 
         send_requests(service_url.as_str()).await;
 
-        signal::kill(
-            Pid::from_raw(server.id().unwrap().try_into().unwrap()),
-            Signal::SIGTERM,
-        )
+        timeout(Duration::from_secs(5), async {
+            server.wait().await.unwrap()
+        })
+        .await
         .unwrap();
-
-        server.wait().await.unwrap();
         validate_requests(&mut stdout_reader).await;
 
         delete_namespace(&client, pod_namespace).await;

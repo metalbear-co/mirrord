@@ -26,7 +26,7 @@ jobs:
   test_mirrord_protocol:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11, macos-10.15]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
@@ -34,6 +34,7 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
+          target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}
@@ -51,9 +52,6 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
-      - run: |
-          cd mirrord-agent
-          cargo build
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
@@ -68,16 +66,38 @@ jobs:
           tag: test
           file: mirrord-agent/Dockerfile
           outputs: type=docker,dest=/tmp/test.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: upload image
         uses: actions/upload-artifact@v2
         with:
           name: test
           path: /tmp/test.tar
 
-  test_mirrord_layer:
+  test_mirrord_layer_cli:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11, macos-10.15]
+        target: [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-18.04
+            target: x86_64-apple-darwin
+          - os: ubuntu-18.04
+            target: aarch64-apple-darwin
+          - os: macos-12
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            target: aarch64-apple-darwin
+          - os: macos-11
+            target: x86_64-unknown-linux-gnu
+          - os: macos-10.15
+            target: aarch64-apple-darwin
+          - os: macos-10.15
+            target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
@@ -85,11 +105,12 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
+          target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ${{matrix.os}}
-      # For now, just evrify it compiles.
-      - run: cargo +nightly build --manifest-path=mirrord-layer/Cargo.toml
+          key: ${{matrix.os}}-${{matrix.target}}
+      # For now, just verify it compiles.
+      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
@@ -143,7 +164,7 @@ jobs:
         run: docker load --input /tmp/test.tar
       - run: docker image tag $(docker images | awk '{print $3}' | awk 'NR==2') test:latest
       - run: minikube image load test:latest
-      - name: setup nginx
+      - name: setup http-echo
         run: kubectl apply -f tests/app.yaml
       - name: cargo test
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
@@ -152,9 +173,9 @@ jobs:
           minikube delete
           minikube start --container-runtime=docker
           minikube image load test:latest
-      - name: setup nginx
+      - name: setup http-echo
         run: kubectl apply -f tests/app.yaml
-      - name: wait for nginx pod
-        run: kubectl wait --for=condition=ready pod -l app=nginx --timeout=20s
+      - name: wait for http-echo pod
+        run: kubectl wait --for=condition=ready pod -l app=http-echo --timeout=20s
       - name: test with docker runtime
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
