@@ -128,7 +128,7 @@ async fn select_env_vars(
         })
     })?;
 
-    let mut raw_env_vars = String::with_capacity(255);
+    let mut raw_env_vars = String::with_capacity(8192);
 
     // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
     // "nginx -g daemon off;".
