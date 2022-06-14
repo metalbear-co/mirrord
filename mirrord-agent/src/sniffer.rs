@@ -194,7 +194,7 @@ impl ConnectionManager {
 
             if !data.is_empty() {
                 messages.push(SnifferOutput::TCPData(TCPData {
-                    data: data.to_vec(),
+                    bytes: data.to_vec(),
                     connection_id: session,
                 }));
             }

@@ -3,7 +3,7 @@ use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
-use super::HookMessage;
+use super::{tcp::TrafficHandlerInput, HookMessage};
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -14,7 +14,13 @@ pub enum LayerError {
     ParseBoolError(#[from] ParseBoolError),
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
-    SendError(#[from] SendError<HookMessage>),
+    SendErrorHookMessage(#[from] SendError<HookMessage>),
+
+    #[error("mirrord-layer: Sender<TrafficHandlerInput> failed with `{0}`!")]
+    SendErrorTrafficHandler(#[from] SendError<TrafficHandlerInput>),
+
+    #[error("mirrord-layer: Sender<TrafficHandlerInput> failed with `{0}`!")]
+    SendErrorConnection(#[from] SendError<Vec<u8>>),
 
     #[error("mirrord-layer: Receiver failed with `{0}`!")]
     RecvError(#[from] RecvError),
@@ -30,4 +36,19 @@ pub enum LayerError {
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
+
+    #[error("mirrord-layer: No connection found for id `{0}`!")]
+    NoConnectionId(u16),
+
+    #[error("mirrord-layer: IO failed with `{0}`!")]
+    IO(#[from] std::io::Error),
+
+    #[error("mirrord-layer: Failed to find port `{0}`!")]
+    PortNotFound(u16),
+
+    #[error("mirrord-layer: Failed to find connection_id `{0}`!")]
+    ConnectionIdNotFound(u16),
+
+    #[error("mirrord-layer: Failed inserting listen, already exists!")]
+    ListenAlreadyExists,
 }
