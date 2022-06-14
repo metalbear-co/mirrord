@@ -47,25 +47,27 @@ jobs:
       - name: build mirrord-layer macOS arm
         run: cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
       - name: create universal target dir
-        run: mkdir -p target/universal-apple-darwin/release
+        run: mkdir -p /tmp/target/universal-apple-darwin/release
       - name: create universal dylib
-        run: lipo -create -output target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
       - name: build macOS arm cli with universal dylib
         env:
-          MIRRORD_LAYER_FILE: target/universal-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
         run: cargo +nightly build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
-          MIRRORD_LAYER_FILE: target/universal-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
         run: cargo +nightly build --release -p mirrord --target=x86_64-apple-darwin
       - name: create universal macOS cli
-        run: lipo -create -output mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
+      - name: change dir to tmp
+        run: cd /tmp
       - uses: actions/upload-artifact@v3
         with:
           name: universal-apple-darwin
           path: |
-            target/universal/release/mirrord
-            target/universal/release/libmirrord_layer.dylib
+            target/universal-apple-darwin/release/mirrord
+            target/universal-apple-darwin/release/libmirrord_layer.dylib
           if-no-files-found: error
 
   release_docker_image:
