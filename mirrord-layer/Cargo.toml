@@ -17,7 +17,6 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow.workspace = true
 ctor = "0.1.22"
 libc = "0.2.121"
 nix.workspace = true
