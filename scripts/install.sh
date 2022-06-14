@@ -44,10 +44,7 @@ install() {
           exit 1
       fi
   elif [[ "$OSTYPE" == "darwin"* ]]; then
-      ARCH=$(uname -m);
-      if [[ "$ARCH" == "arm64" ]]; then
-          ARCH="aarch64";
-      fi
+      ARCH="universal";
       OS="mac";
   else
       echo "mirrord isn't supported for your platform - $OSTYPE"
