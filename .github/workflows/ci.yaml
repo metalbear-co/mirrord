@@ -66,6 +66,8 @@ jobs:
           tag: test
           file: mirrord-agent/Dockerfile
           outputs: type=docker,dest=/tmp/test.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: upload image
         uses: actions/upload-artifact@v2
         with:

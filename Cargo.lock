@@ -1452,6 +1452,7 @@ version = "2.2.1"
 dependencies = [
  "actix-codec",
  "anyhow",
+ "async-trait",
  "bytes",
  "clap 3.1.18",
  "ctor",

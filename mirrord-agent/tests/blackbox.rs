@@ -113,7 +113,7 @@ mod tests {
             data_msg,
             DaemonMessage::TCPData(TCPData {
                 connection_id: 0,
-                data: test_data.to_vec()
+                bytes: test_data.to_vec()
             })
         );
 
