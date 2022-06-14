@@ -160,7 +160,7 @@ use std::env::temp_dir;
 use mac::temp_dir;
 
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
-    let library_file = env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER");
+    let library_file = env!("MIRRORD_LAYER_FILE");
     let library_path = std::path::Path::new(library_file);
 
     let file_name = library_path.components().last().unwrap();
@@ -170,7 +170,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     };
     let mut file = File::create(&file_path)
         .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
-    let bytes = include_bytes!(env!("CARGO_CDYLIB_FILE_MIRRORD_LAYER"));
+    let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
     file.write_all(bytes).unwrap();
 
     debug!("Extracted library file to {:?}", &file_path);

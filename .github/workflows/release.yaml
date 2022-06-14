@@ -39,6 +39,55 @@ jobs:
             target/${{matrix.target}}/release/mirrord
             target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
           if-no-files-found: error
+  build_binaries_macos:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-18.04
+            extension: so
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            extension: dylib
+            target: x86_64-apple-darwin
+          - os: macos-11
+            extension: dylib
+            target: aarch64-apple-darwin
+            code-target: darwin-arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v1
+      - name: build mirrord-layer and cli x86-64
+        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build mirrord-layer macOS arm
+        run: cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
+      - name: create universal dylib
+        run: lipo -create -output libmirrord_layer_universal.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+      - name: build macOS arm cli with universal dylib
+        env:
+          MIRRORD_LAYER_FILE: libmirrord_layer_universal.dylib
+        run: cargo +nightly build --release -p mirrord --target=aarch64-apple-darwin
+      - name: copy universal dylib to match path
+        run: cp libmirrord_layer_universal.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+      - uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-apple-darwin
+          path: |
+            target/x86_64-apple-darwin/release/mirrord
+            target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v3
+        with:
+          name: aarch64-apple-darwin
+          path: |
+            target/aarch64-apple-darwin/release/mirrord
+            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+          if-no-files-found: error
 
   release_docker_image:
     runs-on: ubuntu-latest
@@ -131,11 +180,6 @@ jobs:
           mv /tmp/artifacts/x86_64-apple-darwin/mirrord /tmp/release/mirrord_mac_x86_64
           mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_aarch64.dylib
           mv /tmp/artifacts/aarch64-apple-darwin/mirrord /tmp/release/mirrord_mac_aarch64
-
-          # create universal2 binaries for macOS
-          cd /tmp/release
-          lipo -create -output libmirrord_layer_mac.dylib libmirrord_layer_mac_x86_64.dylib libmirrord_layer_mac_aarch64.dylib
-          lipo -create -output mirrord_mac mirrord_mac_x86_64 mirrord_mac_aarch64
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
