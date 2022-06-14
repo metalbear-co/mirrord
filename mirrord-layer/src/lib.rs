@@ -2,13 +2,12 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(type_alias_impl_trait)]
+#![feature(generic_associated_types)]
 
 use std::{
-    collections::HashMap,
     env,
     lazy::{SyncLazy, SyncOnceCell},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
     sync::Mutex,
 };
 
@@ -29,16 +28,14 @@ use mirrord_protocol::{
     ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
+use tcp_mirror::create_tcp_mirror_handler;
 use tokio::{
-    io::AsyncWriteExt,
-    net::TcpStream,
     runtime::Runtime,
     select,
     sync::{
         mpsc::{channel, Receiver, Sender},
         oneshot,
     },
-    task,
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, trace};
@@ -51,64 +48,16 @@ mod file;
 mod macros;
 mod pod_api;
 mod sockets;
+mod tcp;
+mod tcp_mirror;
 
-use crate::{
-    common::{HookMessage, Port},
-    config::Config,
-    macros::hook,
-    sockets::{SocketInformation, CONNECTION_QUEUE},
-};
+use crate::{common::HookMessage, config::Config, macros::hook, tcp::TCPApi};
 
 static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
 static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
-
-#[derive(Debug)]
-enum TcpTunnelMessages {
-    Data(Vec<u8>),
-    Close,
-}
-
-#[derive(Debug, Clone)]
-struct ListenData {
-    ipv6: bool,
-    port: Port,
-    fd: RawFd,
-}
-
-async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunnelMessages>) {
-    loop {
-        select! {
-            message = receiver.recv() => {
-                match message {
-                    Some(TcpTunnelMessages::Data(data)) => {
-                        local_stream.write_all(&data).await.unwrap()
-                    },
-                    Some(TcpTunnelMessages::Close) => break,
-                    None => break
-                };
-            },
-            _ = local_stream.readable() => {
-                let mut data = vec![0; 1024];
-                match local_stream.try_read(&mut data) {
-                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        continue
-                    },
-                    Err(err) => {
-                        debug!("local stream ended with err {:?}", err);
-                        break;
-                    }
-                    Ok(n) if n == 0 => break,
-                    Ok(_) => {}
-                }
-
-            }
-        }
-    }
-    debug!("exiting tcp tunnel");
-}
 
 #[ctor]
 fn init() {
@@ -145,7 +94,7 @@ fn init() {
 #[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
-    port_mapping: &mut HashMap<Port, ListenData>,
+    mirror_api: &mut TCPApi,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
@@ -158,20 +107,12 @@ async fn handle_hook_message(
     match hook_message {
         HookMessage::Listen(listen_message) => {
             debug!("HookMessage::Listen {:?}", listen_message);
-
-            let _listen_data = codec
+            codec
                 .send(ClientMessage::PortSubscribe(vec![listen_message.real_port]))
                 .await
-                .map(|()| {
-                    port_mapping.insert(
-                        listen_message.real_port,
-                        ListenData {
-                            port: listen_message.fake_port,
-                            ipv6: listen_message.ipv6,
-                            fd: listen_message.fd,
-                        },
-                    )
-                });
+                .map(|()| async { mirror_api.listen_request(listen_message).await.unwrap() })
+                .unwrap()
+                .await;
         }
         HookMessage::OpenFileHook(OpenFileHook {
             path,
@@ -320,8 +261,7 @@ async fn handle_hook_message(
 #[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
-    port_mapping: &mut HashMap<Port, ListenData>,
-    active_connections: &mut HashMap<u16, Sender<TcpTunnelMessages>>,
+    mirror_api: &mut TCPApi,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
@@ -331,54 +271,21 @@ async fn handle_daemon_message(
     ping: &mut bool,
 ) {
     match daemon_message {
-        DaemonMessage::NewTCPConnection(conn) => {
-            debug!("DaemonMessage::NewTCPConnection {conn:#?}");
-
-            let _ = port_mapping
-                .get(&conn.destination_port)
-                .map(|listen_data| {
-                    let addr = match listen_data.ipv6 {
-                        false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
-                        true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
-                    };
-
-                    let info =
-                        SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
-                    {
-                        CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
-                    }
-
-                    TcpStream::connect(addr)
-                })
-                .map(|stream| {
-                    let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
-
-                    active_connections.insert(conn.connection_id, sender);
-
-                    task::spawn(async move { tcp_tunnel(stream.await.unwrap(), receiver).await })
-                });
+        DaemonMessage::NewTCPConnection(tcp_connection) => {
+            debug!("DaemonMessage::NewTCPConnection {:#?}", tcp_connection);
+            mirror_api.new_tcp_connection(tcp_connection).await.unwrap();
         }
-        DaemonMessage::TCPData(msg) => {
-            if let Err(fail) = active_connections
-                .get(&msg.connection_id)
-                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data)))
-                .unwrap()
-                .await
-            {
-                error!("DaemonMessage::TCPData error {fail:#?}");
-                active_connections.remove(&msg.connection_id);
-            }
+        DaemonMessage::TCPData(tcp_data) => {
+            debug!(
+                "DaemonMessage::TCPData id {:#?} | amount {:#?}",
+                tcp_data.connection_id,
+                tcp_data.bytes.len()
+            );
+            mirror_api.tcp_data(tcp_data).await.unwrap();
         }
-        DaemonMessage::TCPClose(msg) => {
-            if let Err(fail) = active_connections
-                .get(&msg.connection_id)
-                .map(|sender| sender.send(TcpTunnelMessages::Close))
-                .unwrap()
-                .await
-            {
-                error!("DaemonMessage::TCPClose error {fail:#?}");
-                active_connections.remove(&msg.connection_id);
-            }
+        DaemonMessage::TCPClose(tcp_close) => {
+            debug!("DaemonMessage::TCPClose {:#?}", tcp_close);
+            mirror_api.tcp_close(tcp_close).await.unwrap();
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
@@ -460,9 +367,6 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
-    let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
-    let mut active_connections = HashMap::new();
-
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -480,24 +384,27 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
+
+    let (tcp_mirror_handler, mut mirror_api, handler_receiver) = create_tcp_mirror_handler();
+    tokio::spawn(async move { tcp_mirror_handler.run(handler_receiver).await });
+
     loop {
         select! {
             hook_message = receiver.recv() => {
                 handle_hook_message(hook_message.unwrap(),
-                    &mut port_mapping,
-                    &mut codec,
-                    &open_file_handler,
-                    &open_relative_file_handler,
-                    &read_file_handler,
-                    &seek_file_handler,
-                    &write_file_handler,
-                    &close_file_handler,
-                ).await;
+                &mut mirror_api,
+                &mut codec,
+                &open_file_handler,
+                &open_relative_file_handler,
+                &read_file_handler,
+                &seek_file_handler,
+                &write_file_handler,
+                &close_file_handler,
+            ).await;
             }
             daemon_message = codec.next() => {
                 handle_daemon_message(daemon_message.unwrap().unwrap(),
-                    &mut port_mapping,
-                    &mut active_connections,
+                    &mut mirror_api,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,

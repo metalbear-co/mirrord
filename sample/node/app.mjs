@@ -35,7 +35,7 @@ server.on("connection", handleConnection);
 server.listen(
   {
     host: "localhost",
-    port: 8000,
+    port: 80,
   },
   function () {
     console.log("server listening to %j", server.address());

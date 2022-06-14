@@ -11,11 +11,12 @@ use std::{
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
-    common::{HookMessage, Listen, Port},
+    common::{HookMessage, Listen},
     macros::{hook, try_hook},
     HOOK_SENDER,
 };
@@ -294,14 +295,15 @@ unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
 fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect called");
+    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
 
     let socket = {
         let mut sockets = SOCKETS.lock().unwrap();
+
         match sockets.remove(&sockfd) {
             Some(socket) => socket,
             None => {
-                debug!("connect: no socket found for fd: {}", &sockfd);
+                warn!("connect: no socket found for fd: {}", &sockfd);
                 return unsafe { libc::connect(sockfd, address, len) };
             }
         }
