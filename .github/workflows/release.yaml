@@ -104,7 +104,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [build_binaries, release_docker_image]
+    needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
