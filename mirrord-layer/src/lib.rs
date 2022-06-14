@@ -447,20 +447,13 @@ async fn handle_daemon_message(
             match remote_env_vars {
                 Ok(remote_env_vars) => {
                     for (key, value) in remote_env_vars.into_iter() {
-                        unsafe {
-                            debug!(
-                                "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
-                                key, value
-                            );
+                        debug!(
+                            "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                            key, value
+                        );
 
-                            let setenv_result =
-                                libc::setenv(key.as_ptr().cast(), value.as_ptr().cast(), 1);
-
-                            debug!(
-                                "DaemonMessage::GetEnvVarsResponse setenv_result {:#?}",
-                                setenv_result
-                            );
-                        }
+                        std::env::set_var(&key, &value);
+                        debug_assert_eq!(std::env::var(key), Ok(value));
                     }
                 }
                 Err(fail) => error!(
