@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
@@ -57,7 +58,7 @@ pub async fn create_agent(
     agent_namespace: &str,
     log_level: String,
     agent_image: String,
-) -> Portforwarder {
+) -> Result<Portforwarder> {
     let env_config = config::Config::init_from_env().unwrap();
     let client = if env_config.accept_invalid_certificates {
         let mut config = Config::infer().await.unwrap();
@@ -160,14 +161,16 @@ pub async fn create_agent(
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
-    match tokio::time::timeout(std::time::Duration::from_secs(20), running).await {
-        Ok(_) => {}
-        Err(elapsed) => {
-            error!(
-                "Failed to receive a running response from pod: {:?}",
-                elapsed
-            );
-        }
-    }
-    pods_api.portforward(&pod_name, &[61337]).await.unwrap()
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to receive a timely response from pod: {:?}",
+                pod_name
+            )
+        });
+    pods_api
+        .portforward(&pod_name, &[61337])
+        .await
+        .context("Received an error from the pods API")
 }

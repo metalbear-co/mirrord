@@ -1451,6 +1451,7 @@ name = "mirrord-layer"
 version = "2.2.0"
 dependencies = [
  "actix-codec",
+ "anyhow",
  "bytes",
  "clap 3.1.18",
  "ctor",
