@@ -50,11 +50,11 @@ struct ExecArgs {
     pub enable_fs: bool,
 
     /// Enable env vars override
-    #[clap(short = 'o', long)]
+    #[clap(short = 'o', long, value_parser)]
     pub override_env_vars: bool,
 
     /// The env vars to filter out
-    #[clap(short = 'v', long)]
+    #[clap(short = 'v', long, value_parser)]
     pub override_filter_env_vars: Option<String>,
 
     /// Binary to execute and mirror traffic into.
