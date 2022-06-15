@@ -6,7 +6,16 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
 ### Changed
+- Speed up agent container image building by using a more specific base image.
+- CI: Remove building agent before building & running tests (duplicate)
+- CI: Add Docker cache to Docker build-push action to reduce build duration.
+- CD release: Fix universal binary for macOS
+
+## 2.2.1
+### Changed
+- Compile universal binaries for MacOS. (Fixes #131)
 - E2E small improvements, removing sleeps. (Fixes #99)
 
 ## 2.2.0
