@@ -61,7 +61,7 @@ jobs:
       - name: create universal macOS cli
         run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
       - name: adjust directory layout for upload
-        run: cp /tmp/target target
+        run: cp -rf /tmp/target .
       - uses: actions/upload-artifact@v3
         with:
           name: universal-apple-darwin
