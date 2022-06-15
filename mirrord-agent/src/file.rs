@@ -17,11 +17,15 @@ use tracing::{debug, error};
 
 use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
 
-// TODO: To help with `openat`, instead of `HashMap<_, File>` this should be
-// `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
+#[derive(Debug)]
+pub struct RemoteFile {
+    inner: File,
+    path: PathBuf,
+}
+
 #[derive(Debug, Default)]
 pub struct FileManager {
-    pub open_files: HashMap<i32, File>,
+    pub open_files: HashMap<i32, RemoteFile>,
 }
 
 impl FileManager {
@@ -36,10 +40,10 @@ impl FileManager {
         );
 
         OpenOptions::from(open_options)
-            .open(path)
+            .open(&path)
             .map(|file| {
                 let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
+                self.open_files.insert(fd, RemoteFile { inner: file, path });
 
                 OpenFileResponse { fd }
             })
@@ -63,16 +67,24 @@ impl FileManager {
             path, open_options, relative_fd
         );
 
-        let _relative_dir = self
+        let relative_dir = self
             .open_files
             .get(&relative_fd)
             .ok_or(ResponseError::NotFound)?;
 
+        let complete_path = relative_dir.path.join(&path);
+
         OpenOptions::from(open_options)
-            .open(path)
+            .open(&complete_path)
             .map(|file| {
                 let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
+                self.open_files.insert(
+                    fd,
+                    RemoteFile {
+                        inner: file,
+                        path: complete_path,
+                    },
+                );
 
                 OpenFileResponse { fd }
             })
@@ -90,10 +102,12 @@ impl FileManager {
         fd: i32,
         buffer_size: usize,
     ) -> Result<ReadFileResponse, ResponseError> {
-        let file = self
+        let remote_file = self
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
+
+        let file = &mut remote_file.inner;
 
         debug!(
             "FileManager::read -> Trying to read file {:#?}, with count {:#?}",
@@ -132,6 +146,8 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
 
+        let file = &mut file.inner;
+
         debug!(
             "FileManager::seek -> Trying to seek file {:#?}, with seek {:#?}",
             file, seek_from
@@ -157,6 +173,8 @@ impl FileManager {
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
+
+        let file = &mut file.inner;
 
         debug!("FileManager::write -> Trying to write file {:#?}", file);
 

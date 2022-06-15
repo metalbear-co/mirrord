@@ -3,7 +3,7 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use mirrord_protocol::ReadFileResponse;
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{
     ops::{fdopen, fopen, openat},
