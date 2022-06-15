@@ -129,7 +129,8 @@ mod subscription_tests {
     #[test]
     fn sanity() {
         let mut subscriptions = Subscriptions::<Port, _>::new();
-        subscriptions.subscribe_many(3, vec![3, 2]);
+        subscriptions.subscribe(3, 2);
+        subscriptions.subscribe(3, 3);
         subscriptions.subscribe(3, 1);
         subscriptions.subscribe(1, 4);
         subscriptions.subscribe(2, 1);
