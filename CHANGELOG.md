@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Speed up agent container image building by using a more specific base image.
 - CI: Remove building agent before building & running tests (duplicate)
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
+- Handle relative paths for open, openat
 
 ## 2.2.1
 ### Changed
