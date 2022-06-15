@@ -32,7 +32,6 @@ where
             .insert(client);
     }
 
-
     /// Remove a subscription of given client from the topic.
     /// topic is removed if no subscribers left.
     pub fn unsubscribe(&mut self, client: C, topic: T) {

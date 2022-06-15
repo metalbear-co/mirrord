@@ -354,5 +354,4 @@ mod tests {
             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
         }
     }
-
 }
