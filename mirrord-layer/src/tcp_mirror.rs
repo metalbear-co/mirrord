@@ -110,18 +110,20 @@ pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
     sender: LayerTcpSender,
+    receiver: TcpHandlerMessageReceiver,
 }
 
 impl TcpMirrorHandler {
-    pub fn new(sender: LayerTcpSender) -> Self {
+    pub fn new(sender: LayerTcpSender, receiver: TcpHandlerMessageReceiver) -> Self {
         Self {
             sender,
+            receiver,
             ports: HashSet::new(),
             connections: HashSet::new(),
         }
     }
-    pub async fn run(mut self, mut incoming: TcpHandlerMessageReceiver) -> Result<(), LayerError> {
-        while let Some(message) = incoming.recv().await {
+    pub async fn run(mut self) -> Result<(), LayerError> {
+        while let Some(message) = self.receiver.recv().await {
             let _ = self
                 .handle_incoming_message(message)
                 .await
@@ -214,12 +216,12 @@ impl TcpHandler for TcpMirrorHandler {
 
 unsafe impl Send for TcpMirrorHandler {}
 
-pub fn create_tcp_mirror_handler() -> (TcpMirrorHandler, TcpApi, TcpHandlerMessageReceiver)
+pub fn create_tcp_mirror_handler() -> (TcpMirrorHandler, TcpApi)
 where
 {
     let (handler_tx, handler_rx) = channel(CHANNEL_SIZE);
     let (layer_tx, layer_rx) = channel(CHANNEL_SIZE);
-    let handler = TcpMirrorHandler::new(layer_tx);
+    let handler = TcpMirrorHandler::new(layer_tx, handler_rx);
     let control = TcpApi::new(handler_tx, layer_rx);
-    (handler, control, handler_rx)
+    (handler, control)
 }
