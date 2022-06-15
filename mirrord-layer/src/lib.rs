@@ -51,7 +51,7 @@ mod sockets;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::Config, macros::hook, tcp::TCPApi};
+use crate::{common::HookMessage, config::Config, macros::hook, tcp::TcpApi};
 
 static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
 static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
@@ -94,7 +94,7 @@ fn init() {
 #[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
-    mirror_api: &mut TCPApi,
+    mirror_api: &mut TcpApi,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
@@ -105,14 +105,11 @@ async fn handle_hook_message(
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
 ) {
     match hook_message {
-        HookMessage::Listen(listen_message) => {
-            debug!("HookMessage::Listen {:?}", listen_message);
-            codec
-                .send(ClientMessage::PortSubscribe(vec![listen_message.real_port]))
+        HookMessage::Tcp(message) => {
+            mirror_api
+                .send(tcp::TcpHandlerMessage::Hook(message))
                 .await
-                .map(|()| async { mirror_api.listen_request(listen_message).await.unwrap() })
-                .unwrap()
-                .await;
+                .unwrap();
         }
         HookMessage::OpenFileHook(OpenFileHook {
             path,
@@ -261,7 +258,7 @@ async fn handle_hook_message(
 #[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
-    mirror_api: &mut TCPApi,
+    mirror_api: &mut TcpApi,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
@@ -271,21 +268,11 @@ async fn handle_daemon_message(
     ping: &mut bool,
 ) {
     match daemon_message {
-        DaemonMessage::NewTCPConnection(tcp_connection) => {
-            debug!("DaemonMessage::NewTCPConnection {:#?}", tcp_connection);
-            mirror_api.new_tcp_connection(tcp_connection).await.unwrap();
-        }
-        DaemonMessage::TCPData(tcp_data) => {
-            debug!(
-                "DaemonMessage::TCPData id {:#?} | amount {:#?}",
-                tcp_data.connection_id,
-                tcp_data.bytes.len()
-            );
-            mirror_api.tcp_data(tcp_data).await.unwrap();
-        }
-        DaemonMessage::TCPClose(tcp_close) => {
-            debug!("DaemonMessage::TCPClose {:#?}", tcp_close);
-            mirror_api.tcp_close(tcp_close).await.unwrap();
+        DaemonMessage::Tcp(message) => {
+            mirror_api
+                .send(tcp::TcpHandlerMessage::Daemon(message))
+                .await
+                .unwrap();
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
@@ -412,6 +399,13 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &close_file_handler,
                     &mut ping,
                 ).await;
+            },
+            message = mirror_api.recv() => {
+                if let Some(message) = message {
+                    codec.send(ClientMessage::Tcp(message)).await.unwrap();
+                } else {
+                    break;
+                }
             }
             _ = sleep(Duration::from_secs(60)) => {
                 if !ping {

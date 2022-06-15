@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
-use mirrord_protocol::{ConnectionID, NewTCPConnection, TCPClose, TCPData};
+use mirrord_protocol::{
+    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    ConnectionID,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -18,14 +21,11 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, warn};
 
 use crate::{
-    common::Listen,
     error::LayerError,
-    tcp::{TCPApi, TCPHandler, TrafficHandlerInput},
+    tcp::{LayerTcpSender, Listen, ListenClose, TcpApi, TcpHandler, TcpHandlerMessageReceiver},
 };
 
 const CHANNEL_SIZE: usize = 1024;
-
-type TrafficHandlerReceiver = Receiver<TrafficHandlerInput>;
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
@@ -106,30 +106,37 @@ impl Borrow<ConnectionID> for Connection {
 }
 
 /// Handles traffic mirroring
-#[derive(Default)]
-pub struct TCPMirrorHandler {
+pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
+    sender: LayerTcpSender,
 }
 
-impl TCPMirrorHandler {
-    pub async fn run(mut self, mut incoming: TrafficHandlerReceiver) -> Result<(), LayerError> {
+impl TcpMirrorHandler {
+    pub fn new(sender: LayerTcpSender) -> Self {
+        Self {
+            sender,
+            ports: HashSet::new(),
+            connections: HashSet::new(),
+        }
+    }
+    pub async fn run(mut self, mut incoming: TcpHandlerMessageReceiver) -> Result<(), LayerError> {
         while let Some(message) = incoming.recv().await {
             let _ = self
                 .handle_incoming_message(message)
                 .await
-                .inspect_err(|fail| error!("TCPMirrorHandler::run failed with {:#?}", fail));
+                .inspect_err(|fail| error!("TcpMirrorHandler::run failed with {:#?}", fail));
         }
         Ok(())
     }
 }
 
 #[async_trait]
-impl TCPHandler for TCPMirrorHandler {
+impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
     async fn handle_new_connection(
         &mut self,
-        tcp_connection: NewTCPConnection,
+        tcp_connection: NewTcpConnection,
     ) -> Result<(), LayerError> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
@@ -145,8 +152,16 @@ impl TCPHandler for TCPMirrorHandler {
         Ok(())
     }
 
+    /// Handle when a listen socket closes on layer
+    async fn handle_listen_close(&mut self, close: ListenClose) -> Result<(), LayerError> {
+        self.sender
+            .send(LayerTcp::PortUnsubscribe(close.port))
+            .await
+            .map_err(From::from)
+    }
+
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TCPData) -> Result<(), LayerError> {
+    async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
         debug!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
@@ -172,10 +187,10 @@ impl TCPHandler for TCPMirrorHandler {
     }
 
     /// Handle connection close
-    fn handle_close(&mut self, close: TCPClose) -> Result<(), LayerError> {
+    fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
         debug!("handle_close -> close {:#?}", close);
 
-        let TCPClose { connection_id } = close;
+        let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
         self.connections
@@ -191,15 +206,20 @@ impl TCPHandler for TCPMirrorHandler {
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
     }
+
+    fn sender(&mut self) -> &mut LayerTcpSender {
+        &mut self.sender
+    }
 }
 
-unsafe impl Send for TCPMirrorHandler {}
+unsafe impl Send for TcpMirrorHandler {}
 
-pub fn create_tcp_mirror_handler() -> (TCPMirrorHandler, TCPApi, TrafficHandlerReceiver)
+pub fn create_tcp_mirror_handler() -> (TcpMirrorHandler, TcpApi, TcpHandlerMessageReceiver)
 where
 {
-    let (traffic_in_tx, traffic_in_rx) = channel(CHANNEL_SIZE);
-    let handler = TCPMirrorHandler::default();
-    let control = TCPApi::new(traffic_in_tx);
-    (handler, control, traffic_in_rx)
+    let (handler_tx, handler_rx) = channel(CHANNEL_SIZE);
+    let (layer_tx, layer_rx) = channel(CHANNEL_SIZE);
+    let handler = TcpMirrorHandler::new(layer_tx);
+    let control = TcpApi::new(handler_tx, layer_rx);
+    (handler, control, handler_rx)
 }

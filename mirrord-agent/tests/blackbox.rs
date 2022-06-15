@@ -5,7 +5,8 @@ mod tests {
     use actix_codec::Framed;
     use futures::SinkExt;
     use mirrord_protocol::{
-        ClientCodec, ClientMessage, DaemonMessage, NewTCPConnection, TCPClose, TCPData,
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+        ClientCodec, ClientMessage, DaemonMessage,
     };
     use test_bin::get_test_bin;
     use tokio::{
@@ -69,7 +70,7 @@ mod tests {
         let mut codec = Framed::new(stream, ClientCodec::new());
 
         codec
-            .send(ClientMessage::PortSubscribe(vec![1337, 1338]))
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
             .await
             .expect("port subscribe failed");
         // Let message be acknowledged and dummy socket to start listening
@@ -101,25 +102,25 @@ mod tests {
             .expect("got invalid message");
         assert_eq!(
             new_conn_msg,
-            DaemonMessage::NewTCPConnection(NewTCPConnection {
+            DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id: 0,
                 address: IpAddr::V4("127.0.0.1".parse().unwrap()),
                 destination_port: 1337,
                 source_port: port
-            })
+            }))
         );
 
         assert_eq!(
             data_msg,
-            DaemonMessage::TCPData(TCPData {
+            DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 0,
                 bytes: test_data.to_vec()
-            })
+            }))
         );
 
         assert_eq!(
             close_msg,
-            DaemonMessage::TCPClose(TCPClose { connection_id: 0 })
+            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 }))
         );
 
         drop(codec);

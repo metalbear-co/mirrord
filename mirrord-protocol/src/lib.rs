@@ -3,7 +3,10 @@
 #![feature(core_ffi_c)]
 
 pub mod codec;
+pub mod common;
 pub mod error;
+pub mod tcp;
 
 pub use codec::*;
+pub use common::*;
 pub use error::*;
