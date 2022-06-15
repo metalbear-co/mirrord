@@ -355,12 +355,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decode_daemon_partial_data() {
-        let mut codec = DaemonCodec::new();
-        let mut buf = BytesMut::new();
-        buf.put_u8(0);
-
-        assert!(codec.decode(&mut buf).unwrap().is_none());
-    }
 }
