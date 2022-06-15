@@ -6,9 +6,10 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionID,
+    ClientCodec, ClientMessage, ConnectionID,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -22,10 +23,8 @@ use tracing::{debug, error, warn};
 
 use crate::{
     error::LayerError,
-    tcp::{LayerTcpSender, Listen, ListenClose, TcpApi, TcpHandler, TcpHandlerMessageReceiver},
+    tcp::{Listen, ListenClose, TcpHandler},
 };
-
-const CHANNEL_SIZE: usize = 1024;
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
@@ -106,31 +105,10 @@ impl Borrow<ConnectionID> for Connection {
 }
 
 /// Handles traffic mirroring
+#[derive(Default)]
 pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
-    sender: LayerTcpSender,
-    receiver: TcpHandlerMessageReceiver,
-}
-
-impl TcpMirrorHandler {
-    pub fn new(sender: LayerTcpSender, receiver: TcpHandlerMessageReceiver) -> Self {
-        Self {
-            sender,
-            receiver,
-            ports: HashSet::new(),
-            connections: HashSet::new(),
-        }
-    }
-    pub async fn run(mut self) -> Result<(), LayerError> {
-        while let Some(message) = self.receiver.recv().await {
-            let _ = self
-                .handle_incoming_message(message)
-                .await
-                .inspect_err(|fail| error!("TcpMirrorHandler::run failed with {:#?}", fail));
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -155,9 +133,16 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(&mut self, close: ListenClose) -> Result<(), LayerError> {
-        self.sender
-            .send(LayerTcp::PortUnsubscribe(close.port))
+    async fn handle_listen_close(
+        &mut self,
+        close: ListenClose,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
+        codec
+            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
             .await
             .map_err(From::from)
     }
@@ -208,20 +193,4 @@ impl TcpHandler for TcpMirrorHandler {
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
     }
-
-    fn sender(&mut self) -> &mut LayerTcpSender {
-        &mut self.sender
-    }
-}
-
-unsafe impl Send for TcpMirrorHandler {}
-
-pub fn create_tcp_mirror_handler() -> (TcpMirrorHandler, TcpApi)
-where
-{
-    let (handler_tx, handler_rx) = channel(CHANNEL_SIZE);
-    let (layer_tx, layer_rx) = channel(CHANNEL_SIZE);
-    let handler = TcpMirrorHandler::new(layer_tx, handler_rx);
-    let control = TcpApi::new(handler_tx, layer_rx);
-    (handler, control)
 }

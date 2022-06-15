@@ -28,7 +28,8 @@ use mirrord_protocol::{
     ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
-use tcp_mirror::create_tcp_mirror_handler;
+use tcp::TcpHandler;
+use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
     select,
@@ -51,7 +52,7 @@ mod sockets;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::Config, macros::hook, tcp::TcpApi};
+use crate::{common::HookMessage, config::Config, macros::hook};
 
 static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
 static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
@@ -94,8 +95,8 @@ fn init() {
 #[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
-    mirror_api: &mut TcpApi,
-    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
+    tcp_mirror_handler: &mut TcpMirrorHandler,
+    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
     open_relative_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
@@ -106,8 +107,8 @@ async fn handle_hook_message(
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
-            mirror_api
-                .send(tcp::TcpHandlerMessage::Hook(message))
+            tcp_mirror_handler
+                .handle_hook_message(message, codec)
                 .await
                 .unwrap();
         }
@@ -258,7 +259,7 @@ async fn handle_hook_message(
 #[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
-    mirror_api: &mut TcpApi,
+    tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
@@ -269,8 +270,8 @@ async fn handle_daemon_message(
 ) {
     match daemon_message {
         DaemonMessage::Tcp(message) => {
-            mirror_api
-                .send(tcp::TcpHandlerMessage::Daemon(message))
+            tcp_mirror_handler
+                .handle_daemon_message(message)
                 .await
                 .unwrap();
         }
@@ -372,14 +373,13 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
 
     let mut ping = false;
 
-    let (tcp_mirror_handler, mut mirror_api) = create_tcp_mirror_handler();
-    tokio::spawn(async move { tcp_mirror_handler.run().await });
+    let mut tcp_mirror_handler = TcpMirrorHandler::default();
 
     loop {
         select! {
             hook_message = receiver.recv() => {
                 handle_hook_message(hook_message.unwrap(),
-                &mut mirror_api,
+                &mut tcp_mirror_handler,
                 &mut codec,
                 &open_file_handler,
                 &open_relative_file_handler,
@@ -391,7 +391,7 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
             }
             daemon_message = codec.next() => {
                 handle_daemon_message(daemon_message.unwrap().unwrap(),
-                    &mut mirror_api,
+                    &mut tcp_mirror_handler,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,
@@ -400,13 +400,6 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                     &mut ping,
                 ).await;
             },
-            message = mirror_api.recv() => {
-                if let Some(message) = message {
-                    codec.send(ClientMessage::Tcp(message)).await.unwrap();
-                } else {
-                    break;
-                }
-            }
             _ = sleep(Duration::from_secs(60)) => {
                 if !ping {
                     codec.send(ClientMessage::Ping).await.unwrap();

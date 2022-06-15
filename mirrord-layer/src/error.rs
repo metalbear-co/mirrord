@@ -4,7 +4,7 @@ use mirrord_protocol::tcp::LayerTcp;
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
-use super::{tcp::TcpHandlerMessage, HookMessage};
+use super::HookMessage;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -16,9 +16,6 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
-
-    #[error("mirrord-layer: Sender<TcpHandlerMessage> failed with `{0}`!")]
-    SendErrorTcpHandlerMessage(#[from] SendError<TcpHandlerMessage>),
 
     #[error("mirrord-layer: Sender<Vec<u8>> failed with `{0}`!")]
     SendErrorConnection(#[from] SendError<Vec<u8>>),

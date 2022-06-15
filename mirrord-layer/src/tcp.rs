@@ -9,14 +9,12 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    Port,
+    ClientCodec, ClientMessage, Port,
 };
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
-};
+use tokio::net::TcpStream;
 use tracing::debug;
 
 use crate::{
@@ -34,18 +32,6 @@ pub enum HookMessageTcp {
     Listen(Listen),
     Close(ListenClose),
 }
-
-#[derive(Debug, Clone)]
-pub enum TcpHandlerMessage {
-    Hook(HookMessageTcp),
-    Daemon(DaemonTcp),
-}
-
-pub type TcpHandlerMessageSender = Sender<TcpHandlerMessage>;
-pub type TcpHandlerMessageReceiver = Receiver<TcpHandlerMessage>;
-
-type LayerTcpReceiver = Receiver<LayerTcp>;
-pub type LayerTcpSender = Sender<LayerTcp>;
 
 #[derive(Debug, Clone)]
 pub struct Listen {
@@ -88,38 +74,11 @@ impl From<&Listen> for SocketAddr {
     }
 }
 
-/// Struct for controlling the traffic handler struct
-pub struct TcpApi {
-    input: TcpHandlerMessageSender,
-    output: LayerTcpReceiver,
-}
-
-impl TcpApi {
-    pub fn new(input: TcpHandlerMessageSender, output: LayerTcpReceiver) -> Self {
-        Self { input, output }
-    }
-    pub async fn send(&self, msg: TcpHandlerMessage) -> Result<(), LayerError> {
-        self.input.send(msg).await.map_err(From::from)
-    }
-    pub async fn recv(&mut self) -> Option<LayerTcp> {
-        self.output.recv().await
-    }
-}
-
 #[async_trait]
 pub trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
-    async fn handle_incoming_message(
-        &mut self,
-        message: TcpHandlerMessage,
-    ) -> Result<(), LayerError> {
-        match message {
-            TcpHandlerMessage::Hook(msg) => self.handle_hook_message(msg).await,
-            TcpHandlerMessage::Daemon(msg) => self.handle_daemon_message(msg).await,
-        }
-    }
     /// Returns true to let caller know to keep running
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
         debug!("handle_incoming_message -> message {:#?}", message);
@@ -137,15 +96,29 @@ pub trait TcpHandler {
         handled
     }
 
-    async fn handle_hook_message(&mut self, message: HookMessageTcp) -> Result<(), LayerError> {
+    async fn handle_hook_message(
+        &mut self,
+        message: HookMessageTcp,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
         match message {
-            HookMessageTcp::Close(close) => self.handle_listen_close(close).await,
-            HookMessageTcp::Listen(listen) => self.handle_listen(listen).await,
+            HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
+            HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
         }
     }
 
     /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(&mut self, close: ListenClose) -> Result<(), LayerError>;
+    async fn handle_listen_close(
+        &mut self,
+        close: ListenClose,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError>;
 
     /// Handle NewConnection messages
     async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<(), LayerError>;
@@ -183,7 +156,14 @@ pub trait TcpHandler {
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
 
     /// Handle listen request
-    async fn handle_listen(&mut self, listen: Listen) -> Result<(), LayerError> {
+    async fn handle_listen(
+        &mut self,
+        listen: Listen,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
         debug!("handle_listen -> listen {:#?}", listen);
 
         let port = listen.real_port;
@@ -193,11 +173,11 @@ pub trait TcpHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        self.sender()
-            .send(LayerTcp::PortSubscribe(port))
+        // TODO: remove unwrap
+        codec
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await
-            .map_err(From::from)
+            .unwrap();
+        Ok(())
     }
-
-    fn sender(&mut self) -> &mut LayerTcpSender;
 }
