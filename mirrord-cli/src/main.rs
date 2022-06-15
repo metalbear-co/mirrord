@@ -17,44 +17,47 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Exec(ExecArgs),
-    Extract { path: String },
+    Extract {
+        #[clap(value_parser)]
+        path: String,
+    },
 }
 
 #[derive(Args, Debug)]
 struct ExecArgs {
     /// Pod name to mirror.
-    #[clap(short, long)]
+    #[clap(short, long, value_parser)]
     pub pod_name: String,
 
     /// Namespace of the pod to mirror. Defaults to "default".
-    #[clap(short = 'n', long)]
+    #[clap(short = 'n', long, value_parser)]
     pub pod_namespace: Option<String>,
 
     /// Namespace to place agent in.
-    #[clap(short = 'a', long)]
+    #[clap(short = 'a', long, value_parser)]
     pub agent_namespace: Option<String>,
 
     /// Agent log level
-    #[clap(short = 'l', long)]
+    #[clap(short = 'l', long, value_parser)]
     pub agent_log_level: Option<String>,
 
     /// Agent image
-    #[clap(short = 'i', long)]
+    #[clap(short = 'i', long, value_parser)]
     pub agent_image: Option<String>,
 
     /// Enable file hooking
-    #[clap(short = 'f', long)]
+    #[clap(short = 'f', long, value_parser)]
     pub enable_fs: bool,
 
     /// Binary to execute and mirror traffic into.
-    #[clap()]
+    #[clap(value_parser)]
     pub binary: String,
 
     /// Accept/reject invalid certificates.
-    #[clap(short = 'c', long)]
+    #[clap(short = 'c', long, value_parser)]
     pub accept_invalid_certificates: bool,
     /// Arguments to pass to the binary.
-    #[clap()]
+    #[clap(value_parser)]
     binary_args: Vec<String>,
 }
 
