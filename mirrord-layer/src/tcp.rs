@@ -173,11 +173,9 @@ pub trait TcpHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        // TODO: remove unwrap
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await
-            .unwrap();
-        Ok(())
+            .map_err(From::from)
     }
 }
