@@ -372,8 +372,8 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
 
     let mut ping = false;
 
-    let (tcp_mirror_handler, mut mirror_api, handler_receiver) = create_tcp_mirror_handler();
-    tokio::spawn(async move { tcp_mirror_handler.run(handler_receiver).await });
+    let (tcp_mirror_handler, mut mirror_api) = create_tcp_mirror_handler();
+    tokio::spawn(async move { tcp_mirror_handler.run().await });
 
     loop {
         select! {
