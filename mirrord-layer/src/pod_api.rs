@@ -168,7 +168,7 @@ pub async fn create_agent(
                 "Failed to receive a timely response from pod: {:?}",
                 pod_name
             )
-        });
+        })?;
     pods_api
         .portforward(&pod_name, &[61337])
         .await
