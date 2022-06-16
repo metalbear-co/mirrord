@@ -161,7 +161,7 @@ async fn handle_peer_messages(
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel.send(DaemonMessage::Pong).await?;
         }
-        ClientMessage::FileRequest(file_request) => {
+        ClientMessage::FileRequest(_) => {
             // handled by the peer..
         }
     }

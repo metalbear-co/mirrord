@@ -41,7 +41,7 @@ pub fn parse_args() -> Args {
                 Ok(args)
             }
         })
-        .map(|args| {
+        .map(|mut args| {
             if args.container_runtime.is_none() {
                 args.container_runtime = Some(DEFAULT_RUNTIME.to_string());
             }
