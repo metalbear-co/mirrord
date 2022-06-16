@@ -282,7 +282,7 @@ async fn start_agent() -> Result<(), AgentError> {
         sniffer_output_tx,
         sniffer_command_rx,
         args.interface.clone(),
-        pid.clone(),
+        pid,
     ));
 
     loop {
@@ -297,7 +297,7 @@ async fn start_agent() -> Result<(), AgentError> {
                     state.peers.insert(Peer::new(peer_id, daemon_message_tx));
 
                     tokio::spawn(async move {
-                        let _ = PeerHandler::start(peer_messages_tx, peer_id, stream, daemon_message_rx, pid.clone())
+                        let _ = PeerHandler::start(peer_messages_tx, peer_id, stream, daemon_message_rx, pid)
                             .await
                             .inspect(|_| debug!("start_agent -> Peer {:#?} closed", peer_id))
                             .inspect_err(|fail| error!("start_agent -> Peer {:#?} failed with {:#?}", peer_id, fail));
