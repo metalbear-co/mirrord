@@ -6,10 +6,9 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, ConnectionID,
+    tcp::{NewTcpConnection, TcpClose, TcpData},
+    ConnectionID,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -23,7 +22,7 @@ use tracing::{debug, error, warn};
 
 use crate::{
     error::LayerError,
-    tcp::{Listen, ListenClose, TcpHandler},
+    tcp::{Listen, TcpHandler},
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
