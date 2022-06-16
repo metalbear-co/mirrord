@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Speed up agent container image building by using a more specific base image.
 - CI: Remove building agent before building & running tests (duplicate)
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
+- CD release: Fix universal binary for macOS
 
 ## 2.2.1
 ### Changed
