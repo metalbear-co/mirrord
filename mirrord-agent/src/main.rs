@@ -188,21 +188,39 @@ impl PeerHandler {
         stream: TcpStream,
         mut receiver: Receiver<DaemonMessage>,
     ) -> Result<(), AgentError> {
-        let peer_handler = PeerHandler { sender, peer_id };
+        let mut peer_handler = PeerHandler { sender, peer_id };
         let mut peer_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
         loop {
             select! {
-                message = peer_stream.next() => {
-                    match message {
-                        Some(message) => peer_handler.handle_peer_message(message.map_err(From::from)?).await?,
-                        None => {
-                            debug!("Peer {} disconnected", peer_id);
-                            break;
-                        }
+            message = peer_stream.next() => {
+                if let Some(message) = message {
+                    peer_handler.handle_peer_message(message?).await?;
+                } else {
+                    debug!("Peer {} disconnected", peer_id);
+                        break;
+                }
+            },
+            message = receiver.recv() => {
+                debug!("peer_handler -> received a message {:?}", message);
+                if let Some(message) = message {
+                        debug!("peer_handler -> send message to client");
+                        peer_stream.send(message).await?;
+                    } else {
+                        debug!("peer_handler -> receiver dropped");
+                        break;
                     }
                 }
+
             }
         }
+        peer_handler
+            .sender
+            .send(PeerMessage {
+                client_message: ClientMessage::Close,
+                peer_id,
+            })
+            .await?;
+
         Ok(())
     }
 
@@ -210,49 +228,12 @@ impl PeerHandler {
     async fn handle_peer_message(&mut self, message: ClientMessage) -> Result<(), AgentError> {
         let message = PeerMessage {
             client_message: message,
-            peer_id: self.peer_id
+            peer_id: self.peer_id,
         };
 
         debug!("peer_handler -> client sent message {:?}", message);
         self.sender.send(message).await.map_err(From::from)
     }
-
-
-}
-
-async fn peer_handler(
-    mut daemon_messages_rx: mpsc::Receiver<DaemonMessage>,
-    peer_messages_tx: mpsc::Sender<PeerMessage>,
-    stream: TcpStream,
-    peer_id: PeerID,
-) -> Result<(), AgentError> {
-    let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
-
-    loop {
-        select! {
-            message = daemon_messages_rx.recv() => {
-                debug!("peer_handler -> daemon_messages_rx.recv received a message {:?}", message);
-
-                match message {
-                    Some(message) => {
-                        debug!("peer_handler -> send message to client");
-                        daemon_stream.send(message).await?;
-                    }
-                    None => ()
-                }
-
-            }
-        }
-    }
-
-    peer_messages_tx
-        .send(PeerMessage {
-            client_message: ClientMessage::Close,
-            peer_id,
-        })
-        .await?;
-
-    Ok(())
 }
 
 async fn start_agent() -> Result<(), AgentError> {
@@ -301,7 +282,7 @@ async fn start_agent() -> Result<(), AgentError> {
                     state.peers.insert(Peer::new(peer_id, daemon_message_tx));
 
                     tokio::spawn(async move {
-                        let _ = peer_handler(daemon_message_rx, peer_messages_tx, stream, peer_id)
+                        let _ = PeerHandler::start(peer_messages_tx, peer_id, stream, daemon_message_rx)
                             .await
                             .inspect(|_| debug!("start_agent -> Peer {:#?} closed", peer_id))
                             .inspect_err(|fail| error!("start_agent -> Peer {:#?} failed with {:#?}", peer_id, fail));
