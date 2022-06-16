@@ -110,16 +110,6 @@ pub trait TcpHandler {
         }
     }
 
-    /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError>;
-
     /// Handle NewConnection messages
     async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<(), LayerError>;
 
@@ -175,6 +165,21 @@ pub trait TcpHandler {
 
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+            .await
+            .map_err(From::from)
+    }
+
+    /// Handle when a listen socket closes on layer
+    async fn handle_listen_close(
+        &mut self,
+        close: ListenClose,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
+        codec
+            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
             .await
             .map_err(From::from)
     }

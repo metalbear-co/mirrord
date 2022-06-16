@@ -3,10 +3,11 @@
 #![feature(core_ffi_c)]
 
 pub mod codec;
-pub mod common;
 pub mod error;
 pub mod tcp;
 
 pub use codec::*;
-pub use common::*;
 pub use error::*;
+
+pub type ConnectionID = u16;
+pub type Port = u16;

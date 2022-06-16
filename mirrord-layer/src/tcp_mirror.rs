@@ -132,21 +132,6 @@ impl TcpHandler for TcpMirrorHandler {
         Ok(())
     }
 
-    /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError> {
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
-            .await
-            .map_err(From::from)
-    }
-
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
         debug!("handle_new_data -> id {:#?}", data.connection_id);
