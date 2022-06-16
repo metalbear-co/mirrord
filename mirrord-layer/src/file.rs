@@ -23,6 +23,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
         r"^/etc/.*",
         r"^/usr/.*",
         r"^/dev/.*",
+        r"^/opt/.*",
         r"^/home/iojs/.*",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.

@@ -179,7 +179,5 @@ jobs:
         run: kubectl wait --for=condition=ready pod -l app=http-echo --timeout=20s
       - name: test with docker runtime
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
-      - name: file operations 
-        run: $CARGO_BIN_FILE_MIRRORD exec -c --enable-fs --pod-name $(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep http) tests/python-e2e/ops.py
 
 
