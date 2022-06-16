@@ -4,6 +4,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
     path::PathBuf,
+    sync::atomic::AtomicUsize,
 };
 
 use mirrord_protocol::{
@@ -17,6 +18,9 @@ use tracing::{debug, error};
 
 use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
 
+/// Unqiue file descriptor generator
+static COUNTER: AtomicUsize = AtomicUsize::new(1);
+
 #[derive(Debug)]
 pub enum RemoteFile {
     File(File),
@@ -25,7 +29,7 @@ pub enum RemoteFile {
 
 #[derive(Debug, Default)]
 pub struct FileManager {
-    pub open_files: HashMap<i32, RemoteFile>,
+    pub open_files: HashMap<usize, RemoteFile>,
 }
 
 impl FileManager {
@@ -42,7 +46,8 @@ impl FileManager {
         OpenOptions::from(open_options)
             .open(&path)
             .map(|file| {
-                let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+                // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+                let fd = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let _ = file
                     .metadata()
@@ -75,7 +80,7 @@ impl FileManager {
 
     pub(crate) fn open_relative(
         &mut self,
-        relative_fd: i32,
+        relative_fd: usize,
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> Result<OpenFileResponse, ResponseError> {
@@ -96,7 +101,8 @@ impl FileManager {
                 path
             );
             OpenOptions::from(open_options).open(&path).map(|file| {
-                let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+                // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
+                let fd = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 let _ = file
                     .metadata()
@@ -135,7 +141,7 @@ impl FileManager {
 
     pub(crate) fn read(
         &mut self,
-        fd: i32,
+        fd: usize,
         buffer_size: usize,
     ) -> Result<ReadFileResponse, ResponseError> {
         let remote_file = self
@@ -175,7 +181,7 @@ impl FileManager {
 
     pub(crate) fn seek(
         &mut self,
-        fd: i32,
+        fd: usize,
         seek_from: SeekFrom,
     ) -> Result<SeekFileResponse, ResponseError> {
         let file = self
@@ -205,7 +211,7 @@ impl FileManager {
 
     pub(crate) fn write(
         &mut self,
-        fd: i32,
+        fd: usize,
         write_bytes: Vec<u8>,
     ) -> Result<WriteFileResponse, ResponseError> {
         let file = self
@@ -241,7 +247,7 @@ impl FileManager {
         })
     }
 
-    pub(crate) fn close(&mut self, fd: i32) -> Result<CloseFileResponse, ResponseError> {
+    pub(crate) fn close(&mut self, fd: usize) -> Result<CloseFileResponse, ResponseError> {
         let file = self.open_files.remove(&fd).ok_or(ResponseError::NotFound)?;
 
         debug!("FileManager::write -> Trying to close file {:#?}", file);

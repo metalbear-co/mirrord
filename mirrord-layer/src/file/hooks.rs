@@ -29,9 +29,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         Err(fail) => return fail,
     };
 
-    let is_dir = libc::O_DIRECTORY & open_flags == libc::O_DIRECTORY;
     // Calls with non absolute paths are sent to libc::open.
-    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() && !is_dir {
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);

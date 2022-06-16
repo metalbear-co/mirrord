@@ -83,7 +83,7 @@ pub struct OpenFileHook {
 
 #[derive(Debug)]
 pub struct OpenRelativeFileHook {
-    pub(crate) relative_fd: RawFd,
+    pub(crate) relative_fd: usize,
     pub(crate) path: PathBuf,
     pub(crate) file_channel_tx: oneshot::Sender<OpenFileResponse>,
     pub(crate) open_options: OpenOptionsInternal,
@@ -91,28 +91,28 @@ pub struct OpenRelativeFileHook {
 
 #[derive(Debug)]
 pub struct ReadFileHook {
-    pub(crate) fd: RawFd,
+    pub(crate) fd: usize,
     pub(crate) buffer_size: usize,
     pub(crate) file_channel_tx: oneshot::Sender<ReadFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct SeekFileHook {
-    pub(crate) fd: RawFd,
+    pub(crate) fd: usize,
     pub(crate) seek_from: SeekFrom,
     pub(crate) file_channel_tx: oneshot::Sender<SeekFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct WriteFileHook {
-    pub(crate) fd: RawFd,
+    pub(crate) fd: usize,
     pub(crate) write_bytes: Vec<u8>,
     pub(crate) file_channel_tx: oneshot::Sender<WriteFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct CloseFileHook {
-    pub(crate) fd: RawFd,
+    pub(crate) fd: usize,
     pub(crate) file_channel_tx: oneshot::Sender<CloseFileResponse>,
 }
 
