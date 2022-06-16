@@ -91,6 +91,10 @@ impl FileManager {
 
         if let RemoteFile::Directory(relative_dir) = relative_dir {
             let path = relative_dir.join(&path);
+            debug!(
+                "FileManager::open_relative -> Trying to open complete path: {:#?}",
+                path
+            );
             OpenOptions::from(open_options).open(&path).map(|file| {
                 let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
 
@@ -295,15 +299,7 @@ pub async fn file_worker(
                     open_options,
                 }),
             ) => {
-                let path = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))
-                    .unwrap();
-
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = file_manager.open_relative(relative_fd, full_path, open_options);
+                let open_result = file_manager.open_relative(relative_fd, path, open_options);
                 let response = FileResponse::Open(open_result);
 
                 file_response_tx.send((peer_id, response)).await.unwrap();

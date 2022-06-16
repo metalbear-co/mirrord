@@ -14,6 +14,12 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
 
+    let python_env = env::var("PYTHONPATH").unwrap_or_else(|_| "".to_string());
+    let path = env::var("PATH")
+        .unwrap_or_else(|_| "".to_string())
+        .split(":")
+        .collect::<Vec<_>>();
+
     let set = RegexSet::new(&[
         r".*\.so",
         r".*\.d",
@@ -24,6 +30,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
         r"^/usr/.*",
         r"^/dev/.*",
         r"^/opt/.*",
+        //python_env.as_str(),
         r"^/home/iojs/.*",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
