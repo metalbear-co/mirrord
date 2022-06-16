@@ -45,7 +45,6 @@ lazy_static! {
 // target/debug/mirrord exec --pod-name pod_name  -c binary command
 pub fn start_server(pod_name: &str, command: Vec<&str>, env: HashMap<&str, &str>) -> Child {
     let path = env!("CARGO_BIN_FILE_MIRRORD");
-    println!(">>>>> path: {}", path);
     let args: Vec<&str> = vec!["exec", "--pod-name", pod_name, "-c", "--"]
         .into_iter()
         .chain(command.into_iter())
