@@ -17,7 +17,7 @@ use mirrord_protocol::{
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
@@ -175,6 +175,51 @@ async fn handle_peer_messages(
     Ok(())
 }
 
+struct PeerHandler {
+    sender: Sender<PeerMessage>,
+    peer_id: PeerID,
+}
+
+impl PeerHandler {
+    /// A loop that handles peer connection and state. Brekas upon receiver/sender drop.
+    pub async fn start(
+        sender: Sender<PeerMessage>,
+        peer_id: PeerID,
+        stream: TcpStream,
+        mut receiver: Receiver<DaemonMessage>,
+    ) -> Result<(), AgentError> {
+        let peer_handler = PeerHandler { sender, peer_id };
+        let mut peer_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+        loop {
+            select! {
+                message = peer_stream.next() => {
+                    match message {
+                        Some(message) => peer_handler.handle_peer_message(message.map_err(From::from)?).await?,
+                        None => {
+                            debug!("Peer {} disconnected", peer_id);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle incoming messages from the peer.
+    async fn handle_peer_message(&mut self, message: ClientMessage) -> Result<(), AgentError> {
+        let message = PeerMessage {
+            client_message: message,
+            peer_id: self.peer_id
+        };
+
+        debug!("peer_handler -> client sent message {:?}", message);
+        self.sender.send(message).await.map_err(From::from)
+    }
+
+
+}
+
 async fn peer_handler(
     mut daemon_messages_rx: mpsc::Receiver<DaemonMessage>,
     peer_messages_tx: mpsc::Sender<PeerMessage>,
@@ -185,22 +230,6 @@ async fn peer_handler(
 
     loop {
         select! {
-            message = daemon_stream.next() => {
-                debug!("peer_handler -> daemon_stream.next received a message {:?}", message);
-
-                match message {
-                    Some(message) => {
-                        let message = PeerMessage {
-                            client_message: message?,
-                            peer_id
-                        };
-
-                        debug!("peer_handler -> client sent message {:?}", message);
-                        peer_messages_tx.send(message).await?;
-                    }
-                    None => break
-                }
-            },
             message = daemon_messages_rx.recv() => {
                 debug!("peer_handler -> daemon_messages_rx.recv received a message {:?}", message);
 
