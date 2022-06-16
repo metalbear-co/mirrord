@@ -12,20 +12,80 @@ use mirrord_protocol::{
     ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest,
     WriteFileResponse,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
-use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
+use crate::error::AgentError;
 
 // TODO: To help with `openat`, instead of `HashMap<_, File>` this should be
 // `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
 #[derive(Debug, Default)]
 pub struct FileManager {
-    pub open_files: HashMap<i32, File>,
+    open_files: HashMap<i32, File>,
+    root_path: PathBuf,
 }
 
 impl FileManager {
-    pub(crate) fn open(
+    /// Executes the request and returns the response.
+    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse, AgentError> {
+        let root_path = &self.root_path;
+        match request {
+            FileRequest::Open(OpenFileRequest { path, open_options }) => {
+                // TODO: maybe not agent error on this?
+                let path = path
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(path);
+
+                let open_result = self.open(full_path, open_options);
+                Ok(FileResponse::Open(open_result))
+            }
+            FileRequest::OpenRelative(OpenRelativeFileRequest {
+                relative_fd,
+                path,
+                open_options,
+            }) => {
+                let path = path
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(path);
+
+                let open_result = self.open_relative(relative_fd, full_path, open_options);
+                Ok(FileResponse::Open(open_result))
+            }
+            FileRequest::Read(ReadFileRequest { fd, buffer_size }) => {
+                let read_result = self.read(fd, buffer_size);
+                Ok(FileResponse::Read(read_result))
+            }
+            FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
+                let seek_result = self.seek(fd, seek_from.into());
+                Ok(FileResponse::Seek(seek_result))
+            }
+            FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
+                let write_result = self.write(fd, write_bytes);
+                Ok(FileResponse::Write(write_result))
+            }
+            FileRequest::Close(CloseFileRequest { fd }) => {
+                let close_result = self.close(fd);
+                Ok(FileResponse::Close(close_result))
+            }
+        }
+    }
+
+    pub fn new(pid: Option<u64>) -> Self {
+        let root_path = match pid {
+            Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
+            None => PathBuf::from("/"),
+        };
+        Self {
+            open_files: HashMap::new(),
+            root_path,
+        }
+    }
+    fn open(
         &mut self,
         path: PathBuf,
         open_options: OpenOptionsInternal,
@@ -52,7 +112,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn open_relative(
+    fn open_relative(
         &mut self,
         relative_fd: i32,
         path: PathBuf,
@@ -85,11 +145,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn read(
-        &mut self,
-        fd: i32,
-        buffer_size: usize,
-    ) -> Result<ReadFileResponse, ResponseError> {
+    fn read(&mut self, fd: i32, buffer_size: usize) -> Result<ReadFileResponse, ResponseError> {
         let file = self
             .open_files
             .get_mut(&fd)
@@ -122,11 +178,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn seek(
-        &mut self,
-        fd: i32,
-        seek_from: SeekFrom,
-    ) -> Result<SeekFileResponse, ResponseError> {
+    fn seek(&mut self, fd: i32, seek_from: SeekFrom) -> Result<SeekFileResponse, ResponseError> {
         let file = self
             .open_files
             .get_mut(&fd)
@@ -148,11 +200,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn write(
-        &mut self,
-        fd: i32,
-        write_bytes: Vec<u8>,
-    ) -> Result<WriteFileResponse, ResponseError> {
+    fn write(&mut self, fd: i32, write_bytes: Vec<u8>) -> Result<WriteFileResponse, ResponseError> {
         let file = self
             .open_files
             .get_mut(&fd)
@@ -171,113 +219,11 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: i32) -> Result<CloseFileResponse, ResponseError> {
+    fn close(&mut self, fd: i32) -> Result<CloseFileResponse, ResponseError> {
         let file = self.open_files.remove(&fd).ok_or(ResponseError::NotFound)?;
 
         debug!("FileManager::write -> Trying to close file {:#?}", file);
 
         Ok(CloseFileResponse)
     }
-}
-
-pub async fn file_worker(
-    mut file_request_rx: Receiver<(PeerID, FileRequest)>,
-    file_response_tx: Sender<(PeerID, FileResponse)>,
-    container_id: Option<String>,
-    container_runtime: Option<String>,
-) -> Result<(), AgentError> {
-    debug!("file_worker -> Setting namespace");
-
-    let pid = match container_id {
-        Some(container_id) => {
-            get_container_pid(
-                &container_id,
-                &container_runtime.unwrap_or_else(|| DEFAULT_RUNTIME.to_string()),
-            )
-            .await
-        }
-        None => Err(AgentError::NotFound(format!(
-            "file_worker -> Container ID not specified {:#?} for runtime {:#?}!",
-            container_id, container_runtime
-        ))),
-    }?;
-
-    let root_path = PathBuf::from("/proc").join(pid.to_string()).join("root");
-    let mut file_manager = FileManager::default();
-
-    while let Some(file_request) = file_request_rx.recv().await {
-        match file_request {
-            (peer_id, FileRequest::Open(OpenFileRequest { path, open_options })) => {
-                let path = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = file_manager.open(full_path, open_options);
-                let response = FileResponse::Open(open_result);
-
-                file_response_tx.send((peer_id, response)).await?;
-            }
-            (
-                peer_id,
-                FileRequest::OpenRelative(OpenRelativeFileRequest {
-                    relative_fd,
-                    path,
-                    open_options,
-                }),
-            ) => {
-                let path = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = file_manager.open_relative(relative_fd, full_path, open_options);
-                let response = FileResponse::Open(open_result);
-
-                file_response_tx.send((peer_id, response)).await?;
-            }
-            (peer_id, FileRequest::Read(ReadFileRequest { fd, buffer_size })) => {
-                let read_result = file_manager.read(fd, buffer_size);
-                let response = FileResponse::Read(read_result);
-
-                file_response_tx
-                    .send((peer_id, response))
-                    .await
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-            }
-            (peer_id, FileRequest::Seek(SeekFileRequest { fd, seek_from })) => {
-                let seek_result = file_manager.seek(fd, seek_from.into());
-                let response = FileResponse::Seek(seek_result);
-
-                file_response_tx
-                    .send((peer_id, response))
-                    .await
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-            }
-            (peer_id, FileRequest::Write(WriteFileRequest { fd, write_bytes })) => {
-                let write_result = file_manager.write(fd, write_bytes);
-                let response = FileResponse::Write(write_result);
-
-                file_response_tx
-                    .send((peer_id, response))
-                    .await
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-            }
-            (peer_id, FileRequest::Close(CloseFileRequest { fd })) => {
-                let close_result = file_manager.close(fd);
-                let response = FileResponse::Close(close_result);
-
-                file_response_tx
-                    .send((peer_id, response))
-                    .await
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-            }
-        }
-    }
-    debug!("file worker ends");
-    Ok(())
 }

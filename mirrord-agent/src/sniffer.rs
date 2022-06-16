@@ -21,16 +21,10 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-use crate::{
-    error::AgentError,
-    runtime::{get_container_pid, set_namespace},
-    util::IndexAllocator,
-};
+use crate::{error::AgentError, runtime::set_namespace, util::IndexAllocator};
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
-
-pub(crate) const DEFAULT_RUNTIME: &str = "containerd";
 
 type ConnectionID = u16;
 
@@ -251,26 +245,9 @@ pub async fn packet_worker(
     sniffer_output_tx: Sender<SnifferOutput>,
     mut sniffer_command_rx: Receiver<SnifferCommand>,
     interface: String,
-    container_id: Option<String>,
-    container_runtime: Option<String>,
+    pid: Option<u64>,
 ) -> Result<(), AgentError> {
     debug!("packet_worker -> setting namespace");
-
-    let pid = match (container_id, container_runtime) {
-        (Some(container_id), Some(container_runtime)) => {
-            get_container_pid(&container_id, &container_runtime)
-                .await
-                .ok()
-        }
-        (Some(container_id), None) => get_container_pid(&container_id, DEFAULT_RUNTIME).await.ok(),
-        (None, Some(_)) => {
-            return Err(AgentError::NotFound(
-                "packet_worker -> Container ID not specified".to_string(),
-            ))
-        }
-
-        _ => None,
-    };
 
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")

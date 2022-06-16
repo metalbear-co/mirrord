@@ -13,7 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
 - CD release: Fix universal binary for macOS
 - Refactor: Change protocol + mirrord-layer to split messages into modules, so main module only handles general messages, passing down to the appropriate module for handling.
-
+- Refactor(agent) - change `FileManager` to be per peer, thus removing the need of it being in a different task, moving the handling to the peer logic, change structure of peer handling to a struct.
 ## 2.2.1
 ### Changed
 - Compile universal binaries for MacOS. (Fixes #131)
