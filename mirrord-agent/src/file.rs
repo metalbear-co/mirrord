@@ -18,8 +18,8 @@ use tracing::{debug, error};
 
 use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
 
-/// Unqiue file descriptor generator
-pub(crate) fn get_fd() -> usize {
+/// Unique file descriptor generator
+pub(crate) fn generate_fd() -> usize {
     static FD_GEN: AtomicUsize = AtomicUsize::new(1);
     FD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
@@ -50,7 +50,7 @@ impl FileManager {
             .open(&path)
             .map(|file| {
                 // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = get_fd();
+                let fd = generate_fd();
 
                 let _ = file
                     .metadata()
@@ -105,7 +105,7 @@ impl FileManager {
             );
             OpenOptions::from(open_options).open(&path).map(|file| {
                 // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = get_fd();
+                let fd = generate_fd();
 
                 let _ = file
                     .metadata()
@@ -121,11 +121,12 @@ impl FileManager {
                             "FileManager::open_relative -> Got metadata for file {:#?}",
                             metadata
                         );
-                        if metadata.is_dir() {
-                            self.open_files.insert(fd, RemoteFile::Directory(path));
+                        let remote_file = if metadata.is_dir() {
+                            RemoteFile::Directory(path)
                         } else {
-                            self.open_files.insert(fd, RemoteFile::File(file));
-                        }
+                            RemoteFile::File(file)
+                        };
+                        self.open_files.insert(fd, remote_file);
                     });
 
                 OpenFileResponse { fd }
