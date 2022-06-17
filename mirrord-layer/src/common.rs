@@ -1,4 +1,4 @@
-use std::{io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{io::SeekFrom, path::PathBuf};
 
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
