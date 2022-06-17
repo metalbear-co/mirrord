@@ -19,11 +19,13 @@ mod tests {
     use crate::utils::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_complete_node_api() {
         _test_complete_api("node").await;
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_complete_python_api() {
         _test_complete_api("python").await;
     }
@@ -115,6 +117,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     /// Sends a request to a different pod in the cluster (different namespace) and asserts
     /// that no operation is performed as specified in the request by the server
     /// as the agent pod is impersonating the pod running in the default namespace
@@ -172,6 +175,7 @@ mod tests {
 
     // agent namespace tests
     #[tokio::test]
+    #[ignore]
     /// Creates a new k8s namespace, starts the API server with env:
     /// MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
     /// validate data through requests to the API server
@@ -269,6 +273,7 @@ mod tests {
 
     // pod namespace tests
     #[tokio::test]
+    #[ignore]
     /// Creates a new k8s namespace, starts the API server with env:
     /// MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
     /// requests
@@ -324,6 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     /// Starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
     /// (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
     /// exist
