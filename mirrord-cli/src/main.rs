@@ -53,7 +53,7 @@ struct ExecArgs {
     #[clap(value_parser)]
     pub binary: String,
 
-    /// Agent TTL (overrides environment variable)
+    /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
 
