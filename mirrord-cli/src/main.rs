@@ -68,6 +68,7 @@ struct ExecArgs {
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
     pub accept_invalid_certificates: bool,
+
     /// Arguments to pass to the binary.
     #[clap(value_parser)]
     binary_args: Vec<String>,

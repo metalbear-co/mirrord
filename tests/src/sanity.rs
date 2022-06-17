@@ -12,6 +12,7 @@ mod tests {
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+        process::Command,
         time::{timeout, Duration},
     };
 
@@ -360,5 +361,42 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+
+    #[tokio::test]
+    pub async fn test_remote_env_vars() {
+        let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
+        let node_command = vec!["node", "node-e2e/remote_env.mjs"];
+
+        let client = setup_kube_client().await;
+
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "--override_env_vars",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
+
+        let test_process = Command::new(mirrord_bin)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+        assert!(test_process.success());
     }
 }
