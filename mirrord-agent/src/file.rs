@@ -19,7 +19,10 @@ use tracing::{debug, error};
 use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
 
 /// Unqiue file descriptor generator
-static COUNTER: AtomicUsize = AtomicUsize::new(1);
+pub(crate) fn get_fd() -> usize {
+    static FD_GEN: AtomicUsize = AtomicUsize::new(1);
+    FD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -47,7 +50,7 @@ impl FileManager {
             .open(&path)
             .map(|file| {
                 // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let fd = get_fd();
 
                 let _ = file
                     .metadata()
@@ -102,7 +105,7 @@ impl FileManager {
             );
             OpenOptions::from(open_options).open(&path).map(|file| {
                 // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let fd = get_fd();
 
                 let _ = file
                     .metadata()

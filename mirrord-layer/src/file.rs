@@ -14,15 +14,12 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
 
-    // let python_env = env::var("PYTHONPATH").unwrap_or_else(|_| "".to_string());
-    // let path = env::var("PATH")
-    //     .unwrap_or_else(|_| "".to_string())
-    //     .split(":")
-    //     .collect::<Vec<_>>();
-
     let set = RegexSet::new(&[
         r".*\.so",
         r".*\.d",
+        r".*\.pyc",
+        r".*\.py",
+        r".*\.js",
         r"^/proc/.*",
         r"^/sys/.*",
         r"^/lib/.*",
