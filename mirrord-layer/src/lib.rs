@@ -71,15 +71,17 @@ fn init() {
 
     let config = Config::init_from_env().unwrap();
 
-    let port_forwarder = RUNTIME.block_on(pod_api::create_agent(
-        &config.impersonated_pod_name,
-        &config.impersonated_pod_namespace,
-        &config.agent_namespace,
-        config.agent_rust_log,
-        config.agent_image.unwrap_or_else(|| {
-            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-        }),
-    ));
+    let port_forwarder = RUNTIME
+        .block_on(pod_api::create_agent(
+            &config.impersonated_pod_name,
+            &config.impersonated_pod_namespace,
+            &config.agent_namespace,
+            config.agent_rust_log,
+            config.agent_image.unwrap_or_else(|| {
+                concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+            }),
+        ))
+        .unwrap();
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
