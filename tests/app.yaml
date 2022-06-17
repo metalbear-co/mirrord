@@ -19,6 +19,11 @@ spec:
           image: ealen/echo-server
           ports:
             - containerPort: 80
+          env:
+            - name: MIRRORD_FAKE_VAR_FIRST
+              value: mirrord.is.running
+            - name: MIRRORD_FAKE_VAR_SECOND
+              value: "7777"
 
 ---
 apiVersion: v1
