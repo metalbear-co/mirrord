@@ -8,10 +8,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Changed
+- Removed `unwrap` from the `Future` that was waiting for Kube pod to spin up in `pod_api.rs`. (Fixes #110)
 - Speed up agent container image building by using a more specific base image.
 - CI: Remove building agent before building & running tests (duplicate)
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
 - CD release: Fix universal binary for macOS
+- Refactor: Change protocol + mirrord-layer to split messages into modules, so main module only handles general messages, passing down to the appropriate module for handling.
 
 ## 2.2.1
 ### Changed

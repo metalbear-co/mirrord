@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use mirrord_protocol::{NewTCPConnection, TCPClose, TCPData};
+use mirrord_protocol::tcp::{NewTcpConnection, TcpClose, TcpData};
 use pcap::{stream::PacketCodec, Active, Capture, Device, Linktype};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
@@ -42,22 +42,22 @@ pub enum SnifferCommand {
 
 #[derive(Debug)]
 pub enum SnifferOutput {
-    NewTCPConnection(NewTCPConnection),
-    TCPClose(TCPClose),
-    TCPData(TCPData),
+    NewTcpConnection(NewTcpConnection),
+    TcpClose(TcpClose),
+    TcpData(TcpData),
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
-pub struct TCPSessionIdentifier {
+pub struct TcpSessionIdentifier {
     source_addr: Ipv4Addr,
     dest_addr: Ipv4Addr,
     source_port: u16,
     dest_port: u16,
 }
 
-impl PartialEq for TCPSessionIdentifier {
+impl PartialEq for TcpSessionIdentifier {
     /// It's the same session if 4 tuple is same/opposite.
-    fn eq(&self, other: &TCPSessionIdentifier) -> bool {
+    fn eq(&self, other: &TcpSessionIdentifier) -> bool {
         self.source_addr == other.source_addr
             && self.dest_addr == other.dest_addr
             && self.source_port == other.source_port
@@ -69,7 +69,7 @@ impl PartialEq for TCPSessionIdentifier {
     }
 }
 
-impl Hash for TCPSessionIdentifier {
+impl Hash for TcpSessionIdentifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
         if self.source_addr > self.dest_addr {
             self.source_addr.hash(state);
@@ -89,7 +89,7 @@ impl Hash for TCPSessionIdentifier {
 }
 
 type Session = ConnectionID;
-type SessionMap = HashMap<TCPSessionIdentifier, Session>;
+type SessionMap = HashMap<TcpSessionIdentifier, Session>;
 
 fn is_new_connection(flags: u16) -> bool {
     flags == TcpFlags::SYN
@@ -156,7 +156,7 @@ impl ConnectionManager {
         let tcp_flags = tcp_packet.get_flags();
         let source_port = tcp_packet.get_source();
 
-        let identifier = TCPSessionIdentifier {
+        let identifier = TcpSessionIdentifier {
             source_addr: ip_packet.get_source(),
             dest_addr: ip_packet.get_destination(),
             source_port,
@@ -179,7 +179,7 @@ impl ConnectionManager {
                     error!("connection index exhausted, dropping new connection");
                     None
                 })?;
-                messages.push(SnifferOutput::NewTCPConnection(NewTCPConnection {
+                messages.push(SnifferOutput::NewTcpConnection(NewTcpConnection {
                     destination_port: dest_port,
                     source_port,
                     connection_id: id,
@@ -193,7 +193,7 @@ impl ConnectionManager {
             let data = tcp_packet.payload();
 
             if !data.is_empty() {
-                messages.push(SnifferOutput::TCPData(TCPData {
+                messages.push(SnifferOutput::TcpData(TcpData {
                     bytes: data.to_vec(),
                     connection_id: session,
                 }));
@@ -203,7 +203,7 @@ impl ConnectionManager {
         if is_closed_connection(tcp_flags) {
             self.index_allocator.free_index(session);
 
-            messages.push(SnifferOutput::TCPClose(TCPClose {
+            messages.push(SnifferOutput::TcpClose(TcpClose {
                 connection_id: session,
             }));
         } else {
@@ -214,9 +214,9 @@ impl ConnectionManager {
     }
 }
 
-pub struct TCPManagerCodec {}
+pub struct TcpManagerCodec {}
 
-impl PacketCodec for TCPManagerCodec {
+impl PacketCodec for TcpManagerCodec {
     type Type = Vec<u8>;
 
     fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
@@ -282,7 +282,7 @@ pub async fn packet_worker(
 
     debug!("preparing sniffer");
     let sniffer = prepare_sniffer(interface)?;
-    let codec = TCPManagerCodec {};
+    let codec = TcpManagerCodec {};
     let mut connection_manager = ConnectionManager::new();
     let mut sniffer_stream = sniffer.stream(codec)?;
 

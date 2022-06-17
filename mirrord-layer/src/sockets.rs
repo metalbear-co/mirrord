@@ -16,8 +16,9 @@ use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, warn};
 
 use crate::{
-    common::{HookMessage, Listen},
+    common::HookMessage,
     macros::{hook, try_hook},
+    tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };
 
@@ -107,7 +108,7 @@ fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 
-/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (TCPv4/v6)
+/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
@@ -115,10 +116,10 @@ fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
         error!("socket failed");
         return fd;
     }
-    // We don't handle non TCPv4 sockets
+    // We don't handle non Tcpv4 sockets
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
     {
-        debug!("non TCP socket domain:{:?}, type:{:?}", domain, type_);
+        debug!("non Tcp socket domain:{:?}, type:{:?}", domain, type_);
         return fd;
     }
     let mut sockets = SOCKETS.lock().unwrap();
@@ -261,12 +262,12 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
                 return ret;
             }
             let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-            match sender.blocking_send(HookMessage::Listen(Listen {
+            match sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
                 fake_port: result_addr.port(),
                 real_port,
                 ipv6: result_addr.is_ipv6(),
                 fd: sockfd,
-            })) {
+            }))) {
                 Ok(_) => {}
                 Err(e) => {
                     error!("listen: failed to send listen message: {:?}", e);

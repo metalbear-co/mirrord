@@ -1,6 +1,5 @@
 use std::{
     io::{self, SeekFrom},
-    net::IpAddr,
     path::PathBuf,
 };
 
@@ -8,29 +7,10 @@ use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
-use crate::ResponseError;
-
-pub type ConnectionID = u16;
-pub type Port = u16;
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct NewTCPConnection {
-    pub connection_id: ConnectionID,
-    pub address: IpAddr,
-    pub destination_port: Port,
-    pub source_port: Port,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct TCPData {
-    pub connection_id: ConnectionID,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct TCPClose {
-    pub connection_id: ConnectionID,
-}
+use crate::{
+    tcp::{DaemonTcp, LayerTcp},
+    ResponseError,
+};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
@@ -147,9 +127,8 @@ pub enum FileRequest {
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
-    PortSubscribe(Vec<u16>),
     Close,
-    ConnectionUnsubscribe(ConnectionID),
+    Tcp(LayerTcp),
     FileRequest(FileRequest),
     Ping,
 }
@@ -191,9 +170,7 @@ pub enum FileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
     Close,
-    NewTCPConnection(NewTCPConnection),
-    TCPData(TCPData),
-    TCPClose(TCPClose),
+    Tcp(DaemonTcp),
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
@@ -306,6 +283,7 @@ mod tests {
     use bytes::BytesMut;
 
     use super::*;
+    use crate::tcp::TcpData;
 
     #[test]
     fn sanity_client_encode_decode() {
@@ -313,7 +291,7 @@ mod tests {
         let mut daemon_codec = DaemonCodec::new();
         let mut buf = BytesMut::new();
 
-        let msg = ClientMessage::PortSubscribe(vec![1, 2, 3]);
+        let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
 
         client_codec.encode(msg.clone(), &mut buf).unwrap();
 
@@ -329,10 +307,10 @@ mod tests {
         let mut daemon_codec = DaemonCodec::new();
         let mut buf = BytesMut::new();
 
-        let msg = DaemonMessage::TCPData(TCPData {
+        let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
             bytes: vec![1, 2, 3],
-        });
+        }));
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();
 
@@ -375,14 +353,5 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
         }
-    }
-
-    #[test]
-    fn decode_daemon_partial_data() {
-        let mut codec = DaemonCodec::new();
-        let mut buf = BytesMut::new();
-        buf.put_u8(0);
-
-        assert!(codec.decode(&mut buf).unwrap().is_none());
     }
 }
