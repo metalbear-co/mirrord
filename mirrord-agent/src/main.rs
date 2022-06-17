@@ -12,6 +12,7 @@ use std::{
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
+    tcp::{DaemonTcp, LayerTcp},
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, FileRequest, FileResponse,
     GetEnvVarsRequest, Port, ResponseError,
 };
@@ -184,14 +185,23 @@ async fn handle_peer_messages(
     container_runtime: &Option<String>,
 ) -> Result<(), AgentError> {
     match peer_message.client_message {
-        ClientMessage::PortSubscribe(ports) => {
+        ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) => {
             debug!(
-                "ClientMessage::PortSubscribe -> peer id {:#?} asked to subscribe to {:#?}",
-                peer_message.peer_id, ports
+                "ClientMessage::PortUnsubscribe -> peer id {:#?}, port {port:#?}",
+                peer_message.peer_id
             );
             state
                 .port_subscriptions
-                .subscribe_many(peer_message.peer_id, ports);
+                .unsubscribe(peer_message.peer_id, port);
+        }
+        ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
+            debug!(
+                "ClientMessage::PortSubscribe -> peer id {:#?} asked to subscribe to {:#?}",
+                peer_message.peer_id, port
+            );
+            state
+                .port_subscriptions
+                .subscribe(peer_message.peer_id, port);
 
             let ports = state.port_subscriptions.get_subscribed_topics();
             sniffer_command_tx
@@ -210,7 +220,7 @@ async fn handle_peer_messages(
                 .send(SnifferCommand::SetPorts(ports))
                 .await?;
         }
-        ClientMessage::ConnectionUnsubscribe(connection_id) => {
+        ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id)) => {
             debug!("ClientMessage::ConnectionUnsubscribe -> peer id {:#?} unsubscribe connection id {:#?}", &peer_message.peer_id, connection_id);
             state
                 .connections_subscriptions
@@ -394,15 +404,15 @@ async fn start_agent() -> Result<(), AgentError> {
                 match sniffer_output {
                     Some(sniffer_output) => {
                         match sniffer_output {
-                            SnifferOutput::NewTCPConnection(new_connection) => {
-                                debug!("SnifferOutput::NewTCPConnection -> connection {:#?}", new_connection);
+                            SnifferOutput::NewTcpConnection(new_connection) => {
+                                debug!("SnifferOutput::NewTcpConnection -> connection {:#?}", new_connection);
                                 let peer_ids = state.port_subscriptions.get_topic_subscribers(new_connection.destination_port);
 
                                 for peer_id in peer_ids {
                                     state.connections_subscriptions.subscribe(peer_id, new_connection.connection_id);
 
                                     if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::NewTCPConnection(new_connection.clone())).await {
+                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::NewConnection(new_connection.clone()))).await {
                                             Ok(_) => {},
                                             Err(err) => {
                                                 error!("error sending message {:?}", err);
@@ -411,13 +421,13 @@ async fn start_agent() -> Result<(), AgentError> {
                                     }
                                 }
                             },
-                            SnifferOutput::TCPClose(close) => {
-                                debug!("SnifferOutput::TCPClose -> close {:#?}", close);
+                            SnifferOutput::TcpClose(close) => {
+                                debug!("SnifferOutput::TcpClose -> close {:#?}", close);
                                 let peer_ids = state.connections_subscriptions.get_topic_subscribers(close.connection_id);
 
                                 for peer_id in peer_ids {
                                     if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::TCPClose(close.clone())).await {
+                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::Close(close.clone()))).await {
                                             Ok(_) => {},
                                             Err(err) => {
                                                 error!("error sending message {:?}", err);
@@ -427,13 +437,13 @@ async fn start_agent() -> Result<(), AgentError> {
                                 }
                                 state.connections_subscriptions.remove_topic(close.connection_id);
                             },
-                            SnifferOutput::TCPData(data) => {
-                                debug!("SnifferOutput::TCPData -> data");
+                            SnifferOutput::TcpData(data) => {
+                                debug!("SnifferOutput::TcpData -> data");
                                 let peer_ids = state.connections_subscriptions.get_topic_subscribers(data.connection_id);
 
                                 for peer_id in peer_ids {
                                     if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::TCPData(data.clone())).await {
+                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::Data(data.clone()))).await {
                                             Ok(_) => {},
                                             Err(err) => {
                                                 error!("error sending message {:?}", err);

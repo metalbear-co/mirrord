@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
@@ -52,7 +53,7 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(config: LayerConfig) -> Portforwarder {
+pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     let LayerConfig {
         agent_rust_log,
         agent_namespace,
@@ -179,6 +180,14 @@ pub async fn create_agent(config: LayerConfig) -> Portforwarder {
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
         .await
-        .unwrap();
-    pods_api.portforward(&pod_name, &[61337]).await.unwrap()
+        .with_context(|| {
+            format!(
+                "Failed to receive a timely response from pod: {:?}",
+                pod_name
+            )
+        })?;
+    pods_api
+        .portforward(&pod_name, &[61337])
+        .await
+        .context("Received an error from the pods API")
 }

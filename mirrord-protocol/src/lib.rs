@@ -3,11 +3,15 @@
 
 pub mod codec;
 pub mod error;
+pub mod tcp;
 
 use std::{collections::HashSet, ops::Deref};
 
 pub use codec::*;
 pub use error::*;
+
+pub type ConnectionID = u16;
+pub type Port = u16;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVarsFilter(pub String);
