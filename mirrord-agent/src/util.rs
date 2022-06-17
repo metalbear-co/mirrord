@@ -32,13 +32,6 @@ where
             .insert(client);
     }
 
-    /// Subscribe many topics at once
-    pub fn subscribe_many(&mut self, client: C, topics: impl IntoIterator<Item = T>) {
-        for topic in topics {
-            self.subscribe(client, topic);
-        }
-    }
-
     /// Remove a subscription of given client from the topic.
     /// topic is removed if no subscribers left.
     pub fn unsubscribe(&mut self, client: C, topic: T) {
@@ -136,7 +129,8 @@ mod subscription_tests {
     #[test]
     fn sanity() {
         let mut subscriptions = Subscriptions::<Port, _>::new();
-        subscriptions.subscribe_many(3, vec![3, 2]);
+        subscriptions.subscribe(3, 2);
+        subscriptions.subscribe(3, 3);
         subscriptions.subscribe(3, 1);
         subscriptions.subscribe(1, 4);
         subscriptions.subscribe(2, 1);

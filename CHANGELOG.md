@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Remove building agent before building & running tests (duplicate)
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
 - CD release: Fix universal binary for macOS
+- Refactor: Change protocol + mirrord-layer to split messages into modules, so main module only handles general messages, passing down to the appropriate module for handling.
 
 ## 2.2.1
 ### Changed
