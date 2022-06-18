@@ -4,25 +4,21 @@ use std::{
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
     path::PathBuf,
-    sync::atomic::AtomicUsize,
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenFileRequest,
-    OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse,
+    CloseFileRequest, CloseFileResponse, ErrorKindInternal, FileError, FileRequest, FileResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
-use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
-
-/// Unique file descriptor generator
-pub(crate) fn generate_fd() -> usize {
-    static FD_GEN: AtomicUsize = AtomicUsize::new(1);
-    FD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
+use crate::{
+    error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, util::IndexAllocator,
+    PeerID,
+};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -33,6 +29,7 @@ pub enum RemoteFile {
 #[derive(Debug, Default)]
 pub struct FileManager {
     pub open_files: HashMap<usize, RemoteFile>,
+    index_allocator: IndexAllocator<usize>,
 }
 
 impl FileManager {
@@ -46,39 +43,52 @@ impl FileManager {
             path, open_options
         );
 
-        OpenOptions::from(open_options)
+        let file = OpenOptions::from(open_options)
             .open(&path)
-            .map(|file| {
-                // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = generate_fd();
-
-                let _ = file
-                    .metadata()
-                    .map_err(|err| {
-                        error!(
-                            "FileManager::open -> Failed to get metadata for file {:#?}",
-                            err
-                        );
-                        err
-                    })
-                    .map(|metadata| {
-                        debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
-                        if metadata.is_dir() {
-                            self.open_files.insert(fd, RemoteFile::Directory(path));
-                        } else {
-                            self.open_files.insert(fd, RemoteFile::File(file));
-                        }
-                    });
-
-                OpenFileResponse { fd }
-            })
             .map_err(|fail| {
+                error!(
+                    "FileManager::open -> Failed to open file {:#?} | error {:#?}",
+                    path, fail
+                );
                 ResponseError::FileOperation(FileError {
                     operation: "open".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
+            })?;
+
+        let fd = self.index_allocator.next_index().ok_or_else(|| {
+            error!("FileManager::open -> Failed to allocate file descriptor");
+            ResponseError::FileOperation(FileError {
+                operation: "open".to_string(),
+                raw_os_error: Some(-1),
+                kind: ErrorKindInternal::Other,
             })
+        })?;
+
+        match file.metadata() {
+            Ok(metadata) => {
+                debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
+                let remote_file = if metadata.is_dir() {
+                    RemoteFile::Directory(path)
+                } else {
+                    RemoteFile::File(file)
+                };
+                self.open_files.insert(fd, remote_file);
+                Ok(OpenFileResponse { fd })
+            }
+            Err(err) => {
+                error!(
+                    "FileManager::open_relative -> Failed to get metadata for file {:#?}",
+                    err
+                );
+                Err(ResponseError::FileOperation(FileError {
+                    operation: "open".to_string(),
+                    raw_os_error: err.raw_os_error(),
+                    kind: err.kind().into(),
+                }))
+            }
+        }
     }
 
     pub(crate) fn open_relative(
@@ -103,44 +113,55 @@ impl FileManager {
                 "FileManager::open_relative -> Trying to open complete path: {:#?}",
                 path
             );
-            OpenOptions::from(open_options).open(&path).map(|file| {
-                // let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                let fd = generate_fd();
-
-                let _ = file
-                    .metadata()
-                    .map_err(|err| {
-                        error!(
-                            "FileManager::open_relative -> Failed to get metadata for file {:#?}",
-                            err
-                        );
-                        err
+            let file = OpenOptions::from(open_options)
+                .open(&path)
+                .map_err(|fail| {
+                    error!(
+                        "FileManager::open -> Failed to open file {:#?} | error {:#?}",
+                        path, fail
+                    );
+                    ResponseError::FileOperation(FileError {
+                        operation: "open".to_string(),
+                        raw_os_error: fail.raw_os_error(),
+                        kind: fail.kind().into(),
                     })
-                    .map(|metadata| {
-                        debug!(
-                            "FileManager::open_relative -> Got metadata for file {:#?}",
-                            metadata
-                        );
-                        let remote_file = if metadata.is_dir() {
-                            RemoteFile::Directory(path)
-                        } else {
-                            RemoteFile::File(file)
-                        };
-                        self.open_files.insert(fd, remote_file);
-                    });
+                })?;
 
-                OpenFileResponse { fd }
-            })
+            let fd = self.index_allocator.next_index().ok_or_else(|| {
+                error!("FileManager::open -> Failed to allocate file descriptor");
+                ResponseError::FileOperation(FileError {
+                    operation: "open".to_string(),
+                    raw_os_error: Some(-1),
+                    kind: ErrorKindInternal::Other,
+                })
+            })?;
+
+            match file.metadata() {
+                Ok(metadata) => {
+                    debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
+                    let remote_file = if metadata.is_dir() {
+                        RemoteFile::Directory(path)
+                    } else {
+                        RemoteFile::File(file)
+                    };
+                    self.open_files.insert(fd, remote_file);
+                    Ok(OpenFileResponse { fd })
+                }
+                Err(err) => {
+                    error!(
+                        "FileManager::open_relative -> Failed to get metadata for file {:#?}",
+                        err
+                    );
+                    Err(ResponseError::FileOperation(FileError {
+                        operation: "open".to_string(),
+                        raw_os_error: err.raw_os_error(),
+                        kind: err.kind().into(),
+                    }))
+                }
+            }
         } else {
-            return Err(ResponseError::NotFound);
+            Err(ResponseError::NotFound)
         }
-        .map_err(|fail| {
-            ResponseError::FileOperation(FileError {
-                operation: "open".to_string(),
-                raw_os_error: fail.raw_os_error(),
-                kind: fail.kind().into(),
-            })
-        })
     }
 
     pub(crate) fn read(
