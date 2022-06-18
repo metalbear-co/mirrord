@@ -118,7 +118,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if let Some(override_env_vars_include) = &args.override_env_vars_include {
         std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_SELECT",
+            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
             override_env_vars_include,
         );
     }
