@@ -34,6 +34,10 @@ pub struct LayerConfig {
     pub enabled_override_env_vars: bool,
 
     /// Filters out these env vars when overriding is enabled.
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_FILTER", default = "")]
-    pub override_env_vars_filter: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", default = "")]
+    pub override_env_vars_exclude: String,
+
+    /// Selects these env vars when overriding is enabled.
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", default = "")]
+    pub override_env_vars_include: String,
 }

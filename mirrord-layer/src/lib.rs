@@ -393,11 +393,24 @@ async fn poll_agent(
     let mut ping = false;
 
     if config.enabled_override_env_vars {
-        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_env_vars_filter));
+        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_env_vars_exclude));
+        let env_vars_select = HashSet::from(EnvVarsFilter(config.override_env_vars_include));
+
+        let env_vars_intersection = env_vars_filter.intersection(&env_vars_select);
+        if env_vars_intersection.clone().count() > 0 {
+            panic!(
+                r"mirrord-layer encountered an issue:
+            Intersecting values in OVERRIDE_ENV_VARS_EXCLUDE and OVERRIDE_ENV_VARS_INCLUDE!
+            Make sure that no values are present in both filters at the same time!
+            Common values are {:#?}",
+                env_vars_intersection
+            );
+        }
 
         let codec_result = codec
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
+                env_vars_select,
             }))
             .await;
 

@@ -115,10 +115,11 @@ pub struct PeerMessage {
 async fn select_env_vars(
     environ_path: PathBuf,
     filter_env_vars: HashSet<String>,
+    select_env_vars: HashSet<String>,
 ) -> Result<HashMap<String, String>, ResponseError> {
     debug!(
-        "select_env_vars -> environ_path {:#?} filter_env_vars {:#?}",
-        environ_path, filter_env_vars
+        "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
+        environ_path, filter_env_vars, select_env_vars
     );
 
     let mut environ_file = tokio::fs::File::open(environ_path).await.map_err(|fail| {
@@ -148,6 +149,14 @@ async fn select_env_vars(
         read_amount, raw_env_vars
     );
 
+    // TODO(alex) [mid] 2022-06-17: Fix this in CI
+    /*
+    error: Found argument '--override_env_vars' which wasn't expected, or isn't valid in this context
+        Did you mean '--override-env-vars'?
+        If you tried to supply `--override_env_vars` as a value rather than a flag, use `-- --override_env_vars`
+    USAGE:
+        mirrord-f89b5123540aaf97 exec --pod-name <POD_NAME> --accept-invalid-certificates --override-env-vars <BINARY>
+         */
     let env_vars = raw_env_vars
         // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
         .split_terminator(char::from(0))
@@ -163,6 +172,8 @@ async fn select_env_vars(
         // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
         .filter(|(key, _)| !filter_env_vars.contains(key))
         // [("DB", "foo.db"), ("PORT", "99")]
+        .filter(|(key, _)| select_env_vars.is_empty() || select_env_vars.contains(key))
+        // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
 
     debug!("select_env_vars -> selected env vars found {:?}", env_vars);
@@ -242,11 +253,12 @@ async fn handle_peer_messages(
                 .await?;
         }
         ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-            env_vars_filter: filter_env_vars,
+            env_vars_filter,
+            env_vars_select,
         }) => {
             debug!(
-                "ClientMessage::GetEnvVarsRequest peer id {:?} requesting {:?}",
-                peer_message.peer_id, filter_env_vars
+                "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
+                peer_message.peer_id, env_vars_filter, env_vars_select
             );
 
             let container_runtime = container_runtime
@@ -263,7 +275,8 @@ async fn handle_peer_messages(
             }?;
 
             let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
-            let env_vars_result = select_env_vars(environ_path, filter_env_vars).await;
+            let env_vars_result =
+                select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
 
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel

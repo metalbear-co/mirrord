@@ -118,6 +118,7 @@ pub struct CloseFileRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetEnvVarsRequest {
     pub env_vars_filter: HashSet<String>,
+    pub env_vars_select: HashSet<String>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
