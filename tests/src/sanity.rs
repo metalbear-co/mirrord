@@ -385,17 +385,10 @@ mod tests {
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec![
-            "exec",
-            "--pod-name",
-            &pod_name,
-            "-c",
-            "--override_env_vars",
-            "--",
-        ]
-        .into_iter()
-        .chain(node_command.into_iter())
-        .collect();
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "-e", "--"]
+            .into_iter()
+            .chain(node_command.into_iter())
+            .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
