@@ -41,16 +41,16 @@ use util::{IndexAllocator, Subscriptions};
 
 use crate::runtime::get_container_pid;
 
-type PeerID = u32;
+type AgentID = u32;
 
 #[derive(Debug)]
 struct Peer {
-    id: PeerID,
+    id: AgentID,
     channel: mpsc::Sender<DaemonMessage>,
 }
 
 impl Peer {
-    pub fn new(id: PeerID, channel: mpsc::Sender<DaemonMessage>) -> Peer {
+    pub fn new(id: AgentID, channel: mpsc::Sender<DaemonMessage>) -> Peer {
         Peer { id, channel }
     }
 }
@@ -68,8 +68,8 @@ impl Hash for Peer {
     }
 }
 
-impl Borrow<PeerID> for Peer {
-    fn borrow(&self) -> &PeerID {
+impl Borrow<AgentID> for Peer {
+    fn borrow(&self) -> &AgentID {
         &self.id
     }
 }
@@ -77,9 +77,9 @@ impl Borrow<PeerID> for Peer {
 #[derive(Debug)]
 struct State {
     pub peers: HashSet<Peer>,
-    index_allocator: IndexAllocator<PeerID>,
-    pub port_subscriptions: Subscriptions<Port, PeerID>,
-    pub connections_subscriptions: Subscriptions<ConnectionID, PeerID>,
+    index_allocator: IndexAllocator<AgentID>,
+    pub port_subscriptions: Subscriptions<Port, AgentID>,
+    pub connections_subscriptions: Subscriptions<ConnectionID, AgentID>,
 }
 
 impl State {
@@ -92,11 +92,11 @@ impl State {
         }
     }
 
-    pub fn generate_id(&mut self) -> Option<PeerID> {
+    pub fn generate_id(&mut self) -> Option<AgentID> {
         self.index_allocator.next_index()
     }
 
-    pub fn remove_peer(&mut self, peer_id: PeerID) {
+    pub fn remove_peer(&mut self, peer_id: AgentID) {
         self.peers.remove(&peer_id);
         self.port_subscriptions.remove_client(peer_id);
         self.connections_subscriptions.remove_client(peer_id);
@@ -107,7 +107,7 @@ impl State {
 #[derive(Debug)]
 pub struct PeerMessage {
     client_message: ClientMessage,
-    peer_id: PeerID,
+    peer_id: AgentID,
 }
 
 /// Helper function that loads the process' environment variables, and selects only those that were
@@ -251,7 +251,7 @@ async fn handle_peer_messages(
 
 struct PeerHandler {
     pub sender: Sender<PeerMessage>,
-    id: PeerID,
+    id: AgentID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     receiver: Receiver<DaemonMessage>,
@@ -262,7 +262,7 @@ impl PeerHandler {
     /// A loop that handles peer connection and state. Brekas upon receiver/sender drop.
     pub async fn start(
         sender: Sender<PeerMessage>,
-        id: PeerID,
+        id: AgentID,
         stream: TcpStream,
         receiver: Receiver<DaemonMessage>,
         pid: Option<u64>,

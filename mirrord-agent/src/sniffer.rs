@@ -21,7 +21,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-use crate::{error::AgentError, runtime::set_namespace, util::IndexAllocator};
+use crate::{error::AgentError, runtime::set_namespace, util::IndexAllocator, AgentID};
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
@@ -314,4 +314,135 @@ pub async fn packet_worker(
     }
     debug!("packet_worker -> finished");
     Ok(())
+}
+
+pub struct NewPeer {
+    sender: Sender<DaemonTcp>,
+    receiver: Receiver<LayerTcp>,
+}
+
+type NewPeerReceiver = Receiver<NewPeer>;
+
+struct NewAgent {
+    sender: Sender<DaemonTcp>
+}
+
+struct Subscribe {
+    port: Port,
+}
+
+enum SnifferCommands {
+    NewAgent(NewAgent),
+    Subscribe(Subscribe),
+    AgentClosed
+}
+
+#[derive(Debug)]
+struct SnifferCommand {
+    agent_id: AgentID,
+    command: SnifferCommands
+}
+
+struct TCPSnifferAPI<State> {
+    agent_id: AgentID,
+    sender: Sender<SnifferCommand>,
+    state: std::marker::PhantomData<State>
+}
+struct Disabled;
+struct Enabled;
+
+impl TCPSnifferAPI {
+    pub fn new(agent_id: AgentID, sender: Sender<SnifferCommand>) -> TCPSnifferAPI<Disabled> {
+        Self { agent_id, sender, state: std::marker::PhantomData }
+    }
+}
+
+impl TCPSnifferAPI<Disabled> {
+    pub async fn enable(mut self, sender: Sender<DaemonTcp>) -> Result(TCPSnifferAPI<Enabled>, AgentError) {
+        self.sender.send(SnifferCommand {
+            agent_id: self.agent_id,
+            command: SnifferCommands::NewAgent(NewAgent {
+                sender
+            })
+        }).await?;
+        Ok(self)
+    }
+}
+
+impl TCPSnifferAPI<Enabled> {
+    pub async fn subscribe(&mut self, port: Port) -> Result((), AgentError) {
+        self.sender.send(SnifferCommand {
+            agent_id: self.agent_id,
+            command: SnifferCommands::Subscribe(Subscribe {
+                port
+            })
+        }).await?;
+        Ok(())
+    }
+}
+
+impl Drop for TCPSnifferAPI<Enabled> {
+    fn drop(&mut self) {
+        self.sender.blocking_send(SnifferCommand {
+            agent_id: self.agent_id,
+            command: SnifferCommands::AgentClosed
+        }).unwrap();
+    }
+}
+
+
+struct TCPConnectionSniffer {
+    port_subscriptions: Subscriptions<Port, AgentID>,
+    reciever: Receiver<SnifferCommand>,
+    agent_senders: HashMap<AgentID, Sender<DaemonTcp>>,
+}
+
+impl TCPConnectionSniffer {
+
+    pub async fn run(mut self) -> Result<()> {
+        loop {
+            select! {
+                command = self.reciever.next() => {
+                    self.handle_command(command).await?;
+                }
+            }
+        }       
+        Ok(())
+    }
+
+    fn handle_new_agent(&mut self, agent_id: AgentID, sender: Sender<DaemonTcp>) {
+        self.agent_senders.insert(agent_id, sender);
+    }
+
+    fn handle_subscribe(&mut self, agent_id: AgentID, port: Port) {
+        self.port_subscriptions.subscribe(port, agent_id);
+    }
+
+    fn handle_agent_closed(&mut self, agent_id: AgentID) {
+        self.agent_senders.remove(&agent_id);
+        self.port_subscriptions.remove_client(agent_id);
+    }
+
+    async fn handle_command(&mut self, command: SnifferCommand) -> Result<()> {
+        match command {
+            SnifferCommand {
+                agent_id,
+                command: SnifferCommands::NewAgent(NewAgent { sender })} => {
+                    self.handle_new_agent(agent_id, sender);
+                },
+            SnifferCommand {
+                agent_id,
+                command: SnifferCommands::Subscribe(Subscribe { port })
+            } => {
+                self.handle_subscribe(agent_id, port);
+            },
+            SnifferCommand {
+                agent_id,
+                command: SnifferCommands::AgentClosed
+            } => {
+                self.handle_agent_closed(agent_id);
+            }
+        }
+        Ok(())
+    }
 }

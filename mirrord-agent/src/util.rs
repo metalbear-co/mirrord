@@ -13,6 +13,14 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
+type AgentID = u32;
+
+#[derive(Debug)]
+pub struct AgentMessage<T> {
+    id: AgentID,
+    message: T
+}
+
 impl<T, C> Subscriptions<T, C>
 where
     T: Eq + Hash + Clone + Copy,
