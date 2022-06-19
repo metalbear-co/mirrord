@@ -179,3 +179,6 @@ jobs:
         run: kubectl wait --for=condition=ready pod -l app=http-echo --timeout=20s
       - name: test with docker runtime
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: kubectl logs -l app=mirrord
