@@ -12,7 +12,7 @@ mod tests {
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-        time::{timeout, Duration, sleep},
+        time::{sleep, timeout, Duration},
     };
 
     use crate::utils::*;
@@ -71,8 +71,9 @@ mod tests {
         .await
         .unwrap();
 
-        // agent takes a bit of time to set filter and start sending traffic, this should solve many race stuff until
-        // we watch the agent logs and start sending requests after we see it had set the new filter.
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
         sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
@@ -156,8 +157,9 @@ mod tests {
         .await
         .unwrap();
 
-        // agent takes a bit of time to set filter and start sending traffic, this should solve many race stuff until
-        // we watch the agent logs and start sending requests after we see it had set the new filter.
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
         sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
@@ -219,8 +221,9 @@ mod tests {
         .await
         .unwrap();
 
-        // agent takes a bit of time to set filter and start sending traffic, this should solve many race stuff until
-        // we watch the agent logs and start sending requests after we see it had set the new filter.
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
         sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
@@ -319,8 +322,9 @@ mod tests {
         .await
         .unwrap();
 
-        // agent takes a bit of time to set filter and start sending traffic, this should solve many race stuff until
-        // we watch the agent logs and start sending requests after we see it had set the new filter.
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
         sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
