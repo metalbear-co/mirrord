@@ -12,7 +12,7 @@ mod tests {
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-        time::{timeout, Duration},
+        time::{sleep, timeout, Duration},
     };
 
     use crate::utils::*;
@@ -71,6 +71,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -153,6 +157,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
@@ -213,6 +221,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -310,6 +322,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
