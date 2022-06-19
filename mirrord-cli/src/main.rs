@@ -53,6 +53,10 @@ struct ExecArgs {
     #[clap(value_parser)]
     pub binary: String,
 
+    /// Agent TTL
+    #[clap(long, value_parser)]
+    pub agent_ttl: Option<u16>,
+
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
     pub accept_invalid_certificates: bool,
@@ -146,6 +150,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if let Some(image) = &args.agent_image {
         std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
+    }
+
+    if let Some(agent_ttl) = &args.agent_ttl {
+        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
 
     if args.enable_fs {

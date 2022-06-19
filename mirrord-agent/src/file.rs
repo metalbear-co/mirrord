@@ -269,7 +269,7 @@ impl FileManager {
                     })
                 })
         } else {
-            return Err(ResponseError::NotFound);
+            Err(ResponseError::NotFound)
         }
     }
 
