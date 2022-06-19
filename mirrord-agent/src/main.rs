@@ -236,9 +236,7 @@ async fn handle_peer_messages(
                 .unsubscribe(peer_message.peer_id, connection_id);
         }
         ClientMessage::Ping => {
-            trace!("peer id {:?} sent ping", &peer_message.peer_id);
-            let peer = state.peers.get(&peer_message.peer_id).unwrap();
-            peer.channel.send(DaemonMessage::Pong).await?;
+            // handled by peer
         }
         ClientMessage::FileRequest(_) => {
             // handled by the peer..
@@ -352,6 +350,10 @@ impl PeerHandler {
                     .await
                     .map_err(From::from)
             }
+            },
+            ClientMessage::Ping => {
+                self.stream.send(DaemonMessage::Pong).await.map_err(From::from)
+            },
             _ => {
                 let message = PeerMessage {
                     client_message: message,
