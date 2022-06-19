@@ -57,7 +57,7 @@ impl FileManager {
                 })
             })?;
 
-        let fd = self.index_allocator.next_index().ok_or_else(|| {
+        let fd = self.index_allocator.next_index().ok_or({
             error!("FileManager::open -> Failed to allocate file descriptor");
             ResponseError::FileOperation(FileError {
                 operation: "open".to_string(),
@@ -250,26 +250,27 @@ impl FileManager {
                 file, write_bytes
             );
 
-            file.write(&write_bytes).map(|write_amount| {
-                debug!(
-                    "FileManager::write -> wrote {:#?} bytes to fd {:#?}",
-                    write_amount, fd
-                );
+            file.write(&write_bytes)
+                .map(|write_amount| {
+                    debug!(
+                        "FileManager::write -> wrote {:#?} bytes to fd {:#?}",
+                        write_amount, fd
+                    );
 
-                WriteFileResponse {
-                    written_amount: write_amount,
-                }
-            })
+                    WriteFileResponse {
+                        written_amount: write_amount,
+                    }
+                })
+                .map_err(|fail| {
+                    ResponseError::FileOperation(FileError {
+                        operation: "write".to_string(),
+                        raw_os_error: fail.raw_os_error(),
+                        kind: fail.kind().into(),
+                    })
+                })
         } else {
             return Err(ResponseError::NotFound);
         }
-        .map_err(|fail| {
-            ResponseError::FileOperation(FileError {
-                operation: "write".to_string(),
-                raw_os_error: fail.raw_os_error(),
-                kind: fail.kind().into(),
-            })
-        })
     }
 
     pub(crate) fn close(&mut self, fd: usize) -> Result<CloseFileResponse, ResponseError> {
