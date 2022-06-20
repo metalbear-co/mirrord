@@ -2,10 +2,9 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    lazy::SyncLazy,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use errno::{errno, set_errno, Errno};
@@ -22,11 +21,11 @@ use crate::{
     HOOK_SENDER,
 };
 
-pub(crate) static SOCKETS: SyncLazy<Mutex<HashMap<RawFd, Arc<Socket>>>> =
-    SyncLazy::new(|| Mutex::new(HashMap::new()));
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub static CONNECTION_QUEUE: SyncLazy<Mutex<ConnectionQueue>> =
-    SyncLazy::new(|| Mutex::new(ConnectionQueue::default()));
+pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
+    LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]

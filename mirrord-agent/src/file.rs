@@ -7,21 +7,29 @@ use std::{
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileError, FileRequest, FileResponse, OpenFileRequest,
-    OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse,
+    CloseFileRequest, CloseFileResponse, ErrorKindInternal, FileError, FileRequest, FileResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error};
 
-use crate::{error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, PeerID};
+use crate::{
+    error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, util::IndexAllocator,
+    PeerID,
+};
 
-// TODO: To help with `openat`, instead of `HashMap<_, File>` this should be
-// `HashMap<_, RemoteFile`>, where `RemoteFile` is a struct that holds both the `File` + `PathBuf`.
+#[derive(Debug)]
+pub enum RemoteFile {
+    File(File),
+    Directory(PathBuf),
+}
+
 #[derive(Debug, Default)]
 pub struct FileManager {
-    pub open_files: HashMap<i32, File>,
+    pub open_files: HashMap<usize, RemoteFile>,
+    index_allocator: IndexAllocator<usize>,
 }
 
 impl FileManager {
@@ -35,26 +43,57 @@ impl FileManager {
             path, open_options
         );
 
-        OpenOptions::from(open_options)
-            .open(path)
-            .map(|file| {
-                let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
-
-                OpenFileResponse { fd }
-            })
+        let file = OpenOptions::from(open_options)
+            .open(&path)
             .map_err(|fail| {
+                error!(
+                    "FileManager::open -> Failed to open file {:#?} | error {:#?}",
+                    path, fail
+                );
                 ResponseError::FileOperation(FileError {
                     operation: "open".to_string(),
                     raw_os_error: fail.raw_os_error(),
                     kind: fail.kind().into(),
                 })
+            })?;
+
+        let fd = self.index_allocator.next_index().ok_or({
+            error!("FileManager::open -> Failed to allocate file descriptor");
+            ResponseError::FileOperation(FileError {
+                operation: "open".to_string(),
+                raw_os_error: Some(-1),
+                kind: ErrorKindInternal::Other,
             })
+        })?;
+
+        match file.metadata() {
+            Ok(metadata) => {
+                debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
+                let remote_file = if metadata.is_dir() {
+                    RemoteFile::Directory(path)
+                } else {
+                    RemoteFile::File(file)
+                };
+                self.open_files.insert(fd, remote_file);
+                Ok(OpenFileResponse { fd })
+            }
+            Err(err) => {
+                error!(
+                    "FileManager::open_relative -> Failed to get metadata for file {:#?}",
+                    err
+                );
+                Err(ResponseError::FileOperation(FileError {
+                    operation: "open".to_string(),
+                    raw_os_error: err.raw_os_error(),
+                    kind: err.kind().into(),
+                }))
+            }
+        }
     }
 
     pub(crate) fn open_relative(
         &mut self,
-        relative_fd: i32,
+        relative_fd: usize,
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> Result<OpenFileResponse, ResponseError> {
@@ -63,46 +102,86 @@ impl FileManager {
             path, open_options, relative_fd
         );
 
-        let _relative_dir = self
+        let relative_dir = self
             .open_files
             .get(&relative_fd)
             .ok_or(ResponseError::NotFound)?;
 
-        OpenOptions::from(open_options)
-            .open(path)
-            .map(|file| {
-                let fd = std::os::unix::prelude::AsRawFd::as_raw_fd(&file);
-                self.open_files.insert(fd, file);
+        if let RemoteFile::Directory(relative_dir) = relative_dir {
+            let path = relative_dir.join(&path);
+            debug!(
+                "FileManager::open_relative -> Trying to open complete path: {:#?}",
+                path
+            );
+            let file = OpenOptions::from(open_options)
+                .open(&path)
+                .map_err(|fail| {
+                    error!(
+                        "FileManager::open -> Failed to open file {:#?} | error {:#?}",
+                        path, fail
+                    );
+                    ResponseError::FileOperation(FileError {
+                        operation: "open".to_string(),
+                        raw_os_error: fail.raw_os_error(),
+                        kind: fail.kind().into(),
+                    })
+                })?;
 
-                OpenFileResponse { fd }
-            })
-            .map_err(|fail| {
+            let fd = self.index_allocator.next_index().ok_or_else(|| {
+                error!("FileManager::open -> Failed to allocate file descriptor");
                 ResponseError::FileOperation(FileError {
                     operation: "open".to_string(),
-                    raw_os_error: fail.raw_os_error(),
-                    kind: fail.kind().into(),
+                    raw_os_error: Some(-1),
+                    kind: ErrorKindInternal::Other,
                 })
-            })
+            })?;
+
+            match file.metadata() {
+                Ok(metadata) => {
+                    debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
+                    let remote_file = if metadata.is_dir() {
+                        RemoteFile::Directory(path)
+                    } else {
+                        RemoteFile::File(file)
+                    };
+                    self.open_files.insert(fd, remote_file);
+                    Ok(OpenFileResponse { fd })
+                }
+                Err(err) => {
+                    error!(
+                        "FileManager::open_relative -> Failed to get metadata for file {:#?}",
+                        err
+                    );
+                    Err(ResponseError::FileOperation(FileError {
+                        operation: "open".to_string(),
+                        raw_os_error: err.raw_os_error(),
+                        kind: err.kind().into(),
+                    }))
+                }
+            }
+        } else {
+            Err(ResponseError::NotFound)
+        }
     }
 
     pub(crate) fn read(
         &mut self,
-        fd: i32,
+        fd: usize,
         buffer_size: usize,
     ) -> Result<ReadFileResponse, ResponseError> {
-        let file = self
+        let remote_file = self
             .open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
 
-        debug!(
-            "FileManager::read -> Trying to read file {:#?}, with count {:#?}",
-            file, buffer_size
-        );
+        if let RemoteFile::File(file) = remote_file {
+            debug!(
+                "FileManager::read -> Trying to read file {:#?}, with count {:#?}",
+                file, buffer_size
+            );
 
-        let mut buffer = vec![0; buffer_size];
-        file.read(&mut buffer)
-            .map(|read_amount| {
+            let mut buffer = vec![0; buffer_size];
+            file.read(&mut buffer).map(|read_amount| {
                 debug!(
                     "FileManager::read -> read {:#?} bytes from fd {:#?}",
                     read_amount, fd
@@ -113,18 +192,21 @@ impl FileManager {
                     read_amount,
                 }
             })
-            .map_err(|fail| {
-                ResponseError::FileOperation(FileError {
-                    operation: "read".to_string(),
-                    raw_os_error: fail.raw_os_error(),
-                    kind: fail.kind().into(),
-                })
+        } else {
+            return Err(ResponseError::NotFound);
+        }
+        .map_err(|fail| {
+            ResponseError::FileOperation(FileError {
+                operation: "read".to_string(),
+                raw_os_error: fail.raw_os_error(),
+                kind: fail.kind().into(),
             })
+        })
     }
 
     pub(crate) fn seek(
         &mut self,
-        fd: i32,
+        fd: usize,
         seek_from: SeekFrom,
     ) -> Result<SeekFileResponse, ResponseError> {
         let file = self
@@ -132,25 +214,29 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
 
-        debug!(
-            "FileManager::seek -> Trying to seek file {:#?}, with seek {:#?}",
-            file, seek_from
-        );
+        if let RemoteFile::File(file) = file {
+            debug!(
+                "FileManager::seek -> Trying to seek file {:#?}, with seek {:#?}",
+                file, seek_from
+            );
 
-        file.seek(seek_from)
-            .map(|result_offset| SeekFileResponse { result_offset })
-            .map_err(|fail| {
-                ResponseError::FileOperation(FileError {
-                    operation: "seek".to_string(),
-                    raw_os_error: fail.raw_os_error(),
-                    kind: fail.kind().into(),
-                })
+            file.seek(seek_from)
+                .map(|result_offset| SeekFileResponse { result_offset })
+        } else {
+            return Err(ResponseError::NotFound);
+        }
+        .map_err(|fail| {
+            ResponseError::FileOperation(FileError {
+                operation: "seek".to_string(),
+                raw_os_error: fail.raw_os_error(),
+                kind: fail.kind().into(),
             })
+        })
     }
 
     pub(crate) fn write(
         &mut self,
-        fd: i32,
+        fd: usize,
         write_bytes: Vec<u8>,
     ) -> Result<WriteFileResponse, ResponseError> {
         let file = self
@@ -158,20 +244,36 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound)?;
 
-        debug!("FileManager::write -> Trying to write file {:#?}", file);
+        if let RemoteFile::File(file) = file {
+            debug!(
+                "FileManager::write -> Trying to write file {:#?}, with bytes {:#?}",
+                file, write_bytes
+            );
 
-        file.write(&write_bytes)
-            .map(|written_amount| WriteFileResponse { written_amount })
-            .map_err(|fail| {
-                ResponseError::FileOperation(FileError {
-                    operation: "write".to_string(),
-                    raw_os_error: fail.raw_os_error(),
-                    kind: fail.kind().into(),
+            file.write(&write_bytes)
+                .map(|write_amount| {
+                    debug!(
+                        "FileManager::write -> wrote {:#?} bytes to fd {:#?}",
+                        write_amount, fd
+                    );
+
+                    WriteFileResponse {
+                        written_amount: write_amount,
+                    }
                 })
-            })
+                .map_err(|fail| {
+                    ResponseError::FileOperation(FileError {
+                        operation: "write".to_string(),
+                        raw_os_error: fail.raw_os_error(),
+                        kind: fail.kind().into(),
+                    })
+                })
+        } else {
+            Err(ResponseError::NotFound)
+        }
     }
 
-    pub(crate) fn close(&mut self, fd: i32) -> Result<CloseFileResponse, ResponseError> {
+    pub(crate) fn close(&mut self, fd: usize) -> Result<CloseFileResponse, ResponseError> {
         let file = self.open_files.remove(&fd).ok_or(ResponseError::NotFound)?;
 
         debug!("FileManager::write -> Trying to close file {:#?}", file);
@@ -228,14 +330,7 @@ pub async fn file_worker(
                     open_options,
                 }),
             ) => {
-                let path = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = file_manager.open_relative(relative_fd, full_path, open_options);
+                let open_result = file_manager.open_relative(relative_fd, path, open_options);
                 let response = FileResponse::Open(open_result);
 
                 file_response_tx.send((peer_id, response)).await?;

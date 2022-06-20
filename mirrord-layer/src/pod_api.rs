@@ -79,7 +79,10 @@ pub async fn create_agent(
     let agent_pod: Job =
         serde_json::from_value(json!({ // Only Jobs support self deletion after completion
                 "metadata": {
-                    "name": agent_job_name
+                    "name": agent_job_name,
+                    "labels": {
+                        "app": "mirrord"
+                    }
                 },
                 "spec": {
                 "ttlSecondsAfterFinished": env_config.agent_ttl,

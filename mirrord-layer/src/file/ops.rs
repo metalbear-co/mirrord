@@ -82,7 +82,7 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
     Ok(local_file_fd)
 }
 
-fn close_remote_file_on_failure(fd: RawFd) -> Result<CloseFileResponse, LayerError> {
+fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse, LayerError> {
     // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
 
@@ -99,7 +99,7 @@ fn close_remote_file_on_failure(fd: RawFd) -> Result<CloseFileResponse, LayerErr
 pub(crate) fn openat(
     path: PathBuf,
     open_flags: c_int,
-    relative_fd: RawFd,
+    relative_fd: usize,
 ) -> Result<RawFd, LayerError> {
     debug!(
         "openat -> trying to open valid file {:?} with relative dir {:?}.",
@@ -175,7 +175,7 @@ pub(crate) fn fopen(
 
 pub(crate) fn fdopen(
     local_fd: &RawFd,
-    remote_fd: RawFd,
+    remote_fd: usize,
     _open_options: OpenOptionsInternal,
 ) -> Result<*mut FILE, LayerError> {
     debug!("fdopen -> trying to fdopen valid file {:#?}", remote_fd);
@@ -189,7 +189,7 @@ pub(crate) fn fdopen(
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
-pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
+pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
     debug!("read -> trying to read valid file {:?}.", fd);
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
@@ -206,7 +206,7 @@ pub(crate) fn read(fd: RawFd, read_amount: usize) -> Result<ReadFileResponse, La
     Ok(read_file_response)
 }
 
-pub(crate) fn lseek(fd: RawFd, seek_from: SeekFrom) -> Result<u64, LayerError> {
+pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
     debug!("lseek -> trying to seek valid file {:?}.", fd);
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<SeekFileResponse>();
 
@@ -222,7 +222,7 @@ pub(crate) fn lseek(fd: RawFd, seek_from: SeekFrom) -> Result<u64, LayerError> {
     Ok(result_offset)
 }
 
-pub(crate) fn write(fd: RawFd, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
+pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
     debug!("write -> trying to write valid file {:?}.", fd);
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<WriteFileResponse>();
 
@@ -238,7 +238,7 @@ pub(crate) fn write(fd: RawFd, write_bytes: Vec<u8>) -> Result<isize, LayerError
     Ok(written_amount.try_into()?)
 }
 
-pub(crate) fn close(fd: RawFd) -> Result<c_int, LayerError> {
+pub(crate) fn close(fd: usize) -> Result<c_int, LayerError> {
     debug!("close -> trying to close valid file {:?}.", fd);
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<CloseFileResponse>();
 
