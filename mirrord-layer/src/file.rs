@@ -1,4 +1,9 @@
-use std::{collections::HashMap, env, lazy::SyncLazy, os::unix::io::RawFd, sync::Mutex};
+use std::{
+    collections::HashMap,
+    env,
+    os::unix::io::RawFd,
+    sync::{LazyLock, Mutex},
+};
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::OpenOptionsInternal;
@@ -9,7 +14,7 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 /// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
+static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
@@ -46,8 +51,8 @@ struct RemoteFile {
     fd: RawFd,
 }
 
-pub(crate) static OPEN_FILES: SyncLazy<Mutex<HashMap<LocalFd, RemoteFd>>> =
-    SyncLazy::new(|| Mutex::new(HashMap::with_capacity(4)));
+pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
+    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 pub(crate) trait OpenOptionsInternalExt {
     fn from_flags(flags: c_int) -> Self;
