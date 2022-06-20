@@ -33,14 +33,8 @@
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
-        "MIRRORD_OVERRIDE_ENV_VARS": "true",
-        "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE": "NGINX",
-        "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE": "MIRRORD_FAKE_VAR_FIRST;MIRRORD_FAKE_VAR_SECOND",
-        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
@@ -58,12 +52,8 @@
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
-        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_OVERRIDE_ENV_VARS": "true",
-        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
