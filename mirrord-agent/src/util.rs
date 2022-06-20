@@ -18,7 +18,7 @@ type AgentID = u32;
 #[derive(Debug)]
 pub struct AgentMessage<T> {
     id: AgentID,
-    message: T
+    message: T,
 }
 
 impl<T, C> Subscriptions<T, C>
