@@ -14,25 +14,18 @@ pub type ConnectionID = u16;
 pub type Port = u16;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EnvVarsFilter(pub String);
+pub struct EnvVars(pub String);
 
-impl From<EnvVarsFilter> for HashSet<String> {
-    fn from(env_vars: EnvVarsFilter) -> Self {
-        let mut filter = env_vars
+impl From<EnvVars> for HashSet<String> {
+    fn from(env_vars: EnvVars) -> Self {
+        env_vars
             .split_terminator(';')
             .map(String::from)
-            .collect::<HashSet<_>>();
-
-        // TODO: These are env vars that should usually be ignored. Revisit this list if a user
-        // ever asks for a way to NOT filter out these.
-        filter.insert("PATH".to_string());
-        filter.insert("HOME".to_string());
-
-        filter
+            .collect::<HashSet<_>>()
     }
 }
 
-impl Deref for EnvVarsFilter {
+impl Deref for EnvVars {
     type Target = String;
 
     fn deref(&self) -> &Self::Target {

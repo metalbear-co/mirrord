@@ -149,6 +149,12 @@ async fn select_env_vars(
         read_amount, raw_env_vars
     );
 
+    // TODO: These are env vars that should usually be ignored. Revisit this list if a user
+    // ever asks for a way to NOT filter out these.
+    let mut default_filter = HashSet::with_capacity(2);
+    default_filter.insert("PATH".to_string());
+    default_filter.insert("HOME".to_string());
+
     let env_vars = raw_env_vars
         // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
         .split_terminator(char::from(0))
@@ -161,10 +167,15 @@ async fn select_env_vars(
                 _ => None,
             },
         )
+        .filter(|(key, _)| !default_filter.contains(key))
         // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
         .filter(|(key, _)| !filter_env_vars.contains(key))
         // [("DB", "foo.db"), ("PORT", "99")]
-        .filter(|(key, _)| select_env_vars.is_empty() || select_env_vars.contains(key))
+        .filter(|(key, _)| {
+            select_env_vars.is_empty()
+                || select_env_vars.contains("*")
+                || select_env_vars.contains(key)
+        })
         // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
 

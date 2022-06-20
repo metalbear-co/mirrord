@@ -250,6 +250,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     /// Starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
     /// asserts the process crashes: "NotFound" as the namespace does not exist
     async fn test_nonexistent_agent_namespace() {
@@ -386,6 +387,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     pub async fn test_file_ops() {
         let path = env!("CARGO_BIN_FILE_MIRRORD");
         let command = vec!["python3", "python-e2e/ops.py"];

@@ -20,7 +20,7 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVarsFilter,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
     FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
@@ -389,16 +389,17 @@ async fn poll_agent(
     if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
     {
         panic!(
-            r"mirrord-layer encountered an issue:
+            r#"mirrord-layer encountered an issue:
 
             mirrord doesn't support specifying both
-            OVERRIDE_ENV_VARS_EXCLUDE and OVERRIDE_ENV_VARS_INCLUDE at the same time!
+            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
 
-            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`."
+            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
+            >> If you want to include all, use `--override_env_vars_include="*"`."#
         );
     } else {
-        let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_env_vars_exclude));
-        let env_vars_select = HashSet::from(EnvVarsFilter(config.override_env_vars_include));
+        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
+        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
 
         if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
             let codec_result = codec
@@ -409,7 +410,7 @@ async fn poll_agent(
                 .await;
 
             debug!(
-                "ClientMessage::GetEnvVarsFilterRequest codec_result {:#?}",
+                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
                 codec_result
             );
         }
