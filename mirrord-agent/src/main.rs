@@ -149,14 +149,6 @@ async fn select_env_vars(
         read_amount, raw_env_vars
     );
 
-    // TODO(alex) [mid] 2022-06-17: Fix this in CI
-    /*
-    error: Found argument '--override_env_vars' which wasn't expected, or isn't valid in this context
-        Did you mean '--override-env-vars'?
-        If you tried to supply `--override_env_vars` as a value rather than a flag, use `-- --override_env_vars`
-    USAGE:
-        mirrord-f89b5123540aaf97 exec --pod-name <POD_NAME> --accept-invalid-certificates --override-env-vars <BINARY>
-         */
     let env_vars = raw_env_vars
         // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
         .split_terminator(char::from(0))
