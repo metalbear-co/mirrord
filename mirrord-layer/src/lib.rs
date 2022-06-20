@@ -392,32 +392,33 @@ async fn poll_agent(
 
     let mut ping = false;
 
-    if config.enabled_override_env_vars {
+    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
+    {
+        panic!(
+            r"mirrord-layer encountered an issue:
+
+            mirrord doesn't support specifying both
+            OVERRIDE_ENV_VARS_EXCLUDE and OVERRIDE_ENV_VARS_INCLUDE at the same time!
+
+            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`."
+        );
+    } else {
         let env_vars_filter = HashSet::from(EnvVarsFilter(config.override_env_vars_exclude));
         let env_vars_select = HashSet::from(EnvVarsFilter(config.override_env_vars_include));
 
-        let env_vars_intersection = env_vars_filter.intersection(&env_vars_select);
-        if env_vars_intersection.clone().count() > 0 {
-            panic!(
-                r"mirrord-layer encountered an issue:
-            Intersecting values in OVERRIDE_ENV_VARS_EXCLUDE and OVERRIDE_ENV_VARS_INCLUDE!
-            Make sure that no values are present in both filters at the same time!
-            Common values are {:#?}",
-                env_vars_intersection
+        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            let codec_result = codec
+                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                }))
+                .await;
+
+            debug!(
+                "ClientMessage::GetEnvVarsFilterRequest codec_result {:#?}",
+                codec_result
             );
         }
-
-        let codec_result = codec
-            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            }))
-            .await;
-
-        debug!(
-            "ClientMessage::GetEnvVarsFilterRequest codec_result {:#?}",
-            codec_result
-        );
     }
 
     let mut tcp_mirror_handler = TcpMirrorHandler::default();

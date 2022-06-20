@@ -105,10 +105,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_FILE_OPS", true.to_string());
     }
 
-    if args.override_env_vars {
-        std::env::set_var("MIRRORD_OVERRIDE_ENV_VARS", true.to_string());
-    }
-
     if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
         std::env::set_var(
             "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",

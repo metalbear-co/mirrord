@@ -42,10 +42,6 @@ pub(super) struct ExecArgs {
     #[clap(short = 'f', long, value_parser)]
     pub enable_fs: bool,
 
-    /// Enable env vars override
-    #[clap(short = 'e', long, value_parser)]
-    pub override_env_vars: bool,
-
     /// The env vars to filter out
     #[clap(short = 'x', long, value_parser)]
     pub override_env_vars_exclude: Option<String>,
