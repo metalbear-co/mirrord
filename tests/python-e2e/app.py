@@ -5,10 +5,10 @@ from flask import Flask, request
 import logging
 import sys
 
-log = logging.getLogger('werkzeug')
+log = logging.getLogger("werkzeug")
 log.disabled = True
 
-cli = sys.modules['flask.cli']
+cli = sys.modules["flask.cli"]
 
 cli.show_server_banner = lambda *x: click.echo("Server listening on port 80")
 
@@ -19,20 +19,20 @@ DELETE_PATH = getcwd() + "/deletetest"
 CREATE_PATH = getcwd() + "/test"
 
 
-@app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def get():
     print("GET: Request completed")
     return "OK"
 
 
-@app.route('/', methods=['POST'])
+@app.route("/", methods=["POST"])
 def post():
-    if str(request.data, 'utf-8') == TEXT:
+    if str(request.data, "utf-8") == TEXT:
         print("POST: Request completed")
     return "OK"
 
 
-@app.route('/', methods=['PUT'])
+@app.route("/", methods=["PUT"])
 def put():
     with open(CREATE_PATH, "w") as f:
         f.write(TEXT)
@@ -42,7 +42,7 @@ def put():
     return "OK"
 
 
-@app.route('/', methods=['DELETE'])
+@app.route("/", methods=["DELETE"])
 def delete():
     remove(DELETE_PATH)
     print("DELETE: Request completed")
@@ -51,5 +51,5 @@ def delete():
     return "OK"
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=80)

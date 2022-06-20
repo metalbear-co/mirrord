@@ -20,6 +20,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CD release: Fix universal binary for macOS
 - Refactor: Change protocol + mirrord-layer to split messages into modules, so main module only handles general messages, passing down to the appropriate module for handling.
 - Add a CLI flag to specify `MIRRORD_AGENT_TTL`
+- CI: Collect mirrord-agent logs in case of failure in e2e.
+- Add "app" = "mirrord" label to the agent pod for log collection at ease.
+- CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
+
+- Handle relative paths for open, openat
 
 ## 2.2.1
 

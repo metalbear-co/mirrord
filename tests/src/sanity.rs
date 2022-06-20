@@ -13,7 +13,7 @@ mod tests {
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
         process::Command,
-        time::{timeout, Duration},
+        time::{sleep, timeout, Duration},
     };
 
     use crate::utils::*;
@@ -74,6 +74,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -157,6 +161,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
@@ -218,6 +226,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -316,6 +328,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -367,6 +383,31 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+
+    #[tokio::test]
+    pub async fn test_file_ops() {
+        let path = env!("CARGO_BIN_FILE_MIRRORD");
+        let command = vec!["python3", "python-e2e/ops.py"];
+        let client = setup_kube_client().await;
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--enable-fs", "--"]
+            .into_iter()
+            .chain(command.into_iter())
+            .collect();
+        let test = Command::new(path)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+        assert!(test.success());
     }
 
     #[tokio::test]
