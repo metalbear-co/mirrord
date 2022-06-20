@@ -447,6 +447,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[should_panic]
     pub async fn test_remote_env_vars_panics_when_both_filters_are_specified() {
         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
         let node_command = vec![
@@ -480,16 +481,12 @@ mod tests {
         .chain(node_command.into_iter())
         .collect();
 
-        let test_process = Command::new(mirrord_bin)
+        let _ = Command::new(mirrord_bin)
             .args(args)
             .envs(&env)
             .status()
             .await
             .unwrap();
-
-        println!("test_process {:#?}", test_process);
-
-        assert_eq!(test_process.success(), false);
     }
 
     #[tokio::test]
