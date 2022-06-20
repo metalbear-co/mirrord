@@ -487,6 +487,8 @@ mod tests {
             .await
             .unwrap();
 
+        println!("test_process {:#?}", test_process);
+
         assert_eq!(test_process.success(), false);
     }
 
