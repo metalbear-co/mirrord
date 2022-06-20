@@ -19,13 +19,11 @@ mod tests {
     use crate::utils::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_complete_node_api() {
         _test_complete_api("node").await;
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_complete_python_api() {
         _test_complete_api("python").await;
     }
@@ -121,7 +119,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     /// Sends a request to a different pod in the cluster (different namespace) and asserts
     /// that no operation is performed as specified in the request by the server
     /// as the agent pod is impersonating the pod running in the default namespace
@@ -183,7 +180,6 @@ mod tests {
 
     // agent namespace tests
     #[tokio::test]
-    #[ignore]
     /// Creates a new k8s namespace, starts the API server with env:
     /// MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
     /// validate data through requests to the API server
@@ -250,7 +246,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     /// Starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
     /// asserts the process crashes: "NotFound" as the namespace does not exist
     async fn test_nonexistent_agent_namespace() {
@@ -286,7 +281,6 @@ mod tests {
 
     // pod namespace tests
     #[tokio::test]
-    #[ignore]
     /// Creates a new k8s namespace, starts the API server with env:
     /// MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
     /// requests
@@ -346,7 +340,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     /// Starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
     /// (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
     /// exist
@@ -387,7 +380,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     pub async fn test_file_ops() {
         let path = env!("CARGO_BIN_FILE_MIRRORD");
         let command = vec!["python3", "python-e2e/ops.py"];
@@ -446,8 +438,9 @@ mod tests {
         assert!(test_process.success());
     }
 
+    /// Weird one to test, as we `panic` inside a separate thread, so the main sample app will just
+    /// complete as normal.
     #[tokio::test]
-    #[should_panic]
     pub async fn test_remote_env_vars_panics_when_both_filters_are_specified() {
         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
         let node_command = vec![
@@ -488,7 +481,6 @@ mod tests {
             .await
             .unwrap();
 
-        println!("test_process {:#?}", test_process);
         assert!(test_process.success());
     }
 
