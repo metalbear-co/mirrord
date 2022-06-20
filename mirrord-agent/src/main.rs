@@ -12,7 +12,7 @@ use std::{
 use actix_codec::Framed;
 use error::AgentError;
 use file::FileManager;
-use futures::SinkExt;
+use futures::{stream::FuturesUnordered, SinkExt};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp},
     ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest, Port,
@@ -36,59 +36,22 @@ mod sniffer;
 mod util;
 
 use cli::parse_args;
-use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
+use sniffer::{Enabled, SnifferCommand, SnifferOutput, TCPConnectionSniffer, TCPSnifferAPI};
 use util::{IndexAllocator, Subscriptions};
 
 use crate::runtime::get_container_pid;
 
-type AgentID = u32;
-
-#[derive(Debug)]
-struct Peer {
-    id: AgentID,
-    channel: mpsc::Sender<DaemonMessage>,
-}
-
-impl Peer {
-    pub fn new(id: AgentID, channel: mpsc::Sender<DaemonMessage>) -> Peer {
-        Peer { id, channel }
-    }
-}
-impl Eq for Peer {}
-
-impl PartialEq for Peer {
-    fn eq(&self, other: &Peer) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Hash for Peer {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl Borrow<AgentID> for Peer {
-    fn borrow(&self) -> &AgentID {
-        &self.id
-    }
-}
-
 #[derive(Debug)]
 struct State {
-    pub peers: HashSet<Peer>,
+    pub agents: HashSet<AgentID>,
     index_allocator: IndexAllocator<AgentID>,
-    pub port_subscriptions: Subscriptions<Port, AgentID>,
-    pub connections_subscriptions: Subscriptions<ConnectionID, AgentID>,
 }
 
 impl State {
     pub fn new() -> State {
         State {
-            peers: HashSet::new(),
+            agents: HashSet::new(),
             index_allocator: IndexAllocator::new(),
-            port_subscriptions: Subscriptions::new(),
-            connections_subscriptions: Subscriptions::new(),
         }
     }
 
@@ -96,11 +59,9 @@ impl State {
         self.index_allocator.next_index()
     }
 
-    pub fn remove_peer(&mut self, peer_id: AgentID) {
-        self.peers.remove(&peer_id);
-        self.port_subscriptions.remove_client(peer_id);
-        self.connections_subscriptions.remove_client(peer_id);
-        self.index_allocator.free_index(peer_id)
+    pub fn remove_agent(&mut self, agent_id: AgentID) {
+        self.agents.remove(&agent_id);
+        self.index_allocator.free_index(agent_id)
     }
 }
 
@@ -258,74 +219,59 @@ struct PeerHandler {
     pid: Option<u64>,
 }
 
-impl PeerHandler {
-    /// A loop that handles peer connection and state. Brekas upon receiver/sender drop.
+impl AgentConnectionHandler {
+    /// A loop that handles agent connection and state. Brekas upon receiver/sender drop.
     pub async fn start(
-        sender: Sender<PeerMessage>,
         id: AgentID,
         stream: TcpStream,
-        receiver: Receiver<DaemonMessage>,
         pid: Option<u64>,
+        sniffer_command_sender: Sender<SnifferCommand>,
     ) -> Result<(), AgentError> {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
-        let mut peer_handler = PeerHandler {
-            sender,
+        let (tcp_receiver, tcp_sender) = mpsc::channel(CHANNEL_SIZE);
+        let tcp_sniffer_api = TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver)
+            .enable(tcp_sender)
+            .await?;
+        let mut agent_handler = AgentConnectionHandler {
             id,
             file_manager,
             stream,
             receiver,
             pid,
+            tcp_sniffer_api,
         };
-        peer_handler.handle_loop().await?;
-
-        peer_handler
-            .sender
-            .send(PeerMessage {
-                client_message: ClientMessage::Close,
-                peer_id: id,
-            })
-            .await?;
-
+        agent_handler.handle_loop().await?;
         Ok(())
     }
 
     async fn handle_loop(&mut self) -> Result<(), AgentError> {
-        loop {
+        let mut running = true;
+        while running {
             select! {
-            message = self.stream.next() => {
-                if let Some(message) = message {
-                    self.handle_peer_message(message?).await?;
-                } else {
-                    debug!("Peer {} disconnected", self.id);
-                        break;
-                }
-            },
-            message = self.receiver.recv() => {
-                debug!("peer_handler -> received a message {:?}", message);
-                if let Some(message) = message {
-                        debug!("peer_handler -> send message to client");
-                        self.stream.send(message).await?;
+                message = self.stream.next() => {
+                    if let Some(message) = message {
+                        running = self.handle_agent_message(message?).await?;
                     } else {
-                        debug!("peer_handler -> receiver dropped");
-                        break;
+                        debug!("Agent {} disconnected", self.id);
+                            break;
                     }
                 }
-
             }
         }
         Ok(())
     }
-    /// Handle incoming messages from the peer.
-    async fn handle_peer_message(&mut self, message: ClientMessage) -> Result<(), AgentError> {
-        debug!("peer_handler -> client sent message {:?}", message);
+
+    /// Handle incoming messages from the agent. Returns False if the agent disconnected.
+    async fn handle_agent_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
+        debug!("agent_handler -> client sent message {:?}", message);
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
                 self.stream
                     .send(DaemonMessage::FileResponse(response))
                     .await
-                    .map_err(From::from)
+                    .map_err(From::from)?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
@@ -358,14 +304,22 @@ impl PeerHandler {
                 .stream
                 .send(DaemonMessage::Pong)
                 .await
-                .map_err(From::from),
-            _ => {
-                let message = PeerMessage {
-                    client_message: message,
-                    peer_id: self.id,
-                };
-                self.sender.send(message).await.map_err(From::from)
+                .map_err(From::from)?,
+            ClientMessage::Tcp(message) => self.handle_agent_tcp(message).await?,
+            ClientMessage::Close => {
+                return Ok(false);
             }
+        }
+        Ok(true)
+    }
+
+    async fn handle_agent_tcp(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+        match message {
+            LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
+            LayerTcp::ConnectionUnsubscribe(connection_id) => {
+                self.tcp_sniffer_api.unsubscribe(connection_id).await
+            }
+            LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.unsubscribe_port(port).await,
         }
     }
 }
@@ -387,108 +341,50 @@ async fn start_agent() -> Result<(), AgentError> {
 
     let mut state = State::new();
 
-    let (peer_messages_tx, mut peer_messages_rx) = mpsc::channel::<PeerMessage>(1000);
-    let (sniffer_output_tx, mut sniffer_output_rx) = mpsc::channel::<SnifferOutput>(1000);
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    // We use tokio spawn so it'll create another thread (default tokio runtime configuration).
-    let packet_task = tokio::spawn(packet_worker(
-        sniffer_output_tx,
+    let sniffer_task = tokio::spawn(TCPConnectionSniffer::start(
         sniffer_command_rx,
-        args.interface.clone(),
         pid,
+        args.interface,
     ));
 
+    let agents = FuturesUnordered::new();
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
                 debug!("start -> Connection accepted from {:?}", addr);
 
-                if let Some(peer_id) = state.generate_id() {
-                    let (daemon_message_tx, daemon_message_rx) = mpsc::channel::<DaemonMessage>(1000);
-                    let peer_messages_tx = peer_messages_tx.clone();
+                if let Some(agent_id) = state.generate_id() {
 
-                    state.peers.insert(Peer::new(peer_id, daemon_message_tx));
+                    state.agents.insert(agent_id);
 
-                    tokio::spawn(async move {
-                        let _ = PeerHandler::start(peer_messages_tx, peer_id, stream, daemon_message_rx, pid)
-                            .await
-                            .inspect(|_| debug!("start_agent -> Peer {:#?} closed", peer_id))
-                            .inspect_err(|fail| error!("start_agent -> Peer {:#?} failed with {:#?}", peer_id, fail));
+                    let agent = tokio::spawn(async move {
+                        match AgentConnectionHandler::start(agent_id, stream, pid, sniffer_command_tx.clone()).await {
+                            Ok(_) => {
+                                debug!("AgentConnectionHandler::start -> Agent {} disconnected", agent_id);
+                            }
+                            Err(e) => {
+                                error!("AgentConnectionHandler::start -> Agent {} disconnected with error: {}", agent_id, e);
+                            }
+                        }
+                        agent_id
+
                     });
+                    agents.push(agent);
                 }
                 else {
                     error!("start_agent -> Ran out of connections, dropping new connection");
                 }
 
             },
-            Some(peer_message) = peer_messages_rx.recv() => {
-                handle_peer_messages(&mut state, sniffer_command_tx.clone(), peer_message).await?;
-
-            },
-            sniffer_output = sniffer_output_rx.recv() => {
-                match sniffer_output {
-                    Some(sniffer_output) => {
-                        match sniffer_output {
-                            SnifferOutput::NewTcpConnection(new_connection) => {
-                                debug!("SnifferOutput::NewTcpConnection -> connection {:#?}", new_connection);
-                                let peer_ids = state.port_subscriptions.get_topic_subscribers(new_connection.destination_port);
-
-                                for peer_id in peer_ids {
-                                    state.connections_subscriptions.subscribe(peer_id, new_connection.connection_id);
-
-                                    if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::NewConnection(new_connection.clone()))).await {
-                                            Ok(_) => {},
-                                            Err(err) => {
-                                                error!("error sending message {:?}", err);
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            SnifferOutput::TcpClose(close) => {
-                                debug!("SnifferOutput::TcpClose -> close {:#?}", close);
-                                let peer_ids = state.connections_subscriptions.get_topic_subscribers(close.connection_id);
-
-                                for peer_id in peer_ids {
-                                    if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::Close(close.clone()))).await {
-                                            Ok(_) => {},
-                                            Err(err) => {
-                                                error!("error sending message {:?}", err);
-                                            }
-                                        }
-                                    }
-                                }
-                                state.connections_subscriptions.remove_topic(close.connection_id);
-                            },
-                            SnifferOutput::TcpData(data) => {
-                                debug!("SnifferOutput::TcpData -> data");
-                                let peer_ids = state.connections_subscriptions.get_topic_subscribers(data.connection_id);
-
-                                for peer_id in peer_ids {
-                                    if let Some(peer) = state.peers.get(&peer_id) {
-                                        match peer.channel.send(DaemonMessage::Tcp(DaemonTcp::Data(data.clone()))).await {
-                                            Ok(_) => {},
-                                            Err(err) => {
-                                                error!("error sending message {:?}", err);
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                        }
-                    }
-                    None => {
-                        info!("statr_agent -> None in SnifferOutput, exiting");
-                        break;
-                    }
-                }
+            agent = agents.select_next_some() => {
+                let agent_id = agent.await?;
+                state.remove_agent(agent_id);
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
-                if state.peers.is_empty() {
-                    debug!("start_agent -> main thread timeout, no peers connected");
+                if state.agents.is_empty() {
+                    debug!("start_agent -> main thread timeout, no agents connected");
                     break;
                 }
             }
