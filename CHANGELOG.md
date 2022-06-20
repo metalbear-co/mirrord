@@ -23,8 +23,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Collect mirrord-agent logs in case of failure in e2e.
 - Add "app" = "mirrord" label to the agent pod for log collection at ease.
 - CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
-
 - Handle relative paths for open, openat
+- Fix once cell renamings, PR [#98165](https://github.com/rust-lang/rust/pull/98165)
 
 ## 2.2.1
 

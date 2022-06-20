@@ -5,8 +5,7 @@
 
 use std::{
     collections::HashSet,
-    lazy::{SyncLazy, SyncOnceCell},
-    sync::Mutex,
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
@@ -53,12 +52,12 @@ mod tcp_mirror;
 
 use crate::{common::HookMessage, config::LayerConfig, macros::hook};
 
-static RUNTIME: SyncLazy<Runtime> = SyncLazy::new(|| Runtime::new().unwrap());
-static GUM: SyncLazy<Gum> = SyncLazy::new(|| unsafe { Gum::obtain() });
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
+static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
-pub static ENABLED_FILE_OPS: SyncOnceCell<bool> = SyncOnceCell::new();
-pub static ENABLED_OVERRIDE_ENV_VARS: SyncOnceCell<bool> = SyncOnceCell::new();
+
+pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
