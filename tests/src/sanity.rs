@@ -429,7 +429,7 @@ mod tests {
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "-e", "--"]
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--"]
             .into_iter()
             .chain(node_command.into_iter())
             .collect();
@@ -459,23 +459,24 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
 
-        env.insert(
-            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
-            "MIRRORD_FAKE_VAR_FIRST",
-        );
-        env.insert(
-            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
-            "MIRRORD_FAKE_VAR_SECOND",
-        );
-
         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "-e", "--"]
-            .into_iter()
-            .chain(node_command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-x",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "-s",
+            "MIRRORD_FAKE_VAR_SECOND",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
@@ -502,19 +503,22 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
 
-        env.insert(
-            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
-            "MIRRORD_FAKE_VAR_FIRST",
-        );
-
         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "-e", "--"]
-            .into_iter()
-            .chain(node_command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-x",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
@@ -541,19 +545,22 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
 
-        env.insert(
-            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
-            "MIRRORD_FAKE_VAR_FIRST",
-        );
-
         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "-e", "--"]
-            .into_iter()
-            .chain(node_command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-s",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
