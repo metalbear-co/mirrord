@@ -29,7 +29,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         Err(fail) => return fail,
     };
 
-    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
+    // Calls with non absolute paths are sent to libc::open.
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -73,7 +74,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
         Err(fail) => return fail,
     };
 
-    if IGNORE_FILES.is_match(path.to_str().unwrap()) {
+    if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
         libc::fopen(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
@@ -144,18 +145,10 @@ pub(super) unsafe extern "C" fn openat_detour(
     };
 
     // `openat` behaves the same as `open` when the path is absolute.
-    if path.is_absolute() {
-        open_detour(raw_path, open_flags)
-    } else if fd == AT_FDCWD {
-        error!(
-            r"Failed `openat_detour` as it cannot deal with `AT_FDCWD`,
-            cannot handle cwd in remote context.
-            `openat_detour` was called with arguments:
-            fd {:#?} | raw_path {:#?} | open_flags {:#?}",
-            fd, raw_path, open_flags
-        );
+    // when called with AT_FDCWD, the call is propagated to `open`.
 
-        -1
+    if path.is_absolute() || fd == AT_FDCWD {
+        open_detour(raw_path, open_flags)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
         // what).

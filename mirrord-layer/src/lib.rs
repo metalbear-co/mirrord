@@ -101,7 +101,6 @@ async fn handle_hook_message(
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
     open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    open_relative_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
     read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
@@ -146,10 +145,7 @@ async fn handle_hook_message(
                 relative_fd, path, open_options
             );
 
-            open_relative_file_handler
-                .lock()
-                .unwrap()
-                .push(file_channel_tx);
+            open_file_handler.lock().unwrap().push(file_channel_tx);
 
             let open_relative_file_request = OpenRelativeFileRequest {
                 relative_fd,
@@ -279,7 +275,7 @@ async fn handle_daemon_message(
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
-
+            debug!("file handler = {:#?}", open_file_handler);
             open_file_handler
                 .lock()
                 .unwrap()
@@ -367,7 +363,6 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
     let open_file_handler = Mutex::new(Vec::with_capacity(4));
-    let open_relative_file_handler = Mutex::new(Vec::with_capacity(4));
     let read_file_handler = Mutex::new(Vec::with_capacity(4));
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
@@ -384,7 +379,6 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
                 &mut tcp_mirror_handler,
                 &mut codec,
                 &open_file_handler,
-                &open_relative_file_handler,
                 &read_file_handler,
                 &seek_file_handler,
                 &write_file_handler,

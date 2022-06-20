@@ -12,6 +12,7 @@ mod tests {
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+        process::Command,
         time::{sleep, timeout, Duration},
     };
 
@@ -376,5 +377,30 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+
+    #[tokio::test]
+    pub async fn test_file_ops() {
+        let path = env!("CARGO_BIN_FILE_MIRRORD");
+        let command = vec!["python3", "python-e2e/ops.py"];
+        let client = setup_kube_client().await;
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--enable-fs", "--"]
+            .into_iter()
+            .chain(command.into_iter())
+            .collect();
+        let test = Command::new(path)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+        assert!(test.success());
     }
 }

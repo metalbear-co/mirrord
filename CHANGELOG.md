@@ -19,6 +19,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add "app" = "mirrord" label to the agent pod for log collection at ease.
 - CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
 
+- Handle relative paths for open, openat
+
 ## 2.2.1
 ### Changed
 - Compile universal binaries for MacOS. (Fixes #131)

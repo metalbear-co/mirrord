@@ -17,12 +17,16 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
     let set = RegexSet::new(&[
         r".*\.so",
         r".*\.d",
+        r".*\.pyc",
+        r".*\.py",
+        r".*\.js",
         r"^/proc/.*",
         r"^/sys/.*",
         r"^/lib/.*",
         r"^/etc/.*",
         r"^/usr/.*",
         r"^/dev/.*",
+        r"^/opt/.*",
         r"^/home/iojs/.*",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
@@ -35,7 +39,7 @@ static IGNORE_FILES: SyncLazy<RegexSet> = SyncLazy::new(|| {
 });
 
 type LocalFd = RawFd;
-type RemoteFd = RawFd;
+type RemoteFd = usize;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
