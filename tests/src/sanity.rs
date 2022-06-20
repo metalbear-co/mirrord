@@ -481,12 +481,15 @@ mod tests {
         .chain(node_command.into_iter())
         .collect();
 
-        let _ = Command::new(mirrord_bin)
+        let test_process = Command::new(mirrord_bin)
             .args(args)
             .envs(&env)
             .status()
             .await
             .unwrap();
+
+        println!("test_process {:#?}", test_process);
+        assert!(test_process.success());
     }
 
     #[tokio::test]
