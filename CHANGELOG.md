@@ -20,6 +20,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
 - Handle relative paths for open, openat
 - Fix once cell renamings, PR [#98165](https://github.com/rust-lang/rust/pull/98165)
+- Enable the blocking feature of the `reqwest` library 
 
 ## 2.2.1
 ### Changed
