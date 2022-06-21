@@ -183,11 +183,7 @@ async fn select_env_vars(
 
     debug!("select_env_vars -> selected env vars found {:?}", env_vars);
 
-    if env_vars.is_empty() {
-        Err(ResponseError::NotFound)
-    } else {
-        Ok(env_vars)
-    }
+    Ok(env_vars)
 }
 
 async fn handle_peer_messages(

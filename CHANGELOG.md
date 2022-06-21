@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Refactor(agent) - change `FileManager` to be per peer, thus removing the need of it being in a different task, moving the handling to the peer logic, change structure of peer handling to a struct.
+- Don't fail environment variable request if none exists.
+
 ## 2.3.0
 
 ### Added
@@ -21,7 +25,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Add Docker cache to Docker build-push action to reduce build duration.
 - CD release: Fix universal binary for macOS
 - Refactor: Change protocol + mirrord-layer to split messages into modules, so main module only handles general messages, passing down to the appropriate module for handling.
-- Refactor(agent) - change `FileManager` to be per peer, thus removing the need of it being in a different task, moving the handling to the peer logic, change structure of peer handling to a struct.
 - Add a CLI flag to specify `MIRRORD_AGENT_TTL`
 - CI: Collect mirrord-agent logs in case of failure in e2e.
 - Add "app" = "mirrord" label to the agent pod for log collection at ease.

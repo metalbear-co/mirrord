@@ -102,9 +102,8 @@ mod tests {
             tokio::spawn(async move {
                 // verify cleanup
                 loop {
-                    let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
                     let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the http-echo pod should exist
-                    if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
+                    if updated_pods.items.len() {
                         let http_echo_pod = updated_pods.items[0].metadata.name.clone().unwrap();
                         assert!(http_echo_pod.contains("http-echo"));
                         break;
@@ -391,10 +390,19 @@ mod tests {
         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
             .await
             .unwrap();
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--enable-fs", "--"]
-            .into_iter()
-            .chain(command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "--agent-ttl",
+            "1000",
+            "--enable-fs",
+            "--",
+        ]
+        .into_iter()
+        .chain(command.into_iter())
+        .collect();
         let test = Command::new(path)
             .args(args)
             .envs(&env)
@@ -423,10 +431,18 @@ mod tests {
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--"]
-            .into_iter()
-            .chain(node_command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "--agent-ttl",
+            "1000",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
@@ -464,6 +480,8 @@ mod tests {
             "--pod-name",
             &pod_name,
             "-c",
+            "--agent-ttl",
+            "1000",
             "-x",
             "MIRRORD_FAKE_VAR_FIRST",
             "-s",
@@ -508,6 +526,8 @@ mod tests {
             "--pod-name",
             &pod_name,
             "-c",
+            "--agent-ttl",
+            "1000",
             "-x",
             "MIRRORD_FAKE_VAR_FIRST",
             "--",
@@ -549,6 +569,8 @@ mod tests {
             "exec",
             "--pod-name",
             &pod_name,
+            "--agent-ttl",
+            "1000",
             "-c",
             "-s",
             "MIRRORD_FAKE_VAR_FIRST",
