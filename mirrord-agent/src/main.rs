@@ -322,7 +322,6 @@ impl AgentConnectionHandler {
             LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.unsubscribe_port(port).await,
         }
     }
-}
 
 async fn start_agent() -> Result<(), AgentError> {
     let args = parse_args();
