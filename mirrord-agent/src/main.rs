@@ -296,15 +296,11 @@ impl AgentConnectionHandler {
                     .await
                     .map_err(From::from)
             }
-            },
-            ClientMessage::Ping => {
-                self.stream.send(DaemonMessage::Pong).await.map_err(From::from)
-            },
             ClientMessage::Ping => self
                 .stream
                 .send(DaemonMessage::Pong)
                 .await
-                .map_err(From::from)?,
+                .map_err(From::from),
             ClientMessage::Tcp(message) => self.handle_agent_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
@@ -322,6 +318,7 @@ impl AgentConnectionHandler {
             LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.unsubscribe_port(port).await,
         }
     }
+}
 
 async fn start_agent() -> Result<(), AgentError> {
     let args = parse_args();
