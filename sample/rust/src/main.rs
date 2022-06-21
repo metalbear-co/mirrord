@@ -1,12 +1,27 @@
+#![allow(dead_code)]
 use std::{
     ffi::CString,
     fs::{File, OpenOptions},
-    io::{prelude::*, Result, SeekFrom},
+    io::{prelude::*, SeekFrom},
     mem::size_of,
-    net::{TcpListener, TcpStream},
 };
 
-fn main() -> Result<()> {
+fn main() {
+    // debug_file_ops().expect("Failed debugging file_ops!");
+    debug_outgoing_request().expect("Failed debugging outgoing_request!");
+}
+
+fn debug_outgoing_request() -> Result<(), reqwest::Error> {
+    let client = reqwest::blocking::ClientBuilder::new().build()?;
+    println!(">>>>> client built");
+
+    let body = client.get("https://www.rust-lang.org").send()?.text()?;
+    println!(">>>>> response body {:#?}", &body[0..10]);
+
+    Ok(())
+}
+
+fn debug_file_ops() -> Result<(), std::io::Error> {
     let mut file = File::open("/var/log/dpkg.log")?;
     println!(">>>>> open file {:#?}", file);
 
@@ -74,20 +89,5 @@ fn main() -> Result<()> {
         dir.metadata().unwrap().is_dir()
     );
 
-    let listener = TcpListener::bind("127.0.0.1:80")?;
-    for stream in listener.incoming() {
-        let stream = stream.unwrap();
-
-        handle_connection(stream);
-    }
-
     Ok(())
-}
-
-fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
-
-    let _ = stream.read(&mut buffer).unwrap();
-
-    println!(">>>>> request is {}", String::from_utf8_lossy(&buffer[..]));
 }

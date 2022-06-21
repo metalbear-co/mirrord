@@ -18,7 +18,7 @@ use crate::{
     HOOK_SENDER,
 };
 
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+pub(super) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
         HOOK_SENDER
             .as_ref()
@@ -37,7 +37,7 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
 ///
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
-pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
+pub(super) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<OpenFileResponse>();
 
     let requesting_file = OpenFileHook {
@@ -96,7 +96,7 @@ fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse, LayerErr
     file_channel_rx.blocking_recv().map_err(From::from)
 }
 
-pub(crate) fn openat(
+pub(super) fn openat(
     path: PathBuf,
     open_flags: c_int,
     relative_fd: usize,
@@ -154,7 +154,7 @@ pub(crate) fn openat(
 }
 
 /// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
-pub(crate) fn fopen(
+pub(super) fn fopen(
     path: PathBuf,
     open_options: OpenOptionsInternal,
 ) -> Result<*mut FILE, LayerError> {
@@ -173,7 +173,7 @@ pub(crate) fn fopen(
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }
 
-pub(crate) fn fdopen(
+pub(super) fn fdopen(
     local_fd: &RawFd,
     remote_fd: usize,
     _open_options: OpenOptionsInternal,
@@ -189,7 +189,7 @@ pub(crate) fn fdopen(
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
-pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
+pub(super) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
     debug!("read -> trying to read valid file {:?}.", fd);
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<ReadFileResponse>();
@@ -206,7 +206,7 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, La
     Ok(read_file_response)
 }
 
-pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
+pub(super) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
     debug!("lseek -> trying to seek valid file {:?}.", fd);
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<SeekFileResponse>();
 
@@ -222,7 +222,7 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
     Ok(result_offset)
 }
 
-pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
+pub(super) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
     debug!("write -> trying to write valid file {:?}.", fd);
     let (file_channel_tx, file_channel_rx) = oneshot::channel::<WriteFileResponse>();
 

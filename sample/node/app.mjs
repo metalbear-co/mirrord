@@ -1,6 +1,29 @@
 import { Buffer } from "node:buffer";
 import { createServer } from "net";
 import { open, readFile } from "fs/promises";
+import https from "https";
+
+async function debug_outgoing_request() {
+  const options = {
+    hostname: "www.rust-lang.org",
+    port: 443,
+    method: "GET",
+  };
+
+  try {
+    const request = https.request(options, (response) => {
+      console.log(`>>>>> response code ${response.statusCode}`);
+
+      response.on("data", (chunk) => {
+        console.log(`chunk`);
+      });
+    });
+
+    request.end();
+  } catch (fail) {
+    console.error("!!! Failed outgoing_request operation with ", fail);
+  }
+}
 
 async function debug_file_ops() {
   try {
@@ -28,35 +51,39 @@ async function debug_file_ops() {
   }
 }
 
+debug_outgoing_request();
 // debug_file_ops();
+// debug_requests();
 
-const server = createServer();
-server.on("connection", handleConnection);
-server.listen(
-  {
-    host: "localhost",
-    port: 80,
-  },
-  function () {
-    console.log("server listening to %j", server.address());
-  }
-);
+async function debug_requests() {
+  const server = createServer(async (req, res) => {});
+  server.on("connection", handleConnection);
+  server.listen(
+    {
+      host: "localhost",
+      port: 80,
+    },
+    function () {
+      console.log("server listening to %j", server.address());
+    }
+  );
 
-function handleConnection(conn) {
-  var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-  console.log("new client connection from %s", remoteAddress);
-  conn.on("data", onConnData);
-  conn.once("close", onConnClose);
-  conn.on("error", onConnError);
+  function handleConnection(conn) {
+    var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
+    console.log("new client connection from %s", remoteAddress);
+    conn.on("data", onConnData);
+    conn.once("close", onConnClose);
+    conn.on("error", onConnError);
 
-  function onConnData(d) {
-    console.log("connection data from %s: %j", remoteAddress, d.toString());
-    conn.write(d);
-  }
-  function onConnClose() {
-    console.log("connection from %s closed", remoteAddress);
-  }
-  function onConnError(err) {
-    console.log("Connection %s error: %s", remoteAddress, err.message);
+    function onConnData(d) {
+      console.log("connection data from %s: %j", remoteAddress, d.toString());
+      conn.write(d);
+    }
+    function onConnClose() {
+      console.log("connection from %s closed", remoteAddress);
+    }
+    function onConnError(err) {
+      console.log("Connection %s error: %s", remoteAddress, err.message);
+    }
   }
 }

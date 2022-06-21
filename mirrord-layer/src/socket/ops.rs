@@ -1,114 +1,23 @@
-//! We implement each hook function in a safe function as much as possible, having the unsafe do the
-//! absolute minimum
 use std::{
-    collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::Arc,
 };
 
 use errno::{errno, set_errno, Errno};
-use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, warn};
 
+use super::*;
 use crate::{
     common::HookMessage,
-    macros::{hook, try_hook},
     tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
-    LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
-
-/// Struct sent over the socket once created to pass metadata to the hook
-#[derive(Debug)]
-pub struct SocketInformation {
-    pub address: SocketAddr,
-}
-
-/// poll_agent loop inserts connection data into this queue, and accept reads it.
-#[derive(Debug, Default)]
-pub struct ConnectionQueue {
-    connections: HashMap<RawFd, VecDeque<SocketInformation>>,
-}
-
-impl ConnectionQueue {
-    pub fn add(&mut self, fd: &RawFd, info: SocketInformation) {
-        self.connections.entry(*fd).or_default().push_back(info);
-    }
-    pub fn get(&mut self, fd: &RawFd) -> Option<SocketInformation> {
-        let mut queue = self.connections.remove(fd)?;
-        if let Some(info) = queue.pop_front() {
-            if !queue.is_empty() {
-                self.connections.insert(*fd, queue);
-            }
-            Some(info)
-        } else {
-            None
-        }
-    }
-}
-
-impl SocketInformation {
-    pub fn new(address: SocketAddr) -> Self {
-        Self { address }
-    }
-}
-
-trait GetPeerName {
-    fn get_peer_name(&self) -> SocketAddr;
-}
-
-#[derive(Debug)]
-pub struct Connected {
-    /// Remote address we're connected to
-    remote_address: SocketAddr,
-    /// Local address it's connected from
-    local_address: SocketAddr,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Bound {
-    address: SocketAddr,
-}
-
-#[derive(Debug)]
-pub enum SocketState {
-    Initialized,
-    Bound(Bound),
-    Listening(Bound),
-    Connected(Connected),
-}
-
-impl Default for SocketState {
-    fn default() -> Self {
-        SocketState::Initialized
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct Socket {
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-    pub state: SocketState,
-}
-
-#[inline]
-fn is_ignored_port(port: Port) -> bool {
-    port == 0 || (port > 50000 && port < 60000)
-}
-
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
     if fd == -1 {
@@ -134,16 +43,12 @@ fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     fd
 }
 
-unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int) -> c_int {
-    socket(domain, type_, protocol)
-}
-
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
+pub(super) fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     debug!("bind called sockfd: {:?}", sockfd);
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
@@ -184,19 +89,77 @@ fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     0
 }
 
-unsafe extern "C" fn bind_detour(
-    sockfd: c_int,
-    addr: *const sockaddr,
-    addrlen: socklen_t,
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
+    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
+
+    let socket = {
+        let mut sockets = SOCKETS.lock().unwrap();
+
+        match sockets.remove(&sockfd) {
+            Some(socket) => socket,
+            None => {
+                warn!("connect: no socket found for fd: {}", &sockfd);
+                return unsafe { libc::connect(sockfd, address, len) };
+            }
+        }
+    };
+
+    // We don't handle this socket, so restore state if there was any. (delay execute bind)
+    if let SocketState::Bound(bound) = &socket.state {
+        let os_addr = OsSocketAddr::from(bound.address);
+        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
+        if ret != 0 {
+            error!(
+                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
+                ret, os_addr, sockfd
+            );
+            return ret;
+        }
+    };
+    unsafe { libc::connect(sockfd, address, len) }
+}
+
+/// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
+/// cluster)
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn getpeername(
+    sockfd: RawFd,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
 ) -> c_int {
-    bind(sockfd, addr, addrlen)
+    debug!("getpeername called");
+    let remote_address = {
+        let sockets = SOCKETS.lock().unwrap();
+        match sockets.get(&sockfd) {
+            Some(socket) => match &socket.state {
+                SocketState::Connected(connected) => connected.remote_address,
+                _ => {
+                    debug!(
+                        "getpeername: socket is not connected, state: {:?}",
+                        socket.state
+                    );
+                    set_errno(Errno(libc::ENOTCONN));
+                    return -1;
+                }
+            },
+            None => {
+                debug!("getpeername: no socket found for fd: {}", &sockfd);
+                return unsafe { libc::getpeername(sockfd, address, address_len) };
+            }
+        }
+    };
+    debug!("remote_address: {:?}", remote_address);
+    fill_address(address, address_len, remote_address)
 }
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
+pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
@@ -288,92 +251,14 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     0
 }
 
-unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    listen(sockfd, backlog)
-}
-
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
-
-    let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-
-        match sockets.remove(&sockfd) {
-            Some(socket) => socket,
-            None => {
-                warn!("connect: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::connect(sockfd, address, len) };
-            }
-        }
-    };
-
-    // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = &socket.state {
-        let os_addr = OsSocketAddr::from(bound.address);
-        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
-        if ret != 0 {
-            error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
-            );
-            return ret;
-        }
-    };
-    unsafe { libc::connect(sockfd, address, len) }
-}
-
-unsafe extern "C" fn connect_detour(
-    sockfd: RawFd,
-    address: *const sockaddr,
-    len: socklen_t,
-) -> c_int {
-    connect(sockfd, address, len)
-}
-
-/// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
-/// cluster)
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
-    debug!("getpeername called");
-    let remote_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
-            Some(socket) => match &socket.state {
-                SocketState::Connected(connected) => connected.remote_address,
-                _ => {
-                    debug!(
-                        "getpeername: socket is not connected, state: {:?}",
-                        socket.state
-                    );
-                    set_errno(Errno(libc::ENOTCONN));
-                    return -1;
-                }
-            },
-            None => {
-                debug!("getpeername: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::getpeername(sockfd, address, address_len) };
-            }
-        }
-    };
-    debug!("remote_address: {:?}", remote_address);
-    fill_address(address, address_len, remote_address)
-}
-
-unsafe extern "C" fn getpeername_detour(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    getpeername(sockfd, address, address_len)
-}
-
 /// Resolve the fake local address to the real local address.
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
+pub(super) fn getsockname(
+    sockfd: RawFd,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
     debug!("getsockname called");
     let local_address = {
         let sockets = SOCKETS.lock().unwrap();
@@ -400,41 +285,10 @@ fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_
     fill_address(address, address_len, local_address)
 }
 
-unsafe extern "C" fn getsockname_detour(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    getsockname(sockfd, address, address_len)
-}
-
-/// Fill in the sockaddr structure for the given address.
-#[inline]
-fn fill_address(
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    new_address: SocketAddr,
-) -> c_int {
-    if address.is_null() {
-        return 0;
-    }
-    if address_len.is_null() {
-        set_errno(Errno(libc::EINVAL));
-        return -1;
-    }
-    let os_address: OsSocketAddr = new_address.into();
-    unsafe {
-        let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-        std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);
-        *address_len = os_address.len();
-    }
-    0
-}
-
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock This enables us to have a safe way to get "remote" information
 /// (remote ip, port, etc).
-fn accept(
+pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
@@ -477,37 +331,7 @@ fn accept(
     new_fd
 }
 
-unsafe extern "C" fn accept_detour(
-    sockfd: c_int,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    let accept_fd = libc::accept(sockfd, address, address_len);
-
-    if accept_fd == -1 {
-        accept_fd
-    } else {
-        accept(sockfd, address, address_len, accept_fd)
-    }
-}
-
-#[cfg(target_os = "linux")]
-unsafe extern "C" fn accept4_detour(
-    sockfd: i32,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    flags: i32,
-) -> i32 {
-    let accept_fd = libc::accept4(sockfd, address, address_len, flags);
-
-    if accept_fd == -1 {
-        accept_fd
-    } else {
-        accept(sockfd, address, address_len, accept_fd)
-    }
-}
-
-fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
     if fcntl_fd == -1 {
         error!("fcntl failed");
         return fcntl_fd;
@@ -521,12 +345,7 @@ fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
     fcntl_fd
 }
 
-unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    fcntl(fd, cmd, fcntl_fd)
-}
-
-fn dup(fd: c_int, dup_fd: i32) -> c_int {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
     if dup_fd == -1 {
         error!("dup failed");
         return dup_fd;
@@ -537,42 +356,4 @@ fn dup(fd: c_int, dup_fd: i32) -> c_int {
         sockets.insert(dup_fd as RawFd, dup_socket);
     }
     dup_fd
-}
-
-unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    let dup_fd = libc::dup(fd);
-    dup(fd, dup_fd)
-}
-
-unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
-    if oldfd == newfd {
-        return newfd;
-    }
-    let dup2_fd = libc::dup2(oldfd, newfd);
-    dup(oldfd, dup2_fd)
-}
-
-#[cfg(target_os = "linux")]
-unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = libc::dup3(oldfd, newfd, flags);
-    dup(oldfd, dup3_fd)
-}
-
-pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
-    hook!(interceptor, "socket", socket_detour);
-    hook!(interceptor, "bind", bind_detour);
-    hook!(interceptor, "listen", listen_detour);
-    hook!(interceptor, "connect", connect_detour);
-    hook!(interceptor, "fcntl", fcntl_detour);
-    hook!(interceptor, "dup", dup_detour);
-    hook!(interceptor, "dup2", dup2_detour);
-    try_hook!(interceptor, "getpeername", getpeername_detour);
-    try_hook!(interceptor, "getsockname", getsockname_detour);
-    #[cfg(target_os = "linux")]
-    {
-        try_hook!(interceptor, "uv__accept4", accept4_detour);
-        try_hook!(interceptor, "accept4", accept4_detour);
-        try_hook!(interceptor, "dup3", dup3_detour);
-    }
-    try_hook!(interceptor, "accept", accept_detour);
 }

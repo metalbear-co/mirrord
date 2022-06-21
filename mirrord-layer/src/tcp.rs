@@ -19,7 +19,7 @@ use tracing::debug;
 
 use crate::{
     error::LayerError,
-    sockets::{SocketInformation, CONNECTION_QUEUE},
+    socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
 #[derive(Debug, Clone)]

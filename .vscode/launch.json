@@ -50,9 +50,11 @@
       "sourceLanguages": ["rust"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
-        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        // "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"

@@ -25,7 +25,7 @@ use mirrord_protocol::{
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use sockets::SOCKETS;
+use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
@@ -46,7 +46,7 @@ mod error;
 mod file;
 mod macros;
 mod pod_api;
-mod sockets;
+mod socket;
 mod tcp;
 mod tcp_mirror;
 
@@ -467,7 +467,7 @@ fn enable_hooks(enabled_file_ops: bool) {
 
     hook!(interceptor, "close", close_detour);
 
-    sockets::enable_socket_hooks(&mut interceptor);
+    socket::hooks::enable_socket_hooks(&mut interceptor);
 
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);

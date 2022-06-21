@@ -5,10 +5,7 @@ use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
-use super::{
-    ops::{fdopen, fopen, openat},
-    OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
-};
+use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
 use crate::{
     file::ops::{lseek, open, read, write},
     macros::hook,
@@ -175,7 +172,7 @@ pub(super) unsafe extern "C" fn openat_detour(
 /// Hook for `libc::read`.
 ///
 /// Reads `count` bytes into `out_buffer`, only for `fd`s that are being managed by mirrord-layer.
-pub(crate) unsafe extern "C" fn read_detour(
+pub(super) unsafe extern "C" fn read_detour(
     fd: RawFd,
     out_buffer: *mut c_void,
     count: size_t,
@@ -215,7 +212,7 @@ pub(crate) unsafe extern "C" fn read_detour(
 ///
 /// Reads `element_size * number_of_elements` bytes into `out_buffer`, only for `*mut FILE`s that
 /// are being managed by mirrord-layer.
-pub(crate) unsafe extern "C" fn fread_detour(
+pub(super) unsafe extern "C" fn fread_detour(
     out_buffer: *mut c_void,
     element_size: size_t,
     number_of_elements: size_t,
@@ -257,7 +254,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 /// Hook for `libc::fileno`.
 ///
 /// Converts a `*mut FILE` stream into an fd.
-pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
+pub(super) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
 
     if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
@@ -270,7 +267,7 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
 /// Hook for `libc::lseek`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
-pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
+pub(super) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
 
     if let Some(remote_fd) = remote_fd {
@@ -303,7 +300,7 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 /// Hook for `libc::write`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
-pub(crate) unsafe extern "C" fn write_detour(
+pub(super) unsafe extern "C" fn write_detour(
     fd: RawFd,
     buffer: *const c_void,
     count: size_t,
