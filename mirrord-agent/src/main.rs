@@ -15,7 +15,8 @@ use file::FileManager;
 use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, GetEnvVarsRequest, Port,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest, Port,
+    ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -195,8 +196,6 @@ async fn handle_peer_messages(
     state: &mut State,
     sniffer_command_tx: mpsc::Sender<SnifferCommand>,
     peer_message: PeerMessage,
-    container_id: &Option<String>,
-    container_runtime: &Option<String>,
 ) -> Result<(), AgentError> {
     match peer_message.client_message {
         ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) => {
@@ -248,36 +247,8 @@ async fn handle_peer_messages(
         ClientMessage::FileRequest(_) => {
             // handled by the peer..
         }
-        ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-            env_vars_filter,
-            env_vars_select,
-        }) => {
-            debug!(
-                "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
-                peer_message.peer_id, env_vars_filter, env_vars_select
-            );
-
-            let container_runtime = container_runtime
-                .as_ref()
-                .map(String::as_str)
-                .unwrap_or(DEFAULT_RUNTIME);
-
-            let pid = match container_id {
-                Some(container_id) => get_container_pid(container_id, container_runtime).await,
-                None => Err(AgentError::NotFound(format!(
-                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
-                    container_id, container_runtime
-                ))),
-            }?;
-
-            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
-            let env_vars_result =
-                select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
-
-            let peer = state.peers.get(&peer_message.peer_id).unwrap();
-            peer.channel
-                .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
-                .await?;
+        ClientMessage::GetEnvVarsRequest(_) => {
+            // handled by peer
         }
     }
 
@@ -290,6 +261,7 @@ struct PeerHandler {
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     receiver: Receiver<DaemonMessage>,
+    pid: Option<u64>,
 }
 
 impl PeerHandler {
@@ -309,6 +281,7 @@ impl PeerHandler {
             file_manager,
             stream,
             receiver,
+            pid,
         };
         peer_handler.handle_loop().await?;
 
@@ -357,6 +330,29 @@ impl PeerHandler {
                 let response = self.file_manager.handle_message(req)?;
                 self.stream
                     .send(DaemonMessage::FileResponse(response))
+                    .await
+                    .map_err(From::from)
+            }
+            ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                env_vars_filter,
+                env_vars_select,
+            }) => {
+                debug!(
+                    "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
+                    self.id, env_vars_filter, env_vars_select
+                );
+
+                let pid = self
+                    .pid
+                    .map(|i| i.to_string())
+                    .unwrap_or("self".to_string());
+                let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+
+                let env_vars_result =
+                    select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
+
+                self.stream
+                    .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await
                     .map_err(From::from)
             }

@@ -14,10 +14,7 @@ use mirrord_protocol::{
 };
 use tracing::{debug, error};
 
-use crate::{
-    error::AgentError, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME, util::IndexAllocator,
-    PeerID,
-};
+use crate::{error::AgentError, util::IndexAllocator};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -91,6 +88,7 @@ impl FileManager {
         Self {
             open_files: HashMap::new(),
             root_path,
+            ..Default::default()
         }
     }
     fn open(
