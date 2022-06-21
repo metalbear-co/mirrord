@@ -182,4 +182,4 @@ jobs:
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: Collect logs
         if: ${{ failure() }}
-        run: kubectl logs -l app=mirrord
+        run: minikube logs
