@@ -115,7 +115,7 @@ impl FileManager {
                 })
             })?;
 
-        let fd = self.index_allocator.next_index().ok_or({
+        let fd = self.index_allocator.next_index().ok_or_else(|| {
             error!("FileManager::open -> Failed to allocate file descriptor");
             ResponseError::FileOperation(FileError {
                 operation: "open".to_string(),
