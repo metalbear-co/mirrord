@@ -345,7 +345,7 @@ impl PeerHandler {
                 let pid = self
                     .pid
                     .map(|i| i.to_string())
-                    .unwrap_or("self".to_string());
+                    .unwrap_or_else(|| "self".to_string());
                 let environ_path = PathBuf::from("/proc").join(pid).join("environ");
 
                 let env_vars_result =
