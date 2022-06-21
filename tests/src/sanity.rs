@@ -4,8 +4,6 @@ pub mod utils;
 mod tests {
     use std::collections::HashMap;
 
-    use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
-    use kube::{api::ListParams, Api};
     use nix::{
         sys::signal::{self, Signal},
         unistd::Pid,
@@ -84,37 +82,6 @@ mod tests {
         .await
         .unwrap();
         validate_requests(&mut stdout_reader).await;
-
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
-        let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-        // assuming only one job is running
-        // to make the tests parallel we need to figure a way to get the exact job name when len() >
-        // 1
-        assert!(jobs.items.len() > 0);
-
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), "default");
-        let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert!(pods.items.len() > 1);
-
-        let cleanup_timeout = Duration::from_secs(35);
-        timeout(
-            cleanup_timeout,
-            tokio::spawn(async move {
-                // verify cleanup
-                loop {
-                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the http-echo pod should exist
-                    if updated_pods.items.len() {
-                        let http_echo_pod = updated_pods.items[0].metadata.name.clone().unwrap();
-                        assert!(http_echo_pod.contains("http-echo"));
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
     }
 
     #[tokio::test]
@@ -234,13 +201,6 @@ mod tests {
         .unwrap();
         validate_requests(&mut stdout_reader).await;
 
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
-        let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(jobs.items.len(), 1);
-
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
-        let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(pods.items.len(), 1);
         delete_namespace(&client, agent_namespace).await;
     }
 
