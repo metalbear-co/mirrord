@@ -333,7 +333,7 @@ impl FileManager {
 
     pub(crate) fn close(&mut self, fd: usize) -> Result<CloseFileResponse, ResponseError> {
         let file = self.open_files.remove(&fd).ok_or(ResponseError::NotFound)?;
-
+        self.index_allocator.free_index(fd);
         debug!("FileManager::write -> Trying to close file {:#?}", file);
 
         Ok(CloseFileResponse)
