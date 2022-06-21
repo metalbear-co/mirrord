@@ -51,14 +51,7 @@ impl FileManager {
                 path,
                 open_options,
             }) => {
-                let path = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = self.open_relative(relative_fd, full_path, open_options);
+                let open_result = self.open_relative(relative_fd, path, open_options);
                 Ok(FileResponse::Open(open_result))
             }
             FileRequest::Read(ReadFileRequest { fd, buffer_size }) => {
