@@ -133,6 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     name: e2e
     needs: [build_mirrord, test_agent_image]
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -182,4 +184,4 @@ jobs:
         run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
       - name: Collect logs
         if: ${{ failure() }}
-        run: kubectl logs -l app=mirrord
+        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done

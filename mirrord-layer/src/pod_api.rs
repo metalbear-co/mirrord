@@ -12,7 +12,8 @@ use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
 use tracing::{error, warn};
 
-use crate::config;
+use crate::config::LayerConfig;
+
 struct RuntimeData {
     container_id: String,
     container_runtime: String,
@@ -52,14 +53,19 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(
-    pod_name: &str,
-    pod_namespace: &str,
-    agent_namespace: &str,
-    log_level: String,
-    agent_image: String,
-) -> Result<Portforwarder> {
-    let env_config = config::Config::init_from_env().unwrap();
+pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
+    let LayerConfig {
+        agent_rust_log,
+        agent_namespace,
+        agent_image,
+        image_pull_policy,
+        impersonated_pod_name,
+        impersonated_pod_namespace,
+        ..
+    } = config;
+
+    let env_config = LayerConfig::init_from_env().unwrap();
+
     let client = if env_config.accept_invalid_certificates {
         let mut config = Config::infer().await.unwrap();
         config.accept_invalid_certs = true;
@@ -68,13 +74,24 @@ pub async fn create_agent(
     } else {
         Client::try_default().await.unwrap()
     };
-    let runtime_data = RuntimeData::from_k8s(client.clone(), pod_name, pod_namespace).await;
+
+    let runtime_data = RuntimeData::from_k8s(
+        client.clone(),
+        &impersonated_pod_name,
+        &impersonated_pod_namespace,
+    )
+    .await;
+
     let agent_job_name = format!(
         "mirrord-agent-{}",
         Alphanumeric
             .sample_string(&mut rand::thread_rng(), 10)
             .to_lowercase()
     );
+
+    let agent_image = agent_image.unwrap_or_else(|| {
+        concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+    });
 
     let agent_pod: Job =
         serde_json::from_value(json!({ // Only Jobs support self deletion after completion
@@ -104,7 +121,7 @@ pub async fn create_agent(
                         {
                             "name": "mirrord-agent",
                             "image": agent_image,
-                            "imagePullPolicy": "IfNotPresent",
+                            "imagePullPolicy": image_pull_policy,
                             "securityContext": {
                                 "privileged": true,
                             },
@@ -123,7 +140,7 @@ pub async fn create_agent(
                                 "-t",
                                 "30",
                             ],
-                            "env": [{"name": "RUST_LOG", "value": log_level}],
+                            "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
                         }
                     ]
                 }
@@ -133,13 +150,13 @@ pub async fn create_agent(
         ))
         .unwrap();
 
-    let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
+    let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
     jobs_api
         .create(&PostParams::default(), &agent_pod)
         .await
         .unwrap();
 
-    let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
+    let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
     let params = ListParams::default()
         .labels(&format!("job-name={}", agent_job_name))
         .timeout(10);

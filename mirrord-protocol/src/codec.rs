@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     io::{self, SeekFrom},
     path::PathBuf,
 };
@@ -115,6 +116,12 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetEnvVarsRequest {
+    pub env_vars_filter: HashSet<String>,
+    pub env_vars_select: HashSet<String>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
@@ -130,6 +137,7 @@ pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
     FileRequest(FileRequest),
+    GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
 }
 
@@ -174,6 +182,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
+    GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
 }
 
 pub struct ClientCodec {

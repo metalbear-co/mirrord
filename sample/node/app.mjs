@@ -28,7 +28,7 @@ async function debug_file_ops() {
   }
 }
 
-debug_file_ops();
+// debug_file_ops();
 
 const server = createServer();
 server.on("connection", handleConnection);

@@ -27,7 +27,7 @@ pub async fn get_container_pid(
         "docker" => get_docker_container_pid(container_id.to_string()).await,
         "containerd" => get_containerd_container_pid(container_id.to_string()).await,
         _ => Err(AgentError::NotFound(format!(
-            "Unknown runtime {}",
+            "Unknown runtime {:?}",
             container_runtime
         ))),
     }

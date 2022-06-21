@@ -18,10 +18,7 @@ mod tests {
     };
     use tokio_stream::StreamExt;
 
-    // TODO: Re-enable this test, it errors out due to `file_worker` task requiring a valid
-    // `container_id` for `pid` handling, meanwhile this test passes it as `None`.
     #[tokio::test]
-    #[ignore]
     async fn sanity() {
         let mut bin = get_test_bin("mirrord-agent");
         let child = bin
