@@ -9,9 +9,6 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
-};
 use ctor::ctor;
 use envconfig::Envconfig;
 use file::OPEN_FILES;
@@ -19,6 +16,9 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use message::{
+    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+};
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
     FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
@@ -40,17 +40,17 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
-mod common;
 mod config;
 mod error;
 mod file;
 mod macros;
+mod message;
 mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, macros::hook};
+use crate::{config::LayerConfig, macros::hook, message::HookMessage};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });

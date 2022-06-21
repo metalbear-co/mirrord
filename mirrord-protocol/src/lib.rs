@@ -3,6 +3,7 @@
 
 pub mod codec;
 pub mod error;
+pub mod file;
 pub mod tcp;
 
 use std::{collections::HashSet, ops::Deref};

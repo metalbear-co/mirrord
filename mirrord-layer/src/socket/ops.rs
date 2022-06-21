@@ -11,7 +11,7 @@ use tracing::{debug, error, warn};
 
 use super::*;
 use crate::{
-    common::HookMessage,
+    message::HookMessage,
     tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };

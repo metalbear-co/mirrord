@@ -2,19 +2,19 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    file::OpenOptionsInternal, CloseFileResponse, OpenFileResponse, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
-    common::{
+    error::LayerError,
+    file::{OpenOptionsInternalExt, OPEN_FILES},
+    message::{
         CloseFileHook, HookMessage, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
         WriteFileHook,
     },
-    error::LayerError,
-    file::{OpenOptionsInternalExt, OPEN_FILES},
     HOOK_SENDER,
 };
 

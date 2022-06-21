@@ -7,8 +7,8 @@ use std::{
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, ErrorKindInternal, FileError, FileRequest, FileResponse,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    file::OpenOptionsInternal, CloseFileRequest, CloseFileResponse, ErrorKindInternal, FileError,
+    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };

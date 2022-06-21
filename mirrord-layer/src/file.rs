@@ -6,7 +6,7 @@ use std::{
 };
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
-use mirrord_protocol::OpenOptionsInternal;
+use mirrord_protocol::file::OpenOptionsInternal;
 use regex::RegexSet;
 use tracing::warn;
 

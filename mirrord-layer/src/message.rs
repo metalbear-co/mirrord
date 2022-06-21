@@ -1,8 +1,8 @@
 use std::{io::SeekFrom, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    file::OpenOptionsInternal, CloseFileResponse, OpenFileResponse, ReadFileResponse,
+    SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 
