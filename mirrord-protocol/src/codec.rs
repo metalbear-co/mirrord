@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     io::{self, SeekFrom},
     path::PathBuf,
 };
@@ -19,7 +20,7 @@ pub struct LogMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadFileRequest {
-    pub fd: i32,
+    pub fd: usize,
     pub buffer_size: usize,
 }
 
@@ -92,26 +93,32 @@ pub struct OpenFileRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenRelativeFileRequest {
-    pub relative_fd: i32,
+    pub relative_fd: usize,
     pub path: PathBuf,
     pub open_options: OpenOptionsInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SeekFileRequest {
-    pub fd: i32,
+    pub fd: usize,
     pub seek_from: SeekFromInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct WriteFileRequest {
-    pub fd: i32,
+    pub fd: usize,
     pub write_bytes: Vec<u8>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileRequest {
-    pub fd: i32,
+    pub fd: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetEnvVarsRequest {
+    pub env_vars_filter: HashSet<String>,
+    pub env_vars_select: HashSet<String>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -130,12 +137,13 @@ pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
     FileRequest(FileRequest),
+    GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenFileResponse {
-    pub fd: i32,
+    pub fd: usize,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -174,6 +182,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
+    GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
 }
 
 pub struct ClientCodec {

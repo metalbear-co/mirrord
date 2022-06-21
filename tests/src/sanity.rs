@@ -12,7 +12,8 @@ mod tests {
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-        time::{timeout, Duration},
+        process::Command,
+        time::{sleep, timeout, Duration},
     };
 
     use crate::utils::*;
@@ -71,6 +72,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -153,6 +158,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         // Note: Sending a SIGTERM adds an EOF to the stdout stream, so we can read it without
@@ -213,6 +222,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -310,6 +323,10 @@ mod tests {
         .await
         .unwrap();
 
+        // agent takes a bit of time to set filter and start sending traffic, this should solve many
+        // race stuff until we watch the agent logs and start sending requests after we see
+        // it had set the new filter.
+        sleep(Duration::from_millis(100)).await;
         send_requests(service_url.as_str()).await;
 
         timeout(Duration::from_secs(5), async {
@@ -360,5 +377,194 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+
+    #[tokio::test]
+    pub async fn test_file_ops() {
+        let path = env!("CARGO_BIN_FILE_MIRRORD");
+        let command = vec!["python3", "python-e2e/ops.py"];
+        let client = setup_kube_client().await;
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--enable-fs", "--"]
+            .into_iter()
+            .chain(command.into_iter())
+            .collect();
+        let test = Command::new(path)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+        assert!(test.success());
+    }
+
+    #[tokio::test]
+    pub async fn test_remote_env_vars_does_nothing_when_not_specified() {
+        let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_does_nothing_when_not_specified.mjs",
+        ];
+
+        let client = setup_kube_client().await;
+
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+
+        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--"]
+            .into_iter()
+            .chain(node_command.into_iter())
+            .collect();
+
+        let test_process = Command::new(mirrord_bin)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+
+        assert!(test_process.success());
+    }
+
+    /// Weird one to test, as we `panic` inside a separate thread, so the main sample app will just
+    /// complete as normal.
+    #[tokio::test]
+    pub async fn test_remote_env_vars_panics_when_both_filters_are_specified() {
+        let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_panics_when_both_filters_are_specified.mjs",
+        ];
+
+        let client = setup_kube_client().await;
+
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-x",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "-s",
+            "MIRRORD_FAKE_VAR_SECOND",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
+
+        let test_process = Command::new(mirrord_bin)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+
+        assert!(test_process.success());
+    }
+
+    #[tokio::test]
+    pub async fn test_remote_env_vars_exclude_works() {
+        let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
+        ];
+
+        let client = setup_kube_client().await;
+
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-x",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
+
+        let test_process = Command::new(mirrord_bin)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+
+        assert!(test_process.success());
+    }
+
+    #[tokio::test]
+    pub async fn test_remote_env_vars_include_works() {
+        let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
+        ];
+
+        let client = setup_kube_client().await;
+
+        let pod_namespace = "default";
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+
+        let pod_name = get_http_echo_pod_name(&client, pod_namespace)
+            .await
+            .unwrap();
+
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "-s",
+            "MIRRORD_FAKE_VAR_FIRST",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
+
+        let test_process = Command::new(mirrord_bin)
+            .args(args)
+            .envs(&env)
+            .status()
+            .await
+            .unwrap();
+
+        assert!(test_process.success());
     }
 }

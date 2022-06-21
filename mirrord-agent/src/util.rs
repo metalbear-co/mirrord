@@ -121,6 +121,12 @@ where
     }
 }
 
+impl Default for IndexAllocator<usize> {
+    fn default() -> Self {
+        IndexAllocator::new()
+    }
+}
+
 #[cfg(test)]
 mod subscription_tests {
     use super::Subscriptions;
