@@ -1,23 +1,26 @@
 #![feature(result_option_inspect)]
-#![feature(never_type)]
+#![feature(hash_drain_filter)]
 
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
 };
 
 use error::AgentError;
 use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileRequest, FileResponse, Port,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, FileRequest, FileResponse,
+    GetEnvVarsRequest, Port, ResponseError,
 };
 use tokio::{
+    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
+    sync::mpsc,
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
@@ -34,7 +37,7 @@ use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
 
-use crate::file::file_worker;
+use crate::{file::file_worker, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME};
 
 type PeerID = u32;
 
@@ -105,6 +108,86 @@ pub struct PeerMessage {
     peer_id: PeerID,
 }
 
+/// Helper function that loads the process' environment variables, and selects only those that were
+/// requested from `mirrord-layer` (ignores vars specified in `filter_env_vars`).
+///
+/// Returns an error if none of the requested environment variables were found.
+async fn select_env_vars(
+    environ_path: PathBuf,
+    filter_env_vars: HashSet<String>,
+    select_env_vars: HashSet<String>,
+) -> Result<HashMap<String, String>, ResponseError> {
+    debug!(
+        "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
+        environ_path, filter_env_vars, select_env_vars
+    );
+
+    let mut environ_file = tokio::fs::File::open(environ_path).await.map_err(|fail| {
+        ResponseError::FileOperation(FileError {
+            operation: "open".to_string(),
+            raw_os_error: fail.raw_os_error(),
+            kind: fail.kind().into(),
+        })
+    })?;
+
+    let mut raw_env_vars = String::with_capacity(8192);
+
+    // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
+    // "nginx -g daemon off;".
+    let read_amount = environ_file
+        .read_to_string(&mut raw_env_vars)
+        .await
+        .map_err(|fail| {
+            ResponseError::FileOperation(FileError {
+                operation: "read_to_string".to_string(),
+                raw_os_error: fail.raw_os_error(),
+                kind: fail.kind().into(),
+            })
+        })?;
+    debug!(
+        "select_env_vars -> read {:#?} bytes with pure ENV_VARS {:#?}",
+        read_amount, raw_env_vars
+    );
+
+    // TODO: These are env vars that should usually be ignored. Revisit this list if a user
+    // ever asks for a way to NOT filter out these.
+    let mut default_filter = HashSet::with_capacity(2);
+    default_filter.insert("PATH".to_string());
+    default_filter.insert("HOME".to_string());
+
+    let env_vars = raw_env_vars
+        // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
+        .split_terminator(char::from(0))
+        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
+        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        .filter(|(key, _)| !default_filter.contains(key))
+        // [("DB", "foo.db"), ("PORT", "99"), ("PATH", "/fake")]
+        .filter(|(key, _)| !filter_env_vars.contains(key))
+        // [("DB", "foo.db"), ("PORT", "99")]
+        .filter(|(key, _)| {
+            select_env_vars.is_empty()
+                || select_env_vars.contains("*")
+                || select_env_vars.contains(key)
+        })
+        // [("DB", "foo.db")]
+        .collect::<HashMap<_, _>>();
+
+    debug!("select_env_vars -> selected env vars found {:?}", env_vars);
+
+    if env_vars.is_empty() {
+        Err(ResponseError::NotFound)
+    } else {
+        Ok(env_vars)
+    }
+}
+
 async fn handle_peer_messages(
     // TODO: Possibly refactor `state` out to be more "independent", and live in its own worker
     // thread.
@@ -112,6 +195,8 @@ async fn handle_peer_messages(
     sniffer_command_tx: mpsc::Sender<SnifferCommand>,
     file_request_tx: mpsc::Sender<(PeerID, FileRequest)>,
     peer_message: PeerMessage,
+    container_id: &Option<String>,
+    container_runtime: &Option<String>,
 ) -> Result<(), AgentError> {
     match peer_message.client_message {
         ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) => {
@@ -170,6 +255,37 @@ async fn handle_peer_messages(
                 .send((peer_message.peer_id, file_request))
                 .await?;
         }
+        ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+            env_vars_filter,
+            env_vars_select,
+        }) => {
+            debug!(
+                "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
+                peer_message.peer_id, env_vars_filter, env_vars_select
+            );
+
+            let container_runtime = container_runtime
+                .as_ref()
+                .map(String::as_str)
+                .unwrap_or(DEFAULT_RUNTIME);
+
+            let pid = match container_id {
+                Some(container_id) => get_container_pid(container_id, container_runtime).await,
+                None => Err(AgentError::NotFound(format!(
+                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
+                    container_id, container_runtime
+                ))),
+            }?;
+
+            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
+            let env_vars_result =
+                select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
+
+            let peer = state.peers.get(&peer_message.peer_id).unwrap();
+            peer.channel
+                .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                .await?;
+        }
     }
 
     Ok(())
@@ -202,7 +318,7 @@ async fn peer_handler(
                 }
             },
             message = daemon_messages_rx.recv() => {
-                debug!("peer_handler -> daemon_messages_rx.recv received a message {:?}", message);
+                debug!("peer_handler -> daemon_messages_rx.recv received a message");
 
                 match message {
                     Some(message) => {
@@ -284,7 +400,13 @@ async fn start_agent() -> Result<(), AgentError> {
 
             },
             Some(peer_message) = peer_messages_rx.recv() => {
-                handle_peer_messages(&mut state, sniffer_command_tx.clone(), file_request_tx.clone(), peer_message).await?;
+                handle_peer_messages(&mut state,
+                    sniffer_command_tx.clone(),
+                    file_request_tx.clone(),
+                    peer_message,
+                    &args.container_id,
+                    &args.container_runtime,
+                ).await?;
 
             },
             Some((peer_id, file_response)) = file_response_rx.recv() => {

@@ -2,11 +2,9 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
-#![feature(type_alias_impl_trait)]
-#![feature(generic_associated_types)]
 
 use std::{
-    env,
+    collections::HashSet,
     sync::{LazyLock, Mutex, OnceLock},
 };
 
@@ -22,9 +20,10 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
+    FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tcp::TcpHandler;
@@ -51,12 +50,13 @@ mod sockets;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::Config, macros::hook};
+use crate::{common::HookMessage, config::LayerConfig, macros::hook};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
@@ -68,18 +68,10 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let config = Config::init_from_env().unwrap();
+    let config = LayerConfig::init_from_env().unwrap();
 
     let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(
-            &config.impersonated_pod_name,
-            &config.impersonated_pod_namespace,
-            &config.agent_namespace,
-            config.agent_rust_log,
-            config.agent_image.unwrap_or_else(|| {
-                concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-            }),
-        ))
+        .block_on(pod_api::create_agent(config.clone()))
         .unwrap();
 
     let (sender, receiver) = channel::<HookMessage>(1000);
@@ -90,7 +82,7 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    RUNTIME.spawn(poll_agent(port_forwarder, receiver));
+    RUNTIME.spawn(poll_agent(port_forwarder, receiver, config));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -341,12 +333,37 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
+        DaemonMessage::GetEnvVarsResponse(remote_env_vars) => {
+            debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+
+            match remote_env_vars {
+                Ok(remote_env_vars) => {
+                    for (key, value) in remote_env_vars.into_iter() {
+                        debug!(
+                            "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                            key, value
+                        );
+
+                        std::env::set_var(&key, &value);
+                        debug_assert_eq!(std::env::var(key), Ok(value));
+                    }
+                }
+                Err(fail) => error!(
+                    "Loading remote environment variables failed with {:#?}",
+                    fail
+                ),
+            }
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
 }
 
-async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) {
+async fn poll_agent(
+    mut pf: Portforwarder,
+    mut receiver: Receiver<HookMessage>,
+    config: LayerConfig,
+) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
@@ -368,6 +385,36 @@ async fn poll_agent(mut pf: Portforwarder, mut receiver: Receiver<HookMessage>) 
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
+
+    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
+    {
+        panic!(
+            r#"mirrord-layer encountered an issue:
+
+            mirrord doesn't support specifying both
+            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
+
+            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
+            >> If you want to include all, use `--override_env_vars_include="*"`."#
+        );
+    } else {
+        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
+        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
+
+        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            let codec_result = codec
+                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                }))
+                .await;
+
+            debug!(
+                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
+                codec_result
+            );
+        }
+    }
 
     let mut tcp_mirror_handler = TcpMirrorHandler::default();
 

@@ -1,7 +1,7 @@
 use envconfig::Envconfig;
 
-#[derive(Envconfig)]
-pub struct Config {
+#[derive(Envconfig, Clone)]
+pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub agent_rust_log: String,
 
@@ -10,6 +10,9 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_AGENT_IMAGE")]
     pub agent_image: Option<String>,
+
+    #[envconfig(from = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
+    pub image_pull_policy: String,
 
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub impersonated_pod_name: String,
@@ -25,4 +28,12 @@ pub struct Config {
 
     #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
+
+    /// Filters out these env vars when overriding is enabled.
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", default = "")]
+    pub override_env_vars_exclude: String,
+
+    /// Selects these env vars when overriding is enabled.
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", default = "")]
+    pub override_env_vars_include: String,
 }
