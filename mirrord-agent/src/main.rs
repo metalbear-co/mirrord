@@ -9,18 +9,20 @@ use std::{
     path::PathBuf,
 };
 
+use actix_codec::Framed;
 use error::AgentError;
+use file::FileManager;
 use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, FileRequest, FileResponse,
-    GetEnvVarsRequest, Port, ResponseError,
+    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest, Port,
+    ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc,
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
@@ -37,7 +39,7 @@ use cli::parse_args;
 use sniffer::{packet_worker, SnifferCommand, SnifferOutput};
 use util::{IndexAllocator, Subscriptions};
 
-use crate::{file::file_worker, runtime::get_container_pid, sniffer::DEFAULT_RUNTIME};
+use crate::runtime::get_container_pid;
 
 type PeerID = u32;
 
@@ -181,11 +183,7 @@ async fn select_env_vars(
 
     debug!("select_env_vars -> selected env vars found {:?}", env_vars);
 
-    if env_vars.is_empty() {
-        Err(ResponseError::NotFound)
-    } else {
-        Ok(env_vars)
-    }
+    Ok(env_vars)
 }
 
 async fn handle_peer_messages(
@@ -193,10 +191,7 @@ async fn handle_peer_messages(
     // thread.
     state: &mut State,
     sniffer_command_tx: mpsc::Sender<SnifferCommand>,
-    file_request_tx: mpsc::Sender<(PeerID, FileRequest)>,
     peer_message: PeerMessage,
-    container_id: &Option<String>,
-    container_runtime: &Option<String>,
 ) -> Result<(), AgentError> {
     match peer_message.client_message {
         ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) => {
@@ -245,101 +240,127 @@ async fn handle_peer_messages(
             let peer = state.peers.get(&peer_message.peer_id).unwrap();
             peer.channel.send(DaemonMessage::Pong).await?;
         }
-        ClientMessage::FileRequest(file_request) => {
-            debug!(
-                "ClientMessage::FileRequest peer id {:?} requesting {:?}",
-                peer_message.peer_id, file_request
-            );
-
-            file_request_tx
-                .send((peer_message.peer_id, file_request))
-                .await?;
+        ClientMessage::FileRequest(_) => {
+            // handled by the peer..
         }
-        ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-            env_vars_filter,
-            env_vars_select,
-        }) => {
-            debug!(
-                "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
-                peer_message.peer_id, env_vars_filter, env_vars_select
-            );
-
-            let container_runtime = container_runtime
-                .as_ref()
-                .map(String::as_str)
-                .unwrap_or(DEFAULT_RUNTIME);
-
-            let pid = match container_id {
-                Some(container_id) => get_container_pid(container_id, container_runtime).await,
-                None => Err(AgentError::NotFound(format!(
-                    "handle_peer_messages -> Container ID not specified {:#?} for runtime {:#?}!",
-                    container_id, container_runtime
-                ))),
-            }?;
-
-            let environ_path = PathBuf::from("/proc").join(pid.to_string()).join("environ");
-            let env_vars_result =
-                select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
-
-            let peer = state.peers.get(&peer_message.peer_id).unwrap();
-            peer.channel
-                .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
-                .await?;
+        ClientMessage::GetEnvVarsRequest(_) => {
+            // handled by peer
         }
     }
 
     Ok(())
 }
 
-async fn peer_handler(
-    mut daemon_messages_rx: mpsc::Receiver<DaemonMessage>,
-    peer_messages_tx: mpsc::Sender<PeerMessage>,
-    stream: TcpStream,
-    peer_id: PeerID,
-) -> Result<(), AgentError> {
-    let mut daemon_stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+struct PeerHandler {
+    pub sender: Sender<PeerMessage>,
+    id: PeerID,
+    file_manager: FileManager,
+    stream: Framed<TcpStream, DaemonCodec>,
+    receiver: Receiver<DaemonMessage>,
+    pid: Option<u64>,
+}
 
-    loop {
-        select! {
-            message = daemon_stream.next() => {
-                debug!("peer_handler -> daemon_stream.next received a message {:?}", message);
+impl PeerHandler {
+    /// A loop that handles peer connection and state. Brekas upon receiver/sender drop.
+    pub async fn start(
+        sender: Sender<PeerMessage>,
+        id: PeerID,
+        stream: TcpStream,
+        receiver: Receiver<DaemonMessage>,
+        pid: Option<u64>,
+    ) -> Result<(), AgentError> {
+        let file_manager = FileManager::new(pid);
+        let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+        let mut peer_handler = PeerHandler {
+            sender,
+            id,
+            file_manager,
+            stream,
+            receiver,
+            pid,
+        };
+        peer_handler.handle_loop().await?;
 
-                match message {
-                    Some(message) => {
-                        let message = PeerMessage {
-                            client_message: message?,
-                            peer_id
-                        };
+        peer_handler
+            .sender
+            .send(PeerMessage {
+                client_message: ClientMessage::Close,
+                peer_id: id,
+            })
+            .await?;
 
-                        debug!("peer_handler -> client sent message {:?}", message);
-                        peer_messages_tx.send(message).await?;
-                    }
-                    None => break
+        Ok(())
+    }
+
+    async fn handle_loop(&mut self) -> Result<(), AgentError> {
+        loop {
+            select! {
+            message = self.stream.next() => {
+                if let Some(message) = message {
+                    self.handle_peer_message(message?).await?;
+                } else {
+                    debug!("Peer {} disconnected", self.id);
+                        break;
                 }
             },
-            message = daemon_messages_rx.recv() => {
-                debug!("peer_handler -> daemon_messages_rx.recv received a message");
-
-                match message {
-                    Some(message) => {
+            message = self.receiver.recv() => {
+                debug!("peer_handler -> received a message {:?}", message);
+                if let Some(message) = message {
                         debug!("peer_handler -> send message to client");
-                        daemon_stream.send(message).await?;
+                        self.stream.send(message).await?;
+                    } else {
+                        debug!("peer_handler -> receiver dropped");
+                        break;
                     }
-                    None => ()
                 }
 
             }
         }
+        Ok(())
     }
+    /// Handle incoming messages from the peer.
+    async fn handle_peer_message(&mut self, message: ClientMessage) -> Result<(), AgentError> {
+        debug!("peer_handler -> client sent message {:?}", message);
+        match message {
+            ClientMessage::FileRequest(req) => {
+                let response = self.file_manager.handle_message(req)?;
+                self.stream
+                    .send(DaemonMessage::FileResponse(response))
+                    .await
+                    .map_err(From::from)
+            }
+            ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                env_vars_filter,
+                env_vars_select,
+            }) => {
+                debug!(
+                    "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
+                    self.id, env_vars_filter, env_vars_select
+                );
 
-    peer_messages_tx
-        .send(PeerMessage {
-            client_message: ClientMessage::Close,
-            peer_id,
-        })
-        .await?;
+                let pid = self
+                    .pid
+                    .map(|i| i.to_string())
+                    .unwrap_or_else(|| "self".to_string());
+                let environ_path = PathBuf::from("/proc").join(pid).join("environ");
 
-    Ok(())
+                let env_vars_result =
+                    select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
+
+                self.stream
+                    .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                    .await
+                    .map_err(From::from)
+            }
+            _ => {
+                let message = PeerMessage {
+                    client_message: message,
+                    peer_id: self.id,
+                };
+                self.sender.send(message).await.map_err(From::from)
+            }
+        }
+    }
 }
 
 async fn start_agent() -> Result<(), AgentError> {
@@ -350,6 +371,12 @@ async fn start_agent() -> Result<(), AgentError> {
         args.communicate_port,
     ))
     .await?;
+    let pid = match (args.container_id, args.container_runtime) {
+        (Some(container_id), Some(container_runtime)) => {
+            Some(get_container_pid(&container_id, &container_runtime).await?)
+        }
+        _ => None,
+    };
 
     let mut state = State::new();
 
@@ -362,18 +389,7 @@ async fn start_agent() -> Result<(), AgentError> {
         sniffer_output_tx,
         sniffer_command_rx,
         args.interface.clone(),
-        args.container_id.clone(),
-        args.container_runtime.clone(),
-    ));
-
-    let (file_request_tx, file_request_rx) = mpsc::channel::<(PeerID, FileRequest)>(1000);
-    let (file_response_tx, mut file_response_rx) = mpsc::channel::<(PeerID, FileResponse)>(1000);
-    // Create a task to handle file operations, similar to sniffer.
-    let file_task = tokio::spawn(file_worker(
-        file_request_rx,
-        file_response_tx,
-        args.container_id.clone(),
-        args.container_runtime.clone(),
+        pid,
     ));
 
     loop {
@@ -388,7 +404,7 @@ async fn start_agent() -> Result<(), AgentError> {
                     state.peers.insert(Peer::new(peer_id, daemon_message_tx));
 
                     tokio::spawn(async move {
-                        let _ = peer_handler(daemon_message_rx, peer_messages_tx, stream, peer_id)
+                        let _ = PeerHandler::start(peer_messages_tx, peer_id, stream, daemon_message_rx, pid)
                             .await
                             .inspect(|_| debug!("start_agent -> Peer {:#?} closed", peer_id))
                             .inspect_err(|fail| error!("start_agent -> Peer {:#?} failed with {:#?}", peer_id, fail));
@@ -400,22 +416,9 @@ async fn start_agent() -> Result<(), AgentError> {
 
             },
             Some(peer_message) = peer_messages_rx.recv() => {
-                handle_peer_messages(&mut state,
-                    sniffer_command_tx.clone(),
-                    file_request_tx.clone(),
-                    peer_message,
-                    &args.container_id,
-                    &args.container_runtime,
-                ).await?;
+                handle_peer_messages(&mut state, sniffer_command_tx.clone(), peer_message).await?;
 
             },
-            Some((peer_id, file_response)) = file_response_rx.recv() => {
-                if let Some(peer) = state.peers.get(&peer_id) {
-                    peer.channel.send(DaemonMessage::FileResponse(file_response))
-                        .await
-                        .inspect_err(|fail| error!("Failed sending message {:?} to peer {:?}", fail, peer_id))?;
-                }
-            }
             sniffer_output = sniffer_output_rx.recv() => {
                 match sniffer_output {
                     Some(sniffer_output) => {
@@ -493,11 +496,8 @@ async fn start_agent() -> Result<(), AgentError> {
     // To make tasks stop (need to add drain..)
     drop(sniffer_command_tx);
     drop(sniffer_output_rx);
-    drop(file_request_tx);
-    drop(file_response_rx);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), packet_task).await???;
-    tokio::time::timeout(std::time::Duration::from_secs(10), file_task).await???;
 
     Ok(())
 }
