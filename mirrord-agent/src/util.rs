@@ -13,7 +13,7 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
-pub type AgentID = u32;
+pub type ClientID = u32;
 
 impl<T, C> Subscriptions<T, C>
 where
