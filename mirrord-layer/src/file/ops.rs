@@ -9,23 +9,14 @@ use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
+    blocking_send_hook_message,
     error::LayerError,
     file::{OpenOptionsInternalExt, OPEN_FILES},
     message::{
         CloseFileHook, HookMessage, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
         WriteFileHook,
     },
-    HOOK_SENDER,
 };
-
-pub(super) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
-    unsafe {
-        HOOK_SENDER
-            .as_ref()
-            .ok_or(LayerError::EmptyHookSender)
-            .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
-    }
-}
 
 /// Blocking wrapper around `libc::open` call.
 ///

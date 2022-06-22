@@ -1,20 +1,16 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
-    sync::Arc,
-};
+use std::{os::unix::io::RawFd, sync::Arc};
 
-use errno::{errno, set_errno, Errno};
+use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, warn};
 
 use super::*;
 use crate::{
+    blocking_send_hook_message,
     error::LayerError,
     message::HookMessage,
     tcp::{HookMessageTcp, Listen},
-    HOOK_SENDER,
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
@@ -90,91 +86,32 @@ pub(super) fn bind(socket: &mut Socket, raw_addr: OsSocketAddr) -> Result<(), La
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn listen(socket: &mut Socket) -> Result<c_int, LayerError> {
-    debug!("listen called");
+pub(super) fn listen(
+    socket: &mut Socket,
+    bound: Bound,
+    os_addr: OsSocketAddr,
+    fd: RawFd,
+) -> Result<(), LayerError> {
+    debug!(
+        "listen -> socket {:#?} | os_addr {:#?} | fd {:#?}",
+        socket, os_addr, fd
+    );
 
-    match &socket.state {
-        SocketState::Bound(bound) => {
-            let real_port = bound.address.port();
-            socket.state = SocketState::Listening(*bound);
+    let addr = os_addr
+        .into_addr()
+        .ok_or(LayerError::ParseSocketAddr(os_addr))?;
 
-            let mut os_addr = match socket.domain {
-                libc::AF_INET => {
-                    OsSocketAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-                }
-                libc::AF_INET6 => {
-                    OsSocketAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                }
-                invalid_domain => {
-                    // shouldn't happen
-                    warn!("unsupported domain");
-                    return Err(LayerError::UnsupportedDomain(invalid_domain));
-                }
-            };
+    blocking_send_hook_message(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
+        fake_port: addr.port(),
+        real_port: bound.address.port(),
+        ipv6: addr.is_ipv6(),
+        fd,
+    })))?;
 
-            // TODO(alex) [high] 2022-06-22: This is a though one, so many libc calls mixed in here.
-            let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
-            if ret != 0 {
-                error!(
-                    "listen: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}, errno: {:?}",
-                    ret, os_addr, sockfd, errno()
-                );
-                return ret;
-            }
-            let mut addr_len = os_addr.len();
-            // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
-            // connect to.
-            let ret = unsafe { libc::getsockname(sockfd, os_addr.as_mut_ptr(), &mut addr_len) };
-            if ret != 0 {
-                error!(
-                    "listen: failed to get sockname ret: {:?}, addr: {:?}, sockfd: {:?}",
-                    ret, os_addr, sockfd
-                );
-                return ret;
-            }
-            let result_addr = match os_addr.into_addr() {
-                Some(addr) => addr,
-                None => {
-                    error!("listen: failed to parse addr");
-                    return libc::EINVAL;
-                }
-            };
-            let ret = unsafe { libc::listen(sockfd, _backlog) };
-            if ret != 0 {
-                error!(
-                    "listen: failed to listen ret: {:?}, addr: {:?}, sockfd: {:?}",
-                    ret, result_addr, sockfd
-                );
-                return ret;
-            }
-            let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-            match sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
-                fake_port: result_addr.port(),
-                real_port,
-                ipv6: result_addr.is_ipv6(),
-                fd: sockfd,
-            }))) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("listen: failed to send listen message: {:?}", e);
-                    return libc::EFAULT;
-                }
-            };
-        }
-        _ => {
-            error!(
-                "listen: socket is not bound or already listening, state: {:?}",
-                socket.state
-            );
-            return libc::EINVAL;
-        }
-    }
+    socket.state = SocketState::Listening(bound);
     debug!("listen: success");
-    let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(sockfd, socket);
-    0
+
+    Ok(())
 }
 
 #[allow(clippy::significant_drop_in_scrutinee)]

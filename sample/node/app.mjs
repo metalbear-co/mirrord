@@ -51,9 +51,9 @@ async function debug_file_ops() {
   }
 }
 
-debug_outgoing_request();
+// debug_outgoing_request();
 // debug_file_ops();
-// debug_requests();
+debug_requests();
 
 async function debug_requests() {
   const server = createServer(async (req, res) => {});

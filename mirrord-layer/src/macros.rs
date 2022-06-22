@@ -25,7 +25,7 @@ macro_rules! try_hook {
                     error!("{} error: {:?}", $func, e);
                 }
                 Ok(_) => {
-                    debug!("{} hooked", $func);
+                    tracing::trace!("{} hooked", $func);
                 }
             }
         }

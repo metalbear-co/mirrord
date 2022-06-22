@@ -1,11 +1,12 @@
 use std::{os::unix::io::RawFd, sync::Arc};
 
+use errno::errno;
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 
-use super::{ops::*, SOCKETS};
+use super::{ops::*, SocketState, SOCKETS};
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
@@ -59,7 +60,7 @@ pub(super) unsafe extern "C" fn bind_detour(
                     libc::bind(sockfd, addr, addrlen)
                 }
                 _ => {
-                    error!("bind_detour -> Failed with {:#?}", fail);
+                    error!("bind_detour -> Failed with {:#?}!", fail);
                     -1
                 }
             })
@@ -77,7 +78,70 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
     };
 
     if let Some(mut socket) = socket {
-        todo!()
+        if let SocketState::Bound(bound) = socket.state {
+            let os_addr = OsSocketAddr::try_from(socket.as_ref());
+            let mut os_addr = match os_addr {
+                Ok(addr) => addr,
+                Err(fail) => {
+                    error!(
+                        "listen_detour -> Failed converting into OsSocketAddr with {:#?}!",
+                        fail
+                    );
+                    return -1;
+                }
+            };
+
+            // TODO(alex): [low] 2022-06-22: Leaks, as we may fail after this call, so this `sockfd`
+            // will remain bound forever.
+            let bind_result = libc::bind(sockfd, os_addr.as_ptr(), os_addr.len());
+            if bind_result != 0 {
+                error!(
+                    "listen_detour -> Failed bind {:#?} | addr {:#?} | sockfd: {:#?}, errno: {:?}!",
+                    bind_result,
+                    os_addr,
+                    sockfd,
+                    errno()
+                );
+                return bind_result;
+            }
+
+            let mut addr_len = os_addr.len();
+            let getsockname_result = libc::getsockname(sockfd, os_addr.as_mut_ptr(), &mut addr_len);
+            if getsockname_result != 0 {
+                error!(
+                    "listen_detour -> Failed to get sockname {:#?} | addr {:#?} | sockfd: {:#?}!",
+                    getsockname_result, os_addr, sockfd
+                );
+                return getsockname_result;
+            }
+
+            let listen_result = libc::listen(sockfd, backlog);
+            if listen_result != 0 {
+                error!(
+                    "listen_detour -> Failed to listen {:#?} | sockfd: {:#?}!",
+                    listen_result, sockfd
+                );
+                return listen_result;
+            }
+
+            listen(Arc::get_mut(&mut socket).unwrap(), bound, os_addr, sockfd)
+                .map(|_| {
+                    SOCKETS.lock().unwrap().insert(sockfd, socket);
+                    0
+                })
+                .map_err(|fail| {
+                    error!("listen_detour -> Failed with {:#?}!", fail);
+                    libc::EFAULT
+                })
+                .unwrap_or_else(|fail| fail)
+        } else {
+            error!(
+                "listen_detour -> Failed socket is not bound or already listening, state: {:#?}!",
+                socket.state
+            );
+
+            -1
+        }
     } else {
         warn!("listen_detour -> No socket found for sockfd: {:#?}", sockfd);
         libc::listen(sockfd, backlog)

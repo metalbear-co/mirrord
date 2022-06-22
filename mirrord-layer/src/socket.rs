@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -11,6 +11,9 @@ use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
+use tracing::warn;
+
+use crate::error::LayerError;
 
 pub(crate) mod hooks;
 pub(crate) mod ops;
@@ -95,6 +98,28 @@ pub struct Socket {
     type_: c_int,
     protocol: c_int,
     pub state: SocketState,
+}
+
+impl TryFrom<&Socket> for OsSocketAddr {
+    type Error = LayerError;
+
+    fn try_from(socket: &Socket) -> Result<Self, Self::Error> {
+        match socket.domain {
+            libc::AF_INET => Ok(OsSocketAddr::from(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                0,
+            ))),
+            libc::AF_INET6 => Ok(OsSocketAddr::from(SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                0,
+            ))),
+            invalid_domain => {
+                // shouldn't happen
+                warn!("unsupported domain");
+                Err(LayerError::UnsupportedDomain(invalid_domain))
+            }
+        }
+    }
 }
 
 #[inline]
