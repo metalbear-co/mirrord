@@ -257,6 +257,8 @@ pub struct TCPConnectionSniffer {
     agent_senders: HashMap<AgentID, Sender<DaemonTcp>>,
     stream: PacketStream<Active, TcpManagerCodec>,
     sessions: TCPSessionMap,
+    //todo: impl drop for index allocator and connection id..
+    connection_id_to_tcp_identifier: HashMap<ConnectionID, TcpSessionIdentifier>,
     index_allocator: IndexAllocator<ConnectionID>,
 }
 
@@ -276,7 +278,7 @@ impl TCPConnectionSniffer {
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
         interface: String,
-    ) -> Result<TCPConnectionSniffer> {
+    ) -> Result<TCPConnectionSniffer, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
                 .join(PathBuf::from(pid.to_string()))
@@ -366,9 +368,13 @@ impl TCPConnectionSniffer {
                 agent_id,
                 command: SnifferCommands::UnsubscribeConnection(connection_id),
             } => {
-                self.sessions
-                    .get_mut(connection_id)
-                    .map(|session| session.agents.remove(&agent_id));
+                self.connection_id_to_tcp_identifier
+                    .get(&connection_id)
+                    .and_then(|identifier| {
+                        self.sessions
+                            .get_mut(identifier)
+                            .map(|session| session.agents.remove(&agent_id))
+                    });
             }
             SnifferCommand {
                 agent_id,
@@ -383,14 +389,15 @@ impl TCPConnectionSniffer {
 
     async fn send_message_to_agents(
         &mut self,
-        agents: impl Iterator<Item = AgentID>,
+        agents: impl Iterator<Item = &AgentID>,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         for agent_id in agents {
-            if let Some(sender) = self.agent_senders.get(&agent_id) {
-                sender.send(message.clone()).await.ok_or_else(|| {
+            if let Some(sender) = self.agent_senders.get(agent_id) {
+                sender.send(message.clone()).await.map_err(|err| {
                     warn!("failed to send message to agent {}", agent_id);
-                    self.handle_agent_closed(agent_id)?;
+                    self.handle_agent_closed(*agent_id);
+                    err
                 })?;
             }
         }
@@ -420,10 +427,14 @@ impl TCPConnectionSniffer {
                     return Ok(());
                 }
 
-                let id = self.index_allocator.next_index().or_else(|| {
-                    error!("connection index exhausted, dropping new connection");
-                    None
-                })?;
+                let id = match self.index_allocator.next_index() {
+                    Some(id) => id,
+                    None => {
+                        error!("connection index exhausted, dropping new connection");
+                        return Ok(());
+                    }
+                };
+
                 let agent_ids = self.port_subscriptions.get_topic_subscribers(dest_port);
 
                 let message = DaemonTcp::NewConnection(NewTcpConnection {
@@ -434,9 +445,11 @@ impl TCPConnectionSniffer {
                 });
                 self.send_message_to_agents(agent_ids.iter(), message)
                     .await?;
+                self.connection_id_to_tcp_identifier
+                    .insert(id, identifier.clone());
                 TCPSession {
                     id,
-                    agents: agent_ids,
+                    agents: agent_ids.into_iter().collect(),
                 }
             }
         };
@@ -449,18 +462,18 @@ impl TCPConnectionSniffer {
                     bytes: data.to_vec(),
                     connection_id: session.id,
                 });
-                self.send_message_to_agents(&session.agents, message)
+                self.send_message_to_agents(session.agents.iter(), message)
                     .await?;
             }
         }
 
         if is_closed_connection(tcp_flags) {
-            self.index_allocator.free_index(session);
-
+            self.index_allocator.free_index(session.id);
+            self.connection_id_to_tcp_identifier.remove(&session.id);
             let message = DaemonTcp::Close(TcpClose {
-                connection_id: session,
+                connection_id: session.id,
             });
-            self.send_message_to_agents(&session.agents, message)
+            self.send_message_to_agents(session.agents.iter(), message)
                 .await?;
         } else {
             self.sessions.insert(identifier, session);

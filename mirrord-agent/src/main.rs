@@ -10,7 +10,10 @@ use std::{
 use actix_codec::Framed;
 use error::AgentError;
 use file::FileManager;
-use futures::{SinkExt, stream::{FuturesUnordered, StreamExt}};
+use futures::{
+    stream::{FuturesUnordered, StreamExt},
+    SinkExt,
+};
 use mirrord_protocol::{
     tcp::LayerTcp, ClientMessage, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest,
     ResponseError,
@@ -220,13 +223,13 @@ impl AgentConnectionHandler {
                 self.stream
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await
-                    .map_err(From::from)
+                    .map_err(From::from)?
             }
             ClientMessage::Ping => self
                 .stream
                 .send(DaemonMessage::Pong)
                 .await
-                .map_err(From::from),
+                .map_err(From::from)?,
             ClientMessage::Tcp(message) => self.handle_agent_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
@@ -239,7 +242,9 @@ impl AgentConnectionHandler {
         match message {
             LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
-                self.tcp_sniffer_api.unsubscribe(connection_id).await
+                self.tcp_sniffer_api
+                    .unsubscribe_connection(connection_id)
+                    .await
             }
             LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.unsubscribe_port(port).await,
         }
@@ -301,7 +306,7 @@ async fn start_agent() -> Result<(), AgentError> {
 
             },
             agent = agents.select_next_some() => {
-                let agent_id = agent.await?;
+                let agent_id = agent?;
                 state.remove_agent(agent_id);
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
