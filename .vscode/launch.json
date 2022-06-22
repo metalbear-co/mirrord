@@ -32,7 +32,7 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
+        "RUST_LOG": "warn,mirrord=trace",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
@@ -55,7 +55,7 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
+        "RUST_LOG": "warn,mirrord=trace",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",

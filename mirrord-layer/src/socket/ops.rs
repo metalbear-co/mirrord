@@ -1,6 +1,5 @@
 use std::{os::unix::io::RawFd, sync::Arc};
 
-use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, warn};
@@ -114,73 +113,23 @@ pub(super) fn listen(
     Ok(())
 }
 
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
-
-    let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-
-        match sockets.remove(&sockfd) {
-            Some(socket) => socket,
-            None => {
-                warn!("connect: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::connect(sockfd, address, len) };
-            }
-        }
-    };
-
-    // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = &socket.state {
-        let os_addr = OsSocketAddr::from(bound.address);
-
-        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
-
-        if ret != 0 {
-            error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
-            );
-
-            return ret;
-        }
-    };
-    unsafe { libc::connect(sockfd, address, len) }
+pub(super) fn connect(
+    sockfd: RawFd,
+    address: *const sockaddr,
+    len: socklen_t,
+) -> Result<(), LayerError> {
+    todo!()
 }
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> c_int {
-    debug!("getpeername called");
-    let remote_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
-            Some(socket) => match &socket.state {
-                SocketState::Connected(connected) => connected.remote_address,
-                _ => {
-                    debug!(
-                        "getpeername: socket is not connected, state: {:?}",
-                        socket.state
-                    );
-                    set_errno(Errno(libc::ENOTCONN));
-                    return -1;
-                }
-            },
-            None => {
-                debug!("getpeername: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::getpeername(sockfd, address, address_len) };
-            }
-        }
-    };
-    debug!("remote_address: {:?}", remote_address);
-    fill_address(address, address_len, remote_address)
+    todo!()
 }
 
 /// Resolve the fake local address to the real local address.
@@ -191,30 +140,7 @@ pub(super) fn getsockname(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> c_int {
-    debug!("getsockname called");
-    let local_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
-            Some(socket) => match &socket.state {
-                SocketState::Connected(connected) => connected.local_address,
-                SocketState::Bound(bound) => bound.address,
-                SocketState::Listening(bound) => bound.address,
-                _ => {
-                    debug!(
-                        "getsockname: socket is not bound or connected, state: {:?}",
-                        socket.state
-                    );
-                    return unsafe { libc::getsockname(sockfd, address, address_len) };
-                }
-            },
-            None => {
-                debug!("getsockname: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::getsockname(sockfd, address, address_len) };
-            }
-        }
-    };
-    debug!("local_address: {:?}", local_address);
-    fill_address(address, address_len, local_address)
+    todo!()
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the

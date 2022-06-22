@@ -7,7 +7,6 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
@@ -100,6 +99,25 @@ pub struct Socket {
     pub state: SocketState,
 }
 
+impl Socket {
+    fn get_connected_remote_address(&self) -> Result<SocketAddr, LayerError> {
+        if let SocketState::Connected(connected) = &self.state {
+            Ok(connected.remote_address)
+        } else {
+            Err(LayerError::SocketInvalidState(self.state.clone()))
+        }
+    }
+
+    fn get_local_address(&self) -> Result<SocketAddr, LayerError> {
+        match &self.state {
+            SocketState::Initialized => Err(LayerError::SocketInvalidState(self.state.clone())),
+            SocketState::Bound(bound) => Ok(bound.address),
+            SocketState::Listening(listening) => Ok(listening.address),
+            SocketState::Connected(connected) => Ok(connected.local_address),
+        }
+    }
+}
+
 impl TryFrom<&Socket> for OsSocketAddr {
     type Error = LayerError;
 
@@ -133,20 +151,23 @@ pub(crate) fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> c_int {
+) -> Result<(), LayerError> {
     if address.is_null() {
-        return 0;
-    }
+        Err(LayerError::NullSocketAddress)
+    } else if address_len.is_null() {
+        Err(LayerError::NullAddressLength)
+    } else {
+        let os_address: OsSocketAddr = new_address.into();
+        unsafe {
+            let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
+            std::ptr::copy_nonoverlapping(
+                os_address.as_ptr() as *const u8,
+                address as *mut u8,
+                len,
+            );
+            *address_len = os_address.len();
+        }
 
-    if address_len.is_null() {
-        set_errno(Errno(libc::EINVAL));
-        return -1;
+        Ok(())
     }
-    let os_address: OsSocketAddr = new_address.into();
-    unsafe {
-        let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-        std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);
-        *address_len = os_address.len();
-    }
-    0
 }

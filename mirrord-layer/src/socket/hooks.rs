@@ -1,12 +1,12 @@
 use std::{os::unix::io::RawFd, sync::Arc};
 
-use errno::errno;
+use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use tracing::{error, warn};
+use tracing::{error, trace, warn};
 
-use super::{ops::*, SocketState, SOCKETS};
+use super::{fill_address, ops::*, SocketState, SOCKETS};
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
@@ -17,6 +17,8 @@ pub(super) unsafe extern "C" fn socket_detour(
     type_: c_int,
     protocol: c_int,
 ) -> c_int {
+    trace!("socket_detour");
+
     let fd = libc::socket(domain, type_, protocol);
 
     if fd == -1 {
@@ -33,11 +35,14 @@ pub(super) unsafe extern "C" fn socket_detour(
     }
 }
 
+// TODO(alex) [high] 2022-06-22: Do the `bind` directly, instead of leaving it up to `listen`.
 pub(super) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
+    trace!("bind_detour");
+
     let raw_addr = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize);
 
     let socket = {
@@ -48,9 +53,11 @@ pub(super) unsafe extern "C" fn bind_detour(
     // "remove -> modify -> insert" pattern is used here to change the value in `Arc<Socket>`.
     // It works as we basically take ownership of the `Arc`.
     // Avoiding this pattern would require changing `SOCKETS` to hold `Arc<Mutex<Socket>>>`.
+    //
+    // TODO(alex) [low] 2022-06-22: Solve this pattern issue.
     if let Some(mut socket) = socket {
         bind(Arc::get_mut(&mut socket).unwrap(), raw_addr)
-            .map(|_| {
+            .map(|()| {
                 SOCKETS.lock().unwrap().insert(sockfd, socket);
                 0
             })
@@ -72,6 +79,8 @@ pub(super) unsafe extern "C" fn bind_detour(
 }
 
 pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
+    trace!("listen_detour");
+
     let socket = {
         let mut sockets = SOCKETS.lock().unwrap();
         sockets.remove(&sockfd)
@@ -91,7 +100,7 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
                 }
             };
 
-            // TODO(alex): [low] 2022-06-22: Leaks, as we may fail after this call, so this `sockfd`
+            // TODO(alex) [low] 2022-06-22: Leaks, as we may fail after this call, so this `sockfd`
             // will remain bound forever.
             let bind_result = libc::bind(sockfd, os_addr.as_ptr(), os_addr.len());
             if bind_result != 0 {
@@ -125,7 +134,7 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
             }
 
             listen(Arc::get_mut(&mut socket).unwrap(), bound, os_addr, sockfd)
-                .map(|_| {
+                .map(|()| {
                     SOCKETS.lock().unwrap().insert(sockfd, socket);
                     0
                 })
@@ -153,15 +162,70 @@ pub(super) unsafe extern "C" fn connect_detour(
     address: *const sockaddr,
     len: socklen_t,
 ) -> c_int {
-    connect(sockfd, address, len)
+    trace!("connect_detour");
+
+    let socket = {
+        let mut sockets = SOCKETS.lock().unwrap();
+        sockets.remove(&sockfd)
+    };
+
+    if let Some(socket) = socket {
+        if let SocketState::Bound(bound) = socket.state {
+            let os_addr = OsSocketAddr::from(bound.address);
+            libc::bind(sockfd, os_addr.as_ptr(), os_addr.len())
+        } else {
+            error!(
+                "connect_detour -> Socket {:#?} in invalid state for this call {:#?}!",
+                sockfd, socket
+            );
+
+            -1
+        }
+    } else {
+        warn!(
+            "connect_detour -> No socket found for sockfd {:#?}",
+            &sockfd
+        );
+        libc::connect(sockfd, address, len)
+    }
 }
 
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> i32 {
-    getpeername(sockfd, address, address_len)
+) -> c_int {
+    let sockets = SOCKETS.lock().unwrap();
+
+    if let Some(socket) = sockets.get(&sockfd) {
+        socket
+            .get_connected_remote_address()
+            .and_then(|remote_address| fill_address(address, address_len, remote_address))
+            .map_err(|fail| {
+                error!("getpeername_detour -> Failed with {:#?}!", fail);
+
+                match fail {
+                    LayerError::SocketInvalidState(_) => {
+                        set_errno(Errno(libc::ENOTCONN));
+                        -1
+                    }
+                    LayerError::NullSocketAddress => 0,
+                    LayerError::NullAddressLength => {
+                        set_errno(Errno(libc::EINVAL));
+                        -1
+                    }
+                    _ => -1,
+                }
+            })
+            .map(|()| 0)
+            .unwrap_or_else(|fail| fail)
+    } else {
+        warn!(
+            "getpeername_detour -> No socket found for sockfd {:#?}",
+            sockfd
+        );
+        libc::getpeername(sockfd, address, address_len)
+    }
 }
 
 pub(super) unsafe extern "C" fn getsockname_detour(
@@ -169,7 +233,37 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> i32 {
-    getsockname(sockfd, address, address_len)
+    let sockets = SOCKETS.lock().unwrap();
+
+    if let Some(socket) = sockets.get(&sockfd) {
+        socket
+            .get_local_address()
+            .and_then(|remote_address| fill_address(address, address_len, remote_address))
+            .map_err(|fail| {
+                error!("getpeername_detour -> Failed with {:#?}!", fail);
+
+                match fail {
+                    LayerError::SocketInvalidState(_) => {
+                        set_errno(Errno(libc::ENOTCONN));
+                        -1
+                    }
+                    LayerError::NullSocketAddress => 0,
+                    LayerError::NullAddressLength => {
+                        set_errno(Errno(libc::EINVAL));
+                        -1
+                    }
+                    _ => -1,
+                }
+            })
+            .map(|()| 0)
+            .unwrap_or_else(|fail| fail)
+    } else {
+        warn!(
+            "getsockname_detour -> No socket found for sockfd {:#?}",
+            sockfd
+        );
+        libc::getpeername(sockfd, address, address_len)
+    }
 }
 
 pub(super) unsafe extern "C" fn accept_detour(

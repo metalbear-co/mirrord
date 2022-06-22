@@ -68,4 +68,10 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Socket operation called for an unsupported domain `{0:#?}`!")]
     UnsupportedDomain(i32),
+
+    #[error("mirrord-layer: Socket address is null!")]
+    NullSocketAddress,
+
+    #[error("mirrord-layer: Socket address length is null!")]
+    NullAddressLength,
 }
