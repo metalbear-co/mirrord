@@ -2,9 +2,7 @@
 #![feature(hash_drain_filter)]
 
 use std::{
-    borrow::Borrow,
     collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
 };
@@ -12,20 +10,18 @@ use std::{
 use actix_codec::Framed;
 use error::AgentError;
 use file::FileManager;
-use futures::{stream::FuturesUnordered, SinkExt};
+use futures::{SinkExt, stream::{FuturesUnordered, StreamExt}};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, ConnectionID, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest, Port,
+    tcp::LayerTcp, ClientMessage, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest,
     ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Sender},
 };
-use tokio_stream::StreamExt;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 use tracing_subscriber::prelude::*;
 
 mod cli;
@@ -36,10 +32,12 @@ mod sniffer;
 mod util;
 
 use cli::parse_args;
-use sniffer::{Enabled, SnifferCommand, SnifferOutput, TCPConnectionSniffer, TCPSnifferAPI};
-use util::{IndexAllocator, Subscriptions};
+use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
+use util::{AgentID, IndexAllocator};
 
 use crate::runtime::get_container_pid;
+
+const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug)]
 struct State {
@@ -63,12 +61,6 @@ impl State {
         self.agents.remove(&agent_id);
         self.index_allocator.free_index(agent_id)
     }
-}
-
-#[derive(Debug)]
-pub struct PeerMessage {
-    client_message: ClientMessage,
-    peer_id: AgentID,
 }
 
 /// Helper function that loads the process' environment variables, and selects only those that were
@@ -147,76 +139,12 @@ async fn select_env_vars(
     Ok(env_vars)
 }
 
-async fn handle_peer_messages(
-    // TODO: Possibly refactor `state` out to be more "independent", and live in its own worker
-    // thread.
-    state: &mut State,
-    sniffer_command_tx: mpsc::Sender<SnifferCommand>,
-    peer_message: PeerMessage,
-) -> Result<(), AgentError> {
-    match peer_message.client_message {
-        ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)) => {
-            debug!(
-                "ClientMessage::PortUnsubscribe -> peer id {:#?}, port {port:#?}",
-                peer_message.peer_id
-            );
-            state
-                .port_subscriptions
-                .unsubscribe(peer_message.peer_id, port);
-        }
-        ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
-            debug!(
-                "ClientMessage::PortSubscribe -> peer id {:#?} asked to subscribe to {:#?}",
-                peer_message.peer_id, port
-            );
-            state
-                .port_subscriptions
-                .subscribe(peer_message.peer_id, port);
-
-            let ports = state.port_subscriptions.get_subscribed_topics();
-            sniffer_command_tx
-                .send(SnifferCommand::SetPorts(ports))
-                .await?;
-        }
-        ClientMessage::Close => {
-            debug!(
-                "ClientMessage::Close -> peer id {:#?} sent close",
-                &peer_message.peer_id
-            );
-            state.remove_peer(peer_message.peer_id);
-
-            let ports = state.port_subscriptions.get_subscribed_topics();
-            sniffer_command_tx
-                .send(SnifferCommand::SetPorts(ports))
-                .await?;
-        }
-        ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id)) => {
-            debug!("ClientMessage::ConnectionUnsubscribe -> peer id {:#?} unsubscribe connection id {:#?}", &peer_message.peer_id, connection_id);
-            state
-                .connections_subscriptions
-                .unsubscribe(peer_message.peer_id, connection_id);
-        }
-        ClientMessage::Ping => {
-            // handled by peer
-        }
-        ClientMessage::FileRequest(_) => {
-            // handled by the peer..
-        }
-        ClientMessage::GetEnvVarsRequest(_) => {
-            // handled by peer
-        }
-    }
-
-    Ok(())
-}
-
-struct PeerHandler {
-    pub sender: Sender<PeerMessage>,
+struct AgentConnectionHandler {
     id: AgentID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
-    receiver: Receiver<DaemonMessage>,
     pid: Option<u64>,
+    tcp_sniffer_api: TCPSnifferAPI,
 }
 
 impl AgentConnectionHandler {
@@ -229,15 +157,13 @@ impl AgentConnectionHandler {
     ) -> Result<(), AgentError> {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
-        let (tcp_receiver, tcp_sender) = mpsc::channel(CHANNEL_SIZE);
-        let tcp_sniffer_api = TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver)
-            .enable(tcp_sender)
-            .await?;
+        let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
+        let mut tcp_sniffer_api = TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver);
+        tcp_sniffer_api.enable(tcp_sender).await?;
         let mut agent_handler = AgentConnectionHandler {
             id,
             file_manager,
             stream,
-            receiver,
             pid,
             tcp_sniffer_api,
         };
@@ -388,15 +314,6 @@ async fn start_agent() -> Result<(), AgentError> {
     }
 
     debug!("start_agent -> shutting down start");
-    if !sniffer_command_tx.is_closed() {
-        sniffer_command_tx.send(SnifferCommand::Close).await?;
-    };
-
-    // To make tasks stop (need to add drain..)
-    drop(sniffer_command_tx);
-    drop(sniffer_output_rx);
-
-    tokio::time::timeout(std::time::Duration::from_secs(10), packet_task).await???;
 
     Ok(())
 }
