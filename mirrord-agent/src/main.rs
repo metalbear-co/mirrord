@@ -37,7 +37,7 @@ mod util;
 
 use cli::parse_args;
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use util::{AgentID, IndexAllocator};
+use util::{ClientID, IndexAllocator};
 
 use crate::runtime::get_container_pid;
 
@@ -45,25 +45,25 @@ const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug)]
 struct State {
-    pub agents: HashSet<AgentID>,
-    index_allocator: IndexAllocator<AgentID>,
+    pub clients: HashSet<ClientID>,
+    index_allocator: IndexAllocator<ClientID>,
 }
 
 impl State {
     pub fn new() -> State {
         State {
-            agents: HashSet::new(),
+            clients: HashSet::new(),
             index_allocator: IndexAllocator::new(),
         }
     }
 
-    pub fn generate_id(&mut self) -> Option<AgentID> {
+    pub fn generate_id(&mut self) -> Option<ClientID> {
         self.index_allocator.next_index()
     }
 
-    pub fn remove_agent(&mut self, agent_id: AgentID) {
-        self.agents.remove(&agent_id);
-        self.index_allocator.free_index(agent_id)
+    pub fn remove_client(&mut self, client_id: ClientID) {
+        self.clients.remove(&client_id);
+        self.index_allocator.free_index(client_id)
     }
 }
 
@@ -143,18 +143,18 @@ async fn select_env_vars(
     Ok(env_vars)
 }
 
-struct AgentConnectionHandler {
-    id: AgentID,
+struct ClientConnectionHandler {
+    id: ClientID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
 }
 
-impl AgentConnectionHandler {
-    /// A loop that handles agent connection and state. Brekas upon receiver/sender drop.
+impl ClientConnectionHandler {
+    /// A loop that handles client connection and state. Brekas upon receiver/sender drop.
     pub async fn start(
-        id: AgentID,
+        id: ClientID,
         stream: TcpStream,
         pid: Option<u64>,
         sniffer_command_sender: Sender<SnifferCommand>,
@@ -165,14 +165,14 @@ impl AgentConnectionHandler {
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
         let mut tcp_sniffer_api = TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver);
         tcp_sniffer_api.enable(tcp_sender).await?;
-        let mut agent_handler = AgentConnectionHandler {
+        let mut client_handler = ClientConnectionHandler {
             id,
             file_manager,
             stream,
             pid,
             tcp_sniffer_api,
         };
-        agent_handler.handle_loop(cancel_token).await?;
+        client_handler.handle_loop(cancel_token).await?;
         Ok(())
     }
 
@@ -182,9 +182,9 @@ impl AgentConnectionHandler {
             select! {
                 message = self.stream.next() => {
                     if let Some(message) = message {
-                        running = self.handle_agent_message(message?).await?;
+                        running = self.handle_client_message(message?).await?;
                     } else {
-                        debug!("Agent {} disconnected", self.id);
+                        debug!("Client {} disconnected", self.id);
                             break;
                     }
                 }
@@ -193,13 +193,13 @@ impl AgentConnectionHandler {
                 }
             }
         }
-        debug!("peer closing");
+        debug!("client closing");
         Ok(())
     }
 
-    /// Handle incoming messages from the agent. Returns False if the agent disconnected.
-    async fn handle_agent_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
-        debug!("agent_handler -> client sent message {:?}", message);
+    /// Handle incoming messages from the client. Returns False if the client disconnected.
+    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
+        debug!("client_handler -> client sent message {:?}", message);
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
@@ -212,7 +212,7 @@ impl AgentConnectionHandler {
                 env_vars_select,
             }) => {
                 debug!(
-                    "ClientMessage::GetEnvVarsRequest peer id {:?} filter {:?} select {:?}",
+                    "ClientMessage::GetEnvVarsRequest client id {:?} filter {:?} select {:?}",
                     self.id, env_vars_filter, env_vars_select
                 );
 
@@ -230,7 +230,7 @@ impl AgentConnectionHandler {
                     .await?
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
-            ClientMessage::Tcp(message) => self.handle_agent_tcp(message).await?,
+            ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }
@@ -238,7 +238,7 @@ impl AgentConnectionHandler {
         Ok(true)
     }
 
-    async fn handle_agent_tcp(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+    async fn handle_client_tcp(&mut self, message: LayerTcp) -> Result<(), AgentError> {
         match message {
             LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
@@ -279,43 +279,43 @@ async fn start_agent() -> Result<(), AgentError> {
         cancellation_token.clone(),
     ));
 
-    let mut agents = FuturesUnordered::new();
+    let mut clients = FuturesUnordered::new();
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
                 debug!("start -> Connection accepted from {:?}", addr);
 
-                if let Some(agent_id) = state.generate_id() {
+                if let Some(client_id) = state.generate_id() {
 
-                    state.agents.insert(agent_id);
+                    state.clients.insert(client_id);
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
-                    let agent = tokio::spawn(async move {
-                        match AgentConnectionHandler::start(agent_id, stream, pid, sniffer_command_tx, cancellation_token).await {
+                    let client = tokio::spawn(async move {
+                        match ClientConnectionHandler::start(client_id, stream, pid, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
-                                debug!("AgentConnectionHandler::start -> Agent {} disconnected", agent_id);
+                                debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
                             }
                             Err(e) => {
-                                error!("AgentConnectionHandler::start -> Agent {} disconnected with error: {}", agent_id, e);
+                                error!("ClientConnectionHandler::start -> Client {} disconnected with error: {}", client_id, e);
                             }
                         }
-                        agent_id
+                        client_id
 
                     });
-                    agents.push(agent);
+                    clients.push(client);
                 }
                 else {
-                    error!("start_agent -> Ran out of connections, dropping new connection");
+                    error!("start_client -> Ran out of connections, dropping new connection");
                 }
 
             },
-            agent = agents.select_next_some() => {
-                let agent_id = agent?;
-                state.remove_agent(agent_id);
+            client = clients.select_next_some() => {
+                let client_id = client?;
+                state.remove_client(client_id);
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
-                if state.agents.is_empty() {
-                    debug!("start_agent -> main thread timeout, no agents connected");
+                if state.clients.is_empty() {
+                    debug!("start_agent -> main thread timeout, no clients connected");
                     break;
                 }
             }
