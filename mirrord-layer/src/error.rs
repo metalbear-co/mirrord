@@ -5,6 +5,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::HookMessage;
+use crate::socket::SocketState;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -52,4 +53,19 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
+
+    #[error("mirrord-layer: Socket with fd `{0}` is not Tcpv4!")]
+    SocketNotTcpv4(RawFd),
+
+    #[error("mirrord-layer: Failed parsing raw_addr `{0:#?}`!")]
+    ParseSocketAddr(os_socketaddr::OsSocketAddr),
+
+    #[error("mirrord-layer: Address `{0:#?}` contains an ignored port!")]
+    IgnoredPort(std::net::SocketAddr),
+
+    #[error("mirrord-layer: Socket is in invalid state `{0:#?}`!")]
+    SocketInvalidState(SocketState),
+
+    #[error("mirrord-layer: Socket operation called for an unsupported domain `{0:#?}`!")]
+    UnsupportedDomain(i32),
 }

@@ -16,7 +16,7 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+    LazyLock::new(|| Mutex::new(HashMap::default()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
@@ -61,7 +61,7 @@ trait GetPeerName {
     fn get_peer_name(&self) -> SocketAddr;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
@@ -69,12 +69,12 @@ pub struct Connected {
     local_address: SocketAddr,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocketState {
     Initialized,
     Bound(Bound),
@@ -98,7 +98,7 @@ pub struct Socket {
 }
 
 #[inline]
-fn is_ignored_port(port: Port) -> bool {
+const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 

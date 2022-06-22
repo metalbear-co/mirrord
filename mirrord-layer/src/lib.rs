@@ -386,6 +386,8 @@ async fn poll_agent(
 
     let mut ping = false;
 
+    // THe remote environment feature doesn't have an `enable` flag, instead it relies on EITHER
+    // of the filters being specified (does NOT allow BOTH).
     if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
     {
         panic!(
@@ -421,29 +423,34 @@ async fn poll_agent(
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(),
-                &mut tcp_mirror_handler,
-                &mut codec,
-                &open_file_handler,
-                &read_file_handler,
-                &seek_file_handler,
-                &write_file_handler,
-                &close_file_handler,
-            ).await;
-            }
-            daemon_message = codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    handle_daemon_message(message,
+                handle_hook_message(
+                    hook_message.unwrap(),
                     &mut tcp_mirror_handler,
+                    &mut codec,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
-                    &mut ping,
+                ).await;
+            }
+            daemon_message = codec.next() => {
+                if let Some(Ok(message)) = daemon_message {
+                    handle_daemon_message(
+                        message,
+                        &mut tcp_mirror_handler,
+                        &open_file_handler,
+                        &read_file_handler,
+                        &seek_file_handler,
+                        &write_file_handler,
+                        &close_file_handler,
+                        &mut ping,
                     ).await;
                 } else {
-                    error!("agent disconnected");
+                    error!(
+                        "poll_agent -> `daemon_message`: {:#?}, agent disconnected!",
+                        daemon_message
+                    );
                     break;
                 }
             },

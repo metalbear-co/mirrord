@@ -11,170 +11,95 @@ use tracing::{debug, error, warn};
 
 use super::*;
 use crate::{
+    error::LayerError,
     message::HookMessage,
     tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
-    debug!("socket called domain:{:?}, type:{:?}", domain, type_);
-    let fd = unsafe { libc::socket(domain, type_, protocol) };
-    if fd == -1 {
-        error!("socket failed");
-        return fd;
-    }
+pub(super) fn socket(
+    fd: RawFd,
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+) -> Result<RawFd, LayerError> {
+    debug!(
+        "socket -> fd {:#?} | domain {:#?} | type {:#?}",
+        fd, domain, type_
+    );
+
     // We don't handle non Tcpv4 sockets
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
     {
-        debug!("non Tcp socket domain:{:?}, type:{:?}", domain, type_);
-        return fd;
+        warn!(
+            "socket-> Found non-Tcpv4 socket with values: domain {:#?} | type {:#?}",
+            domain, type_
+        );
+
+        Err(LayerError::SocketNotTcpv4(fd))
+    } else {
+        let mut sockets = SOCKETS.lock().unwrap();
+        sockets.insert(
+            fd,
+            Arc::new(Socket {
+                domain,
+                type_,
+                protocol,
+                state: SocketState::default(),
+            }),
+        );
+
+        Ok(fd)
     }
-    let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(
-        fd,
-        Arc::new(Socket {
-            domain,
-            type_,
-            protocol,
-            state: SocketState::default(),
-        }),
-    );
-    fd
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
-    debug!("bind called sockfd: {:?}", sockfd);
-    let mut socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.remove(&sockfd) {
-            Some(socket) if !matches!(socket.state, SocketState::Initialized) => {
-                error!("socket is in invalid state for bind {:?}", socket.state);
-                return libc::EINVAL;
-            }
-            Some(socket) => socket,
-            None => {
-                debug!("bind: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::bind(sockfd, addr, addrlen) };
-            }
-        }
-    };
+pub(super) fn bind(socket: &mut Socket, raw_addr: OsSocketAddr) -> Result<(), LayerError> {
+    debug!("bind -> socket {:#?} | raw_addr {:#?}", socket, raw_addr);
 
-    let raw_addr = unsafe { OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize) };
-    let parsed_addr = match raw_addr.into_addr() {
-        Some(addr) => addr,
-        None => {
-            error!("bind: failed to parse addr");
-            return libc::EINVAL;
-        }
-    };
+    if socket.state != SocketState::Initialized {
+        Err(LayerError::SocketInvalidState(socket.state.clone()))
+    } else {
+        let parsed_addr = raw_addr
+            .into_addr()
+            .ok_or_else(|| {
+                error!("bind -> Failed to parse raw_addr {:#?}!", raw_addr);
+                LayerError::ParseSocketAddr(raw_addr)
+            })
+            .and_then(|parsed_addr| {
+                let port = parsed_addr.port();
+                debug!("bind -> port {:#?}", port);
 
-    debug!("bind:port: {}", parsed_addr.port());
-    if is_ignored_port(parsed_addr.port()) {
-        debug!("bind: ignoring port: {}", parsed_addr.port());
-        return unsafe { libc::bind(sockfd, addr, addrlen) };
-    }
-
-    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
-        address: parsed_addr,
-    });
-
-    let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(sockfd, socket);
-    0
-}
-
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
-
-    let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-
-        match sockets.remove(&sockfd) {
-            Some(socket) => socket,
-            None => {
-                warn!("connect: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::connect(sockfd, address, len) };
-            }
-        }
-    };
-
-    // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = &socket.state {
-        let os_addr = OsSocketAddr::from(bound.address);
-        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
-        if ret != 0 {
-            error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
-            );
-            return ret;
-        }
-    };
-    unsafe { libc::connect(sockfd, address, len) }
-}
-
-/// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
-/// cluster)
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn getpeername(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> c_int {
-    debug!("getpeername called");
-    let remote_address = {
-        let sockets = SOCKETS.lock().unwrap();
-        match sockets.get(&sockfd) {
-            Some(socket) => match &socket.state {
-                SocketState::Connected(connected) => connected.remote_address,
-                _ => {
-                    debug!(
-                        "getpeername: socket is not connected, state: {:?}",
-                        socket.state
-                    );
-                    set_errno(Errno(libc::ENOTCONN));
-                    return -1;
+                if is_ignored_port(port) {
+                    Err(LayerError::IgnoredPort(parsed_addr))
+                } else {
+                    Ok(parsed_addr)
                 }
-            },
-            None => {
-                debug!("getpeername: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::getpeername(sockfd, address, address_len) };
-            }
-        }
-    };
-    debug!("remote_address: {:?}", remote_address);
-    fill_address(address, address_len, remote_address)
+            })?;
+
+        socket.state = SocketState::Bound(Bound {
+            address: parsed_addr,
+        });
+
+        Ok(())
+    }
 }
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
+pub(super) fn listen(socket: &mut Socket) -> Result<c_int, LayerError> {
     debug!("listen called");
-    let mut socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.remove(&sockfd) {
-            Some(socket) => socket,
-            None => {
-                debug!("listen: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::listen(sockfd, _backlog) };
-            }
-        }
-    };
+
     match &socket.state {
         SocketState::Bound(bound) => {
             let real_port = bound.address.port();
-            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
+            socket.state = SocketState::Listening(*bound);
+
             let mut os_addr = match socket.domain {
                 libc::AF_INET => {
                     OsSocketAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -182,13 +107,14 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
                 libc::AF_INET6 => {
                     OsSocketAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
                 }
-                _ => {
+                invalid_domain => {
                     // shouldn't happen
-                    debug!("unsupported domain");
-                    return libc::EINVAL;
+                    warn!("unsupported domain");
+                    return Err(LayerError::UnsupportedDomain(invalid_domain));
                 }
             };
 
+            // TODO(alex) [high] 2022-06-22: This is a though one, so many libc calls mixed in here.
             let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
             if ret != 0 {
                 error!(
@@ -249,6 +175,75 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     let mut sockets = SOCKETS.lock().unwrap();
     sockets.insert(sockfd, socket);
     0
+}
+
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
+    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
+
+    let socket = {
+        let mut sockets = SOCKETS.lock().unwrap();
+
+        match sockets.remove(&sockfd) {
+            Some(socket) => socket,
+            None => {
+                warn!("connect: no socket found for fd: {}", &sockfd);
+                return unsafe { libc::connect(sockfd, address, len) };
+            }
+        }
+    };
+
+    // We don't handle this socket, so restore state if there was any. (delay execute bind)
+    if let SocketState::Bound(bound) = &socket.state {
+        let os_addr = OsSocketAddr::from(bound.address);
+
+        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
+
+        if ret != 0 {
+            error!(
+                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
+                ret, os_addr, sockfd
+            );
+
+            return ret;
+        }
+    };
+    unsafe { libc::connect(sockfd, address, len) }
+}
+
+/// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
+/// cluster)
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn getpeername(
+    sockfd: RawFd,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    debug!("getpeername called");
+    let remote_address = {
+        let sockets = SOCKETS.lock().unwrap();
+        match sockets.get(&sockfd) {
+            Some(socket) => match &socket.state {
+                SocketState::Connected(connected) => connected.remote_address,
+                _ => {
+                    debug!(
+                        "getpeername: socket is not connected, state: {:?}",
+                        socket.state
+                    );
+                    set_errno(Errno(libc::ENOTCONN));
+                    return -1;
+                }
+            },
+            None => {
+                debug!("getpeername: no socket found for fd: {}", &sockfd);
+                return unsafe { libc::getpeername(sockfd, address, address_len) };
+            }
+        }
+    };
+    debug!("remote_address: {:?}", remote_address);
+    fill_address(address, address_len, remote_address)
 }
 
 /// Resolve the fake local address to the real local address.
