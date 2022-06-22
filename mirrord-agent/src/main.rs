@@ -24,6 +24,7 @@ use tokio::{
     select,
     sync::mpsc::{self, Sender},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 use tracing_subscriber::prelude::*;
 
@@ -157,6 +158,7 @@ impl AgentConnectionHandler {
         stream: TcpStream,
         pid: Option<u64>,
         sniffer_command_sender: Sender<SnifferCommand>,
+        cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
@@ -170,11 +172,11 @@ impl AgentConnectionHandler {
             pid,
             tcp_sniffer_api,
         };
-        agent_handler.handle_loop().await?;
+        agent_handler.handle_loop(cancel_token).await?;
         Ok(())
     }
 
-    async fn handle_loop(&mut self) -> Result<(), AgentError> {
+    async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
         let mut running = true;
         while running {
             select! {
@@ -186,8 +188,12 @@ impl AgentConnectionHandler {
                             break;
                     }
                 }
+                _ = token.cancelled() => {
+                    break;
+                }
             }
         }
+        debug!("peer closing");
         Ok(())
     }
 
@@ -199,8 +205,7 @@ impl AgentConnectionHandler {
                 let response = self.file_manager.handle_message(req)?;
                 self.stream
                     .send(DaemonMessage::FileResponse(response))
-                    .await
-                    .map_err(From::from)?
+                    .await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
@@ -222,14 +227,9 @@ impl AgentConnectionHandler {
 
                 self.stream
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
-                    .await
-                    .map_err(From::from)?
+                    .await?
             }
-            ClientMessage::Ping => self
-                .stream
-                .send(DaemonMessage::Pong)
-                .await
-                .map_err(From::from)?,
+            ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_agent_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
@@ -243,10 +243,10 @@ impl AgentConnectionHandler {
             LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.tcp_sniffer_api
-                    .unsubscribe_connection(connection_id)
+                    .connection_unsubscribe(connection_id)
                     .await
             }
-            LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.unsubscribe_port(port).await,
+            LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.port_unsubscribe(port).await,
         }
     }
 }
@@ -267,16 +267,19 @@ async fn start_agent() -> Result<(), AgentError> {
     };
 
     let mut state = State::new();
-
+    let cancellation_token = CancellationToken::new();
+    // Cancel all other tasks on exit
+    let cancel_guard = cancellation_token.clone().drop_guard();
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
     let sniffer_task = tokio::spawn(TCPConnectionSniffer::start(
         sniffer_command_rx,
         pid,
         args.interface,
+        cancellation_token.clone(),
     ));
 
-    let agents = FuturesUnordered::new();
+    let mut agents = FuturesUnordered::new();
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
@@ -285,9 +288,10 @@ async fn start_agent() -> Result<(), AgentError> {
                 if let Some(agent_id) = state.generate_id() {
 
                     state.agents.insert(agent_id);
-
+                    let sniffer_command_tx = sniffer_command_tx.clone();
+                    let cancellation_token = cancellation_token.clone();
                     let agent = tokio::spawn(async move {
-                        match AgentConnectionHandler::start(agent_id, stream, pid, sniffer_command_tx.clone()).await {
+                        match AgentConnectionHandler::start(agent_id, stream, pid, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
                                 debug!("AgentConnectionHandler::start -> Agent {} disconnected", agent_id);
                             }
@@ -319,7 +323,10 @@ async fn start_agent() -> Result<(), AgentError> {
     }
 
     debug!("start_agent -> shutting down start");
+    drop(cancel_guard);
+    sniffer_task.await??;
 
+    debug!("shutdown done");
     Ok(())
 }
 

@@ -34,7 +34,7 @@ tokio-stream.workspace = true
 thiserror.workspace = true
 num-traits = "0.2"
 bollard = "0.13"
-drain = "0.1"
+tokio-util = "0.7"
 
 [dev-dependencies]
 test_bin = "0.4"

@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
 };
 
+use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionID, Port,
@@ -24,6 +25,7 @@ use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -124,9 +126,13 @@ fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
     Ok(capture)
 }
 
-fn get_tcp_packet<'a>(
-    eth_packet: &'a EthernetPacket,
-) -> Option<(TcpSessionIdentifier, TcpPacket<'a>)> {
+struct TcpPacketData {
+    data: Vec<u8>,
+    flags: u16,
+}
+
+fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacketData)> {
+    let eth_packet = EthernetPacket::new(&eth_packet[..])?;
     let ip_packet = match eth_packet.get_ethertype() {
         EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
         _ => return None,
@@ -146,7 +152,13 @@ fn get_tcp_packet<'a>(
         source_port,
         dest_port,
     };
-    Some((identifier, tcp_packet))
+    Some((
+        identifier,
+        TcpPacketData {
+            flags: tcp_packet.get_flags(),
+            data: tcp_packet.payload().to_vec(),
+        },
+    ))
 }
 /// Build a filter of format: "tcp port (80 or 443 or 50 or 90)"
 fn format_bpf(ports: &[u16]) -> String {
@@ -214,6 +226,7 @@ impl TCPSnifferAPI {
                 command: SnifferCommands::Subscribe(port),
             })
             .await
+            .map_err(From::from)
     }
 
     pub async fn connection_unsubscribe(
@@ -226,6 +239,7 @@ impl TCPSnifferAPI {
                 command: SnifferCommands::UnsubscribeConnection(connection_id),
             })
             .await
+            .map_err(From::from)
     }
 
     pub async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
@@ -235,6 +249,7 @@ impl TCPSnifferAPI {
                 command: SnifferCommands::UnsubscribePort(port),
             })
             .await
+            .map_err(From::from)
     }
 }
 
@@ -263,14 +278,25 @@ pub struct TCPConnectionSniffer {
 }
 
 impl TCPConnectionSniffer {
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
         loop {
             select! {
-                command = self.receiver.next() => {
-                    self.handle_command(command).await?;
+                command = self.receiver.recv() => {
+                    if let Some(command) = command {
+                        self.handle_command(command).await?;
+                    } else { break; }
+                },
+                packet = self.stream.next() => {
+                    if let Some(packet) = packet {
+                        self.handle_packet(packet?).await?;
+                    } else { break; }
+                }
+                _ = cancel_token.cancelled() => {
+                    break;
                 }
             }
         }
+        debug!("TCPConnectionSniffer exiting");
         Ok(())
     }
 
@@ -294,7 +320,12 @@ impl TCPConnectionSniffer {
         Ok(TCPConnectionSniffer {
             receiver,
             stream,
-            ..Default::default()
+            port_subscriptions: Subscriptions::new(),
+            agent_senders: HashMap::new(),
+            sessions: TCPSessionMap::new(),
+            //todo: impl drop for index allocator and connection id..
+            connection_id_to_tcp_identifier: HashMap::new(),
+            index_allocator: IndexAllocator::new(),
         })
     }
 
@@ -302,9 +333,10 @@ impl TCPConnectionSniffer {
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
         interface: String,
-    ) -> Result<()> {
+        cancel_token: CancellationToken,
+    ) -> Result<(), AgentError> {
         let sniffer = Self::new(receiver, pid, interface).await?;
-        sniffer.run().await
+        sniffer.run(cancel_token).await
     }
 
     fn handle_new_agent(&mut self, agent_id: AgentID, sender: Sender<DaemonTcp>) {
@@ -344,7 +376,7 @@ impl TCPConnectionSniffer {
             .contains(&port)
     }
 
-    async fn handle_command(&mut self, command: SnifferCommand) -> Result<()> {
+    async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
                 agent_id,
@@ -396,7 +428,7 @@ impl TCPConnectionSniffer {
             if let Some(sender) = self.agent_senders.get(agent_id) {
                 sender.send(message.clone()).await.map_err(|err| {
                     warn!("failed to send message to agent {}", agent_id);
-                    self.handle_agent_closed(*agent_id);
+                    let _ = self.handle_agent_closed(*agent_id);
                     err
                 })?;
             }
@@ -404,7 +436,7 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
-    async fn handle_packet(&mut self, eth_packet: &EthernetPacket<'_>) -> Result<(), AgentError> {
+    async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
         debug!("handle_packet -> handling eth_packet {:#?}", eth_packet);
 
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
@@ -414,7 +446,7 @@ impl TCPConnectionSniffer {
 
         let dest_port = identifier.dest_port;
         let source_port = identifier.source_port;
-        let tcp_flags = tcp_packet.get_flags();
+        let tcp_flags = tcp_packet.flags;
         let is_client_packet = self.qualified_port(dest_port);
 
         let session = match self.sessions.remove(&identifier) {
@@ -455,11 +487,9 @@ impl TCPConnectionSniffer {
         };
 
         if is_client_packet {
-            let data = tcp_packet.payload();
-
-            if !data.is_empty() {
+            if !tcp_packet.data.is_empty() {
                 let message = DaemonTcp::Data(TcpData {
-                    bytes: data.to_vec(),
+                    bytes: tcp_packet.data,
                     connection_id: session.id,
                 });
                 self.send_message_to_agents(session.agents.iter(), message)

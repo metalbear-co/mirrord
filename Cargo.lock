@@ -522,15 +522,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "drain"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f1a0abf3fcefad9b4dd0e414207a7408e12b68414a01e6bb19b897d5bd7632d"
-dependencies = [
- "tokio",
-]
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1491,7 +1482,6 @@ dependencies = [
  "bollard",
  "clap 3.2.6",
  "containerd-client",
- "drain",
  "futures",
  "mirrord-protocol",
  "nix",
@@ -1504,6 +1494,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.3",
  "tracing",
  "tracing-subscriber",
 ]
