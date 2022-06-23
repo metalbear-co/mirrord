@@ -33,19 +33,14 @@ mod tests {
         let stream = TcpStream::connect("127.0.0.1:61337")
             .await
             .expect("connection to agent failed");
-        println!("..");
         let mutex = Arc::new(Mutex::new(0));
-        println!("..3");
         let task_mutex = Arc::clone(&mutex);
-        println!("..4");
         let guard = mutex.lock().await;
-        println!("..5");
         let task = tokio::spawn(async move {
             let listener = TcpListener::bind("127.0.0.1:1337")
                 .await
                 .expect("couldn't bind socket");
             loop {
-                println!("..6");
                 select! {
                     Ok((socket, _)) = listener.accept() => {
                         let mut buf = [0; 4096];
@@ -64,51 +59,42 @@ mod tests {
                         break
                     }
                 }
-                println!("..7");
             }
         });
 
         let mut codec = Framed::new(stream, ClientCodec::new());
 
-        println!("..8");
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
             .await
             .expect("port subscribe failed");
-        println!("..9");
         // Let message be acknowledged and dummy socket to start listening
         sleep(Duration::from_millis(2000)).await;
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
             .expect("connection to dummy failed");
-        println!("..10");
         let port = test_conn.local_addr().unwrap().port();
         let test_data = [0, 3, 5];
         test_conn
             .write(&test_data)
             .await
             .expect("couldn't write test data");
-        println!("..11");
         drop(test_conn);
-        println!("..12");
         let new_conn_msg = codec
             .next()
             .await
             .expect("couldn't get next message")
             .expect("got invalid message");
-        println!("..13");
         let data_msg = codec
             .next()
             .await
             .expect("couldn't get next message")
             .expect("got invalid message");
-        println!("..14");
         let close_msg = codec
             .next()
             .await
             .expect("couldn't get next message")
             .expect("got invalid message");
-        println!("..15");
         assert_eq!(
             new_conn_msg,
             DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
