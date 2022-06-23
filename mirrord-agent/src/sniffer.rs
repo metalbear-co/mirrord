@@ -191,33 +191,27 @@ pub struct SnifferCommand {
 pub struct TCPSnifferAPI {
     client_id: ClientID,
     sender: Sender<SnifferCommand>,
-    enabled: bool,
     pub receiver: Receiver<DaemonTcp>,
 }
 
 impl TCPSnifferAPI {
-    pub fn new(
+    pub async fn new(
         client_id: ClientID,
-        sender: Sender<SnifferCommand>,
+        sniffer_sender: Sender<SnifferCommand>,
         receiver: Receiver<DaemonTcp>,
-    ) -> TCPSnifferAPI {
-        Self {
-            client_id,
-            sender,
-            enabled: false,
-            receiver,
-        }
-    }
-
-    pub async fn enable(&mut self, sender: Sender<DaemonTcp>) -> Result<(), AgentError> {
-        self.sender
+        tcp_sender: Sender<DaemonTcp>,
+    ) -> Result<TCPSnifferAPI, AgentError> {
+        sniffer_sender
             .send(SnifferCommand {
-                client_id: self.client_id,
-                command: SnifferCommands::NewAgent(sender),
+                client_id,
+                command: SnifferCommands::NewAgent(tcp_sender),
             })
             .await?;
-        self.enabled = true;
-        Ok(())
+        Ok(Self {
+            client_id,
+            sender: sniffer_sender,
+            receiver,
+        })
     }
 
     pub async fn subscribe(&mut self, port: Port) -> Result<(), AgentError> {

@@ -131,8 +131,9 @@ impl Default for IndexAllocator<usize> {
 
 #[cfg(test)]
 mod subscription_tests {
+    use mirrord_protocol::Port;
+
     use super::Subscriptions;
-    use crate::Port;
 
     #[test]
     fn sanity() {

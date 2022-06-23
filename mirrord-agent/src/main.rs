@@ -163,8 +163,9 @@ impl ClientConnectionHandler {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
-        let mut tcp_sniffer_api = TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver);
-        tcp_sniffer_api.enable(tcp_sender).await?;
+        let tcp_sniffer_api =
+            TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
+
         let mut client_handler = ClientConnectionHandler {
             id,
             file_manager,
