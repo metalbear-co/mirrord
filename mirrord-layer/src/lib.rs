@@ -26,7 +26,7 @@ use mirrord_protocol::{
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use socket::SOCKETS;
+use socket::MANAGED_SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
@@ -501,7 +501,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
+    if MANAGED_SOCKETS.lock().unwrap().remove(&fd).is_some() {
         libc::close(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);

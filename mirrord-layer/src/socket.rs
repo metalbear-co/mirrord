@@ -10,6 +10,7 @@ use std::{
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::Port;
 use os_socketaddr::OsSocketAddr;
+use socket2::Socket;
 use tracing::warn;
 
 use crate::error::LayerError;
@@ -17,7 +18,10 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
+pub(crate) static MANAGED_SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<ManagedSocket>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::default()));
+
+pub(crate) static BYPASS_SOCKETS: LazyLock<Mutex<HashMap<RawFd, Socket>>> =
     LazyLock::new(|| Mutex::new(HashMap::default()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
@@ -92,14 +96,12 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct Socket {
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
+pub struct ManagedSocket {
+    inner_socket: Socket,
     pub state: SocketState,
 }
 
-impl Socket {
+impl ManagedSocket {
     fn get_connected_remote_address(&self) -> Result<SocketAddr, LayerError> {
         if let SocketState::Connected(connected) = &self.state {
             Ok(connected.remote_address)
@@ -118,10 +120,10 @@ impl Socket {
     }
 }
 
-impl TryFrom<&Socket> for OsSocketAddr {
+impl TryFrom<&ManagedSocket> for OsSocketAddr {
     type Error = LayerError;
 
-    fn try_from(socket: &Socket) -> Result<Self, Self::Error> {
+    fn try_from(socket: &ManagedSocket) -> Result<Self, Self::Error> {
         match socket.domain {
             libc::AF_INET => Ok(OsSocketAddr::from(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::LOCALHOST),

@@ -63,8 +63,8 @@ pub enum LayerError {
     #[error("mirrord-layer: Address `{0:#?}` contains an ignored port!")]
     IgnoredPort(std::net::SocketAddr),
 
-    #[error("mirrord-layer: Socket is in invalid state `{0:#?}`!")]
-    SocketInvalidState(SocketState),
+    #[error("mirrord-layer: Socket is in invalid state!")]
+    SocketInvalidState,
 
     #[error("mirrord-layer: Socket operation called for an unsupported domain `{0:#?}`!")]
     UnsupportedDomain(i32),

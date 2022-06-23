@@ -1,15 +1,21 @@
-use std::{os::unix::io::RawFd, sync::Arc};
+use std::{
+    net::{SocketAddr, TcpListener},
+    os::unix::{io::RawFd, prelude::*},
+    sync::Arc,
+};
 
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tracing::{error, trace, warn};
 
-use super::{fill_address, ops::*, SocketState, SOCKETS};
+use super::{fill_address, ops::*, SocketState, MANAGED_SOCKETS};
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
+    socket::BYPASS_SOCKETS,
 };
 
 pub(super) unsafe extern "C" fn socket_detour(
@@ -19,23 +25,20 @@ pub(super) unsafe extern "C" fn socket_detour(
 ) -> c_int {
     trace!("socket_detour");
 
-    let fd = libc::socket(domain, type_, protocol);
-
-    if fd == -1 {
-        error!("socket_detour -> Call to `libc::socket` failed!");
-
-        fd
-    } else {
-        socket(fd, domain, type_, protocol)
-            .map_err(|fail| match fail {
-                LayerError::SocketNotTcpv4(fd) => fd,
+    socket(domain, type_, protocol)
+        .map_err(|fail| {
+            error!("Failed creating socket with {:#?}!", fail);
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
-            })
-            .unwrap_or_else(|fail| fail)
-    }
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 // TODO(alex) [high] 2022-06-22: Do the `bind` directly, instead of leaving it up to `listen`.
+// ADD(alex) [high] 2022-06-23: Same for the other parts, lets create a more complete socket
+// abstraction that grabs all the sockets.
 pub(super) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     addr: *const sockaddr,
@@ -43,46 +46,27 @@ pub(super) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     trace!("bind_detour");
 
-    let raw_addr = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize);
+    let address = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
+        .try_into()
+        .unwrap();
 
-    let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-        sockets.remove(&sockfd)
-    };
-
-    // "remove -> modify -> insert" pattern is used here to change the value in `Arc<Socket>`.
-    // It works as we basically take ownership of the `Arc`.
-    // Avoiding this pattern would require changing `SOCKETS` to hold `Arc<Mutex<Socket>>>`.
-    //
-    // TODO(alex) [low] 2022-06-22: Solve this pattern issue.
-    if let Some(mut socket) = socket {
-        bind(Arc::get_mut(&mut socket).unwrap(), raw_addr)
-            .map(|()| {
-                SOCKETS.lock().unwrap().insert(sockfd, socket);
-                0
-            })
-            .map_err(|fail| match fail {
-                LayerError::IgnoredPort(ignored_port) => {
-                    warn!("bind_detour -> ignoring port {:#?}", ignored_port);
-                    libc::bind(sockfd, addr, addrlen)
-                }
-                _ => {
-                    error!("bind_detour -> Failed with {:#?}!", fail);
-                    -1
-                }
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        warn!("bind_detour -> No socket found for sockfd {:#?}", sockfd);
-        libc::bind(sockfd, addr, addrlen)
-    }
+    bind(sockfd, address)
+        .map(|()| 0)
+        .map_err(|fail| {
+            error!("Failed creating socket with {:#?}!", fail);
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     trace!("listen_detour");
 
     let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
+        let mut sockets = MANAGED_SOCKETS.lock().unwrap();
         sockets.remove(&sockfd)
     };
 
@@ -135,7 +119,7 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 
             listen(Arc::get_mut(&mut socket).unwrap(), bound, os_addr, sockfd)
                 .map(|()| {
-                    SOCKETS.lock().unwrap().insert(sockfd, socket);
+                    MANAGED_SOCKETS.lock().unwrap().insert(sockfd, socket);
                     0
                 })
                 .map_err(|fail| {
@@ -165,7 +149,7 @@ pub(super) unsafe extern "C" fn connect_detour(
     trace!("connect_detour");
 
     let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
+        let mut sockets = MANAGED_SOCKETS.lock().unwrap();
         sockets.remove(&sockfd)
     };
 
@@ -195,7 +179,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> c_int {
-    let sockets = SOCKETS.lock().unwrap();
+    let sockets = MANAGED_SOCKETS.lock().unwrap();
 
     if let Some(socket) = sockets.get(&sockfd) {
         socket
@@ -233,7 +217,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> i32 {
-    let sockets = SOCKETS.lock().unwrap();
+    let sockets = MANAGED_SOCKETS.lock().unwrap();
 
     if let Some(socket) = sockets.get(&sockfd) {
         socket

@@ -1,8 +1,12 @@
-use std::{os::unix::io::RawFd, sync::Arc};
+use std::{
+    os::unix::{io::RawFd, prelude::*},
+    sync::Arc,
+};
 
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, warn};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use tracing::{debug, error, trace, warn};
 
 use super::*;
 use crate::{
@@ -13,80 +17,90 @@ use crate::{
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(
-    fd: RawFd,
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-) -> Result<RawFd, LayerError> {
-    debug!(
-        "socket -> fd {:#?} | domain {:#?} | type {:#?}",
-        fd, domain, type_
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd, LayerError> {
+    trace!(
+        "socket -> domain {:#?} | type {:#?} | protocol {:#?}",
+        domain,
+        type_,
+        protocol
     );
+
+    let socket = Socket::new(
+        Domain::from(domain),
+        Type::from(type_),
+        Some(Protocol::from(protocol)),
+    )?;
+
+    let fd = socket.as_raw_fd();
 
     // We don't handle non Tcpv4 sockets
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
     {
         warn!(
-            "socket-> Found non-Tcpv4 socket with values: domain {:#?} | type {:#?}",
+            "socket -> Skipping non tcp socket domain {:#?} | type {:#?}",
             domain, type_
         );
 
-        Err(LayerError::SocketNotTcpv4(fd))
+        BYPASS_SOCKETS.lock().unwrap().insert(fd, socket);
     } else {
-        let mut sockets = SOCKETS.lock().unwrap();
-        sockets.insert(
-            fd,
-            Arc::new(Socket {
-                domain,
-                type_,
-                protocol,
-                state: SocketState::default(),
-            }),
-        );
+        let fake_socket = ManagedSocket {
+            inner_socket: socket,
+            state: SocketState::Initialized,
+        };
 
-        Ok(fd)
+        MANAGED_SOCKETS
+            .lock()
+            .unwrap()
+            .insert(fd, Arc::new(fake_socket));
     }
+
+    Ok(fd)
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-pub(super) fn bind(socket: &mut Socket, raw_addr: OsSocketAddr) -> Result<(), LayerError> {
-    debug!("bind -> socket {:#?} | raw_addr {:#?}", socket, raw_addr);
+pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
+    debug!("bind -> socket {:#?} | address {:#?}", sockfd, address);
 
-    if socket.state != SocketState::Initialized {
-        Err(LayerError::SocketInvalidState(socket.state.clone()))
+    let bind_result = if let Some(socket) = MANAGED_SOCKETS
+        .lock()
+        .unwrap()
+        .get(&sockfd)
+        .map(|managed_socket| &managed_socket.inner_socket)
+        .or_else(|| BYPASS_SOCKETS.lock().unwrap().get(&sockfd))
+    {
+        socket.bind(&SockAddr::from(address)).map_err(From::from)
     } else {
-        let parsed_addr = raw_addr
-            .into_addr()
-            .ok_or_else(|| {
-                error!("bind -> Failed to parse raw_addr {:#?}!", raw_addr);
-                LayerError::ParseSocketAddr(raw_addr)
-            })
-            .and_then(|parsed_addr| {
-                let port = parsed_addr.port();
-                debug!("bind -> port {:#?}", port);
+        Err(LayerError::LocalFDNotFound(sockfd))
+    };
 
-                if is_ignored_port(port) {
-                    Err(LayerError::IgnoredPort(parsed_addr))
-                } else {
-                    Ok(parsed_addr)
-                }
-            })?;
+    // Put this socket into the bypassed list if it fails the `is_ignored_port` check, now that we
+    // have more information about it (address).
+    if let Ok(_) = bind_result {
+        if is_ignored_port(address.port()) {
+            warn!(
+                "bind -> sockfd {:#?} has an ignored port {:#?}, moving it to bypass list!",
+                sockfd,
+                address.port()
+            );
 
-        socket.state = SocketState::Bound(Bound {
-            address: parsed_addr,
-        });
+            let invalid_managed = MANAGED_SOCKETS.lock().unwrap().remove(&sockfd).unwrap();
 
-        Ok(())
+            BYPASS_SOCKETS
+                .lock()
+                .unwrap()
+                .insert(sockfd, invalid_managed.inner_socket);
+        }
     }
+
+    bind_result
 }
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 pub(super) fn listen(
-    socket: &mut Socket,
+    socket: &mut ManagedSocket,
     bound: Bound,
     os_addr: OsSocketAddr,
     fd: RawFd,
@@ -153,7 +167,7 @@ pub(super) fn accept(
     new_fd: RawFd,
 ) -> RawFd {
     let (local_address, domain, protocol, type_) = {
-        if let Some(socket) = SOCKETS.lock().unwrap().get(&sockfd) {
+        if let Some(socket) = MANAGED_SOCKETS.lock().unwrap().get(&sockfd) {
             if let SocketState::Listening(bound) = &socket.state {
                 (bound.address, socket.domain, socket.protocol, socket.type_)
             } else {
@@ -174,7 +188,7 @@ pub(super) fn accept(
         }
     }
     .address;
-    let new_socket = Socket {
+    let new_socket = ManagedSocket {
         domain,
         protocol,
         type_,
@@ -185,7 +199,10 @@ pub(super) fn accept(
     };
     fill_address(address, address_len, remote_address);
 
-    SOCKETS.lock().unwrap().insert(new_fd, Arc::new(new_socket));
+    MANAGED_SOCKETS
+        .lock()
+        .unwrap()
+        .insert(new_fd, Arc::new(new_socket));
     new_fd
 }
 
@@ -208,7 +225,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
         error!("dup failed");
         return dup_fd;
     }
-    let mut sockets = SOCKETS.lock().unwrap();
+    let mut sockets = MANAGED_SOCKETS.lock().unwrap();
     if let Some(socket) = sockets.get(&fd) {
         let dup_socket = socket.clone();
         sockets.insert(dup_fd as RawFd, dup_socket);

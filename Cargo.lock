@@ -1387,6 +1387,7 @@ dependencies = [
  "rand",
  "regex",
  "serde_json",
+ "socket2",
  "thiserror",
  "tokio",
  "tokio-stream",

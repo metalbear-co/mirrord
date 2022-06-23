@@ -47,6 +47,8 @@ errno = "0.2.8"
 async-trait = "0.1.53"
 anyhow.workspace = true
 
+socket2 = "0.4"
+
 [lib]
 crate_type = ["cdylib"]
 
