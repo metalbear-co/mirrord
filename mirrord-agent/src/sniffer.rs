@@ -78,6 +78,7 @@ impl Hash for TcpSessionIdentifier {
     }
 }
 
+#[derive(Debug)]
 struct TCPSession {
     id: ConnectionID,
     clients: HashSet<ClientID>,
@@ -134,11 +135,12 @@ struct TcpPacketData {
 
 fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacketData)> {
     let eth_packet = EthernetPacket::new(&eth_packet[..])?;
+    debug!("get_tcp_packet_start");
     let ip_packet = match eth_packet.get_ethertype() {
         EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
         _ => return None,
     };
-
+    debug!("ip_packet");
     let tcp_packet = match ip_packet.get_next_level_protocol() {
         IpNextHeaderProtocols::Tcp => TcpPacket::new(ip_packet.payload())?,
         _ => return None,
@@ -153,6 +155,7 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
         source_port,
         dest_port,
     };
+    debug!("identifier {identifier:?}");
     Some((
         identifier,
         TcpPacketData {
@@ -245,6 +248,10 @@ impl TCPSnifferAPI {
             })
             .await
             .map_err(From::from)
+    }
+
+    pub async fn recv(&mut self) -> Option<DaemonTcp> {
+        self.receiver.recv().await
     }
 }
 
@@ -440,12 +447,14 @@ impl TCPConnectionSniffer {
         let dest_port = identifier.dest_port;
         let source_port = identifier.source_port;
         let tcp_flags = tcp_packet.flags;
+        debug!("handle_packet");
         let is_client_packet = self.qualified_port(dest_port);
-
+        debug!("qualified {is_client_packet:?}");
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
+                    debug!("not new connection {tcp_flags:?}");
                     return Ok(());
                 }
                 if !is_client_packet {
@@ -468,6 +477,7 @@ impl TCPConnectionSniffer {
                     connection_id: id,
                     address: IpAddr::V4(identifier.source_addr),
                 });
+                debug!("send message {client_ids:?}");
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
                 self.connection_id_to_tcp_identifier.insert(id, identifier);
@@ -477,7 +487,7 @@ impl TCPConnectionSniffer {
                 }
             }
         };
-
+        debug!("tcp session {session:?}");
         if is_client_packet && !tcp_packet.bytes.is_empty() {
             let message = DaemonTcp::Data(TcpData {
                 bytes: tcp_packet.bytes,

@@ -188,6 +188,14 @@ impl ClientConnectionHandler {
                         debug!("Client {} disconnected", self.id);
                             break;
                     }
+                },
+                message = self.tcp_sniffer_api.recv() => {
+                    if let Some(message) = message {
+                        self.stream.send(DaemonMessage::Tcp(message)).await?;
+                    } else {
+                        error!("tcp sniffer stopped?");
+                        break;
+                    }
                 }
                 _ = token.cancelled() => {
                     break;
