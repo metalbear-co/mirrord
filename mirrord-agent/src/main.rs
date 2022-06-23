@@ -310,7 +310,7 @@ async fn start_agent() -> Result<(), AgentError> {
                 }
 
             },
-            client = clients.select_next_some() => {
+            Some(client) = clients.next() => {
                 let client_id = client?;
                 state.remove_client(client_id);
             },

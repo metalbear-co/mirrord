@@ -251,7 +251,7 @@ impl TCPSnifferAPI {
 impl Drop for TCPSnifferAPI {
     fn drop(&mut self) {
         self.sender
-            .blocking_send(SnifferCommand {
+            .try_send(SnifferCommand {
                 client_id: self.client_id,
                 command: SnifferCommands::AgentClosed,
             })
