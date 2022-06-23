@@ -478,8 +478,7 @@ impl TCPConnectionSniffer {
                 });
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
-                self.connection_id_to_tcp_identifier
-                    .insert(id, identifier);
+                self.connection_id_to_tcp_identifier.insert(id, identifier);
                 TCPSession {
                     id,
                     clients: client_ids.into_iter().collect(),
