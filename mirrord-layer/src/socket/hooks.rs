@@ -1,21 +1,15 @@
-use std::{
-    net::{SocketAddr, TcpListener},
-    os::unix::{io::RawFd, prelude::*},
-    sync::Arc,
-};
+use std::{os::unix::io::RawFd, sync::Arc};
 
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tracing::{error, trace, warn};
 
 use super::{fill_address, ops::*, SocketState, MANAGED_SOCKETS};
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
-    socket::BYPASS_SOCKETS,
 };
 
 pub(super) unsafe extern "C" fn socket_detour(

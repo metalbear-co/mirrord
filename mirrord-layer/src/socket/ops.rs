@@ -16,7 +16,10 @@ use crate::{
     tcp::{HookMessageTcp, Listen},
 };
 
-/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
+/// Create the socket, add it to `MANAGED_SOCKETS` if it's successful, plus protocol and domain
+/// matches our expected type (Tcpv4/v6).
+///
+/// Otherwise the socket is added to `BYPASS_SOCKETS`.
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd, LayerError> {
     trace!(
         "socket -> domain {:#?} | type {:#?} | protocol {:#?}",
@@ -57,9 +60,9 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
     Ok(fd)
 }
 
-/// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
-/// update the socket state and don't call bind (will be called later). In any other case, we call
-/// regular bind.
+/// Binds the socket, no matter to which list it belongs (`MANAGED_SOCKETS`, or `BYPASS_SOCKETS`),
+/// but if the `SocketAddr::port` matches our ignored port list (`is_ignored_port`), and this socket
+/// is in `MANAGED_SOCKETS`, then this function will move the socket to `BYPASS_SOCKETS`.
 pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
     debug!("bind -> socket {:#?} | address {:#?}", sockfd, address);
 
