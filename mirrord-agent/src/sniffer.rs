@@ -31,11 +31,13 @@ use tracing::{debug, error, warn};
 use crate::{
     error::AgentError,
     runtime::set_namespace,
-    util::{ClientID, IndexAllocator, Subscriptions},
+    util::{ClientID, IndexAllocator, ReusableIndex, Subscriptions},
 };
 
 const DUMMY_BPF: &str =
     "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
+
+type ReusableConnectionID = ReusableIndex<ConnectionID>;
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub struct TcpSessionIdentifier {
@@ -80,7 +82,7 @@ impl Hash for TcpSessionIdentifier {
 
 #[derive(Debug)]
 struct TCPSession {
-    id: ConnectionID,
+    id: ReusableConnectionID,
     clients: HashSet<ClientID>,
 }
 
@@ -272,7 +274,6 @@ pub struct TCPConnectionSniffer {
     client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
     stream: PacketStream<Active, TcpManagerCodec>,
     sessions: TCPSessionMap,
-    //todo: impl drop for index allocator and connection id..
     connection_id_to_tcp_identifier: HashMap<ConnectionID, TcpSessionIdentifier>,
     index_allocator: IndexAllocator<ConnectionID>,
 }
@@ -474,13 +475,13 @@ impl TCPConnectionSniffer {
                 let message = DaemonTcp::NewConnection(NewTcpConnection {
                     destination_port: dest_port,
                     source_port,
-                    connection_id: id,
+                    connection_id: *id,
                     address: IpAddr::V4(identifier.source_addr),
                 });
                 debug!("send message {client_ids:?}");
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
-                self.connection_id_to_tcp_identifier.insert(id, identifier);
+                self.connection_id_to_tcp_identifier.insert(*id, identifier);
                 TCPSession {
                     id,
                     clients: client_ids.into_iter().collect(),
@@ -491,17 +492,16 @@ impl TCPConnectionSniffer {
         if is_client_packet && !tcp_packet.bytes.is_empty() {
             let message = DaemonTcp::Data(TcpData {
                 bytes: tcp_packet.bytes,
-                connection_id: session.id,
+                connection_id: *session.id,
             });
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;
         }
 
         if is_closed_connection(tcp_flags) {
-            self.index_allocator.free_index(session.id);
             self.connection_id_to_tcp_identifier.remove(&session.id);
             let message = DaemonTcp::Close(TcpClose {
-                connection_id: session.id,
+                connection_id: *session.id,
             });
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;

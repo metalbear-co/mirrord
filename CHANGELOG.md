@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't fail environment variable request if none exists.
 - E2E: Don't assert jobs and pods length, to allow better debugging and less flakiness.
 - Refactor(agent) - Main loop doesn't pass messages around but instead spawned peers interact directly with tcp sniffer. Renamed Peer -> Client and ClientID.
+- Refactor(agent) - Implement `ReusableIndex` that can be used to hold an index and make it reusable on drop.
 
 ## 2.3.0
 

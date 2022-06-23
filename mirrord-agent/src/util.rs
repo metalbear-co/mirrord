@@ -1,7 +1,9 @@
 use std::{
+    borrow::Borrow,
     clone::Clone,
     collections::{HashMap, HashSet},
-    hash::Hash,
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
 };
 
 use num_traits::{zero, CheckedAdd, Num};
@@ -14,6 +16,7 @@ pub struct Subscriptions<T, C> {
 }
 
 pub type ClientID = u32;
+pub type ReusableClientID = ReusableIndex<u32>;
 
 impl<T, C> Subscriptions<T, C>
 where
@@ -90,37 +93,37 @@ where
     T: Num,
 {
     index: T,
-    vacant_indices: Vec<T>,
+    vacant_indices: Arc<Mutex<Vec<T>>>,
 }
 
 impl<T> IndexAllocator<T>
 where
-    T: Num + CheckedAdd + Clone,
+    T: Num + CheckedAdd + Clone + Copy,
 {
     pub fn new() -> IndexAllocator<T> {
         IndexAllocator {
             index: zero(),
-            vacant_indices: Vec::new(),
+            vacant_indices: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     /// Returns the next available index, returns None if not available (reached max)
-    pub fn next_index(&mut self) -> Option<T> {
-        if let Some(i) = self.vacant_indices.pop() {
-            return Some(i);
+    pub fn next_index(&mut self) -> Option<ReusableIndex<T>> {
+        if let Some(i) = self.vacant_indices.lock().unwrap().pop() {
+            return Some(ReusableIndex::new(i, self.vacant_indices.clone()));
         }
         match self.index.checked_add(&T::one()) {
             Some(new_index) => {
-                let res = self.index.clone();
+                let res = self.index;
                 self.index = new_index;
-                Some(res)
+                Some(ReusableIndex::new(res, self.vacant_indices.clone()))
             }
             None => None,
         }
     }
 
     pub fn free_index(&mut self, index: T) {
-        self.vacant_indices.push(index)
+        self.vacant_indices.lock().unwrap().push(index)
     }
 }
 
@@ -129,6 +132,94 @@ impl Default for IndexAllocator<usize> {
         IndexAllocator::new()
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    inner: T,
+    vacant_indices: Arc<Mutex<Vec<T>>>,
+}
+
+impl<T> ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    fn new(value: T, vacant_indices: Arc<Mutex<Vec<T>>>) -> ReusableIndex<T> {
+        ReusableIndex {
+            inner: value,
+            vacant_indices,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> Drop for ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    fn drop(&mut self) {
+        self.vacant_indices.lock().unwrap().push(self.inner)
+    }
+}
+
+impl<T: ?Sized + Hash> Hash for ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (**self).hash(state)
+    }
+}
+
+impl<T> PartialEq for ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+impl<T> Eq for ReusableIndex<T> where T: Num + Copy + Clone + CheckedAdd {}
+
+impl<T> Borrow<T> for ReusableIndex<T>
+where
+    T: Num + Copy + Clone + CheckedAdd,
+{
+    fn borrow(&self) -> &T {
+        &self.inner
+    }
+}
+
+// struct ReusableIndex<T> where T: Num + Copy + Clone + CheckedAdd {
+//     inner: T,
+//     allocator: Mutex<IndexAllocator<T>>
+// }
+
+// impl<T> std::ops::Deref for ReusableIndex<T> where T: Num + Copy + Clone + CheckedAdd {
+//     type Target = T;
+
+//     fn deref(&self) -> &Self::Target {
+//         &self.inner
+//     }
+// }
+
+// impl<T> Drop for ReusableIndex<T> where T: Num + Copy + Clone + CheckedAdd {
+//     fn drop(&mut self) {
+//         self.allocator.get_mut().unwrap().free_index(self.inner)
+//     }
+// }
 
 #[cfg(test)]
 mod subscription_tests {
@@ -177,12 +268,11 @@ mod indexallocator_tests {
     fn sanity() {
         let mut index_allocator = IndexAllocator::<u32>::new();
         let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
+        assert_eq!(0, *index);
         let index = index_allocator.next_index().unwrap();
-        assert_eq!(1, index);
-        index_allocator.free_index(0);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
+        assert_eq!(0, *index);
+        let index2 = index_allocator.next_index().unwrap();
+        assert_eq!(1, *index2);
     }
 
     #[test]

@@ -14,7 +14,10 @@ use mirrord_protocol::{
 };
 use tracing::{debug, error};
 
-use crate::{error::AgentError, util::IndexAllocator};
+use crate::{
+    error::AgentError,
+    util::{IndexAllocator, ReusableIndex},
+};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -25,7 +28,7 @@ pub enum RemoteFile {
 #[derive(Debug, Default)]
 pub struct FileManager {
     root_path: PathBuf,
-    pub open_files: HashMap<usize, RemoteFile>,
+    pub open_files: HashMap<ReusableIndex<usize>, RemoteFile>,
     index_allocator: IndexAllocator<usize>,
 }
 
@@ -125,8 +128,9 @@ impl FileManager {
                 } else {
                     RemoteFile::File(file)
                 };
+                let res = Ok(OpenFileResponse { fd: *fd });
                 self.open_files.insert(fd, remote_file);
-                Ok(OpenFileResponse { fd })
+                res
             }
             Err(err) => {
                 error!(
@@ -195,8 +199,9 @@ impl FileManager {
                     } else {
                         RemoteFile::File(file)
                     };
+                    let res = Ok(OpenFileResponse { fd: *fd });
                     self.open_files.insert(fd, remote_file);
-                    Ok(OpenFileResponse { fd })
+                    res
                 }
                 Err(err) => {
                     error!(

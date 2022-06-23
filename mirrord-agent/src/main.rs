@@ -37,7 +37,7 @@ mod util;
 
 use cli::parse_args;
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use util::{ClientID, IndexAllocator};
+use util::{ClientID, IndexAllocator, ReusableClientID};
 
 use crate::runtime::get_container_pid;
 
@@ -45,7 +45,7 @@ const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug)]
 struct State {
-    pub clients: HashSet<ClientID>,
+    pub clients: HashSet<ReusableClientID>,
     index_allocator: IndexAllocator<ClientID>,
 }
 
@@ -57,13 +57,12 @@ impl State {
         }
     }
 
-    pub fn generate_id(&mut self) -> Option<ClientID> {
+    pub fn generate_id(&mut self) -> Option<ReusableClientID> {
         self.index_allocator.next_index()
     }
 
     pub fn remove_client(&mut self, client_id: ClientID) {
         self.clients.remove(&client_id);
-        self.index_allocator.free_index(client_id)
     }
 }
 
@@ -295,20 +294,20 @@ async fn start_agent() -> Result<(), AgentError> {
                 debug!("start -> Connection accepted from {:?}", addr);
 
                 if let Some(client_id) = state.generate_id() {
-
+                    let id = *client_id;
                     state.clients.insert(client_id);
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
                     let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::start(client_id, stream, pid, sniffer_command_tx, cancellation_token).await {
+                        match ClientConnectionHandler::start(id, stream, pid, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
-                                debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
+                                debug!("ClientConnectionHandler::start -> Client {} disconnected", id);
                             }
                             Err(e) => {
-                                error!("ClientConnectionHandler::start -> Client {} disconnected with error: {}", client_id, e);
+                                error!("ClientConnectionHandler::start -> Client {} disconnected with error: {}", id, e);
                             }
                         }
-                        client_id
+                        id
 
                     });
                     clients.push(client);
