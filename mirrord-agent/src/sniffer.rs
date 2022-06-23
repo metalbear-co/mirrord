@@ -93,7 +93,8 @@ fn is_closed_connection(flags: u16) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-pub struct TcpManagerCodec {}
+#[derive(Debug, Clone)]
+pub struct TcpManagerCodec;
 
 impl PacketCodec for TcpManagerCodec {
     type Type = Vec<u8>;
@@ -127,7 +128,7 @@ fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
 }
 
 struct TcpPacketData {
-    data: Vec<u8>,
+    bytes: Vec<u8>,
     flags: u16,
 }
 
@@ -156,7 +157,7 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
         identifier,
         TcpPacketData {
             flags: tcp_packet.get_flags(),
-            data: tcp_packet.payload().to_vec(),
+            bytes: tcp_packet.payload().to_vec(),
         },
     ))
 }
@@ -269,7 +270,7 @@ impl Drop for TCPSnifferAPI {
 pub struct TCPConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientID>,
     receiver: Receiver<SnifferCommand>,
-    agent_senders: HashMap<ClientID, Sender<DaemonTcp>>,
+    client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
     stream: PacketStream<Active, TcpManagerCodec>,
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
@@ -321,7 +322,7 @@ impl TCPConnectionSniffer {
             receiver,
             stream,
             port_subscriptions: Subscriptions::new(),
-            agent_senders: HashMap::new(),
+            client_senders: HashMap::new(),
             sessions: TCPSessionMap::new(),
             //todo: impl drop for index allocator and connection id..
             connection_id_to_tcp_identifier: HashMap::new(),
@@ -348,8 +349,8 @@ impl TCPConnectionSniffer {
         self.update_sniffer()
     }
 
-    fn handle_agent_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
-        self.agent_senders.remove(&client_id);
+    fn handle_client_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
+        self.client_senders.remove(&client_id);
         self.port_subscriptions.remove_client(client_id);
         self.update_sniffer()
     }
@@ -478,7 +479,7 @@ impl TCPConnectionSniffer {
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
                 self.connection_id_to_tcp_identifier
-                    .insert(id, identifier.clone());
+                    .insert(id, identifier);
                 TCPSession {
                     id,
                     clients: client_ids.into_iter().collect(),
@@ -486,15 +487,13 @@ impl TCPConnectionSniffer {
             }
         };
 
-        if is_client_packet {
-            if !tcp_packet.data.is_empty() {
-                let message = DaemonTcp::Data(TcpData {
-                    bytes: tcp_packet.data,
-                    connection_id: session.id,
-                });
-                self.send_message_to_clients(session.clients.iter(), message)
-                    .await?;
-            }
+        if is_client_packet && !tcp_packet.bytes.is_empty() {
+            let message = DaemonTcp::Data(TcpData {
+                bytes: tcp_packet.bytes,
+                connection_id: session.id,
+            });
+            self.send_message_to_clients(session.clients.iter(), message)
+                .await?;
         }
 
         if is_closed_connection(tcp_flags) {
