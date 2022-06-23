@@ -78,9 +78,10 @@ where
     }
 
     // /// Removes a topic and all of it's clients
-    // pub fn remove_topic(&mut self, topic: T) {
-    //     self._inner.remove(&topic);
-    // }
+    #[allow(dead_code)]
+    pub fn remove_topic(&mut self, topic: T) {
+        self._inner.remove(&topic);
+    }
 }
 
 #[derive(Debug)]
