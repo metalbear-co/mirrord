@@ -73,7 +73,13 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
         .map(|managed_socket| &managed_socket.inner_socket)
         .or_else(|| BYPASS_SOCKETS.lock().unwrap().get(&sockfd))
     {
-        socket.bind(&SockAddr::from(address)).map_err(From::from)
+        let address = if is_ignored_port(address.port()) {
+            address
+        } else {
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
+        };
+
+        Ok(socket.bind(&SockAddr::from(address))?)
     } else {
         Err(LayerError::LocalFDNotFound(sockfd))
     };

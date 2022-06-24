@@ -30,9 +30,6 @@ pub(super) unsafe extern "C" fn socket_detour(
         .unwrap_or_else(|fail| fail)
 }
 
-// TODO(alex) [high] 2022-06-22: Do the `bind` directly, instead of leaving it up to `listen`.
-// ADD(alex) [high] 2022-06-23: Same for the other parts, lets create a more complete socket
-// abstraction that grabs all the sockets.
 pub(super) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     addr: *const sockaddr,
@@ -58,6 +55,8 @@ pub(super) unsafe extern "C" fn bind_detour(
 
 pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     trace!("listen_detour");
+
+    let socket = MANAGED_SOCKETS.lock().unwrap().get(&sockfd);
 
     let socket = {
         let mut sockets = MANAGED_SOCKETS.lock().unwrap();
