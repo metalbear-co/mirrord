@@ -14,18 +14,17 @@ use crate::{
     error::LayerError,
     message::HookMessage,
     tcp::{HookMessageTcp, Listen},
+    HOOK_SENDER,
 };
 
-/// Create the socket, add it to `MANAGED_SOCKETS` if it's successful, plus protocol and domain
+/// Create the socket, add it to `MIRROR_SOCKETS` if it's successful, plus protocol and domain
 /// matches our expected type (Tcpv4/v6).
 ///
 /// Otherwise the socket is added to `BYPASS_SOCKETS`.
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd, LayerError> {
-    trace!(
+    debug!(
         "socket -> domain {:#?} | type {:#?} | protocol {:#?}",
-        domain,
-        type_,
-        protocol
+        domain, type_, protocol
     );
 
     let socket = Socket::new(
@@ -46,92 +45,118 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
 
         BYPASS_SOCKETS.lock().unwrap().insert(fd, socket);
     } else {
-        let fake_socket = ManagedSocket {
-            inner_socket: socket,
+        let mirror_socket = MirrorSocket {
+            inner: socket,
             state: SocketState::Initialized,
         };
 
-        MANAGED_SOCKETS
-            .lock()
-            .unwrap()
-            .insert(fd, Arc::new(fake_socket));
+        MIRROR_SOCKETS.lock().unwrap().insert(fd, mirror_socket);
     }
 
     Ok(fd)
 }
 
-/// Binds the socket, no matter to which list it belongs (`MANAGED_SOCKETS`, or `BYPASS_SOCKETS`),
+/// Binds the socket, no matter to which list it belongs (`MIRROR_SOCKETS`, or `BYPASS_SOCKETS`),
 /// but if the `SocketAddr::port` matches our ignored port list (`is_ignored_port`), and this socket
-/// is in `MANAGED_SOCKETS`, then this function will move the socket to `BYPASS_SOCKETS`.
+/// is in `MIRROR_SOCKETS`, then this function will move the socket to `BYPASS_SOCKETS`.
 pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
-    debug!("bind -> socket {:#?} | address {:#?}", sockfd, address);
+    debug!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
-    let bind_result = if let Some(socket) = MANAGED_SOCKETS
-        .lock()
-        .unwrap()
-        .get(&sockfd)
-        .map(|managed_socket| &managed_socket.inner_socket)
-        .or_else(|| BYPASS_SOCKETS.lock().unwrap().get(&sockfd))
-    {
-        let address = if is_ignored_port(address.port()) {
-            address
-        } else {
-            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
-        };
-
-        Ok(socket.bind(&SockAddr::from(address))?)
+    // New fake address when it's a socket that we're interested in.
+    let updated_address = if is_ignored_port(address.port()) {
+        Ok(address)
     } else {
-        Err(LayerError::LocalFDNotFound(sockfd))
-    };
-
-    // Put this socket into the bypassed list if it fails the `is_ignored_port` check, now that we
-    // have more information about it (address).
-    if let Ok(_) = bind_result {
-        if is_ignored_port(address.port()) {
-            warn!(
-                "bind -> sockfd {:#?} has an ignored port {:#?}, moving it to bypass list!",
-                sockfd,
-                address.port()
-            );
-
-            let invalid_managed = MANAGED_SOCKETS.lock().unwrap().remove(&sockfd).unwrap();
-
-            BYPASS_SOCKETS
-                .lock()
-                .unwrap()
-                .insert(sockfd, invalid_managed.inner_socket);
+        if address.is_ipv4() {
+            Ok(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        } else if address.is_ipv6() {
+            Ok(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))
+        } else {
+            // TODO: Is this even possible?
+            Err(LayerError::UnsupportedDomain(address))
         }
+    }?;
+
+    {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.bind(&SockAddr::from(updated_address))?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }?;
     }
 
-    bind_result
+    // Put this socket into the bypassed list if it fails the `is_ignored_port` check, now that
+    // we have more information about it (address).
+    if is_ignored_port(updated_address.port()) {
+        warn!(
+            "bind -> sockfd {:#?} has an ignored port {:#?}, moving it to bypass list!",
+            sockfd,
+            updated_address.port()
+        );
+
+        let not_mirror_socket = MIRROR_SOCKETS.lock().unwrap().remove(&sockfd).unwrap();
+
+        BYPASS_SOCKETS
+            .lock()
+            .unwrap()
+            .insert(sockfd, not_mirror_socket.inner);
+    }
+
+    if let Some(mirror_socket) = MIRROR_SOCKETS.lock().unwrap().get_mut(&sockfd) {
+        let bound = Bound {
+            address,
+            mirror_address: updated_address,
+        };
+
+        mirror_socket.state = SocketState::Bound(bound);
+    }
+
+    Ok(())
 }
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-pub(super) fn listen(
-    socket: &mut ManagedSocket,
-    bound: Bound,
-    os_addr: OsSocketAddr,
-    fd: RawFd,
-) -> Result<(), LayerError> {
-    debug!(
-        "listen -> socket {:#?} | os_addr {:#?} | fd {:#?}",
-        socket, os_addr, fd
-    );
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
+    debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
-    let addr = os_addr
-        .into_addr()
-        .ok_or(LayerError::ParseSocketAddr(os_addr))?;
+    {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
 
-    blocking_send_hook_message(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
-        fake_port: addr.port(),
-        real_port: bound.address.port(),
-        ipv6: addr.is_ipv6(),
-        fd,
-    })))?;
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.listen(backlog)?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }?;
+    }
 
-    socket.state = SocketState::Listening(bound);
-    debug!("listen: success");
+    if let Some(mirror_socket) = MIRROR_SOCKETS.lock().unwrap().get_mut(&sockfd) {
+        let Bound {
+            address,
+            mirror_address,
+        } = mirror_socket.get_bound()?;
+
+        let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+
+        let listen_data = Listen {
+            fake_port: mirror_address.port(),
+            real_port: address.port(),
+            fd: sockfd,
+            ipv6: mirror_address.is_ipv6(),
+        };
+
+        sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(listen_data)))?;
+    }
 
     Ok(())
 }
@@ -175,69 +200,13 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> RawFd {
-    let (local_address, domain, protocol, type_) = {
-        if let Some(socket) = MANAGED_SOCKETS.lock().unwrap().get(&sockfd) {
-            if let SocketState::Listening(bound) = &socket.state {
-                (bound.address, socket.domain, socket.protocol, socket.type_)
-            } else {
-                error!("original socket is not listening");
-                return new_fd;
-            }
-        } else {
-            debug!("origin socket not found");
-            return new_fd;
-        }
-    };
-    let socket_info = { CONNECTION_QUEUE.lock().unwrap().get(&sockfd) };
-    let remote_address = match socket_info {
-        Some(socket_info) => socket_info,
-        None => {
-            debug!("accept: socketinformation not found, probably not ours");
-            return new_fd;
-        }
-    }
-    .address;
-    let new_socket = ManagedSocket {
-        domain,
-        protocol,
-        type_,
-        state: SocketState::Connected(Connected {
-            remote_address,
-            local_address,
-        }),
-    };
-    fill_address(address, address_len, remote_address);
-
-    MANAGED_SOCKETS
-        .lock()
-        .unwrap()
-        .insert(new_fd, Arc::new(new_socket));
-    new_fd
+    todo!()
 }
 
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
-    if fcntl_fd == -1 {
-        error!("fcntl failed");
-        return fcntl_fd;
-    }
-    match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
-            dup(orig_fd, fcntl_fd);
-        }
-        _ => (),
-    }
-    fcntl_fd
+    todo!()
 }
 
 pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
-    if dup_fd == -1 {
-        error!("dup failed");
-        return dup_fd;
-    }
-    let mut sockets = MANAGED_SOCKETS.lock().unwrap();
-    if let Some(socket) = sockets.get(&fd) {
-        let dup_socket = socket.clone();
-        sockets.insert(dup_fd as RawFd, dup_socket);
-    }
-    dup_fd
+    todo!()
 }

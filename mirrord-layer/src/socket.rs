@@ -18,7 +18,7 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static MANAGED_SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<ManagedSocket>>>> =
+pub(crate) static MIRROR_SOCKETS: LazyLock<Mutex<HashMap<RawFd, MirrorSocket>>> =
     LazyLock::new(|| Mutex::new(HashMap::default()));
 
 pub(crate) static BYPASS_SOCKETS: LazyLock<Mutex<HashMap<RawFd, Socket>>> =
@@ -78,6 +78,7 @@ pub struct Connected {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bound {
     address: SocketAddr,
+    mirror_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,48 +97,34 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct ManagedSocket {
-    inner_socket: Socket,
+pub struct MirrorSocket {
+    inner: Socket,
     pub state: SocketState,
 }
 
-impl ManagedSocket {
+impl MirrorSocket {
+    fn get_bound(&self) -> Result<Bound, LayerError> {
+        if let SocketState::Bound(bound) = &self.state {
+            Ok(*bound)
+        } else {
+            Err(LayerError::SocketInvalidState)
+        }
+    }
+
     fn get_connected_remote_address(&self) -> Result<SocketAddr, LayerError> {
         if let SocketState::Connected(connected) = &self.state {
             Ok(connected.remote_address)
         } else {
-            Err(LayerError::SocketInvalidState(self.state.clone()))
+            Err(LayerError::SocketInvalidState)
         }
     }
 
     fn get_local_address(&self) -> Result<SocketAddr, LayerError> {
         match &self.state {
-            SocketState::Initialized => Err(LayerError::SocketInvalidState(self.state.clone())),
+            SocketState::Initialized => Err(LayerError::SocketInvalidState),
             SocketState::Bound(bound) => Ok(bound.address),
             SocketState::Listening(listening) => Ok(listening.address),
             SocketState::Connected(connected) => Ok(connected.local_address),
-        }
-    }
-}
-
-impl TryFrom<&ManagedSocket> for OsSocketAddr {
-    type Error = LayerError;
-
-    fn try_from(socket: &ManagedSocket) -> Result<Self, Self::Error> {
-        match socket.domain {
-            libc::AF_INET => Ok(OsSocketAddr::from(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::LOCALHOST),
-                0,
-            ))),
-            libc::AF_INET6 => Ok(OsSocketAddr::from(SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                0,
-            ))),
-            invalid_domain => {
-                // shouldn't happen
-                warn!("unsupported domain");
-                Err(LayerError::UnsupportedDomain(invalid_domain))
-            }
         }
     }
 }

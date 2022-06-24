@@ -67,7 +67,7 @@ pub enum LayerError {
     SocketInvalidState,
 
     #[error("mirrord-layer: Socket operation called for an unsupported domain `{0:#?}`!")]
-    UnsupportedDomain(i32),
+    UnsupportedDomain(std::net::SocketAddr),
 
     #[error("mirrord-layer: Socket address is null!")]
     NullSocketAddress,
