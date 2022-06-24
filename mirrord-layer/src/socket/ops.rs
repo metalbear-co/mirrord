@@ -65,15 +65,13 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
     // New fake address when it's a socket that we're interested in.
     let updated_address = if is_ignored_port(address.port()) {
         Ok(address)
+    } else if address.is_ipv4() {
+        Ok(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+    } else if address.is_ipv6() {
+        Ok(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))
     } else {
-        if address.is_ipv4() {
-            Ok(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
-        } else if address.is_ipv6() {
-            Ok(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))
-        } else {
-            // TODO: Is this even possible?
-            Err(LayerError::UnsupportedDomain(address))
-        }
+        // TODO: Is this even possible?
+        Err(LayerError::UnsupportedDomain(address))
     }?;
 
     {
