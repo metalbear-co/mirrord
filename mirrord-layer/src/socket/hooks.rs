@@ -1,12 +1,11 @@
-use std::{os::unix::io::RawFd, sync::Arc};
+use std::os::unix::io::RawFd;
 
-use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 
-use super::{fill_address, ops::*, SocketState, MIRROR_SOCKETS};
+use super::ops::*;
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
@@ -47,6 +46,9 @@ pub(super) unsafe extern "C" fn bind_detour(
             error!("Failed bind call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) | LayerError::BypassBind(_) => {
+                    libc::bind(sockfd, addr, addrlen)
+                }
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -63,6 +65,7 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
             error!("Failed listen call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => libc::listen(sockfd, backlog),
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -85,6 +88,7 @@ pub(super) unsafe extern "C" fn connect_detour(
             error!("Failed connect call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => libc::connect(sockfd, addr, addrlen),
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -92,6 +96,7 @@ pub(super) unsafe extern "C" fn connect_detour(
         .unwrap_or_else(|fail| fail)
 }
 
+// TODO(alex) [high] 2022-06-24: Node crashes with `GetSockOrPeerName` call.
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     out_address: *mut sockaddr,
@@ -108,6 +113,9 @@ pub(super) unsafe extern "C" fn getpeername_detour(
             error!("Failed getpeername call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::getpeername(sockfd, out_address, out_address_len)
+                }
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -131,6 +139,9 @@ pub(super) unsafe extern "C" fn getsockname_detour(
             error!("Failed getsockname call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::getsockname(sockfd, out_address, out_address_len)
+                }
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -154,6 +165,9 @@ pub(super) unsafe extern "C" fn accept_detour(
             error!("Failed getsockname call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::accept(sockfd, out_address, out_address_len)
+                }
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -177,6 +191,7 @@ pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {
             error!("Failed dup call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => libc::dup(sockfd),
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -190,6 +205,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
             error!("Failed dup2 call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => libc::dup2(oldfd, newfd),
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }
@@ -204,6 +220,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
             error!("Failed dup3 call with {:#?}!", fail);
 
             match fail {
+                LayerError::LocalFdNotFound(_) => libc::dup3(oldfd, newfd, flags),
                 LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
                 _ => -1,
             }

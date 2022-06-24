@@ -4,11 +4,29 @@ use std::{
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
     mem::size_of,
+    net::TcpListener,
 };
 
 fn main() {
+    debug_incoming_request().expect("Failed debugging incoming_request!");
     // debug_file_ops().expect("Failed debugging file_ops!");
-    debug_outgoing_request().expect("Failed debugging outgoing_request!");
+    // debug_outgoing_request().expect("Failed debugging outgoing_request!");
+}
+
+fn debug_incoming_request() -> Result<(), std::io::Error> {
+    let listener = TcpListener::bind("127.0.0.1:80")?;
+
+    for stream in listener.incoming() {
+        let mut stream = stream.unwrap();
+
+        let mut buffer = [0; 1024];
+
+        let _ = stream.read(&mut buffer).unwrap();
+
+        println!(">>>>> request is {}", String::from_utf8_lossy(&buffer[..]));
+    }
+
+    Ok(())
 }
 
 fn debug_outgoing_request() -> Result<(), reqwest::Error> {

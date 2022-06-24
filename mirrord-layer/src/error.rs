@@ -5,7 +5,6 @@ use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::HookMessage;
-use crate::socket::SocketState;
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -34,7 +33,7 @@ pub enum LayerError {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error("mirrord-layer: Failed to find local fd `{0}`!")]
-    LocalFDNotFound(RawFd),
+    LocalFdNotFound(RawFd),
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
@@ -54,24 +53,12 @@ pub enum LayerError {
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
 
-    #[error("mirrord-layer: Socket with fd `{0}` is not Tcpv4!")]
-    SocketNotTcpv4(RawFd),
-
-    #[error("mirrord-layer: Failed parsing raw_addr `{0:#?}`!")]
-    ParseSocketAddr(os_socketaddr::OsSocketAddr),
-
-    #[error("mirrord-layer: Address `{0:#?}` contains an ignored port!")]
-    IgnoredPort(std::net::SocketAddr),
-
     #[error("mirrord-layer: Socket is in invalid state!")]
     SocketInvalidState,
 
     #[error("mirrord-layer: Socket operation called for an unsupported domain `{0:#?}`!")]
     UnsupportedDomain(std::net::SocketAddr),
 
-    #[error("mirrord-layer: Socket address is null!")]
-    NullSocketAddress,
-
-    #[error("mirrord-layer: Socket address length is null!")]
-    NullAddressLength,
+    #[error("mirrord-layer: Tried to `bind` a Socket that should be bypassed with fd `{0:#?}`!")]
+    BypassBind(RawFd),
 }

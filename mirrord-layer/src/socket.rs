@@ -2,16 +2,13 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{LazyLock, Mutex},
 };
 
-use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::Port;
-use os_socketaddr::OsSocketAddr;
 use socket2::Socket;
-use tracing::warn;
 
 use crate::error::LayerError;
 
@@ -19,9 +16,6 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static MIRROR_SOCKETS: LazyLock<Mutex<HashMap<RawFd, MirrorSocket>>> =
-    LazyLock::new(|| Mutex::new(HashMap::default()));
-
-pub(crate) static BYPASS_SOCKETS: LazyLock<Mutex<HashMap<RawFd, Socket>>> =
     LazyLock::new(|| Mutex::new(HashMap::default()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
@@ -110,53 +104,9 @@ impl MirrorSocket {
             Err(LayerError::SocketInvalidState)
         }
     }
-
-    fn get_connected_remote_address(&self) -> Result<SocketAddr, LayerError> {
-        if let SocketState::Connected(connected) = &self.state {
-            Ok(connected.remote_address)
-        } else {
-            Err(LayerError::SocketInvalidState)
-        }
-    }
-
-    fn get_local_address(&self) -> Result<SocketAddr, LayerError> {
-        match &self.state {
-            SocketState::Initialized => Err(LayerError::SocketInvalidState),
-            SocketState::Bound(bound) => Ok(bound.address),
-            SocketState::Listening(listening) => Ok(listening.address),
-            SocketState::Connected(connected) => Ok(connected.local_address),
-        }
-    }
 }
 
 #[inline]
 const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
-}
-
-/// Fill in the sockaddr structure for the given address.
-#[inline]
-pub(crate) fn fill_address(
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    new_address: SocketAddr,
-) -> Result<(), LayerError> {
-    if address.is_null() {
-        Err(LayerError::NullSocketAddress)
-    } else if address_len.is_null() {
-        Err(LayerError::NullAddressLength)
-    } else {
-        let os_address: OsSocketAddr = new_address.into();
-        unsafe {
-            let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-            std::ptr::copy_nonoverlapping(
-                os_address.as_ptr() as *const u8,
-                address as *mut u8,
-                len,
-            );
-            *address_len = os_address.len();
-        }
-
-        Ok(())
-    }
 }
