@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::{io::ErrorKind, net::IpAddr, process::Stdio, sync::Arc};
+    use std::{io::ErrorKind, net::IpAddr, sync::Arc};
 
     use actix_codec::Framed;
     use futures::SinkExt;
@@ -26,8 +26,6 @@ mod tests {
             .arg("2")
             .arg("-i")
             .arg("lo")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .spawn()
             .expect("mirrord-agent failed to start");
         // Wait for agent to listen
