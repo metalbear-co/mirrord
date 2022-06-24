@@ -159,52 +159,142 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     Ok(())
 }
 
-pub(super) fn connect(
-    sockfd: RawFd,
-    address: *const sockaddr,
-    len: socklen_t,
-) -> Result<(), LayerError> {
-    todo!()
+pub(super) fn connect(sockfd: RawFd, address: SocketAddr) -> Result<(), LayerError> {
+    {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.connect(&SockAddr::from(address))?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }
+    }
 }
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn getpeername(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> c_int {
-    todo!()
+pub(super) fn getpeername(sockfd: RawFd) -> Result<SockAddr, LayerError> {
+    {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.peer_addr()?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }
+    }
 }
 
 /// Resolve the fake local address to the real local address.
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn getsockname(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> c_int {
-    todo!()
+pub(super) fn getsockname(sockfd: RawFd) -> Result<SockAddr, LayerError> {
+    {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.local_addr()?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }
+    }
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock This enables us to have a safe way to get "remote" information
 /// (remote ip, port, etc).
-pub(super) fn accept(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    new_fd: RawFd,
-) -> RawFd {
-    todo!()
+pub(super) fn accept(sockfd: RawFd) -> Result<(RawFd, SockAddr), LayerError> {
+    let (accepted_socket, accepted_address) = {
+        let mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+        let bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+        if let Some(socket) = mirror_sockets
+            .get(&sockfd)
+            .map(|mirror_socket| &mirror_socket.inner)
+            .or_else(|| bypass_sockets.get(&sockfd))
+        {
+            Ok(socket.accept()?)
+        } else {
+            Err(LayerError::LocalFDNotFound(sockfd))
+        }
+    }?;
+
+    let accepted_fd = accepted_socket.as_raw_fd();
+
+    if let Some(remote_address) = CONNECTION_QUEUE
+        .lock()
+        .unwrap()
+        .get(&sockfd)
+        .map(|socket_info| socket_info.address)
+    {
+        let connected = Connected {
+            remote_address,
+            local_address: getsockname(sockfd)?.as_socket().unwrap(),
+        };
+
+        let accepted_socket = MirrorSocket {
+            inner: accepted_socket,
+            state: SocketState::Connected(connected),
+        };
+
+        MIRROR_SOCKETS
+            .lock()
+            .unwrap()
+            .insert(accepted_fd, accepted_socket);
+    } else {
+        BYPASS_SOCKETS
+            .lock()
+            .unwrap()
+            .insert(accepted_fd, accepted_socket);
+    }
+
+    Ok((accepted_fd, accepted_address))
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
-    todo!()
+pub(super) fn dup(sockfd: RawFd) -> Result<RawFd, LayerError> {
+    let mut mirror_sockets = MIRROR_SOCKETS.lock().unwrap();
+    let mut bypass_sockets = BYPASS_SOCKETS.lock().unwrap();
+
+    if let Some(mirror_socket) = mirror_sockets.get(&sockfd) {
+        let duplicated_socket = mirror_socket.inner.try_clone()?;
+        let duplicated_fd = duplicated_socket.as_raw_fd();
+
+        let new_mirror_socket = MirrorSocket {
+            inner: duplicated_socket,
+            state: mirror_socket.state.clone(),
+        };
+
+        mirror_sockets.insert(duplicated_fd, new_mirror_socket);
+
+        Ok(duplicated_fd)
+    } else if let Some(bypass_socket) = bypass_sockets.get(&sockfd) {
+        let duplicated_socket = bypass_socket.try_clone()?;
+        let duplicated_fd = duplicated_socket.as_raw_fd();
+
+        bypass_sockets.insert(duplicated_fd, duplicated_socket);
+
+        Ok(duplicated_fd)
+    } else {
+        Err(LayerError::LocalFDNotFound(sockfd))
+    }
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<c_int, LayerError> {
     todo!()
 }

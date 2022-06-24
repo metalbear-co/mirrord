@@ -72,93 +72,151 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 
 pub(super) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
-    address: *const sockaddr,
-    len: socklen_t,
+    addr: *const sockaddr,
+    addrlen: socklen_t,
 ) -> c_int {
-    trace!("connect_detour");
+    let address = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
+        .try_into()
+        .unwrap();
 
-    let socket = {
-        let mut sockets = MIRROR_SOCKETS.lock().unwrap();
-        sockets.remove(&sockfd)
-    };
+    connect(sockfd, address)
+        .map(|()| 0)
+        .map_err(|fail| {
+            error!("Failed connect call with {:#?}!", fail);
 
-    if let Some(socket) = socket {
-        if let SocketState::Bound(bound) = socket.state {
-            let os_addr = OsSocketAddr::from(bound.address);
-            libc::bind(sockfd, os_addr.as_ptr(), os_addr.len())
-        } else {
-            error!(
-                "connect_detour -> Socket {:#?} in invalid state for this call {:#?}!",
-                sockfd, socket
-            );
-
-            -1
-        }
-    } else {
-        warn!(
-            "connect_detour -> No socket found for sockfd {:#?}",
-            &sockfd
-        );
-        libc::connect(sockfd, address, len)
-    }
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
+    out_address: *mut sockaddr,
+    out_address_len: *mut socklen_t,
 ) -> c_int {
-    todo!()
+    getpeername(sockfd)
+        .map(|address| {
+            let address_ptr = address.as_ptr();
+            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+
+            0
+        })
+        .map_err(|fail| {
+            error!("Failed getpeername call with {:#?}!", fail);
+
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    todo!()
+    out_address: *mut sockaddr,
+    out_address_len: *mut socklen_t,
+) -> c_int {
+    getsockname(sockfd)
+        .map(|address| {
+            let address_ptr = address.as_ptr();
+            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+
+            0
+        })
+        .map_err(|fail| {
+            error!("Failed getsockname call with {:#?}!", fail);
+
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    todo!()
+    out_address: *mut sockaddr,
+    out_address_len: *mut socklen_t,
+) -> c_int {
+    accept(sockfd)
+        .map(|(accepted_fd, address)| {
+            let address_ptr = address.as_ptr();
+            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+
+            accepted_fd
+        })
+        .map_err(|fail| {
+            error!("Failed getsockname call with {:#?}!", fail);
+
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 #[cfg(target_os = "linux")]
 pub(super) unsafe extern "C" fn accept4_detour(
-    sockfd: i32,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    flags: i32,
-) -> i32 {
-    todo!()
+    sockfd: c_int,
+    out_address: *mut sockaddr,
+    out_address_len: *mut socklen_t,
+    flags: c_int,
+) -> c_int {
+    accept_detour(sockfd, out_address, out_address_len)
 }
 
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    fcntl(fd, cmd, fcntl_fd)
-}
+pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {
+    dup(sockfd)
+        .map_err(|fail| {
+            error!("Failed dup call with {:#?}!", fail);
 
-pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    let dup_fd = libc::dup(fd);
-    dup(fd, dup_fd)
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
-    if oldfd == newfd {
-        return newfd;
-    }
-    let dup2_fd = libc::dup2(oldfd, newfd);
-    dup(oldfd, dup2_fd)
+    dup(oldfd)
+        .map_err(|fail| {
+            error!("Failed dup2 call with {:#?}!", fail);
+
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 #[cfg(target_os = "linux")]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = libc::dup3(oldfd, newfd, flags);
-    dup(oldfd, dup3_fd)
+    dup(oldfd)
+        .map_err(|fail| {
+            error!("Failed dup3 call with {:#?}!", fail);
+
+            match fail {
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
+}
+
+pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
+    if libc::F_DUPFD == cmd || libc::F_DUPFD_CLOEXEC == cmd {
+        dup_detour(fd)
+    } else {
+        libc::fcntl(fd, cmd, arg)
+    }
 }
 
 pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor) {
