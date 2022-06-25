@@ -13,6 +13,8 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
+pub type ClientID = u32;
+
 impl<T, C> Subscriptions<T, C>
 where
     T: Eq + Hash + Clone + Copy,
@@ -76,6 +78,7 @@ where
     }
 
     /// Removes a topic and all of it's clients
+    #[allow(dead_code)] // we might want it later on
     pub fn remove_topic(&mut self, topic: T) {
         self._inner.remove(&topic);
     }
@@ -129,8 +132,9 @@ impl Default for IndexAllocator<usize> {
 
 #[cfg(test)]
 mod subscription_tests {
+    use mirrord_protocol::Port;
+
     use super::Subscriptions;
-    use crate::Port;
 
     #[test]
     fn sanity() {

@@ -4,8 +4,6 @@ pub mod utils;
 mod tests {
     use std::collections::HashMap;
 
-    use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
-    use kube::{api::ListParams, Api};
     use nix::{
         sys::signal::{self, Signal},
         unistd::Pid,
@@ -84,38 +82,6 @@ mod tests {
         .await
         .unwrap();
         validate_requests(&mut stdout_reader).await;
-
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), "default");
-        let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-        // assuming only one job is running
-        // to make the tests parallel we need to figure a way to get the exact job name when len() >
-        // 1
-        assert!(jobs.items.len() > 0);
-
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), "default");
-        let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert!(pods.items.len() > 1);
-
-        let cleanup_timeout = Duration::from_secs(35);
-        timeout(
-            cleanup_timeout,
-            tokio::spawn(async move {
-                // verify cleanup
-                loop {
-                    let updated_jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-                    let updated_pods = pods_api.list(&ListParams::default()).await.unwrap(); // only the http-echo pod should exist
-                    if updated_pods.items.len() == 1 && updated_jobs.items.is_empty() {
-                        let http_echo_pod = updated_pods.items[0].metadata.name.clone().unwrap();
-                        assert!(http_echo_pod.contains("http-echo"));
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
     }
 
     #[tokio::test]
@@ -235,13 +201,6 @@ mod tests {
         .unwrap();
         validate_requests(&mut stdout_reader).await;
 
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), agent_namespace);
-        let jobs = jobs_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(jobs.items.len(), 1);
-
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), agent_namespace);
-        let pods = pods_api.list(&ListParams::default()).await.unwrap();
-        assert_eq!(pods.items.len(), 1);
         delete_namespace(&client, agent_namespace).await;
     }
 
@@ -391,10 +350,19 @@ mod tests {
         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
             .await
             .unwrap();
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--enable-fs", "--"]
-            .into_iter()
-            .chain(command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "--agent-ttl",
+            "1000",
+            "--enable-fs",
+            "--",
+        ]
+        .into_iter()
+        .chain(command.into_iter())
+        .collect();
         let test = Command::new(path)
             .args(args)
             .envs(&env)
@@ -423,10 +391,18 @@ mod tests {
             .await
             .unwrap();
 
-        let args: Vec<&str> = vec!["exec", "--pod-name", &pod_name, "-c", "--"]
-            .into_iter()
-            .chain(node_command.into_iter())
-            .collect();
+        let args: Vec<&str> = vec![
+            "exec",
+            "--pod-name",
+            &pod_name,
+            "-c",
+            "--agent-ttl",
+            "1000",
+            "--",
+        ]
+        .into_iter()
+        .chain(node_command.into_iter())
+        .collect();
 
         let test_process = Command::new(mirrord_bin)
             .args(args)
@@ -464,6 +440,8 @@ mod tests {
             "--pod-name",
             &pod_name,
             "-c",
+            "--agent-ttl",
+            "1000",
             "-x",
             "MIRRORD_FAKE_VAR_FIRST",
             "-s",
@@ -508,6 +486,8 @@ mod tests {
             "--pod-name",
             &pod_name,
             "-c",
+            "--agent-ttl",
+            "1000",
             "-x",
             "MIRRORD_FAKE_VAR_FIRST",
             "--",
@@ -549,6 +529,8 @@ mod tests {
             "exec",
             "--pod-name",
             &pod_name,
+            "--agent-ttl",
+            "1000",
             "-c",
             "-s",
             "MIRRORD_FAKE_VAR_FIRST",

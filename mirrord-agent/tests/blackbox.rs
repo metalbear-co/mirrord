@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::{io::ErrorKind, net::IpAddr, process::Stdio, sync::Arc};
+    use std::{io::ErrorKind, net::IpAddr, sync::Arc};
 
     use actix_codec::Framed;
     use futures::SinkExt;
@@ -18,10 +18,7 @@ mod tests {
     };
     use tokio_stream::StreamExt;
 
-    // TODO: Re-enable this test, it errors out due to `file_worker` task requiring a valid
-    // `container_id` for `pid` handling, meanwhile this test passes it as `None`.
     #[tokio::test]
-    #[ignore]
     async fn sanity() {
         let mut bin = get_test_bin("mirrord-agent");
         let child = bin
@@ -29,8 +26,6 @@ mod tests {
             .arg("2")
             .arg("-i")
             .arg("lo")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .spawn()
             .expect("mirrord-agent failed to start");
         // Wait for agent to listen

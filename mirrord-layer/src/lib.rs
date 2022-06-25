@@ -432,7 +432,8 @@ async fn poll_agent(
             ).await;
             }
             daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(),
+                if let Some(Ok(message)) = daemon_message {
+                    handle_daemon_message(message,
                     &mut tcp_mirror_handler,
                     &open_file_handler,
                     &read_file_handler,
@@ -440,7 +441,11 @@ async fn poll_agent(
                     &write_file_handler,
                     &close_file_handler,
                     &mut ping,
-                ).await;
+                    ).await;
+                } else {
+                    error!("agent disconnected");
+                    break;
+                }
             },
             _ = sleep(Duration::from_secs(60)) => {
                 if !ping {

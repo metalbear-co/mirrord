@@ -1,24 +1,15 @@
-use mirrord_protocol::{DaemonMessage, FileRequest, FileResponse};
+use mirrord_protocol::{tcp::DaemonTcp, FileRequest, FileResponse};
 use thiserror::Error;
 
-use crate::{
-    sniffer::{SnifferCommand, SnifferOutput},
-    PeerMessage,
-};
+use crate::sniffer::SnifferCommand;
 
 #[derive(Debug, Error)]
 pub enum AgentError {
     #[error("Agent failed with `{0}`")]
     IO(#[from] std::io::Error),
 
-    #[error("PeerMessage sender failed with `{0}`")]
-    SendPeerMessage(#[from] tokio::sync::mpsc::error::SendError<PeerMessage>),
-
     #[error("SnifferCommand sender failed with `{0}`")]
     SendSnifferCommand(#[from] tokio::sync::mpsc::error::SendError<SnifferCommand>),
-
-    #[error("SnifferOutput sender failed with `{0}`")]
-    SendSnifferOutput(#[from] tokio::sync::mpsc::error::SendError<SnifferOutput>),
 
     #[error("FileRequest sender failed with `{0}`")]
     SendFileRequest(#[from] tokio::sync::mpsc::error::SendError<(u32, FileRequest)>),
@@ -26,8 +17,8 @@ pub enum AgentError {
     #[error("FileResponse sender failed with `{0}`")]
     SendFileResponse(#[from] tokio::sync::mpsc::error::SendError<(u32, FileResponse)>),
 
-    #[error("DaemonMessage sender failed with `{0}`")]
-    SendDaemonMessage(#[from] tokio::sync::mpsc::error::SendError<DaemonMessage>),
+    #[error("DaemonTcp sender failed with `{0}`")]
+    SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
 
     #[error("task::Join failed with `{0}`")]
     Join(#[from] tokio::task::JoinError),

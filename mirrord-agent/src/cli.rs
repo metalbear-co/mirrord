@@ -1,4 +1,7 @@
-use clap::Parser;
+use clap::{
+    error::{Error, ErrorKind},
+    Parser,
+};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -24,6 +27,28 @@ pub struct Args {
     pub interface: String,
 }
 
+const DEFAULT_RUNTIME: &str = "containerd";
+
 pub fn parse_args() -> Args {
-    Args::parse()
+    let args = Args::try_parse()
+        .and_then(|args| {
+            if args.container_runtime.is_some() && args.container_id.is_none() {
+                Err(Error::raw(
+                    ErrorKind::InvalidValue,
+                    "container_id is required when container_runtime is specified",
+                ))
+            } else {
+                Ok(args)
+            }
+        })
+        .map(|mut args| {
+            if args.container_runtime.is_none() {
+                args.container_runtime = Some(DEFAULT_RUNTIME.to_string());
+            }
+            args
+        });
+    match args {
+        Ok(args) => args,
+        Err(e) => e.exit(),
+    }
 }
