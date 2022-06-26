@@ -72,8 +72,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             .with_context(|| format!("Failed to load kube-config"))?;
         config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
-        Client::try_from(config)
-            .with_context(|| format!("Failed to create client"))?
+        Client::try_from(config).with_context(|| format!("Failed to create client"))?
     } else {
         Client::try_default()
             .await
