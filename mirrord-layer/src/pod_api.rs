@@ -67,12 +67,16 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     let env_config = LayerConfig::init_from_env().unwrap();
 
     let client = if env_config.accept_invalid_certificates {
-        let mut config = Config::infer().await.unwrap();
+        let mut config = Config::infer()
+            .await
+            .with_context(|| "Failed to load kube-config")?;
         config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
-        Client::try_from(config).unwrap()
+        Client::try_from(config).with_context(|| "Failed to create client")?
     } else {
-        Client::try_default().await.unwrap()
+        Client::try_default()
+            .await
+            .with_context(|| "Failed to create client")?
     };
 
     let runtime_data = RuntimeData::from_k8s(
@@ -154,7 +158,12 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     jobs_api
         .create(&PostParams::default(), &agent_pod)
         .await
-        .unwrap();
+        .with_context(|| {
+            format!(
+                "Failed to create jobs api with agent pod {}",
+                &agent_job_name
+            )
+        })?;
 
     let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
     let params = ListParams::default()
@@ -176,7 +185,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     let pods = pods_api
         .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
         .await
-        .unwrap();
+        .with_context(|| format!("Failed to list pods for job agent {}", &agent_job_name))?;
     let pod = pods.items.first().unwrap();
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
