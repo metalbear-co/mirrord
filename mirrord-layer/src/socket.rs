@@ -15,6 +15,31 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
+/// TODO(alex) [high] 2022-06-25: 2 ways I see this interacting with agent + dup:
+///
+/// 1. `Arc<Mutex<MirrorSocket>>` and we keep the `SocketState` idea alive. To make it work just
+/// check where `CONNECTION_QUEUE` is being used, and how the agent is working with the socket
+/// when we call `socket.listen`;
+///
+/// 2. Make the thing stateful, have different `HashMap<RawFd, MirrorSocket<State>>` for sockets
+/// that are (state) `Bind`, `Listen`, `Connected`.
+///
+/// Thinking a bit more about it, (2) works, but still requires `Arc`, otherwise we could end up
+/// with a dupped socket "A" that is `Connected` for `fd` "5", but is `Bound` for `fd` "6".
+///
+/// The biggest problem is that we have a structure like:
+///
+/// ```
+///                     Socket (shared state)
+///                    /      \
+///                   /        \
+///                 fd        dup_fd
+/// ```
+///
+/// And `Arc` pretty much solves this problem.
+///
+/// If I go for (2), then there must be a call that takes **every** dupped socket from the old state
+/// `HashMap` into the new one.
 pub(crate) static MIRROR_SOCKETS: LazyLock<Mutex<HashMap<RawFd, MirrorSocket>>> =
     LazyLock::new(|| Mutex::new(HashMap::default()));
 
