@@ -506,7 +506,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .expect("Should be set during initialization!");
 
     // TODO(alex) [high] 2022-06-28: Deadlock is here! We call `close` before locking `socket`.
-    if MIRROR_SOCKETS.lock().unwrap().remove(&fd).is_some() {
+    if MIRROR_SOCKETS.write().unwrap().remove(&fd).is_some() {
         libc::close(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);

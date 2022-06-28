@@ -25,6 +25,10 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
+    // TODO(alex) [high] 2022-06-28: Still having deadlock issues. No need to lock if we're just
+    // reading, so maybe I could have a separate "mutable" map that will hold the locks when
+    // it needs to change something, and a separate "read-only" map that doesn't require lock?
+
     trace!("socket -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     let socket = Socket::new_raw(
@@ -56,7 +60,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
             fd
         );
 
-        MIRROR_SOCKETS.try_lock()?.insert(fd, mirror_socket);
+        MIRROR_SOCKETS.write().unwrap().insert(fd, mirror_socket);
 
         trace!("socket -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
@@ -92,39 +96,40 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
         );
 
         let bypass_fd = MIRROR_SOCKETS
-            .try_lock()?
+            .write()
+            .unwrap()
             .remove(&sockfd)
             .ok_or(LayerError::LocalFdNotFound(sockfd))
             .and_then(|drop_socket| Ok(drop_socket.inner.into_raw_fd()))?;
 
         Err(LayerError::BypassBind(bypass_fd))
     } else {
-        let mut mirror_socket = MIRROR_SOCKETS
-            .try_lock()?
-            .remove(&sockfd)
-            .ok_or(LayerError::LocalFdNotFound(sockfd))?;
-
-        mirror_socket
-            .inner
-            .bind(&SockAddr::from(mirror_address(address)?))?;
-
-        let mirror_address = mirror_socket.inner.local_addr()?.as_socket().unwrap();
-        let bound = Bound {
-            address,
-            mirror_address,
-        };
-
-        mirror_socket.state = SocketState::Bound(bound);
-
-        trace!("bind -> Bound mirror_socket {:#?}", mirror_socket);
-
+        // TODO(alex) [high] 2022-06-28: Deadlock occurs around here.
+        trace!("bind -> before deadlock");
         MIRROR_SOCKETS
-            .try_lock()?
-            .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
+            .write()
+            .unwrap()
+            .get_mut(&sockfd)
+            .ok_or(LayerError::LocalFdNotFound(sockfd))
+            .and_then(|mirror_socket| {
+                mirror_socket
+                    .inner
+                    .bind(&SockAddr::from(mirror_address(address)?))?;
 
-        trace!("bind -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+                let mirror_address = mirror_socket.inner.local_addr()?.as_socket().unwrap();
+                let bound = Bound {
+                    address,
+                    mirror_address,
+                };
 
-        Ok(())
+                mirror_socket.state = SocketState::Bound(bound);
+
+                trace!("bind -> Bound mirror_socket {:#?}", mirror_socket);
+
+                trace!("bind -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
+                Ok(())
+            })
     }
 }
 
@@ -134,39 +139,37 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
     trace!("listen -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
-    let mut mirror_socket = MIRROR_SOCKETS
-        .try_lock()?
-        .remove(&sockfd)
-        .ok_or(LayerError::LocalFdNotFound(sockfd))?;
-
-    let Bound {
-        address,
-        mirror_address,
-    } = mirror_socket.get_bound()?;
-
-    let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-
-    let listen_data = Listen {
-        fake_port: mirror_address.port(),
-        real_port: address.port(),
-        fd: mirror_socket.inner.as_raw_fd(),
-        ipv6: mirror_address.is_ipv6(),
-    };
-
-    sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(listen_data)))?;
-
-    mirror_socket.inner.listen(backlog)?;
-    mirror_socket.state = SocketState::Listening(mirror_socket.get_bound()?);
-
-    trace!("listen -> Listening mirror_socket {:#?}", mirror_socket);
-
     MIRROR_SOCKETS
-        .try_lock()?
-        .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
+        .write()
+        .unwrap()
+        .get_mut(&sockfd)
+        .ok_or(LayerError::LocalFdNotFound(sockfd))
+        .and_then(|mirror_socket| {
+            let Bound {
+                address,
+                mirror_address,
+            } = mirror_socket.get_bound()?;
 
-    trace!("listen -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+            let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
 
-    Ok(())
+            let listen_data = Listen {
+                fake_port: mirror_address.port(),
+                real_port: address.port(),
+                fd: mirror_socket.inner.as_raw_fd(),
+                ipv6: mirror_address.is_ipv6(),
+            };
+
+            sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(listen_data)))?;
+
+            mirror_socket.inner.listen(backlog)?;
+            mirror_socket.state = SocketState::Listening(mirror_socket.get_bound()?);
+
+            trace!("listen -> Listening mirror_socket {:#?}", mirror_socket);
+
+            trace!("listen -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
+            Ok(())
+        })
 }
 
 pub(super) fn connect(sockfd: RawFd, address: SocketAddr) -> Result<(), LayerError> {
@@ -174,38 +177,36 @@ pub(super) fn connect(sockfd: RawFd, address: SocketAddr) -> Result<(), LayerErr
 
     trace!("connect -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
-    let mirror_socket = MIRROR_SOCKETS
-        .try_lock()?
-        .remove(&sockfd)
-        .ok_or(LayerError::LocalFdNotFound(sockfd))?;
-
-    trace!("connect -> mirror_socket {:#?}", mirror_socket);
-
-    let was_non_blocking = mirror_socket.inner.r#type()? == Type::from(libc::SOCK_NONBLOCK);
-    mirror_socket
-        .inner
-        .connect_timeout(&SockAddr::from(address), Duration::from_secs(1))?;
-
-    mirror_socket.inner.set_nonblocking(was_non_blocking)?;
-
     MIRROR_SOCKETS
-        .try_lock()?
-        .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
+        .read()
+        .unwrap()
+        .get(&sockfd)
+        .ok_or(LayerError::LocalFdNotFound(sockfd))
+        .and_then(|mirror_socket| {
+            trace!("connect -> mirror_socket {:#?}", mirror_socket);
 
-    // let Bound {
-    //     address,
-    //     mirror_address,
-    // } = mirror_socket.get_bound()?;
+            let was_non_blocking = mirror_socket.inner.r#type()? == Type::from(libc::SOCK_NONBLOCK);
+            mirror_socket
+                .inner
+                .connect_timeout(&SockAddr::from(address), Duration::from_secs(1))?;
 
-    // mirror_socket.state = SocketState::Connected(Connected {
-    //     remote_address: todo!(),
-    //     local_address: todo!(),
-    // });
+            mirror_socket.inner.set_nonblocking(was_non_blocking)?;
 
-    // MIRROR_SOCKETS.try_lock()?.insert(sockfd, mirror_socket);
+            // let Bound {
+            //     address,
+            //     mirror_address,
+            // } = mirror_socket.get_bound()?;
 
-    trace!("connect -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
-    Ok(())
+            // mirror_socket.state = SocketState::Connected(Connected {
+            //     remote_address: todo!(),
+            //     local_address: todo!(),
+            // });
+
+            // MIRROR_SOCKETS.lock().unwrap().insert(sockfd, mirror_socket);
+
+            trace!("connect -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+            Ok(())
+        })
 }
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
@@ -214,7 +215,8 @@ pub(super) fn getpeername(sockfd: RawFd) -> Result<SockAddr, LayerError> {
     trace!("getpeername -> sockfd {:#?}", sockfd);
 
     MIRROR_SOCKETS
-        .try_lock()?
+        .read()
+        .unwrap()
         .get(&sockfd)
         .ok_or(LayerError::LocalFdNotFound(sockfd))
         .and_then(|mirror_socket| Ok(mirror_socket.inner.peer_addr()?))
@@ -225,7 +227,8 @@ pub(super) fn getsockname(sockfd: RawFd) -> Result<SockAddr, LayerError> {
     trace!("getsockname -> sockfd {:#?}", sockfd);
 
     MIRROR_SOCKETS
-        .try_lock()?
+        .read()
+        .unwrap()
         .get(&sockfd)
         .ok_or(LayerError::LocalFdNotFound(sockfd))
         .and_then(|mirror_socket| Ok(mirror_socket.inner.local_addr()?))
@@ -245,47 +248,49 @@ pub(super) fn accept(
     );
     trace!("accept -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
-    let mirror_socket = MIRROR_SOCKETS
-        .try_lock()?
-        .remove(&mirror_fd)
-        .ok_or(LayerError::LocalFdNotFound(mirror_fd))?;
-    trace!("accept -> mirror_socket {:#?}", mirror_socket);
-
-    // SAFE: We only get here if `accepted_fd` is a valid value.
-    let accepted_socket = unsafe { Socket::from_raw_fd(accepted_fd) };
-
-    let remote_address = CONNECTION_QUEUE
-        .try_lock()?
+    let accepted_socket = MIRROR_SOCKETS
+        .read()
+        .unwrap()
         .get(&mirror_fd)
-        .map(|socket_info| socket_info.address)
-        .ok_or(LayerError::LocalFdNotFound(mirror_fd))?;
-    trace!("accept -> remote_address {:#?}", remote_address);
+        .ok_or(LayerError::LocalFdNotFound(mirror_fd))
+        .and_then(|mirror_socket| {
+            trace!("accept -> mirror_socket {:#?}", mirror_socket);
 
-    let connected = Connected {
-        remote_address,
-        local_address: getsockname(mirror_fd)?.as_socket().unwrap(),
-    };
+            // SAFE: We only get here if `accepted_fd` is a valid value.
+            let accepted_socket = unsafe { Socket::from_raw_fd(accepted_fd) };
 
-    let accepted_address = accepted_socket.local_addr()?;
+            let remote_address = CONNECTION_QUEUE
+                .lock()
+                .unwrap()
+                .get(&mirror_fd)
+                .map(|socket_info| socket_info.address)
+                .ok_or(LayerError::LocalFdNotFound(mirror_fd))?;
+            trace!("accept -> remote_address {:#?}", remote_address);
 
-    let accepted_socket = MirrorSocket {
-        inner: accepted_socket,
-        state: SocketState::Connected(connected),
-    };
+            let connected = Connected {
+                remote_address,
+                local_address: getsockname(mirror_fd)?.as_socket().unwrap(),
+            };
 
-    trace!(
-        "accept -> Accepted accepted_socket {:#?} for mirror_socket {:#?}",
-        accepted_socket,
-        mirror_socket
-    );
+            let accepted_socket = MirrorSocket {
+                inner: accepted_socket,
+                state: SocketState::Connected(connected),
+            };
 
+            trace!(
+                "accept -> Accepted accepted_socket {:#?} for mirror_socket {:#?}",
+                accepted_socket,
+                mirror_socket
+            );
+
+            Ok(accepted_socket)
+        })?;
+
+    let accepted_address = accepted_socket.inner.local_addr()?;
     MIRROR_SOCKETS
-        .try_lock()?
+        .write()
+        .unwrap()
         .insert(accepted_fd, accepted_socket);
-
-    MIRROR_SOCKETS
-        .try_lock()?
-        .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
 
     trace!("accept -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
@@ -295,7 +300,7 @@ pub(super) fn accept(
 pub(super) fn dup(sockfd: RawFd) -> Result<RawFd, LayerError> {
     trace!("dup -> sockfd {:#?}", sockfd);
 
-    let mut mirror_sockets = MIRROR_SOCKETS.try_lock()?;
+    let mut mirror_sockets = MIRROR_SOCKETS.write().unwrap();
 
     if let Some(mirror_socket) = mirror_sockets.get(&sockfd) {
         let duplicated_socket = mirror_socket.inner.try_clone()?;

@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, RwLock},
 };
 
 use mirrord_protocol::Port;
@@ -42,8 +42,8 @@ pub(crate) type SocketMap = HashMap<RawFd, MirrorSocket>;
 ///
 /// If I go for (2), then there must be a call that takes **every** dupped socket from the old state
 /// `HashMap` into the new one.
-pub(crate) static MIRROR_SOCKETS: LazyLock<Mutex<HashMap<RawFd, MirrorSocket>>> =
-    LazyLock::new(|| Mutex::new(HashMap::default()));
+pub(crate) static MIRROR_SOCKETS: LazyLock<RwLock<HashMap<RawFd, MirrorSocket>>> =
+    LazyLock::new(|| RwLock::new(HashMap::default()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
