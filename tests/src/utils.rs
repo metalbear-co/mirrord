@@ -99,7 +99,7 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
 pub async fn get_http_echo_pod_name(client: &Client, namespace: &str) -> Option<String> {
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=http-echo"))
+        .list(&ListParams::default().labels("app=py-serv"))
         .await
         .unwrap();
     let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
@@ -152,9 +152,9 @@ pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": "http-echo",
+            "name": "py-serv",
             "labels": {
-                "app": "http-echo"
+                "app": "py-serv"
             }
         },
         "spec": {
