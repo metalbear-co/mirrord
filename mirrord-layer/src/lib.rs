@@ -473,6 +473,8 @@ fn enable_hooks(enabled_file_ops: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
+    // TODO(alex) [mid] 2022-06-28: Re-enable this after figuring out the locking issue. This call
+    // was being made in the middle of socket handling.
     // hook!(interceptor, "close", close_detour);
 
     socket::hooks::enable_socket_hooks(&mut interceptor);

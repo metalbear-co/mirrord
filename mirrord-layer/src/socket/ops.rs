@@ -101,15 +101,38 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 
         Err(LayerError::BypassBind(bypass_fd))
     } else {
-        let mirror_address = mirror_address(address)?;
+        let unbounded_mirror_address = mirror_address(address)?;
+        trace!(
+            "bind -> unbounded_mirror_address {:#?}",
+            unbounded_mirror_address
+        );
 
         MIRROR_SOCKETS
             .try_lock()?
             .get_mut(&sockfd)
             .ok_or(LayerError::LocalFdNotFound(sockfd))
             .and_then(|mirror_socket| {
-                mirror_socket.inner.bind(&SockAddr::from(mirror_address))?;
+                mirror_socket
+                    .inner
+                    .bind(&SockAddr::from(unbounded_mirror_address))?;
 
+                trace!("bind -> mirror_socket {:#?}", mirror_socket);
+
+                let mirror_address = mirror_socket
+                    .inner
+                    .local_addr()
+                    .unwrap()
+                    .as_socket()
+                    .unwrap();
+                trace!("bind -> mirror_address {:#?}", mirror_address);
+
+                // TODO(alex) [high] 2022-06-28: This is the real culprit, I was forgetting to load
+                // the bound address, and ended up passing port just as `0` and `localhost`.
+                // Must fix, but we have no `local_addr` even after `socket2::bind` call, why?
+                // Works on playground, but here it justL
+                /*
+                thread '<unnamed>' panicked at 'called `Result::unwrap()` on an `Err` value: Os { code: 107, kind: NotConnected, message: "Transport endpoint is not connected" }', mirrord-layer/src/socket/ops.rs:124:22
+                                 */
                 let bound = Bound {
                     address,
                     mirror_address,
@@ -144,6 +167,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
         fd: sockfd,
         ipv6: mirror_address.is_ipv6(),
     };
+
+    trace!("listen -> listen_data {:#?}", listen_data);
 
     sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(listen_data)))?;
 
