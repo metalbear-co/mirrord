@@ -81,7 +81,7 @@ pub trait TcpHandler {
 
     /// Returns true to let caller know to keep running
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        trace!("handle_daemon_message -> Tcp daemon {:#?}", message);
+        trace!("handle_daemon_message -> Tcp daemon {:?}", message);
 
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {
@@ -91,7 +91,7 @@ pub trait TcpHandler {
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
         };
 
-        debug!("handle_incoming_message -> handled {:#?}", handled);
+        debug!("handle_incoming_message -> handled {:?}", handled);
 
         handled
     }

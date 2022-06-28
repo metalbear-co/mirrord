@@ -1,16 +1,15 @@
 use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
-use libc::{c_int, c_void, sockaddr, socklen_t};
+use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use socket2::{Domain, SockAddr, Type};
-use tracing::{error, info, trace};
+use socket2::SockAddr;
+use tracing::{error, trace};
 
 use super::ops::*;
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
-    socket::MIRROR_SOCKETS,
 };
 
 pub(super) unsafe extern "C" fn socket_detour(
@@ -224,30 +223,35 @@ pub(super) unsafe extern "C" fn accept_detour(
 ) -> c_int {
     trace!("accept_detour -> sockfd {:#?}", sockfd);
 
-    accept(sockfd, None)
-        .map(|(accepted_fd, address)| {
-            let address_ptr = address.as_ptr();
-            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+    let accepted_fd = libc::accept(sockfd, out_address, out_address_len);
+    if -1 != accepted_fd {
+        accept(sockfd, accepted_fd)
+            .map(|(accepted_fd, address)| {
+                let address_ptr = address.as_ptr();
+                out_address.copy_from(address_ptr, (*out_address_len) as usize);
 
-            trace!(
-                "accept_detour -> Copied pointer address {:#?}",
-                *out_address
-            );
+                trace!(
+                    "accept_detour -> Copied pointer address {:#?}",
+                    *out_address
+                );
 
-            accepted_fd
-        })
-        .map_err(|fail| {
-            error!("Failed accept call with {:#?}!", fail);
+                accepted_fd
+            })
+            .map_err(|fail| {
+                error!("Failed accept call with {:#?}!", fail);
 
-            match fail {
-                LayerError::LocalFdNotFound(_) => {
-                    libc::accept(sockfd, out_address, out_address_len)
+                match fail {
+                    LayerError::LocalFdNotFound(_) => {
+                        libc::accept(sockfd, out_address, out_address_len)
+                    }
+                    LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                    _ => -1,
                 }
-                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
-                _ => -1,
-            }
-        })
-        .unwrap_or_else(|fail| fail)
+            })
+            .unwrap_or_else(|fail| fail)
+    } else {
+        accepted_fd
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -263,30 +267,35 @@ pub(super) unsafe extern "C" fn accept4_detour(
         flags
     );
 
-    accept(sockfd, Some(flags))
-        .map(|(accepted_fd, address)| {
-            let address_ptr = address.as_ptr();
-            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+    let accepted_fd = libc::accept4(sockfd, out_address, out_address_len, flags);
+    if -1 != accepted_fd {
+        accept(sockfd, accepted_fd)
+            .map(|(accepted_fd, address)| {
+                let address_ptr = address.as_ptr();
+                out_address.copy_from(address_ptr, (*out_address_len) as usize);
 
-            trace!(
-                "accept4_detour -> Copied pointer address {:#?}",
-                *out_address
-            );
+                trace!(
+                    "accept4_detour -> Copied pointer address {:#?}",
+                    *out_address
+                );
 
-            accepted_fd
-        })
-        .map_err(|fail| {
-            error!("Failed accept4 call with {:#?}!", fail);
+                accepted_fd
+            })
+            .map_err(|fail| {
+                error!("Failed accept call with {:#?}!", fail);
 
-            match fail {
-                LayerError::LocalFdNotFound(_) => {
-                    libc::accept4(sockfd, out_address, out_address_len, flags)
+                match fail {
+                    LayerError::LocalFdNotFound(_) => {
+                        libc::accept(sockfd, out_address, out_address_len)
+                    }
+                    LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                    _ => -1,
                 }
-                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
-                _ => -1,
-            }
-        })
-        .unwrap_or_else(|fail| fail)
+            })
+            .unwrap_or_else(|fail| fail)
+    } else {
+        accepted_fd
+    }
 }
 
 pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {

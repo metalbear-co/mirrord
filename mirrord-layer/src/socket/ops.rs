@@ -1,8 +1,11 @@
-use std::os::unix::{io::RawFd, prelude::*};
+use std::{
+    os::unix::{io::RawFd, prelude::*},
+    time::Duration,
+};
 
-use libc::{c_int, sockaddr, socklen_t};
+use libc::c_int;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 use super::*;
 use crate::{
@@ -21,6 +24,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         type_,
         protocol
     );
+
+    trace!("socket -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     let socket = Socket::new_raw(
         Domain::from(domain),
@@ -53,6 +58,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
 
         MIRROR_SOCKETS.try_lock()?.insert(fd, mirror_socket);
 
+        trace!("socket -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
         Ok(fd)
     }
 }
@@ -75,6 +82,7 @@ fn mirror_address(address: SocketAddr) -> Result<SocketAddr, LayerError> {
 /// is in `MIRROR_SOCKETS`, then this function will move the socket to `BYPASS_SOCKETS`.
 pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
     trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+    trace!("bind -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     if is_ignored_port(address.port()) {
         warn!(
@@ -114,6 +122,8 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
             .try_lock()?
             .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
 
+        trace!("bind -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
         Ok(())
     }
 }
@@ -122,6 +132,7 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
+    trace!("listen -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     let mut mirror_socket = MIRROR_SOCKETS
         .try_lock()?
@@ -153,18 +164,33 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
         .try_lock()?
         .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
 
+    trace!("listen -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
     Ok(())
 }
 
 pub(super) fn connect(sockfd: RawFd, address: SocketAddr) -> Result<(), LayerError> {
     trace!("connect -> sockfd {:#?} | address {:#?}", sockfd, address);
 
+    trace!("connect -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
+
     let mirror_socket = MIRROR_SOCKETS
         .try_lock()?
         .remove(&sockfd)
         .ok_or(LayerError::LocalFdNotFound(sockfd))?;
 
-    mirror_socket.inner.connect(&SockAddr::from(address))?;
+    trace!("connect -> mirror_socket {:#?}", mirror_socket);
+
+    let was_non_blocking = mirror_socket.inner.r#type()? == Type::from(libc::SOCK_NONBLOCK);
+    mirror_socket
+        .inner
+        .connect_timeout(&SockAddr::from(address), Duration::from_secs(1))?;
+
+    mirror_socket.inner.set_nonblocking(was_non_blocking)?;
+
+    MIRROR_SOCKETS
+        .try_lock()?
+        .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
 
     // let Bound {
     //     address,
@@ -178,6 +204,7 @@ pub(super) fn connect(sockfd: RawFd, address: SocketAddr) -> Result<(), LayerErr
 
     // MIRROR_SOCKETS.try_lock()?.insert(sockfd, mirror_socket);
 
+    trace!("connect -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
     Ok(())
 }
 
@@ -207,36 +234,39 @@ pub(super) fn getsockname(sockfd: RawFd) -> Result<SockAddr, LayerError> {
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock This enables us to have a safe way to get "remote" information
 /// (remote ip, port, etc).
-pub(super) fn accept(sockfd: RawFd, flags: Option<i32>) -> Result<(RawFd, SockAddr), LayerError> {
-    trace!("accept -> sockfd {:#?}", sockfd);
-
-    // TODO(alex) [high] 2022-06-28: `accept` is a blocking call, so we hold this lock for way too
-    // long.
+pub(super) fn accept(
+    mirror_fd: RawFd,
+    accepted_fd: RawFd,
+) -> Result<(RawFd, SockAddr), LayerError> {
+    trace!(
+        "accept -> mirror_fd {:#?} | accepted_fd {:#?}",
+        mirror_fd,
+        accepted_fd
+    );
+    trace!("accept -> Start MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     let mirror_socket = MIRROR_SOCKETS
         .try_lock()?
-        .remove(&sockfd)
-        .ok_or(LayerError::LocalFdNotFound(sockfd))?;
-    trace!("accept -> mirror {:#?}", mirror_socket);
+        .remove(&mirror_fd)
+        .ok_or(LayerError::LocalFdNotFound(mirror_fd))?;
+    trace!("accept -> mirror_socket {:#?}", mirror_socket);
 
-    let (accepted_socket, accepted_address) = match flags {
-        Some(flags) => mirror_socket.inner.accept4(flags),
-        None => mirror_socket.inner.accept(),
-    }?;
-
-    let accepted_fd = accepted_socket.as_raw_fd();
+    // SAFE: We only get here if `accepted_fd` is a valid value.
+    let accepted_socket = unsafe { Socket::from_raw_fd(accepted_fd) };
 
     let remote_address = CONNECTION_QUEUE
         .try_lock()?
-        .get(&sockfd)
+        .get(&mirror_fd)
         .map(|socket_info| socket_info.address)
-        .ok_or(LayerError::LocalFdNotFound(sockfd))?;
+        .ok_or(LayerError::LocalFdNotFound(mirror_fd))?;
     trace!("accept -> remote_address {:#?}", remote_address);
 
     let connected = Connected {
         remote_address,
-        local_address: getsockname(sockfd)?.as_socket().unwrap(),
+        local_address: getsockname(mirror_fd)?.as_socket().unwrap(),
     };
+
+    let accepted_address = accepted_socket.local_addr()?;
 
     let accepted_socket = MirrorSocket {
         inner: accepted_socket,
@@ -256,6 +286,8 @@ pub(super) fn accept(sockfd: RawFd, flags: Option<i32>) -> Result<(RawFd, SockAd
     MIRROR_SOCKETS
         .try_lock()?
         .insert(mirror_socket.inner.as_raw_fd(), mirror_socket);
+
+    trace!("accept -> End MIRROR_SOCKETS {:#?}", MIRROR_SOCKETS);
 
     Ok((accepted_fd, accepted_address))
 }
