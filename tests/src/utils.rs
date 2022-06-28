@@ -77,11 +77,13 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
         .list(&ListParams::default().labels("app=http-echo"))
         .await
         .unwrap();
+    println!("pods: {:?}", pods);        
     let host_ip = pods
         .into_iter()
         .next()
         .and_then(|pod| pod.status)
         .and_then(|status| status.host_ip);
+    println!("host_ip: {:?}", host_ip);
     let port = services
         .into_iter()
         .next()
