@@ -3,6 +3,7 @@ use std::os::unix::io::RawFd;
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 use tracing::{error, trace};
 
 use super::ops::*;
@@ -126,7 +127,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     getpeername(sockfd)
         .map(|address| {
             trace!(
-                "getpeername_detour -> address {:#?} | out {:#?}",
+                "getpeername_detour -> address {:?} | out {:?}",
                 address,
                 *out_address
             );
@@ -142,7 +143,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
             // *out_address_len = address.len();
 
             trace!(
-                "getpeername_detour -> address {:#?} | out {:#?}",
+                "getpeername_detour -> address {:?} | out {:?}",
                 address,
                 *out_address
             );
@@ -174,7 +175,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     getsockname(sockfd)
         .map(|address| {
             trace!(
-                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+                "getsockname_detour -> address {:?} | ptr {:?} | out {:?}",
                 address,
                 *address.as_ptr(),
                 *out_address
@@ -220,17 +221,22 @@ pub(super) unsafe extern "C" fn accept_detour(
     out_address: *mut sockaddr,
     out_address_len: *mut socklen_t,
 ) -> c_int {
-    trace!("accept_detour -> sockfd {:#?}", sockfd,);
+    trace!("accept_detour -> sockfd {:#?}", sockfd);
 
-    accept(sockfd)
+    accept(sockfd, None)
         .map(|(accepted_fd, address)| {
             let address_ptr = address.as_ptr();
             out_address.copy_from(address_ptr, (*out_address_len) as usize);
 
+            trace!(
+                "accept_detour -> Copied pointer address {:#?}",
+                *out_address
+            );
+
             accepted_fd
         })
         .map_err(|fail| {
-            error!("Failed getsockname call with {:#?}!", fail);
+            error!("Failed accept call with {:#?}!", fail);
 
             match fail {
                 LayerError::LocalFdNotFound(_) => {
@@ -256,7 +262,30 @@ pub(super) unsafe extern "C" fn accept4_detour(
         flags
     );
 
-    accept_detour(sockfd, out_address, out_address_len)
+    accept(sockfd, Some(flags))
+        .map(|(accepted_fd, address)| {
+            let address_ptr = address.as_ptr();
+            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+
+            trace!(
+                "accept4_detour -> Copied pointer address {:#?}",
+                *out_address
+            );
+
+            accepted_fd
+        })
+        .map_err(|fail| {
+            error!("Failed accept4 call with {:#?}!", fail);
+
+            match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::accept4(sockfd, out_address, out_address_len, flags)
+                }
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {

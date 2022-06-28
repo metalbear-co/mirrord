@@ -15,7 +15,7 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, Port,
 };
 use tokio::net::TcpStream;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
     error::LayerError,
@@ -81,7 +81,7 @@ pub trait TcpHandler {
 
     /// Returns true to let caller know to keep running
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        debug!("handle_incoming_message -> message {:#?}", message);
+        trace!("handle_daemon_message -> Tcp daemon {:#?}", message);
 
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {
@@ -104,6 +104,8 @@ pub trait TcpHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
+        trace!("handle_hook_message -> Tcp hook message {:#?}", message);
+
         match message {
             HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
@@ -119,6 +121,11 @@ pub trait TcpHandler {
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
+        trace!(
+            "create_local_stream -> New tcp connection {:#?}",
+            tcp_connection
+        );
+
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
@@ -155,7 +162,7 @@ pub trait TcpHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        debug!("handle_listen -> listen {:#?}", listen);
+        trace!("handle_listen -> listen {:#?}", listen);
 
         let port = listen.real_port;
 
@@ -179,6 +186,8 @@ pub trait TcpHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
+        trace!("handle_listen_close -> close {:#?}", close);
+
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
             .await

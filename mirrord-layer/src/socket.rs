@@ -15,6 +15,8 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
+pub(crate) type SocketMap = HashMap<RawFd, MirrorSocket>;
+
 /// TODO(alex) [high] 2022-06-25: 2 ways I see this interacting with agent + dup:
 ///
 /// 1. `Arc<Mutex<MirrorSocket>>` and we keep the `SocketState` idea alive. To make it work just

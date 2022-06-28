@@ -473,7 +473,7 @@ fn enable_hooks(enabled_file_ops: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    hook!(interceptor, "close", close_detour);
+    // hook!(interceptor, "close", close_detour);
 
     socket::hooks::enable_socket_hooks(&mut interceptor);
 
@@ -497,10 +497,13 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    trace!("close_detour -> fd {:#?}", fd);
+
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
 
+    // TODO(alex) [high] 2022-06-28: Deadlock is here! We call `close` before locking `socket`.
     if MIRROR_SOCKETS.lock().unwrap().remove(&fd).is_some() {
         libc::close(fd)
     } else if *enabled_file_ops {

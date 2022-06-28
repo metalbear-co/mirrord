@@ -1,10 +1,11 @@
-use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
+use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError, sync::MutexGuard};
 
 use mirrord_protocol::tcp::LayerTcp;
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::HookMessage;
+use crate::socket::{SocketMap, ConnectionQueue};
 
 #[derive(Error, Debug)]
 pub enum LayerError {
@@ -61,4 +62,10 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Tried to `bind` a Socket that should be bypassed with fd `{0:#?}`!")]
     BypassBind(RawFd),
+
+    #[error("mirrord-layer: Failed locking `SocketMap` mutex with `{0}`!")]
+    SocketMapMutex(#[from] std::sync::TryLockError<MutexGuard<'static, SocketMap>>),
+
+    #[error("mirrord-layer: Failed locking `ConnectionQueue` mutex with `{0}`!")]
+    ConnectionQueueMutex(#[from] std::sync::TryLockError<MutexGuard<'static, ConnectionQueue>>),
 }
