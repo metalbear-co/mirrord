@@ -3,13 +3,14 @@ use std::os::unix::io::RawFd;
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use socket2::SockAddr;
-use tracing::{error, trace};
+use socket2::{Domain, SockAddr, Type};
+use tracing::{error, info, trace};
 
 use super::ops::*;
 use crate::{
     error::LayerError,
     macros::{hook, try_hook},
+    socket::MIRROR_SOCKETS,
 };
 
 pub(super) unsafe extern "C" fn socket_detour(
