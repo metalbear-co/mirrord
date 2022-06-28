@@ -1,7 +1,7 @@
 use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
-use libc::{c_int, sockaddr, socklen_t};
+use libc::{c_int, c_void, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use tracing::{error, trace};
 
@@ -16,7 +16,12 @@ pub(super) unsafe extern "C" fn socket_detour(
     type_: c_int,
     protocol: c_int,
 ) -> c_int {
-    trace!("socket_detour");
+    trace!(
+        "socket_detour -> domain {:#?} | type_ {:#?} | protocol {:#?}",
+        domain,
+        type_,
+        protocol
+    );
 
     socket(domain, type_, protocol)
         .map_err(|fail| {
@@ -34,7 +39,11 @@ pub(super) unsafe extern "C" fn bind_detour(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
-    trace!("bind_detour");
+    trace!(
+        "bind_detour -> sockfd {:#?} | addrlen {:#?}",
+        sockfd,
+        addrlen
+    );
 
     let address = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
         .try_into()
@@ -57,7 +66,11 @@ pub(super) unsafe extern "C" fn bind_detour(
 }
 
 pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    trace!("listen_detour");
+    trace!(
+        "listen_detour -> sockfd {:#?} | backlog {:#?}",
+        sockfd,
+        backlog
+    );
 
     listen(sockfd, backlog)
         .map(|()| 0)
@@ -78,6 +91,12 @@ pub(super) unsafe extern "C" fn connect_detour(
     addr: *const sockaddr,
     addrlen: socklen_t,
 ) -> c_int {
+    trace!(
+        "connect_detour -> sockfd {:#?} | addrlen {:#?}",
+        sockfd,
+        addrlen
+    );
+
     let address = OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
         .try_into()
         .unwrap();
@@ -102,12 +121,34 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     out_address: *mut sockaddr,
     out_address_len: *mut socklen_t,
 ) -> c_int {
+    trace!("getpeername_detour -> sockfd {:#?}", sockfd,);
+
     getpeername(sockfd)
         .map(|address| {
-            let address_ptr = address.as_ptr();
-            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+            trace!(
+                "getpeername_detour -> address {:#?} | out {:#?}",
+                address,
+                *out_address
+            );
 
-            0
+            // TODO(alex) [mid] 2022-06-27: Weirdness around here, the pointer copy looks completely
+            // fine (values are what they should be), but we crash when someone tries to use the
+            // address.
+
+            // let address_ptr = address.as_ptr();
+            // let address_len = (*out_address_len).min(address.len()) as usize;
+
+            // out_address.copy_from_nonoverlapping(address_ptr, address_len);
+            // *out_address_len = address.len();
+
+            trace!(
+                "getpeername_detour -> address {:#?} | out {:#?}",
+                address,
+                *out_address
+            );
+            libc::getpeername(sockfd, out_address, out_address_len)
+
+            // 0
         })
         .map_err(|fail| {
             error!("Failed getpeername call with {:#?}!", fail);
@@ -128,12 +169,37 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     out_address: *mut sockaddr,
     out_address_len: *mut socklen_t,
 ) -> c_int {
+    trace!("getsockname_detour -> sockfd {:#?}", sockfd,);
+
     getsockname(sockfd)
         .map(|address| {
-            let address_ptr = address.as_ptr();
-            out_address.copy_from(address_ptr, (*out_address_len) as usize);
+            trace!(
+                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+                address,
+                *address.as_ptr(),
+                *out_address
+            );
 
-            0
+            // TODO(alex) [mid] 2022-06-27: Weirdness around here, the pointer copy looks completely
+            // fine (values are what they should be), but we crash when someone tries to use the
+            // address.
+
+            // let address_ptr = address.as_ptr();
+            // let address_len = (*out_address_len).min(address.len()) as usize;
+
+            // out_address.copy_from_nonoverlapping(address_ptr, address_len);
+            // *out_address_len = address.len();
+
+            // trace!(
+            //     "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+            //     address,
+            //     *address.as_ptr(),
+            //     *out_address
+            // );
+
+            // 0
+
+            libc::getsockname(sockfd, out_address, out_address_len)
         })
         .map_err(|fail| {
             error!("Failed getsockname call with {:#?}!", fail);
@@ -154,6 +220,8 @@ pub(super) unsafe extern "C" fn accept_detour(
     out_address: *mut sockaddr,
     out_address_len: *mut socklen_t,
 ) -> c_int {
+    trace!("accept_detour -> sockfd {:#?}", sockfd,);
+
     accept(sockfd)
         .map(|(accepted_fd, address)| {
             let address_ptr = address.as_ptr();
@@ -182,10 +250,18 @@ pub(super) unsafe extern "C" fn accept4_detour(
     out_address_len: *mut socklen_t,
     flags: c_int,
 ) -> c_int {
+    trace!(
+        "accept4_detour -> sockfd {:#?} | flags {:#?}",
+        sockfd,
+        flags
+    );
+
     accept_detour(sockfd, out_address, out_address_len)
 }
 
 pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {
+    trace!("dup_detour -> sockfd {:#?}", sockfd,);
+
     dup(sockfd)
         .map_err(|fail| {
             error!("Failed dup call with {:#?}!", fail);
@@ -200,6 +276,8 @@ pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {
 }
 
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
+    trace!("dup2_detour -> oldfd {:#?} | newfd {:#?}", oldfd, newfd);
+
     dup(oldfd)
         .map_err(|fail| {
             error!("Failed dup2 call with {:#?}!", fail);
@@ -215,6 +293,13 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
 
 #[cfg(target_os = "linux")]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
+    trace!(
+        "dup3_detour -> oldfd {:#?} | newfd {:#?} | flags {:#?}",
+        oldfd,
+        newfd,
+        flags
+    );
+
     dup(oldfd)
         .map_err(|fail| {
             error!("Failed dup3 call with {:#?}!", fail);
@@ -229,6 +314,13 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
 }
 
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
+    trace!(
+        "fcntl_detour -> fd {:#?} | cmd {:#?} | arg {:#?}",
+        fd,
+        cmd,
+        arg
+    );
+
     if libc::F_DUPFD == cmd || libc::F_DUPFD_CLOEXEC == cmd {
         dup_detour(fd)
     } else {

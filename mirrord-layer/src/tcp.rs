@@ -136,6 +136,7 @@ pub trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
+        // TODO(alex) [high] 2022-06-27: We block here. are we locking up when this calls what?
         TcpStream::connect(addr).await.map_err(From::from)
     }
 

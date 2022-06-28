@@ -51,7 +51,9 @@
       "program": "${workspaceFolder}/target/debug/sample-rust",
       "args": [],
       "cwd": "${workspaceFolder}",
-      "sourceMap": {},
+      "sourceMap": {
+        "/rustc/bb8c2f41174caceec00c28bc6c5c20ae9f9a175c": "/home/lanedraex/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust",
+      },
       "sourceLanguages": ["rust"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",

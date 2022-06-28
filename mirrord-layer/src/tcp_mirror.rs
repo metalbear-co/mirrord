@@ -18,7 +18,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::LayerError,
@@ -26,6 +26,12 @@ use crate::{
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
+    trace!(
+        "tcp_tunnel -> local_stream {:?} | remote_stream {:?}",
+        local_stream,
+        remote_stream
+    );
+
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
 
@@ -40,7 +46,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         }
                     },
                     None => {
-                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                        warn!("tcp_tunnel -> Exiting due to remote stream closed!");
                         break;
                     }
                 }
@@ -49,14 +55,15 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
             read = local_stream.read(&mut buffer) => {
                 match read {
                     Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                        warn!("tcp_tunnel -> Hit `WouldBlock`");
                         continue;
                     },
                     Err(fail) => {
-                        error!("Failed reading local_stream with {:#?}", fail);
+                        error!("Failed reading local_stream with {:#?}!", fail);
                         break;
                     }
                     Ok(read_amount) if read_amount == 0 => {
-                        warn!("tcp_tunnel -> exiting due to local stream closed!");
+                        warn!("tcp_tunnel -> Exiting due to local stream closed!");
                         break;
                     },
                     Ok(_) => {}
@@ -117,9 +124,13 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self,
         tcp_connection: NewTcpConnection,
     ) -> Result<(), LayerError> {
-        debug!("handle_new_connection -> {:#?}", tcp_connection);
+        trace!(
+            "handle_new_connection -> tcp_connection {:#?}",
+            tcp_connection
+        );
 
         let stream = self.create_local_stream(&tcp_connection).await?;
+        debug!("handle_new_connection -> stream {:#?}", stream);
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
 
