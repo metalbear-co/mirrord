@@ -424,6 +424,8 @@ async fn poll_agent(
     loop {
         select! {
             hook_message = receiver.recv() => {
+                trace!("poll_agent -> handle hook_message {:?}", hook_message);
+
                 handle_hook_message(
                     hook_message.unwrap(),
                     &mut tcp_mirror_handler,
@@ -436,6 +438,8 @@ async fn poll_agent(
                 ).await;
             }
             daemon_message = codec.next() => {
+                trace!("poll_agent -> handle daemon_message {:?}", daemon_message);
+
                 if let Some(Ok(message)) = daemon_message {
                     handle_daemon_message(
                         message,
@@ -505,9 +509,11 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
+    let is_mirror_socket = { MIRROR_SOCKETS.contains_key(&fd) };
+
     // TODO(alex) [high] 2022-06-28: Deadlock is here! We call `close` before locking `socket`.
-    if MIRROR_SOCKETS.write().unwrap().remove(&fd).is_some() {
-        libc::close(fd)
+    if is_mirror_socket {
+        socket::ops::close(fd).unwrap_or(-1)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 

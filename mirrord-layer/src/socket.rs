@@ -7,6 +7,7 @@ use std::{
     sync::{LazyLock, Mutex, RwLock},
 };
 
+use dashmap::DashMap;
 use mirrord_protocol::Port;
 use socket2::Socket;
 
@@ -15,7 +16,7 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) type SocketMap = HashMap<RawFd, MirrorSocket>;
+pub(crate) type SocketMap = DashMap<RawFd, MirrorSocket>;
 
 /// TODO(alex) [low] 2022-06-25: 2 ways I see this interacting with agent + dup:
 ///
@@ -42,8 +43,7 @@ pub(crate) type SocketMap = HashMap<RawFd, MirrorSocket>;
 ///
 /// If I go for (2), then there must be a call that takes **every** dupped socket from the old state
 /// `HashMap` into the new one.
-pub(crate) static MIRROR_SOCKETS: LazyLock<RwLock<HashMap<RawFd, MirrorSocket>>> =
-    LazyLock::new(|| RwLock::new(HashMap::default()));
+pub(crate) static MIRROR_SOCKETS: LazyLock<SocketMap> = LazyLock::new(|| SocketMap::default());
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));

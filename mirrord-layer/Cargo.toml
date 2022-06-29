@@ -48,6 +48,7 @@ async-trait = "0.1"
 anyhow.workspace = true
 
 socket2 = "0.4"
+dashmap = "5.3"
 
 [lib]
 crate_type = ["cdylib"]

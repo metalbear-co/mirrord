@@ -86,10 +86,19 @@ pub struct OpenFileResponse {
     pub fd: usize,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: usize,
+}
+
+impl std::fmt::Debug for ReadFileResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadFileResponse")
+            .field("bytes (length)", &self.bytes.len())
+            .field("read_amount", &self.read_amount)
+            .finish()
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

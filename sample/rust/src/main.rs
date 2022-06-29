@@ -21,7 +21,7 @@ fn debug_incoming_request() -> Result<(), std::io::Error> {
     // listener.local_addr();
     // println!(">>>>> DONE ");
 
-    // println!(">>>>> listening {:#?}", listener);
+    println!(">>>>> listening {:#?}", listener);
     for stream in listener.incoming() {
         let mut stream = stream.unwrap();
 

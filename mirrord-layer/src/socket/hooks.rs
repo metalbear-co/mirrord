@@ -172,48 +172,50 @@ pub(super) unsafe extern "C" fn getsockname_detour(
 ) -> c_int {
     trace!("getsockname_detour -> sockfd {:#?}", sockfd,);
 
-    getsockname(sockfd)
-        .map(|address| {
-            trace!(
-                "getsockname_detour -> address {:?} | ptr {:?} | out {:?}",
-                address,
-                *address.as_ptr(),
-                *out_address
-            );
+    libc::getsockname(sockfd, out_address, out_address_len)
 
-            // TODO(alex) [mid] 2022-06-27: Weirdness around here, the pointer copy looks completely
-            // fine (values are what they should be), but we crash when someone tries to use the
-            // address.
+    // getsockname(sockfd)
+    //     .map(|address| {
+    //         trace!(
+    //             "getsockname_detour -> address {:?} | ptr {:?} | out {:?}",
+    //             address,
+    //             *address.as_ptr(),
+    //             *out_address
+    //         );
 
-            let address_ptr = address.as_ptr();
-            let address_len = (*out_address_len).min(address.len()) as usize;
+    //         // TODO(alex) [mid] 2022-06-27: Weirdness around here, the pointer copy looks
+    // completely         // fine (values are what they should be), but we crash when someone
+    // tries to use the         // address.
 
-            out_address.copy_from_nonoverlapping(address_ptr, address_len);
-            *out_address_len = address.len();
+    //         let address_ptr = address.as_ptr();
+    //         let address_len = (*out_address_len).min(address.len()) as usize;
 
-            trace!(
-                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
-                address,
-                *address.as_ptr(),
-                *out_address
-            );
+    //         out_address.copy_from_nonoverlapping(address_ptr, address_len);
+    //         *out_address_len = address.len();
 
-            0
+    //         trace!(
+    //             "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+    //             address,
+    //             *address.as_ptr(),
+    //             *out_address
+    //         );
 
-            // libc::getsockname(sockfd, out_address, out_address_len)
-        })
-        .map_err(|fail| {
-            error!("Failed getsockname call with {:#?}!", fail);
+    //         0
 
-            match fail {
-                LayerError::LocalFdNotFound(_) => {
-                    libc::getsockname(sockfd, out_address, out_address_len)
-                }
-                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
-                _ => -1,
-            }
-        })
-        .unwrap_or_else(|fail| fail)
+    //         // libc::getsockname(sockfd, out_address, out_address_len)
+    //     })
+    //     .map_err(|fail| {
+    //         error!("Failed getsockname call with {:#?}!", fail);
+
+    //         match fail {
+    //             LayerError::LocalFdNotFound(_) => {
+    //                 libc::getsockname(sockfd, out_address, out_address_len)
+    //             }
+    //             LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+    //             _ => -1,
+    //         }
+    //     })
+    //     .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn accept_detour(
@@ -221,19 +223,17 @@ pub(super) unsafe extern "C" fn accept_detour(
     out_address: *mut sockaddr,
     out_address_len: *mut socklen_t,
 ) -> c_int {
-    trace!("accept_detour -> sockfd {:#?}", sockfd);
+    trace!(
+        "accept_detour -> sockfd {:#?} | out_address_len {:#?}",
+        sockfd,
+        *out_address_len
+    );
 
     let accepted_fd = libc::accept(sockfd, out_address, out_address_len);
     if -1 != accepted_fd {
         accept(sockfd, accepted_fd)
             .map(|(accepted_fd, address)| {
-                let address_ptr = address.as_ptr();
-                out_address.copy_from(address_ptr, (*out_address_len) as usize);
-
-                trace!(
-                    "accept_detour -> Copied pointer address {:#?}",
-                    *out_address
-                );
+                trace!("accept_detour -> address {:#?}", address.as_socket());
 
                 accepted_fd
             })
@@ -271,13 +271,7 @@ pub(super) unsafe extern "C" fn accept4_detour(
     if -1 != accepted_fd {
         accept(sockfd, accepted_fd)
             .map(|(accepted_fd, address)| {
-                let address_ptr = address.as_ptr();
-                out_address.copy_from(address_ptr, (*out_address_len) as usize);
-
-                trace!(
-                    "accept4_detour -> Copied pointer address {:#?}",
-                    *out_address
-                );
+                trace!("accept_detour -> address {:#?}", address.as_socket());
 
                 accepted_fd
             })

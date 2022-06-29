@@ -144,7 +144,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        debug!("handle_new_data -> id {:#?}", data.connection_id);
+        trace!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
@@ -170,7 +170,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
-        debug!("handle_close -> close {:#?}", close);
+        trace!("handle_close -> close {:#?}", close);
 
         let TcpClose { connection_id } = close;
 
