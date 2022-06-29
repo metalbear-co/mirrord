@@ -170,7 +170,13 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         .labels(&format!("job-name={}", agent_job_name))
         .timeout(10);
 
-    let mut stream = pods_api.watch(&params, "0").await.unwrap().boxed();
+    let mut stream = pods_api.watch(&params, "0").await
+        .with_context(|| {
+            format!(
+                "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
+                )
+        })?
+        .boxed();
     while let Some(status) = stream.try_next().await.unwrap() {
         match status {
             WatchEvent::Added(_) => break,
