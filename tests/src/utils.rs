@@ -77,7 +77,7 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
         .list(&ListParams::default().labels("app=py-serv"))
         .await
         .unwrap();
-    println!("pods: {:?}", pods);        
+    println!("pods: {:?}", pods);
     let host_ip = pods
         .into_iter()
         .next()
