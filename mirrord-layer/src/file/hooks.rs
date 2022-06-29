@@ -34,14 +34,15 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
-        let open_result = open(path, open_options);
+        let open_result = open(path.clone(), open_options);
 
-        open_result
-            .map_err(|fail| {
-                error!("Failed opening file with {:#?}", fail);
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        match open_result {
+            Ok(fd) => fd,
+            Err(fail) => {
+                error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                fail.into()
+            }
+        }
     }
 }
 
@@ -78,14 +79,15 @@ pub(super) unsafe extern "C" fn fopen_detour(
         libc::fopen(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
-        let fopen_result = fopen(path, open_options);
+        let fopen_result = fopen(path.clone(), open_options);
 
-        fopen_result
-            .map_err(|fail| {
-                error!("Failed opening file with {fail:#?}");
+        match fopen_result {
+            Ok(file) => file,
+            Err(fail) => {
+                error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
                 ptr::null_mut()
-            })
-            .unwrap_or_else(|fail| fail)
+            }
+        }
     }
 }
 
@@ -112,12 +114,13 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
 
-        fdopen_result
-            .map_err(|fail| {
-                error!("Failed fdopen file with {fail:#?}");
+        match fdopen_result {
+            Ok(file) => file,
+            Err(fail) => {
+                error!("Failed opening file with {:#?}", fail);
                 ptr::null_mut()
-            })
-            .unwrap_or_else(|fail| fail)
+            }
+        }
     } else {
         libc::fdopen(fd, raw_mode)
     }
@@ -156,14 +159,15 @@ pub(super) unsafe extern "C" fn openat_detour(
 
         // Are we managing the relative part?
         if let Some(remote_fd) = remote_fd {
-            let openat_result = openat(path, open_flags, remote_fd);
+            let openat_result = openat(path.clone(), open_flags, remote_fd);
 
-            openat_result
-                .map_err(|fail| {
-                    error!("Failed opening file with {fail:#?}");
-                    -1
-                })
-                .unwrap_or_else(|fail| fail)
+            match openat_result {
+                Ok(fd) => fd,
+                Err(fail) => {
+                    error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                    fail.into()
+                }
+            }
         } else {
             // Nope, it's relative outside of our hands.
 
@@ -200,12 +204,13 @@ pub(crate) unsafe extern "C" fn read_detour(
             read_amount.try_into().unwrap()
         });
 
-        read_result
-            .map_err(|fail| {
-                error!("Failed reading file with {fail:#?}");
+        match read_result {
+            Ok(read_amount) => read_amount,
+            Err(fail) => {
+                error!("Failed reading file with {:#?}", fail);
                 -1
-            })
-            .unwrap_or_else(|fail| fail)
+            }
+        }
     } else {
         libc::read(fd, out_buffer, count)
     }
@@ -243,12 +248,13 @@ pub(crate) unsafe extern "C" fn fread_detour(
             read_amount
         });
 
-        read_result
-            .map_err(|fail| {
-                error!("Failed reading file with {fail:#?}");
-                0
-            })
-            .unwrap_or_else(|fail| fail)
+        match read_result {
+            Ok(read_amount) => read_amount,
+            Err(fail) => {
+                error!("Failed reading file with {:#?}", fail);
+                fail.into()
+            }
+        }
     } else {
         libc::fread(out_buffer, element_size, number_of_elements, file_stream)
     }
@@ -289,12 +295,13 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 
         let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
 
-        lseek_result
-            .map_err(|fail| {
-                error!("Failed lseek operation with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        match lseek_result {
+            Ok(offset) => offset,
+            Err(fail) => {
+                error!("Failed seeking file with {:#?}", fail);
+                fail.into()
+            }
+        }
     } else {
         libc::lseek(fd, offset, whence)
     }
@@ -322,12 +329,13 @@ pub(crate) unsafe extern "C" fn write_detour(
 
         let write_result = write(remote_fd, write_bytes);
 
-        write_result
-            .map_err(|fail| {
-                error!("Failed writing file with {fail:#?}");
+        match write_result {
+            Ok(write_amount) => write_amount.try_into().unwrap(),
+            Err(fail) => {
+                error!("Failed writing file with {:#?}", fail);
                 -1
-            })
-            .unwrap_or_else(|fail| fail)
+            }
+        }
     } else {
         libc::write(fd, buffer, count)
     }

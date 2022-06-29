@@ -53,3 +53,73 @@ pub enum LayerError {
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
 }
+
+//Todo: https://stackoverflow.com/questions/39150216/implementing-a-trait-for-multiple-types-at-once
+
+// what should the mapping be between LayerError and integer types
+
+impl From<LayerError> for i32 {
+    fn from(error: LayerError) -> Self {
+        match error {
+            LayerError::VarError(_) => 1,
+            LayerError::ParseBoolError(_) => 2,
+            LayerError::SendErrorHookMessage(_) => 3,
+            LayerError::SendErrorConnection(_) => 4,
+            LayerError::SendErrorLayerTcp(_) => 5,
+            LayerError::RecvError(_) => 6,
+            LayerError::Null(_) => 7,
+            LayerError::TryFromInt(_) => 8,
+            LayerError::LocalFDNotFound(_) => 9,
+            LayerError::EmptyHookSender => 10,
+            LayerError::NoConnectionId(_) => 11,
+            LayerError::IO(_) => 12,
+            LayerError::PortNotFound(_) => 13,
+            LayerError::ConnectionIdNotFound(_) => 14,
+            LayerError::ListenAlreadyExists => 15,
+        }
+    }
+}
+
+impl From<LayerError> for usize {
+    fn from(error: LayerError) -> Self {
+        match error {
+            LayerError::VarError(_) => 1,
+            LayerError::ParseBoolError(_) => 2,
+            LayerError::SendErrorHookMessage(_) => 3,
+            LayerError::SendErrorConnection(_) => 4,
+            LayerError::SendErrorLayerTcp(_) => 5,
+            LayerError::RecvError(_) => 6,
+            LayerError::Null(_) => 7,
+            LayerError::TryFromInt(_) => 8,
+            LayerError::LocalFDNotFound(_) => 9,
+            LayerError::EmptyHookSender => 10,
+            LayerError::NoConnectionId(_) => 11,
+            LayerError::IO(_) => 12,
+            LayerError::PortNotFound(_) => 13,
+            LayerError::ConnectionIdNotFound(_) => 14,
+            LayerError::ListenAlreadyExists => 15,
+        }
+    }
+}
+
+impl From<LayerError> for i64 {
+    fn from(error: LayerError) -> Self {
+        match error {
+            LayerError::VarError(_) => 1,
+            LayerError::ParseBoolError(_) => 2,
+            LayerError::SendErrorHookMessage(_) => 3,
+            LayerError::SendErrorConnection(_) => 4,
+            LayerError::SendErrorLayerTcp(_) => 5,
+            LayerError::RecvError(_) => 6,
+            LayerError::Null(_) => 7,
+            LayerError::TryFromInt(_) => 8,
+            LayerError::LocalFDNotFound(_) => 9,
+            LayerError::EmptyHookSender => 10,
+            LayerError::NoConnectionId(_) => 11,
+            LayerError::IO(_) => 12,
+            LayerError::PortNotFound(_) => 13,
+            LayerError::ConnectionIdNotFound(_) => 14,
+            LayerError::ListenAlreadyExists => 15,
+        }
+    }
+}
