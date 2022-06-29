@@ -185,22 +185,22 @@ pub(super) unsafe extern "C" fn getsockname_detour(
             // fine (values are what they should be), but we crash when someone tries to use the
             // address.
 
-            // let address_ptr = address.as_ptr();
-            // let address_len = (*out_address_len).min(address.len()) as usize;
+            let address_ptr = address.as_ptr();
+            let address_len = (*out_address_len).min(address.len()) as usize;
 
-            // out_address.copy_from_nonoverlapping(address_ptr, address_len);
-            // *out_address_len = address.len();
+            out_address.copy_from_nonoverlapping(address_ptr, address_len);
+            *out_address_len = address.len();
 
-            // trace!(
-            //     "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
-            //     address,
-            //     *address.as_ptr(),
-            //     *out_address
-            // );
+            trace!(
+                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+                address,
+                *address.as_ptr(),
+                *out_address
+            );
 
-            // 0
+            0
 
-            libc::getsockname(sockfd, out_address, out_address_len)
+            // libc::getsockname(sockfd, out_address, out_address_len)
         })
         .map_err(|fail| {
             error!("Failed getsockname call with {:#?}!", fail);
