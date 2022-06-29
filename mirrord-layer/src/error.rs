@@ -58,68 +58,26 @@ pub enum LayerError {
 
 // what should the mapping be between LayerError and integer types
 
+// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
+
 impl From<LayerError> for i32 {
     fn from(error: LayerError) -> Self {
         match error {
-            LayerError::VarError(_) => 1,
+            LayerError::VarError(_) => libc::EINVAL,
             LayerError::ParseBoolError(_) => 2,
-            LayerError::SendErrorHookMessage(_) => 3,
-            LayerError::SendErrorConnection(_) => 4,
-            LayerError::SendErrorLayerTcp(_) => 5,
+            LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
+            LayerError::SendErrorConnection(_) => libc::ECOMM,
+            LayerError::SendErrorLayerTcp(_) => libc::EBADMSG,
             LayerError::RecvError(_) => 6,
             LayerError::Null(_) => 7,
-            LayerError::TryFromInt(_) => 8,
-            LayerError::LocalFDNotFound(_) => 9,
-            LayerError::EmptyHookSender => 10,
-            LayerError::NoConnectionId(_) => 11,
-            LayerError::IO(_) => 12,
-            LayerError::PortNotFound(_) => 13,
-            LayerError::ConnectionIdNotFound(_) => 14,
-            LayerError::ListenAlreadyExists => 15,
-        }
-    }
-}
-
-impl From<LayerError> for usize {
-    fn from(error: LayerError) -> Self {
-        match error {
-            LayerError::VarError(_) => 1,
-            LayerError::ParseBoolError(_) => 2,
-            LayerError::SendErrorHookMessage(_) => 3,
-            LayerError::SendErrorConnection(_) => 4,
-            LayerError::SendErrorLayerTcp(_) => 5,
-            LayerError::RecvError(_) => 6,
-            LayerError::Null(_) => 7,
-            LayerError::TryFromInt(_) => 8,
-            LayerError::LocalFDNotFound(_) => 9,
-            LayerError::EmptyHookSender => 10,
-            LayerError::NoConnectionId(_) => 11,
-            LayerError::IO(_) => 12,
-            LayerError::PortNotFound(_) => 13,
-            LayerError::ConnectionIdNotFound(_) => 14,
-            LayerError::ListenAlreadyExists => 15,
-        }
-    }
-}
-
-impl From<LayerError> for i64 {
-    fn from(error: LayerError) -> Self {
-        match error {
-            LayerError::VarError(_) => 1,
-            LayerError::ParseBoolError(_) => 2,
-            LayerError::SendErrorHookMessage(_) => 3,
-            LayerError::SendErrorConnection(_) => 4,
-            LayerError::SendErrorLayerTcp(_) => 5,
-            LayerError::RecvError(_) => 6,
-            LayerError::Null(_) => 7,
-            LayerError::TryFromInt(_) => 8,
-            LayerError::LocalFDNotFound(_) => 9,
-            LayerError::EmptyHookSender => 10,
-            LayerError::NoConnectionId(_) => 11,
-            LayerError::IO(_) => 12,
-            LayerError::PortNotFound(_) => 13,
-            LayerError::ConnectionIdNotFound(_) => 14,
-            LayerError::ListenAlreadyExists => 15,
+            LayerError::TryFromInt(_) => libc::EINVAL,
+            LayerError::LocalFDNotFound(_) => libc::EBADF,
+            LayerError::EmptyHookSender => libc::ENOENT,
+            LayerError::NoConnectionId(_) => libc::ECONNREFUSED,
+            LayerError::IO(_) => libc::EIO,
+            LayerError::PortNotFound(_) => libc::EADDRNOTAVAIL,
+            LayerError::ConnectionIdNotFound(_) => libc::EADDRNOTAVAIL,
+            LayerError::ListenAlreadyExists => libc::EEXIST,
         }
     }
 }

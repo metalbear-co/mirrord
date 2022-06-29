@@ -1,5 +1,6 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
+use errno::{set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use mirrord_protocol::ReadFileResponse;
@@ -40,7 +41,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
             Ok(fd) => fd,
             Err(fail) => {
                 error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
-                fail.into()
+                set_errno(Errno(fail.into()));
+                -1
             }
         }
     }
@@ -85,6 +87,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
             Ok(file) => file,
             Err(fail) => {
                 error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                set_errno(Errno(fail.into()));
                 ptr::null_mut()
             }
         }
@@ -118,6 +121,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
             Ok(file) => file,
             Err(fail) => {
                 error!("Failed opening file with {:#?}", fail);
+                set_errno(Errno(fail.into()));
                 ptr::null_mut()
             }
         }
@@ -165,7 +169,8 @@ pub(super) unsafe extern "C" fn openat_detour(
                 Ok(fd) => fd,
                 Err(fail) => {
                     error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
-                    fail.into()
+                    set_errno(Errno(fail.into()));
+                    -1
                 }
             }
         } else {
@@ -208,6 +213,7 @@ pub(crate) unsafe extern "C" fn read_detour(
             Ok(read_amount) => read_amount,
             Err(fail) => {
                 error!("Failed reading file with {:#?}", fail);
+                set_errno(Errno(fail.into()));
                 -1
             }
         }
@@ -252,7 +258,8 @@ pub(crate) unsafe extern "C" fn fread_detour(
             Ok(read_amount) => read_amount,
             Err(fail) => {
                 error!("Failed reading file with {:#?}", fail);
-                fail.into()
+                set_errno(Errno(fail.into()));
+                0
             }
         }
     } else {
@@ -299,7 +306,8 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             Ok(offset) => offset,
             Err(fail) => {
                 error!("Failed seeking file with {:#?}", fail);
-                fail.into()
+                set_errno(Errno(fail.into()));
+                -1
             }
         }
     } else {
@@ -330,9 +338,11 @@ pub(crate) unsafe extern "C" fn write_detour(
         let write_result = write(remote_fd, write_bytes);
 
         match write_result {
+            // info: unwrap here returns an Infalliable error
             Ok(write_amount) => write_amount.try_into().unwrap(),
             Err(fail) => {
                 error!("Failed writing file with {:#?}", fail);
+                set_errno(Errno(fail.into()));
                 -1
             }
         }
