@@ -64,12 +64,12 @@ impl From<LayerError> for i32 {
     fn from(error: LayerError) -> Self {
         match error {
             LayerError::VarError(_) => libc::EINVAL,
-            LayerError::ParseBoolError(_) => 2,
+            LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
             LayerError::SendErrorConnection(_) => libc::ECOMM,
             LayerError::SendErrorLayerTcp(_) => libc::EBADMSG,
-            LayerError::RecvError(_) => 6,
-            LayerError::Null(_) => 7,
+            LayerError::RecvError(_) => libc::EBADMSG,
+            LayerError::Null(_) => libc::EINVAL,
             LayerError::TryFromInt(_) => libc::EINVAL,
             LayerError::LocalFDNotFound(_) => libc::EBADF,
             LayerError::EmptyHookSender => libc::ENOENT,
