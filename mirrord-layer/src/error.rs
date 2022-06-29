@@ -66,7 +66,7 @@ impl From<LayerError> for i32 {
             LayerError::VarError(_) => libc::EINVAL,
             LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
-            LayerError::SendErrorConnection(_) => libc::ECOMM,
+            LayerError::SendErrorConnection(_) => libc::EBADMSG,
             LayerError::SendErrorLayerTcp(_) => libc::EBADMSG,
             LayerError::RecvError(_) => libc::EBADMSG,
             LayerError::Null(_) => libc::EINVAL,

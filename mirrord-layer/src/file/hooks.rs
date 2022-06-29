@@ -40,7 +40,7 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         match open_result {
             Ok(fd) => fd,
             Err(fail) => {
-                error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                error!("Failed opening file {:#?} with {:#?}", path, fail);
                 set_errno(Errno(fail.into()));
                 -1
             }
@@ -86,7 +86,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
         match fopen_result {
             Ok(file) => file,
             Err(fail) => {
-                error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                error!("Failed opening file {:#?} with {:#?}", path, fail);
                 set_errno(Errno(fail.into()));
                 ptr::null_mut()
             }
@@ -168,7 +168,7 @@ pub(super) unsafe extern "C" fn openat_detour(
             match openat_result {
                 Ok(fd) => fd,
                 Err(fail) => {
-                    error!("Failed opening file {:#?} with {:#?}", path.clone(), fail);
+                    error!("Failed opening file {:#?} with {:#?}", path, fail);
                     set_errno(Errno(fail.into()));
                     -1
                 }
@@ -338,8 +338,7 @@ pub(crate) unsafe extern "C" fn write_detour(
         let write_result = write(remote_fd, write_bytes);
 
         match write_result {
-            // info: unwrap here returns an Infalliable error
-            Ok(write_amount) => write_amount.try_into().unwrap(),
+            Ok(write_amount) => write_amount,
             Err(fail) => {
                 error!("Failed writing file with {:#?}", fail);
                 set_errno(Errno(fail.into()));
