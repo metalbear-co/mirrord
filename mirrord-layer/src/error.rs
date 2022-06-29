@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
 use super::HookMessage;
-use crate::socket::{SocketMap, ConnectionQueue};
+use crate::socket::{ConnectionQueue, SocketMap};
 
 #[derive(Error, Debug)]
 pub enum LayerError {

@@ -19,10 +19,10 @@ macro_rules! try_hook {
                 frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
             ) {
                 Err(frida_gum::Error::InterceptorAlreadyReplaced) => {
-                    error!("{} already replaced", $func);
+                    tracing::error!("{} already replaced", $func);
                 }
                 Err(e) => {
-                    error!("{} error: {:?}", $func, e);
+                    tracing::error!("{} error: {:?}", $func, e);
                 }
                 Ok(_) => {
                     tracing::trace!("{} hooked", $func);
