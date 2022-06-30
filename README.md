@@ -10,7 +10,7 @@
 
 </div>
 
-mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
+mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both a [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
 
 ## Getting Started
 - [VSCode Extension](#vscode-extension)
@@ -23,12 +23,12 @@ mirrord lets you easily mirror traffic from your Kubernetes cluster to your deve
 ### Installation
 Get the extension [here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
 
-### How to use
+### How To Use
 
 * Click "Enable mirrord" on the status bar
 * Start debugging your project
 * Choose pod to mirror traffic from
-* The debugged process will start with mirrord, and receive traffic 
+* The debugged process will start with mirrord, and receive traffic
 
 <p align="center">
   <img src="./images/demo.gif" width="60%">
@@ -41,9 +41,9 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 ```
 
-* Windows isn't supported currently (you can use WSL)
+* Windows isn't currently supported (you can use WSL)
 
-### How to use
+### How To Use
 ```sh
 mirrord exec <process command> --pod-name <name of the pod to impersonate>
 ```
@@ -55,8 +55,8 @@ mirrord exec node app.js --pod-name my-pod
 
 ---
 
-## How it works
-mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same nodewhich enters the namespace of the selected pod and captures traffic from it.
+## How It Works
+mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
 
 ## Contributing
 Contributions are welcome via PRs.
@@ -64,7 +64,7 @@ Contributions are welcome via PRs.
 
 ## Help & Community 🎉✉️
 
-Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun. 
+Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun.
 
 ## Code of Conduct
 We take our community seriously and we are dedicated to providing a safe and welcoming environment for everyone.
