@@ -1,8 +1,10 @@
-use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
+use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError, path::PathBuf};
 
+use errno::set_errno;
 use mirrord_protocol::tcp::LayerTcp;
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
+use tracing::error;
 
 use super::HookMessage;
 
@@ -33,7 +35,7 @@ pub enum LayerError {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error("mirrord-layer: Failed to find local fd `{0}`!")]
-    LocalFDNotFound(RawFd),
+    LocalFDNotFound(RawFd, PathBuf),
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
@@ -54,15 +56,12 @@ pub enum LayerError {
     ListenAlreadyExists,
 }
 
-//Todo: https://stackoverflow.com/questions/39150216/implementing-a-trait-for-multiple-types-at-once
-
-// what should the mapping be between LayerError and integer types
-
 // mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 
 impl From<LayerError> for i32 {
     fn from(error: LayerError) -> Self {
-        match error {
+        error!("Error occured in Layer >> {:?}", error);
+        let libc_error = match error {
             LayerError::VarError(_) => libc::EINVAL,
             LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
@@ -71,13 +70,15 @@ impl From<LayerError> for i32 {
             LayerError::RecvError(_) => libc::EBADMSG,
             LayerError::Null(_) => libc::EINVAL,
             LayerError::TryFromInt(_) => libc::EINVAL,
-            LayerError::LocalFDNotFound(_) => libc::EBADF,
+            LayerError::LocalFDNotFound(..) => libc::EBADF,
             LayerError::EmptyHookSender => libc::ENOENT,
             LayerError::NoConnectionId(_) => libc::ECONNREFUSED,
-            LayerError::IO(_) => libc::EIO,
+            LayerError::IO(io_err) => io_err.raw_os_error().unwrap_or(libc::EIO),
             LayerError::PortNotFound(_) => libc::EADDRNOTAVAIL,
             LayerError::ConnectionIdNotFound(_) => libc::EADDRNOTAVAIL,
-            LayerError::ListenAlreadyExists => libc::EEXIST,
-        }
+            LayerError::ListenAlreadyExists => libc::EEXIST,            
+        };
+        set_errno(errno::Errno(libc_error));
+        libc_error
     }
 }

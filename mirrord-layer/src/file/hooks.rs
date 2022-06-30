@@ -1,6 +1,5 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
-use errno::{set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
 use mirrord_protocol::ReadFileResponse;
@@ -37,14 +36,12 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
         let open_result = open(path.clone(), open_options);
 
-        match open_result {
-            Ok(fd) => fd,
-            Err(fail) => {
-                error!("Failed opening file {:#?} with {:#?}", path, fail);
-                set_errno(Errno(fail.into()));
-                -1
-            }
-        }
+        let (Ok(result) | Err(result)) = open_result.map_err(|fail| {
+            error!("Failed opening file {:#?} with", path);
+            let _: i32 = fail.into();
+            -1
+        });
+        result
     }
 }
 
@@ -81,16 +78,14 @@ pub(super) unsafe extern "C" fn fopen_detour(
         libc::fopen(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
-        let fopen_result = fopen(path.clone(), open_options);
+        let fopen_result = fopen(path, open_options);
 
-        match fopen_result {
-            Ok(file) => file,
-            Err(fail) => {
-                error!("Failed opening file {:#?} with {:#?}", path, fail);
-                set_errno(Errno(fail.into()));
-                ptr::null_mut()
-            }
-        }
+        let (Ok(result) | Err(result)) = fopen_result.map_err(|fail| {
+            error!("Failed opening file with {fail:#?}");
+            let _: i32 = fail.into();
+            ptr::null_mut()
+        });
+        result
     }
 }
 
@@ -117,14 +112,12 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
 
-        match fdopen_result {
-            Ok(file) => file,
-            Err(fail) => {
-                error!("Failed opening file with {:#?}", fail);
-                set_errno(Errno(fail.into()));
-                ptr::null_mut()
-            }
-        }
+        let (Ok(result) | Err(result)) = fdopen_result.map_err(|fail| {
+            error!("Failed opening file with {fail:#?}");
+            let _: i32 = fail.into();
+            ptr::null_mut()
+        });
+        result
     } else {
         libc::fdopen(fd, raw_mode)
     }
@@ -165,14 +158,12 @@ pub(super) unsafe extern "C" fn openat_detour(
         if let Some(remote_fd) = remote_fd {
             let openat_result = openat(path.clone(), open_flags, remote_fd);
 
-            match openat_result {
-                Ok(fd) => fd,
-                Err(fail) => {
-                    error!("Failed opening file {:#?} with {:#?}", path, fail);
-                    set_errno(Errno(fail.into()));
-                    -1
-                }
-            }
+            let (Ok(result) | Err(result)) = openat_result.map_err(|fail| {
+                error!("Failed opening file {path:#?}");
+                let _: i32 = fail.into();
+                -1
+            });
+            result
         } else {
             // Nope, it's relative outside of our hands.
 
@@ -209,14 +200,12 @@ pub(crate) unsafe extern "C" fn read_detour(
             read_amount.try_into().unwrap()
         });
 
-        match read_result {
-            Ok(read_amount) => read_amount,
-            Err(fail) => {
-                error!("Failed reading file with {:#?}", fail);
-                set_errno(Errno(fail.into()));
-                -1
-            }
-        }
+        let (Ok(result) | Err(result)) = read_result.map_err(|fail| {
+            error!("Failed reading file with {fail:#?}");
+            let _: i32 = fail.into();
+            -1
+        });
+        result
     } else {
         libc::read(fd, out_buffer, count)
     }
@@ -254,14 +243,13 @@ pub(crate) unsafe extern "C" fn fread_detour(
             read_amount
         });
 
-        match read_result {
-            Ok(read_amount) => read_amount,
-            Err(fail) => {
-                error!("Failed reading file with {:#?}", fail);
-                set_errno(Errno(fail.into()));
-                0
-            }
-        }
+        let (Ok(result) | Err(result)) = read_result.map_err(|fail| {
+            error!("Failed reading file with {fail:#?}");
+            let _: i32 = fail.into();
+            0
+        });
+
+        result
     } else {
         libc::fread(out_buffer, element_size, number_of_elements, file_stream)
     }
@@ -302,14 +290,12 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 
         let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
 
-        match lseek_result {
-            Ok(offset) => offset,
-            Err(fail) => {
-                error!("Failed seeking file with {:#?}", fail);
-                set_errno(Errno(fail.into()));
-                -1
-            }
-        }
+        let (Ok(result) | Err(result)) = lseek_result.map_err(|fail| {
+            error!("Failed seeking file with {fail:#?}");
+            let _: i32 = fail.into();
+            -1
+        });
+        result
     } else {
         libc::lseek(fd, offset, whence)
     }
@@ -337,14 +323,12 @@ pub(crate) unsafe extern "C" fn write_detour(
 
         let write_result = write(remote_fd, write_bytes);
 
-        match write_result {
-            Ok(write_amount) => write_amount,
-            Err(fail) => {
-                error!("Failed writing file with {:#?}", fail);
-                set_errno(Errno(fail.into()));
-                -1
-            }
-        }
+        let (Ok(result) | Err(result)) = write_result.map_err(|fail| {
+            error!("Failed writing file with {fail:#?}");
+            let _: i32 = fail.into();
+            -1
+        });
+        result
     } else {
         libc::write(fd, buffer, count)
     }
