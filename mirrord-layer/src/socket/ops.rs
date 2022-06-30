@@ -13,7 +13,6 @@ use crate::{
     error::LayerError,
     message::HookMessage,
     tcp::{HookMessageTcp, Listen},
-    HOOK_SENDER,
 };
 
 /// Create the socket, add it to `MIRROR_SOCKETS` if it's successful, plus protocol and domain

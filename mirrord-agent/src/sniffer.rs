@@ -437,7 +437,10 @@ impl TCPConnectionSniffer {
     }
 
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        debug!("handle_packet -> handling eth_packet {:#?}", eth_packet);
+        debug!(
+            "handle_packet -> handling eth_packet (length) {:#?}",
+            eth_packet.len()
+        );
 
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,

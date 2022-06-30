@@ -3,7 +3,6 @@ use std::os::unix::io::RawFd;
 use frida_gum::interceptor::Interceptor;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use socket2::SockAddr;
 use tracing::{error, trace};
 
 use super::ops::*;

@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{LazyLock, Mutex, RwLock},
+    sync::{LazyLock, Mutex},
 };
 
 use dashmap::DashMap;
