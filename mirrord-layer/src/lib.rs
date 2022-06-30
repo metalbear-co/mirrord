@@ -260,10 +260,15 @@ async fn handle_daemon_message(
 ) {
     match daemon_message {
         DaemonMessage::Tcp(message) => {
-            tcp_mirror_handler
-                .handle_daemon_message(message)
-                .await
-                .unwrap();
+            match tcp_mirror_handler.handle_daemon_message(message).await {
+                Ok(()) => (),
+                Err(fail) => {
+                    error!(
+                        "handle_daemon_message -> Failed message in tcp_mirror_handler with {:#?}",
+                        fail
+                    );
+                }
+            }
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
