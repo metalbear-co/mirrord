@@ -65,16 +65,16 @@ pub async fn setup_kube_client() -> Client {
     Client::try_from(config).unwrap()
 }
 
-// minikube service http-echo --url
+// minikube service py-serv --url
 pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String> {
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let services = service_api
-        .list(&ListParams::default().labels("app=http-echo"))
+        .list(&ListParams::default().labels("app=py-serv"))
         .await
         .unwrap();
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=http-echo"))
+        .list(&ListParams::default().labels("app=py-serv"))
         .await
         .unwrap();
     let host_ip = pods
@@ -95,11 +95,11 @@ pub async fn get_service_url(client: &Client, namespace: &str) -> Option<String>
     ))
 }
 
-// kubectl get pods | grep http-echo
+// kubectl get pods | grep py-serv
 pub async fn get_http_echo_pod_name(client: &Client, namespace: &str) -> Option<String> {
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels("app=http-echo"))
+        .list(&ListParams::default().labels("app=py-serv"))
         .await
         .unwrap();
     let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
@@ -152,28 +152,28 @@ pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": "http-echo",
+            "name": "py-serv",
             "labels": {
-                "app": "http-echo"
+                "app": "py-serv"
             }
         },
         "spec": {
             "replicas": 1,
             "selector": {
                 "matchLabels": {
-                    "app": "http-echo"
+                    "app": "py-serv"
                 }
             },
             "template": {
                 "metadata": {
                     "labels": {
-                        "app": "http-echo"
+                        "app": "py-serv"
                     }
                 },
                 "spec": {
                     "containers": [
                         {
-                            "name": "http-echo",
+                            "name": "py-serv",
                             "image": "ealen/echo-server",
                             "ports": [
                                 {
@@ -192,22 +192,22 @@ pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &deployment)
         .await
         .unwrap();
-    watch_resource_exists(deployment_api, "http-echo").await;
+    watch_resource_exists(deployment_api, "py-serv").await;
 
     let service_api: Api<Service> = Api::namespaced(client.clone(), namespace);
     let service = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": {
-            "name": "http-echo",
+            "name": "py-serv",
             "labels": {
-                "app": "http-echo"
+                "app": "py-serv"
             }
         },
         "spec": {
             "type": "NodePort",
             "selector": {
-                "app": "http-echo"
+                "app": "py-serv"
             },
             "sessionAffinity": "None",
             "ports": [
@@ -225,7 +225,7 @@ pub async fn create_http_echo_pod(client: &Client, namespace: &str) {
         .create(&PostParams::default(), &service)
         .await
         .unwrap();
-    watch_resource_exists(service_api, "http-echo").await;
+    watch_resource_exists(service_api, "py-serv").await;
 }
 
 // watch a resource until it exists

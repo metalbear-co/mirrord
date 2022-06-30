@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.3.1
+
 ### Changed
 - Refactor(agent) - change `FileManager` to be per peer, thus removing the need of it being in a different task, moving the handling to the peer logic, change structure of peer handling to a struct.
 - Don't fail environment variable request if none exists.
@@ -14,6 +16,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Refactor(agent) - Main loop doesn't pass messages around but instead spawned peers interact directly with tcp sniffer. Renamed Peer -> Client and ClientID.
 - Add context to agent/job creation errors (Fixes #112)
 - Add context to stream creation error (Fixes #110)
+- Change E2E to use real app, closes [#149](https://github.com/metalbear-co/mirrord/issues/149)
 
 ## 2.3.0
 
