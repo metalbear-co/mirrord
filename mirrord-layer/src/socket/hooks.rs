@@ -228,29 +228,35 @@ pub(super) unsafe extern "C" fn accept_detour(
         *out_address_len
     );
 
-    let accepted_fd = libc::accept(sockfd, out_address, out_address_len);
-    if -1 != accepted_fd {
-        accept(sockfd, accepted_fd)
-            .map(|(accepted_fd, address)| {
-                trace!("accept_detour -> address {:#?}", address.as_socket());
+    accept(sockfd, None)
+        .map(|(accepted_fd, address)| {
+            let address_ptr = address.as_ptr();
+            let address_len = (*out_address_len).min(address.len()) as usize;
 
-                accepted_fd
-            })
-            .map_err(|fail| {
-                error!("Failed accept call with {:#?}!", fail);
+            out_address.copy_from_nonoverlapping(address_ptr, address_len);
+            *out_address_len = address.len();
 
-                match fail {
-                    LayerError::LocalFdNotFound(_) => {
-                        libc::accept(sockfd, out_address, out_address_len)
-                    }
-                    LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
-                    _ => -1,
+            trace!(
+                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+                address,
+                *address.as_ptr(),
+                *out_address
+            );
+
+            accepted_fd
+        })
+        .map_err(|fail| {
+            error!("Failed accept call with {:#?}!", fail);
+
+            match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::accept(sockfd, out_address, out_address_len)
                 }
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        accepted_fd
-    }
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 #[cfg(target_os = "linux")]
@@ -266,29 +272,35 @@ pub(super) unsafe extern "C" fn accept4_detour(
         flags
     );
 
-    let accepted_fd = libc::accept4(sockfd, out_address, out_address_len, flags);
-    if -1 != accepted_fd {
-        accept(sockfd, accepted_fd)
-            .map(|(accepted_fd, address)| {
-                trace!("accept_detour -> address {:#?}", address.as_socket());
+    accept(sockfd, Some(flags))
+        .map(|(accepted_fd, address)| {
+            let address_ptr = address.as_ptr();
+            let address_len = (*out_address_len).min(address.len()) as usize;
 
-                accepted_fd
-            })
-            .map_err(|fail| {
-                error!("Failed accept call with {:#?}!", fail);
+            out_address.copy_from_nonoverlapping(address_ptr, address_len);
+            *out_address_len = address.len();
 
-                match fail {
-                    LayerError::LocalFdNotFound(_) => {
-                        libc::accept(sockfd, out_address, out_address_len)
-                    }
-                    LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
-                    _ => -1,
+            trace!(
+                "getsockname_detour -> address {:#?} | ptr {:#?} | out {:#?}",
+                address,
+                *address.as_ptr(),
+                *out_address
+            );
+
+            accepted_fd
+        })
+        .map_err(|fail| {
+            error!("Failed accept call with {:#?}!", fail);
+
+            match fail {
+                LayerError::LocalFdNotFound(_) => {
+                    libc::accept(sockfd, out_address, out_address_len)
                 }
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        accepted_fd
-    }
+                LayerError::IO(io_error) => io_error.raw_os_error().unwrap(),
+                _ => -1,
+            }
+        })
+        .unwrap_or_else(|fail| fail)
 }
 
 pub(super) unsafe extern "C" fn dup_detour(sockfd: c_int) -> c_int {

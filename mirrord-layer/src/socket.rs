@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use dashmap::DashMap;
@@ -16,7 +16,7 @@ use crate::error::LayerError;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) type SocketMap = DashMap<RawFd, MirrorSocket>;
+pub(crate) type SocketMap = DashMap<RawFd, Arc<MirrorSocket>>;
 
 /// TODO(alex) [low] 2022-06-25: 2 ways I see this interacting with agent + dup:
 ///
