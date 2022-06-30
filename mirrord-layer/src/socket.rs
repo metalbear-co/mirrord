@@ -43,6 +43,16 @@ pub(crate) type SocketMap = DashMap<RawFd, Arc<MirrorSocket>>;
 ///
 /// If I go for (2), then there must be a call that takes **every** dupped socket from the old state
 /// `HashMap` into the new one.
+///
+/// # TODO(alex) [low] 2022-06-30: The refactor of sockets takes more work than just moving the
+/// implementation of functions around.
+///
+/// 1. The use of `socket2` helps with safety around `libc` calls, but it also introduces potential
+/// deadlock and ownership issues;
+///
+/// 2. Deadlocks are easy to trigger because we end up calling our own safe wrapper functions, which
+/// also lock the `MIRROR_SOCKETS` map of managed sockets. If we had a way of pre-loading the `libc`
+/// functions we could avoid these issues, but we don't;
 pub(crate) static MIRROR_SOCKETS: LazyLock<SocketMap> = LazyLock::new(|| SocketMap::default());
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
