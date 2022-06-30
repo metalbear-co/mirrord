@@ -1,6 +1,5 @@
 from os import getcwd, remove, getpid, kill
 from signal import SIGTERM
-import click
 from flask import Flask, request
 import logging
 import sys
@@ -10,7 +9,7 @@ log.disabled = True
 
 cli = sys.modules["flask.cli"]
 
-cli.show_server_banner = lambda *x: click.echo("Server listening on port 80")
+cli.show_server_banner = lambda *x: print("Server listening on port 80")
 
 app = Flask(__name__)
 
