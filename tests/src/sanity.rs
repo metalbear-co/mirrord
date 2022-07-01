@@ -394,7 +394,7 @@ mod tests {
             .output()
             .unwrap()
             .stdout;
-        output.into_iter().collect()
+        String::from_utf8_lossy(&output).to_string()
     }
 
     async fn get_service_url(kube_client: Client, service: &EchoService) -> String {
