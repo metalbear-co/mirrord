@@ -12,18 +12,11 @@ pub struct NewTcpConnection {
     pub source_port: Port,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TcpData {
     pub connection_id: ConnectionID,
     pub bytes: Vec<u8>,
 }
-
-impl std::fmt::Debug for TcpData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TcpData(connection_id:{},bytes_len:{})", self.connection_id, self.bytes.len())
-    }
-}
-
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TcpClose {
