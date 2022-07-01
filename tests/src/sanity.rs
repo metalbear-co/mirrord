@@ -11,11 +11,9 @@ mod tests {
     };
 
     use futures_util::stream::{StreamExt, TryStreamExt};
-    use k8s_openapi::{
-        api::{
-            apps::v1::Deployment,
-            core::v1::{Pod, Service},
-        },
+    use k8s_openapi::api::{
+        apps::v1::Deployment,
+        core::v1::{Pod, Service},
     };
     use kube::{
         api::{DeleteParams, ListParams, PostParams},
@@ -68,9 +66,8 @@ mod tests {
         rand_str
     }
 
-
     enum Application {
-        // Comment back PythonHTTP after we solve 
+        // Comment back PythonHTTP after we solve
         // PythonHTTP,
         NodeHTTP,
     }
@@ -519,9 +516,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore] // race condition
-    pub async fn test_remote_env_vars_exclude_works(
-        #[future] service: EchoService,
-    ) {
+    pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
             "node",
@@ -538,9 +533,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore] // race condition
-    pub async fn test_remote_env_vars_include_works(
-        #[future] service: EchoService,
-    ) {
+    pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
             "node",
