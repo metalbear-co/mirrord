@@ -72,7 +72,6 @@ mod tests {
         NodeHTTP,
     }
 
-
     struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
