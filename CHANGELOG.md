@@ -10,12 +10,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
 
 ### Changed
+- Refactor e2e, enable only Node HTTP mirroring test.
+
+
+## 2.3.1
+
+### Changed
 - Refactor(agent) - change `FileManager` to be per peer, thus removing the need of it being in a different task, moving the handling to the peer logic, change structure of peer handling to a struct.
 - Don't fail environment variable request if none exists.
 - E2E: Don't assert jobs and pods length, to allow better debugging and less flakiness.
 - Refactor(agent) - Main loop doesn't pass messages around but instead spawned peers interact directly with tcp sniffer. Renamed Peer -> Client and ClientID.
 - Add context to agent/job creation errors (Fixes #112)
-- Refactor e2e, enable only Node HTTP mirroring test.
+- Add context to stream creation error (Fixes #110)
+- Change E2E to use real app, closes [#149](https://github.com/metalbear-co/mirrord/issues/149)
 
 ## 2.3.0
 
