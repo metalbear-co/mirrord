@@ -34,13 +34,9 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         libc::open(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
-        let open_result = open(path.clone(), open_options);
+        let open_result = open(path, open_options);
 
-        let (Ok(result) | Err(result)) = open_result.map_err(|fail| {
-            error!("Failed opening file {:#?} with", path);
-            let _: i32 = fail.into();
-            -1
-        });
+        let (Ok(result) | Err(result)) = open_result.map_err(From::from);
         result
     }
 }
@@ -80,11 +76,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fopen_result = fopen(path, open_options);
 
-        let (Ok(result) | Err(result)) = fopen_result.map_err(|fail| {
-            error!("Failed opening file with {fail:#?}");
-            let _: i32 = fail.into();
-            ptr::null_mut()
-        });
+        let (Ok(result) | Err(result)) = fopen_result.map_err(From::from);
         result
     }
 }
@@ -112,11 +104,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
 
-        let (Ok(result) | Err(result)) = fdopen_result.map_err(|fail| {
-            error!("Failed opening file with {fail:#?}");
-            let _: i32 = fail.into();
-            ptr::null_mut()
-        });
+        let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
         result
     } else {
         libc::fdopen(fd, raw_mode)
@@ -156,13 +144,9 @@ pub(super) unsafe extern "C" fn openat_detour(
 
         // Are we managing the relative part?
         if let Some(remote_fd) = remote_fd {
-            let openat_result = openat(path.clone(), open_flags, remote_fd);
+            let openat_result = openat(path, open_flags, remote_fd);
 
-            let (Ok(result) | Err(result)) = openat_result.map_err(|fail| {
-                error!("Failed opening file {path:#?}");
-                let _: i32 = fail.into();
-                -1
-            });
+            let (Ok(result) | Err(result)) = openat_result.map_err(From::from);
             result
         } else {
             // Nope, it's relative outside of our hands.
@@ -200,11 +184,7 @@ pub(crate) unsafe extern "C" fn read_detour(
             read_amount.try_into().unwrap()
         });
 
-        let (Ok(result) | Err(result)) = read_result.map_err(|fail| {
-            error!("Failed reading file with {fail:#?}");
-            let _: i32 = fail.into();
-            -1
-        });
+        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
         result
     } else {
         libc::read(fd, out_buffer, count)
@@ -243,12 +223,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
             read_amount
         });
 
-        let (Ok(result) | Err(result)) = read_result.map_err(|fail| {
-            error!("Failed reading file with {fail:#?}");
-            let _: i32 = fail.into();
-            0
-        });
-
+        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
         result
     } else {
         libc::fread(out_buffer, element_size, number_of_elements, file_stream)
@@ -290,11 +265,7 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 
         let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
 
-        let (Ok(result) | Err(result)) = lseek_result.map_err(|fail| {
-            error!("Failed seeking file with {fail:#?}");
-            let _: i32 = fail.into();
-            -1
-        });
+        let (Ok(result) | Err(result)) = lseek_result.map_err(From::from);
         result
     } else {
         libc::lseek(fd, offset, whence)
@@ -323,11 +294,7 @@ pub(crate) unsafe extern "C" fn write_detour(
 
         let write_result = write(remote_fd, write_bytes);
 
-        let (Ok(result) | Err(result)) = write_result.map_err(|fail| {
-            error!("Failed writing file with {fail:#?}");
-            let _: i32 = fail.into();
-            -1
-        });
+        let (Ok(result) | Err(result)) = write_result.map_err(From::from);
         result
     } else {
         libc::write(fd, buffer, count)
