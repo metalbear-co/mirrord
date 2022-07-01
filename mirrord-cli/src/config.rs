@@ -9,7 +9,7 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
-    Exec(ExecArgs),
+    Exec(Box<ExecArgs>),
     Extract {
         #[clap(value_parser)]
         path: String,

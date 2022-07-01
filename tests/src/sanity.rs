@@ -72,10 +72,12 @@ mod tests {
         NodeHTTP,
     }
 
+
     struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
         stdout: Arc<Mutex<String>>,
+        // Keeps tempdir existing while process is running.
         _tempdir: TempDir,
     }
 
