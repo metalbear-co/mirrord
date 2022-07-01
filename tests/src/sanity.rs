@@ -1,34 +1,41 @@
 #[cfg(test)]
 
 mod tests {
-    use std::{collections::HashMap, fmt::Debug, net::Ipv4Addr, time::{Duration, Instant}, sync::{Arc, Mutex}, process::Stdio};
+    use std::{
+        collections::HashMap,
+        fmt::Debug,
+        net::Ipv4Addr,
+        process::Stdio,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
-    use reqwest::{StatusCode, Method};
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::{
         api::{
             apps::v1::Deployment,
-            core::v1::{Namespace, Pod, ReadNamespacedPodOptional, Service},
+            core::v1::{Pod, Service},
         },
-        apimachinery::pkg::apis::meta::v1::ObjectMeta,
-        Resource,
     };
     use kube::{
         api::{DeleteParams, ListParams, PostParams},
         core::WatchEvent,
-        Api, Client, Config, runtime::wait::{conditions::is_pod_running, await_condition},
+        runtime::wait::{await_condition, conditions::is_pod_running},
+        Api, Client, Config,
     };
     use rand::{distributions::Alphanumeric, Rng};
+    use reqwest::StatusCode;
     use rstest::*;
-    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
+    use tempdir::TempDir;
     use tokio::{
-        process::{Child, Command, ChildStderr},
-        time::timeout, io::{BufReader, AsyncBufReadExt, AsyncReadExt},
+        io::{AsyncReadExt, BufReader},
+        process::{Child, Command},
+        time::timeout,
     };
     // 0.8
     use tokio_util::sync::{CancellationToken, DropGuard};
-
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
@@ -61,33 +68,23 @@ mod tests {
         rand_str
     }
 
-    // lazy_static! {
-    //     static ref SERVERS: HashMap<&'static str, Vec<&'static str>> = HashMap::from([
-    //         ("python", vec!["python3", "-u", "python-e2e/app.py"]),
-    //         ("node", vec!["node", "node-e2e/app.js"])
-    //     ]);
-    // }
-    
 
     enum Application {
-        // Python,
-        Node,
+        // Comment back PythonHTTP after we solve 
+        // PythonHTTP,
+        NodeHTTP,
     }
-
 
     struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
         stdout: Arc<Mutex<String>>,
+        _tempdir: TempDir,
     }
 
     impl TestProcess {
         fn get_stdout(&self) -> String {
             self.stdout.lock().unwrap().clone()
-        }
-
-        fn get_stderr(&self) -> String {
-            self.stderr.lock().unwrap().clone()
         }
 
         fn assert_stderr(&self) {
@@ -104,15 +101,17 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(100));
             }
             panic!("Timeout waiting for line: {}", line);
-        } 
+        }
 
-        fn from_child(mut child: Child) -> TestProcess {
+        fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
             let stderr_data = Arc::new(Mutex::new(String::new()));
             let stdout_data = Arc::new(Mutex::new(String::new()));
             let child_stderr = child.stderr.take().unwrap();
             let child_stdout = child.stdout.take().unwrap();
             let stderr_data_reader = stderr_data.clone();
             let stdout_data_reader = stdout_data.clone();
+            let pid = child.id().unwrap();
+
             tokio::spawn(async move {
                 let mut reader = BufReader::new(child_stderr);
                 let mut buf = [0; 1024];
@@ -121,9 +120,9 @@ mod tests {
                     if n == 0 {
                         break;
                     }
-                    
+
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr: {}", string);
+                    eprintln!("stderr {pid}: {}", string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -138,57 +137,84 @@ mod tests {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout: {}", string);
+                    println!("stdout pid {pid}: {}", string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
-                    }
                 }
-            );
+            });
             TestProcess {
                 child,
                 stderr: stderr_data,
                 stdout: stdout_data,
+                _tempdir: tempdir,
             }
         }
-
     }
 
-
     impl Application {
-        async fn run(&self, pod_name: &str, namespace: Option<&str>) -> TestProcess {
-            let path = env!("CARGO_BIN_FILE_MIRRORD");
-            let app_args = match self {
-                // Application::Python => vec!["/usr/local/bin/python3", "-u", "python-e2e/app.py"],
-                Application::Node => vec!["node", "node-e2e/app.js"],
+        async fn run(
+            &self,
+            pod_name: &str,
+            namespace: Option<&str>,
+            args: Option<Vec<&str>>,
+        ) -> TestProcess {
+            let process_cmd = match self {
+                // Application::Python => vec!["python3", "-u", "python-e2e/app.py"],
+                Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
-            let mut mirrord_args = vec!["exec", "--pod-name", pod_name, "-c"];
-            if let Some(namespace) = namespace {
-                mirrord_args.extend(["--pod-namespace", namespace].into_iter());
-            }
-            mirrord_args.push("--");
-            let args: Vec<&str> = mirrord_args
-                .into_iter()
-                .chain(app_args.into_iter())
-                .collect();
-            // used by the CI, to load the image locally:
-            // docker build -t test . -f mirrord-agent/Dockerfile
-            // minikube load image test:latest
-            let mut env = HashMap::new();
-            env.insert("MIRRORD_AGENT_IMAGE", "test");
-            env.insert("MIRRORD_CHECK_VERSION", "false");
-            env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
-            env.insert("RUST_LOG", "debug");
-            let server = Command::new(path)
-                .args(args)
-                .envs(env)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
-            
-            TestProcess::from_child(server)
+            run(process_cmd, pod_name, namespace, args).await
         }
+    }
+
+    async fn run(
+        process_cmd: Vec<&str>,
+        pod_name: &str,
+        namespace: Option<&str>,
+        args: Option<Vec<&str>>,
+    ) -> TestProcess {
+        let path = env!("CARGO_BIN_FILE_MIRRORD");
+        let temp_dir = tempdir::TempDir::new("test").unwrap();
+        let mut mirrord_args = vec![
+            "exec",
+            "--pod-name",
+            pod_name,
+            "-c",
+            "--extract-path",
+            temp_dir.path().to_str().unwrap(),
+        ];
+        if let Some(namespace) = namespace {
+            mirrord_args.extend(["--pod-namespace", namespace].into_iter());
+        }
+        if let Some(args) = args {
+            mirrord_args.extend(args.into_iter());
+        }
+        mirrord_args.push("--");
+        let args: Vec<&str> = mirrord_args
+            .into_iter()
+            .chain(process_cmd.into_iter())
+            .collect();
+        // used by the CI, to load the image locally:
+        // docker build -t test . -f mirrord-agent/Dockerfile
+        // minikube load image test:latest
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_AGENT_IMAGE", "test");
+        env.insert("MIRRORD_CHECK_VERSION", "false");
+        env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
+        env.insert("RUST_LOG", "debug");
+        let server = Command::new(path)
+            .args(args.clone())
+            .envs(env)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        println!(
+            "executed mirrord with args {args:?} pid {}",
+            server.id().unwrap()
+        );
+        // We need to hold temp dir until the process is finished
+        TestProcess::from_child(server, temp_dir)
     }
 
     #[fixture]
@@ -244,6 +270,7 @@ mod tests {
     pub struct EchoService {
         name: String,
         namespace: String,
+        pod_name: String,
         _pod: ResourceGuard,
         _service: ResourceGuard,
     }
@@ -282,13 +309,23 @@ mod tests {
                     "spec": {
                         "containers": [
                             {
-                                "name": "http-echo",
-                                "image": "ealen/echo-server",
+                                "name": "test",
+                                "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
                                 "ports": [
                                     {
                                         "containerPort": 80
                                     }
-                                ]
+                                ],
+                                "env": [
+                                    {
+                                      "name": "MIRRORD_FAKE_VAR_FIRST",
+                                      "value": "mirrord.is.running"
+                                    },
+                                    {
+                                      "name": "MIRRORD_FAKE_VAR_SECOND",
+                                      "value": "7777"
+                                    }
+                                  ]
                             }
                         ]
                     }
@@ -329,9 +366,18 @@ mod tests {
         let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
         watch_resource_exists(&service_api, "default").await;
 
+        let pod_name = get_pod_instance(&kube_client, &name, &namespace)
+            .await
+            .unwrap();
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
+        await_condition(pod_api, &pod_name, is_pod_running())
+            .await
+            .unwrap();
+
         EchoService {
             name: name.to_string(),
             namespace: namespace.to_string(),
+            pod_name,
             _pod: pod_guard,
             _service: service_guard,
         }
@@ -341,7 +387,7 @@ mod tests {
     fn resolve_node_host() -> String {
         // We assume it's Docker for Mac
         "127.0.0.1".to_string()
-    } 
+    }
 
     #[cfg(target_os = "linux")]
     fn resolve_node_host() -> String {
@@ -383,10 +429,14 @@ mod tests {
         format!("http://{}:{}", host_ip, port.node_port.unwrap())
     }
 
-    pub async fn get_pod_instance(client: &Client, service: &EchoService) -> Option<String> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), &service.namespace);
+    pub async fn get_pod_instance(
+        client: &Client,
+        app_name: &str,
+        namespace: &str,
+    ) -> Option<String> {
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let pods = pod_api
-            .list(&ListParams::default().labels(&format!("app={}", service.name)))
+            .list(&ListParams::default().labels(&format!("app={}", app_name)))
             .await
             .unwrap();
         let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
@@ -394,44 +444,29 @@ mod tests {
     }
 
     pub async fn send_requests(url: &str) {
+        // Create client for each request until we have a match between local app and remote app
+        // as connection state is flaky
         println!("{url}");
         let client = reqwest::Client::new();
-        let res = client
-            .get(url)
-            .send()
-            .await
-            .unwrap();
+        let res = client.get(url).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         res.bytes().await.unwrap();
 
         let client = reqwest::Client::new();
-        let res = client
-            .post(url)
-            .body(TEXT)
-            .send()
-            .await
-            .unwrap();
+        let res = client.post(url).body(TEXT).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         res.bytes().await.unwrap();
 
         let client = reqwest::Client::new();
-        let res = client
-            .put(url)
-            .send()
-            .await
-            .unwrap();
+        let res = client.put(url).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         res.bytes().await.unwrap();
 
         let client = reqwest::Client::new();
-        let res = client
-            .delete(url)
-            .send()
-            .await
-            .unwrap();
+        let res = client.delete(url).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         res.bytes().await.unwrap();
@@ -443,427 +478,79 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(
-            // Application::Python,
-            Application::Node)] application: Application,
+            // Application::PythonHTTP,
+            Application::NodeHTTP)]
+        application: Application,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let pod_name = get_pod_instance(&kube_client, &service).await.unwrap();
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
-        await_condition(pod_api, &pod_name, is_pod_running()).await;
-        let mut process = application.run(&pod_name, Some(&service.namespace)).await;
+        let mut process = application
+            .run(&service.pod_name, Some(&service.namespace), None)
+            .await;
         process.wait_for_line(Duration::from_secs(10), "Server listening on port 80");
         send_requests(&url).await;
-        timeout(Duration::from_secs(40), process.child.wait()).await.unwrap().unwrap();
+        timeout(Duration::from_secs(40), process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore] // TODO: Fix this test
+    pub async fn test_file_ops(#[future] service: EchoService) {
+        let service = service.await;
+        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+        let python_command = vec!["python3", "python-e2e/ops.py"];
+        let mut process = run(
+            python_command,
+            &service.pod_name,
+            Some(&service.namespace),
+            Some(vec!["--enable-fs", "--extract-path", "/tmp/fs"]),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore] // race condition
+    pub async fn test_remote_env_vars_exclude_works(
+        #[future] service: EchoService,
+    ) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
+        ];
+        let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore] // race condition
+    pub async fn test_remote_env_vars_include_works(
+        #[future] service: EchoService,
+    ) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
+        ];
+        let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
         process.assert_stderr();
     }
 }
-
-
-//     // agent namespace tests
-//     #[tokio::test]
-//     /// Creates a new k8s namespace, starts the API server with env:
-//     /// MIRRORD_AGENT_NAMESPACE=namespace, asserts that the agent job and pod are created
-//     /// validate data through requests to the API server
-//     async fn test_good_agent_namespace() {
-//         let client = setup_kube_client().await;
-
-//         let agent_namespace = "test-namespace-agent-good";
-//         let pod_namespace = "default";
-//         let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
-//         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
-
-//         create_namespace(&client, agent_namespace).await;
-
-//         let service_url = get_service_url(&client, "default").await.unwrap();
-
-//         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-//         let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
-
-//         tokio::spawn(async move {
-//             loop {
-//                 let mut error_stream = String::new();
-//                 stderr_reader.read_line(&mut error_stream).await.unwrap();
-//                 if !error_stream.is_empty() {
-//                     panic!("Error: {}", error_stream);
-//                 }
-//             }
-//         });
-
-//         let mut is_running = String::new();
-//         let start_timeout = Duration::from_secs(10);
-
-//         timeout(start_timeout, async {
-//             loop {
-//                 stdout_reader.read_line(&mut is_running).await.unwrap();
-//                 if is_running == "Server listening on port 80\n" {
-//                     break;
-//                 }
-//             }
-//         })
-//         .await
-//         .unwrap();
-
-//         // agent takes a bit of time to set filter and start sending traffic, this should solve
-// many         // race stuff until we watch the agent logs and start sending requests after we see
-//         // it had set the new filter.
-//         sleep(Duration::from_millis(100)).await;
-//         send_requests(service_url.as_str()).await;
-
-//         timeout(Duration::from_secs(5), async {
-//             server.wait().await.unwrap()
-//         })
-//         .await
-//         .unwrap();
-//         validate_requests(&mut stdout_reader).await;
-
-//         delete_namespace(&client, agent_namespace).await;
-//     }
-
-//     #[tokio::test]
-//     /// Starts the API server with env: MIRRORD_AGENT_NAMESPACE=namespace (nonexistent),
-//     /// asserts the process crashes: "NotFound" as the namespace does not exist
-//     async fn test_nonexistent_agent_namespace() {
-//         let client = setup_kube_client().await;
-//         let agent_namespace = "nonexistent-namespace";
-//         let pod_namespace = "default";
-//         let env = HashMap::from([("MIRRORD_AGENT_NAMESPACE", agent_namespace)]);
-//         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
-
-//         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-
-//         let timeout_duration = Duration::from_secs(5);
-//         timeout(
-//             timeout_duration,
-//             tokio::spawn(async move {
-//                 loop {
-//                     let mut error_stream = String::new();
-//                     stderr_reader
-//                         .read_to_string(&mut error_stream)
-//                         .await
-//                         .unwrap();
-//                     if !error_stream.is_empty() {
-//                         assert!(error_stream.contains("NotFound")); //Todo: fix this when unwraps
-// are removed in pod_api.rs                         break;
-//                     }
-//                 }
-//             }),
-//         )
-//         .await
-//         .unwrap()
-//         .unwrap();
-//     }
-
-//     // pod namespace tests
-//     #[tokio::test]
-//     /// Creates a new k8s namespace, starts the API server with env:
-//     /// MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace, validates data sent through
-//     /// requests
-//     async fn test_good_pod_namespace() {
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "test-pod-namespace";
-//         create_namespace(&client, pod_namespace).await;
-//         create_http_echo_pod(&client, pod_namespace).await;
-
-//         let env = HashMap::from([("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace)]);
-//         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
-
-//         let service_url = get_service_url(&client, pod_namespace).await.unwrap();
-
-//         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-//         let mut stdout_reader = BufReader::new(server.stdout.take().unwrap());
-
-//         tokio::spawn(async move {
-//             loop {
-//                 let mut error_stream = String::new();
-//                 stderr_reader.read_line(&mut error_stream).await.unwrap();
-//                 if !error_stream.is_empty() {
-//                     panic!("Error: {}", error_stream);
-//                 }
-//             }
-//         });
-
-//         let mut is_running = String::new();
-//         let start_timeout = Duration::from_secs(10);
-
-//         timeout(start_timeout, async {
-//             loop {
-//                 stdout_reader.read_line(&mut is_running).await.unwrap();
-//                 if is_running == "Server listening on port 80\n" {
-//                     break;
-//                 }
-//             }
-//         })
-//         .await
-//         .unwrap();
-
-//         // agent takes a bit of time to set filter and start sending traffic, this should solve
-// many         // race stuff until we watch the agent logs and start sending requests after we see
-//         // it had set the new filter.
-//         sleep(Duration::from_millis(100)).await;
-//         send_requests(service_url.as_str()).await;
-
-//         timeout(Duration::from_secs(5), async {
-//             server.wait().await.unwrap()
-//         })
-//         .await
-//         .unwrap();
-//         validate_requests(&mut stdout_reader).await;
-
-//         delete_namespace(&client, pod_namespace).await;
-//     }
-
-//     #[tokio::test]
-//     /// Starts the API server with env: MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE=namespace
-//     /// (nonexistent), asserts the process crashes: "NotFound" as the namespace does not
-//     /// exist
-//     async fn test_bad_pod_namespace() {
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "default";
-//         let env = HashMap::from([(
-//             "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",
-//             "nonexistent-namespace",
-//         )]);
-//         let mut server = test_server_init(&client, pod_namespace, env, "node").await;
-
-//         let mut stderr_reader = BufReader::new(server.stderr.take().unwrap());
-//         let timeout_duration = Duration::from_secs(5);
-//         timeout(
-//             timeout_duration,
-//             tokio::spawn(async move {
-//                 loop {
-//                     let mut error_stream = String::new();
-//                     stderr_reader
-//                         .read_to_string(&mut error_stream)
-//                         .await
-//                         .unwrap();
-//                     if !error_stream.is_empty() {
-//                         assert!(
-//                             error_stream.contains("NotFound"),
-//                             "stream data: {error_stream:?}"
-//                         ); //Todo: fix this when unwraps are removed in pod_api.rs
-//                         break;
-//                     }
-//                 }
-//             }),
-//         )
-//         .await
-//         .unwrap()
-//         .unwrap();
-//     }
-
-//     #[tokio::test]
-//     pub async fn test_file_ops() {
-//         let path = env!("CARGO_BIN_FILE_MIRRORD");
-//         let command = vec!["python3", "python-e2e/ops.py"];
-//         let client = setup_kube_client().await;
-//         let pod_namespace = "default";
-//         let mut env = HashMap::new();
-//         env.insert("MIRRORD_AGENT_IMAGE", "test");
-//         env.insert("MIRRORD_CHECK_VERSION", "false");
-//         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
-//             .await
-//             .unwrap();
-//         let args: Vec<&str> = vec![
-//             "exec",
-//             "--pod-name",
-//             &pod_name,
-//             "-c",
-//             "--agent-ttl",
-//             "1000",
-//             "--enable-fs",
-//             "--",
-//         ]
-//         .into_iter()
-//         .chain(command.into_iter())
-//         .collect();
-//         let test = Command::new(path)
-//             .args(args)
-//             .envs(&env)
-//             .status()
-//             .await
-//             .unwrap();
-//         assert!(test.success());
-//     }
-
-//     #[tokio::test]
-//     pub async fn test_remote_env_vars_does_nothing_when_not_specified() {
-//         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
-//         let node_command = vec![
-//             "node",
-//             "node-e2e/remote_env/test_remote_env_vars_does_nothing_when_not_specified.mjs",
-//         ];
-
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "default";
-//         let mut env = HashMap::new();
-//         env.insert("MIRRORD_AGENT_IMAGE", "test");
-//         env.insert("MIRRORD_CHECK_VERSION", "false");
-
-//         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
-//             .await
-//             .unwrap();
-
-//         let args: Vec<&str> = vec![
-//             "exec",
-//             "--pod-name",
-//             &pod_name,
-//             "-c",
-//             "--agent-ttl",
-//             "1000",
-//             "--",
-//         ]
-//         .into_iter()
-//         .chain(node_command.into_iter())
-//         .collect();
-
-//         let test_process = Command::new(mirrord_bin)
-//             .args(args)
-//             .envs(&env)
-//             .status()
-//             .await
-//             .unwrap();
-
-//         assert!(test_process.success());
-//     }
-
-//     /// Weird one to test, as we `panic` inside a separate thread, so the main sample app will
-// just     /// complete as normal.
-//     #[tokio::test]
-//     pub async fn test_remote_env_vars_panics_when_both_filters_are_specified() {
-//         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
-//         let node_command = vec![
-//             "node",
-//
-// "node-e2e/remote_env/test_remote_env_vars_panics_when_both_filters_are_specified.mjs",         ];
-
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "default";
-//         let mut env = HashMap::new();
-//         env.insert("MIRRORD_AGENT_IMAGE", "test");
-//         env.insert("MIRRORD_CHECK_VERSION", "false");
-
-//         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
-//             .await
-//             .unwrap();
-
-//         let args: Vec<&str> = vec![
-//             "exec",
-//             "--pod-name",
-//             &pod_name,
-//             "-c",
-//             "--agent-ttl",
-//             "1000",
-//             "-x",
-//             "MIRRORD_FAKE_VAR_FIRST",
-//             "-s",
-//             "MIRRORD_FAKE_VAR_SECOND",
-//             "--",
-//         ]
-//         .into_iter()
-//         .chain(node_command.into_iter())
-//         .collect();
-
-//         let test_process = Command::new(mirrord_bin)
-//             .args(args)
-//             .envs(&env)
-//             .status()
-//             .await
-//             .unwrap();
-
-//         assert!(test_process.success());
-//     }
-
-//     #[tokio::test]
-//     pub async fn test_remote_env_vars_exclude_works() {
-//         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
-//         let node_command = vec![
-//             "node",
-//             "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
-//         ];
-
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "default";
-//         let mut env = HashMap::new();
-//         env.insert("MIRRORD_AGENT_IMAGE", "test");
-//         env.insert("MIRRORD_CHECK_VERSION", "false");
-
-//         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
-//             .await
-//             .unwrap();
-
-//         let args: Vec<&str> = vec![
-//             "exec",
-//             "--pod-name",
-//             &pod_name,
-//             "-c",
-//             "--agent-ttl",
-//             "1000",
-//             "-x",
-//             "MIRRORD_FAKE_VAR_FIRST",
-//             "--",
-//         ]
-//         .into_iter()
-//         .chain(node_command.into_iter())
-//         .collect();
-
-//         let test_process = Command::new(mirrord_bin)
-//             .args(args)
-//             .envs(&env)
-//             .status()
-//             .await
-//             .unwrap();
-
-//         assert!(test_process.success());
-//     }
-
-//     #[tokio::test]
-//     pub async fn test_remote_env_vars_include_works() {
-//         let mirrord_bin = env!("CARGO_BIN_FILE_MIRRORD");
-//         let node_command = vec![
-//             "node",
-//             "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
-//         ];
-
-//         let client = setup_kube_client().await;
-
-//         let pod_namespace = "default";
-//         let mut env = HashMap::new();
-//         env.insert("MIRRORD_AGENT_IMAGE", "test");
-//         env.insert("MIRRORD_CHECK_VERSION", "false");
-
-//         let pod_name = get_http_echo_pod_name(&client, pod_namespace)
-//             .await
-//             .unwrap();
-
-//         let args: Vec<&str> = vec![
-//             "exec",
-//             "--pod-name",
-//             &pod_name,
-//             "--agent-ttl",
-//             "1000",
-//             "-c",
-//             "-s",
-//             "MIRRORD_FAKE_VAR_FIRST",
-//             "--",
-//         ]
-//         .into_iter()
-//         .chain(node_command.into_iter())
-//         .collect();
-
-//         let test_process = Command::new(mirrord_bin)
-//             .args(args)
-//             .envs(&env)
-//             .status()
-//             .await
-//             .unwrap();
-
-//         assert!(test_process.success());
-//     }
-// }
