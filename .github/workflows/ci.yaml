@@ -167,21 +167,15 @@ jobs:
         run: docker load --input /tmp/test.tar
       - run: docker image tag $(docker images | awk '{print $3}' | awk 'NR==2') test:latest
       - run: minikube image load test:latest
-      - name: setup py-serv
-        run: kubectl apply -f tests/app.yaml
       - name: cargo test
-        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+        run: cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
           minikube start --container-runtime=docker
           minikube image load test:latest
-      - name: setup py-serv
-        run: kubectl apply -f tests/app.yaml
-      - name: wait for http-echo pod
-        run: kubectl wait --for=condition=ready pod -l app=py-serv --timeout=20s
       - name: test with docker runtime
-        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+        run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
         run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
