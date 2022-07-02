@@ -9,7 +9,7 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
-    Exec(ExecArgs),
+    Exec(Box<ExecArgs>),
     Extract {
         #[clap(value_parser)]
         path: String,
@@ -65,4 +65,8 @@ pub(super) struct ExecArgs {
     /// Arguments to pass to the binary.
     #[clap(value_parser)]
     pub(super) binary_args: Vec<String>,
+
+    /// Where to extract the library to (defaults to a temp dir)
+    #[clap(long, value_parser)]
+    pub extract_path: Option<String>,
 }

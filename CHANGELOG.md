@@ -6,6 +6,12 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
+
+### Changed
+- Refactor e2e, enable only Node HTTP mirroring test.
+
 
 ## 2.3.1
 

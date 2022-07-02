@@ -123,7 +123,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
 
-    let library_path = extract_library(None)?;
+    let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     let mut binary_args = args.binary_args.clone();
