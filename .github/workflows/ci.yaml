@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          tag: test
+          tags: test
           file: mirrord-agent/Dockerfile
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
