@@ -11,7 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Refactor e2e, enable only Node HTTP mirroring test.
-
+- E2E: add macOS to E2E, support using minikube by env var.
+- E2E: Skip loading to docker before loading to minikube (load directly to minikube..)
 
 ## 2.3.1
 
