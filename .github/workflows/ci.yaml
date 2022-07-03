@@ -216,9 +216,6 @@ jobs:
         run: minikube image load /tmp/test.tar
       - name: cargo test
         run: cargo test -p tests
-      - name: DEBUG
-        if: ${{ failure() }}
-        uses: lhotari/action-upterm@v1
       - name: Collect logs
         if: ${{ failure() }}
         run: docker logs $(docker ps -a | grep mirrord-agent | grep -v pause | head -n 1|  cut -d' ' -f1)
