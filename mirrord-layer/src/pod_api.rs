@@ -10,7 +10,7 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::config::LayerConfig;
 
@@ -22,15 +22,34 @@ struct RuntimeData {
 }
 
 impl RuntimeData {
-    async fn from_k8s(client: Client, pod_name: &str, pod_namespace: &str) -> Self {
+    async fn from_k8s(
+        client: Client,
+        pod_name: &str,
+        pod_namespace: &str,
+        container_name: &Option<String>,
+    ) -> Self {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await.unwrap();
         let node_name = &pod.spec.unwrap().node_name;
-        let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-        let container_info = container_statuses
-            .first()
-            .unwrap()
-            .container_id
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+        let container_info = if let Some(container_name) = container_name {
+            &container_statuses
+                .iter()
+                .find(|&status| &status.name == container_name)
+                .with_context(|| {
+                    format!(
+                        "no container named {} found in namespace={}, pod={}",
+                        &container_name, &pod_namespace, &pod_name
+                    )
+                })
+                .unwrap()
+                .container_id
+        } else {
+            info!("No container name specified, defaulting to first container found");
+            &container_statuses.first().unwrap().container_id
+        };
+
+        let container_info = container_info
             .as_ref()
             .unwrap()
             .split("://")
@@ -61,6 +80,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         image_pull_policy,
         impersonated_pod_name,
         impersonated_pod_namespace,
+        impersonated_container_name,
         ..
     } = config;
 
@@ -83,6 +103,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         client.clone(),
         &impersonated_pod_name,
         &impersonated_pod_namespace,
+        &impersonated_container_name,
     )
     .await;
 
