@@ -10,7 +10,7 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::config::LayerConfig;
 
@@ -31,15 +31,11 @@ impl RuntimeData {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await.unwrap();
         let node_name = &pod.spec.unwrap().node_name;
-        let container_statuses = pod.status.unwrap().container_statuses.unwrap();
-        let container_info_map = container_statuses
-            .into_iter()
-            .map(move |cs| (cs.name.clone(), cs))
-            .collect::<std::collections::HashMap<_, _>>();
-
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
-            &container_info_map
-                .get(container_name)
+            &container_statuses
+                .iter()
+                .find(|&status| &status.name == container_name)
                 .with_context(|| {
                     format!(
                         "no container named {} found in namespace={}, pod={}",
@@ -49,8 +45,8 @@ impl RuntimeData {
                 .unwrap()
                 .container_id
         } else {
-            warn!("No container name specified, defaulting to first container found");
-            &container_info_map.iter().next().unwrap().1.container_id
+            info!("No container name specified, defaulting to first container found");
+            &container_statuses.first().unwrap().container_id
         };
 
         let container_info = container_info
