@@ -58,6 +58,10 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
 
+    /// Select container name to impersonate. Default is first container.
+    #[clap(long, value_parser)]
+    pub impersonate_container_name: Option<String>,
+
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
     pub accept_invalid_certificates: bool,
