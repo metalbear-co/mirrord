@@ -201,9 +201,9 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
-        run: brew install virtualbox docker minikube
+        run: brew install hyperkit docker minikube
       - name: start minikube
-        run: minikube start --driver=virtualbox --container-runtime=docker
+        run: minikube start --driver=hyperkit --container-runtime=docker
       - name: download image
         uses: actions/download-artifact@v2
         with:
@@ -215,4 +215,4 @@ jobs:
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
-        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+        run: minikube docker-env; for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
