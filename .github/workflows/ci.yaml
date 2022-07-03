@@ -221,4 +221,4 @@ jobs:
         uses: lhotari/action-upterm@v1
       - name: Collect logs
         if: ${{ failure() }}
-        run: eval $(minikube -p minikube docker-env); docker ps -a; for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+        run: docker logs $(docker ps -a | grep mirrord-agent | grep -v pause | head -n 1|  cut -d' ' -f1)
