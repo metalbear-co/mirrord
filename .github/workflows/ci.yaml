@@ -216,6 +216,9 @@ jobs:
         run: minikube image load /tmp/test.tar
       - name: cargo test
         run: cargo test -p tests
+      - name: DEBUG
+        if: ${{ failure() }}
+        uses: lhotari/action-upterm@v1
       - name: Collect logs
         if: ${{ failure() }}
         run: eval $(minikube -p minikube docker-env); docker ps -a; for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
