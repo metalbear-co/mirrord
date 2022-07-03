@@ -87,7 +87,7 @@ struct TCPSession {
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
 
 fn is_new_connection(flags: u16) -> bool {
-    flags == TcpFlags::SYN
+    0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
 }
 
 fn is_closed_connection(flags: u16) -> bool {

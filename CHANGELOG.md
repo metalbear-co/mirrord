@@ -14,6 +14,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E: add macOS to E2E, support using minikube by env var.
 - E2E: Skip loading to docker before loading to minikube (load directly to minikube..)
 
+### Fixed
+- Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
+
 ## 2.3.1
 
 ### Changed
