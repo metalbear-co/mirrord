@@ -145,6 +145,8 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ubuntu-latest
+          cache-on-failure: true
+
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -193,7 +195,8 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ubuntu-latest
+          key: macos-latest
+          cache-on-failure: true
       - uses: actions/setup-node@v3
         with:
           node-version: 14
