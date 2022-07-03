@@ -199,6 +199,7 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
+        env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", "test");
         env.insert("RUST_LOG", "debug");
         let server = Command::new(path)
             .args(args.clone())

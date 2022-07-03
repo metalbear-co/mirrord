@@ -20,6 +20,9 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
     pub impersonated_pod_namespace: String,
 
+    #[envconfig(from = "MIRRORD_IMPERSONATED_CONTAINER_NAME")]
+    pub impersonated_container_name: Option<String>,
+
     #[envconfig(from = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
     pub accept_invalid_certificates: bool,
 
