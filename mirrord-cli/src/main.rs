@@ -89,10 +89,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
     }
 
-    if let Some(impersonate_container_name) = &args.impersonate_container_name {
+    if let Some(impersonated_container_name) = &args.impersonated_container_name {
         std::env::set_var(
             "MIRRORD_IMPERSONATED_CONTAINER_NAME",
-            impersonate_container_name,
+            impersonated_container_name,
         );
     }
 
