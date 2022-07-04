@@ -6,7 +6,5 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-- Extension provides quick select for setting impersonated container name (environment variable `MIRRORD_IMPERSONATED_CONTAINER_NAME`)
-
 ## 0.0.1 - 25/02/2022
 - Initial release
