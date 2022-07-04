@@ -242,6 +242,14 @@ async fn handle_hook_message(
                 codec_result
             );
         }
+        HookMessage::GetAddrInfoHook(hook) => {
+            trace!("HookMessage::GetAddrInfo");
+
+            let request = ClientMessage::GetAddrInfo(hook.0);
+            let codec_result = codec.send(request).await;
+
+            trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
+        }
     }
 }
 
@@ -353,6 +361,9 @@ async fn handle_daemon_message(
                     fail
                 ),
             }
+        }
+        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+            todo!()
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),

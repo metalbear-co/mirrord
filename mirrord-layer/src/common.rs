@@ -71,6 +71,9 @@ pub struct CloseFileHook {
     pub(crate) file_channel_tx: oneshot::Sender<CloseFileResponse>,
 }
 
+#[derive(Debug)]
+pub struct GetAddrInfoHook(pub String);
+
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub enum HookMessage {
@@ -81,4 +84,5 @@ pub enum HookMessage {
     SeekFileHook(SeekFileHook),
     WriteFileHook(WriteFileHook),
     CloseFileHook(CloseFileHook),
+    GetAddrInfoHook(GetAddrInfoHook),
 }

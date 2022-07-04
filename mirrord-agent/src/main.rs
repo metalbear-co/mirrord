@@ -25,7 +25,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod cli;
@@ -237,6 +237,12 @@ impl ClientConnectionHandler {
                 self.stream
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
+            }
+            ClientMessage::GetAddrInfo(hostname) => {
+                trace!("ClientMessage::GetAddrInfo hostname {:#?}", hostname);
+
+                let ips: Vec<std::net::IpAddr> = dns_lookup::lookup_host(&hostname).unwrap();
+                trace!("ClientMessage::GetAddrInfo ips {:?}", ips);
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,

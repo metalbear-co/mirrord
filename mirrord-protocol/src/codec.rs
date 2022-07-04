@@ -13,6 +13,8 @@ use crate::{
     ResponseError,
 };
 
+pub struct AddrInfo {}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
@@ -139,6 +141,7 @@ pub enum ClientMessage {
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
+    GetAddrInfo(String),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -174,6 +177,9 @@ pub enum FileResponse {
     Close(Result<CloseFileResponse, ResponseError>),
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoResponse(pub Result<Vec<std::net::IpAddr>, ResponseError>);
+
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
@@ -183,6 +189,7 @@ pub enum DaemonMessage {
     FileResponse(FileResponse),
     Pong,
     GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
+    GetAddrInfoResponse(GetAddrInfoResponse),
 }
 
 pub struct ClientCodec {

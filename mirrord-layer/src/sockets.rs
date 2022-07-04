@@ -2,6 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
+    ffi::{CStr, CString},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
@@ -9,13 +10,15 @@ use std::{
 
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
-use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::Port;
+use libc::{c_char, c_int, sockaddr, socklen_t};
+use mirrord_protocol::{DaemonMessage, GetAddrInfoResponse, Port};
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, warn};
+use tokio::sync::oneshot;
+use tracing::{debug, error, trace, warn};
 
 use crate::{
-    common::HookMessage,
+    common::{GetAddrInfoHook, HookMessage},
+    file::ops::blocking_send_hook_message,
     macros::{hook, try_hook},
     tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
@@ -558,6 +561,58 @@ unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_
     dup(oldfd, dup3_fd)
 }
 
+unsafe extern "C" fn getaddrinfo_detour(
+    raw_hostname: *const c_char,
+    raw_servname: *const c_char,
+    raw_hints: *const libc::addrinfo,
+    result: *mut *mut libc::addrinfo,
+) -> c_int {
+    trace!(
+        "getaddrinfo_detour -> raw_hostname {:#?} | raw_servname {:#?} | raw_hints {:#?}",
+        raw_hostname,
+        raw_servname,
+        *raw_hints,
+    );
+
+    let hostname: String = match CStr::from_ptr(raw_hostname).to_str().map_err(|fail| {
+        error!(
+            "Failed converting raw_hostname from `c_char` with {:#?}",
+            fail
+        );
+
+        libc::EAI_MEMORY
+    }) {
+        Ok(hostname) => hostname.into(),
+        Err(fail) => return fail,
+    };
+
+    unimplemented!();
+
+    let servname: String = match CStr::from_ptr(raw_servname).to_str().map_err(|fail| {
+        error!(
+            "Failed converting raw_servname from `c_char` with {:#?}",
+            fail
+        );
+
+        libc::EAI_MEMORY
+    }) {
+        Ok(hostname) => hostname.into(),
+        Err(fail) => return fail,
+    };
+
+    // TODO(alex) [high] 2022-07-01: Finish this implementation, first off try it out to see if
+    // it works. Then replace this tuple struct with a proper struct that contains more data
+    // (possibly even send the AddrInfo struct to -agent).
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel::<GetAddrInfoResponse>();
+    let hook = GetAddrInfoHook(hostname);
+
+    blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook)).unwrap();
+
+    let GetAddrInfoResponse(ips) = hook_channel_rx.blocking_recv().unwrap();
+
+    todo!()
+}
+
 pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
@@ -575,4 +630,5 @@ pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
         try_hook!(interceptor, "dup3", dup3_detour);
     }
     try_hook!(interceptor, "accept", accept_detour);
+    hook!(interceptor, "getaddrinfo", getaddrinfo_detour);
 }
