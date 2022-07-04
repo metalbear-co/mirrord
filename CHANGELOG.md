@@ -6,6 +6,17 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
+- mirrord-layer provides `MIRRORD_IMPERSONATED_CONTAINER_NAME` environment variable to specify container name to impersonate. mirrord-cli accepts argument to set variable.
+
+### Changed
+- Refactor e2e, enable only Node HTTP mirroring test.
+- E2E: add macOS to E2E, support using minikube by env var.
+- E2E: Skip loading to docker before loading to minikube (load directly to minikube..)
+
+### Fixed
+- Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
 
 ## 2.3.1
 

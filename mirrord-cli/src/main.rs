@@ -89,6 +89,13 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
     }
 
+    if let Some(impersonate_container_name) = &args.impersonate_container_name {
+        std::env::set_var(
+            "MIRRORD_IMPERSONATED_CONTAINER_NAME",
+            impersonate_container_name,
+        );
+    }
+
     if let Some(log_level) = &args.agent_log_level {
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
     }
@@ -123,7 +130,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
 
-    let library_path = extract_library(None)?;
+    let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     let mut binary_args = args.binary_args.clone();
