@@ -136,7 +136,6 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
-		const containerName = globalContext.workspaceState.get<string>('impersonatedContainerName');
 		// Get pods from kubectl and let user select one to mirror
 		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
 		let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
@@ -156,6 +155,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 					libraryPath = globalContext.extensionPath;
 				}
 				let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
+				globalContext.workspaceState.update('impersonatedPodName', podName);
 				config.env = {
 					...config.env, ...{
 						// eslint-disable-next-line @typescript-eslint/naming-convention
@@ -163,27 +163,38 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE': podNamespace,
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_IMPERSONATED_CONTAINER_NAME': containerName,
-						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false')
 					}
 				};
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
-
-				// let user select container name if there are multiple containers in the pod
-				const pod = pods.body.items.find(p => p.metadata!.name === podName!);
-				const containerNames = pod!.spec!.containers.map(c => c.name!);
-				if (containerNames.length > 0) {
-					vscode.window.showQuickPick(containerNames, { placeHolder: 'Select containerName' }).then(containerName => {
-						globalContext.workspaceState.update('impersonatedContainerName', containerName);
-					});
-				}
 				return resolve(config);
 			});
 		});
 
+		// let user select container name if there are multiple containers in the pod
+		const podName = globalContext.workspaceState.get('impersonatedPodName');
+		const pod = pods.body.items.find(p => p.metadata!.name === podName!);
+		const containerNames = pod!.spec!.containers.map(c => c.name!);
+		if (containerNames.length > 1) {
+			return await vscode.window.showQuickPick(containerNames, { placeHolder: 'Select containerName' }).then(async containerName => {
+				return new Promise(resolve => {
+					globalContext.workspaceState.update('impersonatedContainerName', containerName);
+					config.env = {
+						...config.env, ...{
+							// eslint-disable-next-line @typescript-eslint/naming-convention
+							'MIRRORD_IMPERSONATED_CONTAINER_NAME': containerName,
+						}
+					};
+					return resolve(config);
+				});
+			});
+		} else {
+			return new Promise(resolve => {
+				return resolve(config);
+			});
+		}
 	}
 }
 
