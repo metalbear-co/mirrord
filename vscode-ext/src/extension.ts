@@ -1,3 +1,4 @@
+import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
 import * as vscode from 'vscode';
 
 const semver = require('semver');
@@ -14,7 +15,7 @@ const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-let k8sApi: any;
+let k8sApi: CoreV1Api;
 
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
@@ -28,13 +29,16 @@ async function changeSettings() {
 			return;
 		}
 
-		if (setting.startsWith('Toggle file')){
+		if (setting.startsWith('Toggle file')) {
 			globalContext.workspaceState.update('fileOps', !fileOps);
 		}
 
 		if (setting.startsWith('Change namespace')) {
-			let namespaces = await k8sApi.listNamespace();
-			let namespaceNames = namespaces.body.items.map((namespace: { metadata: { name: any; }; }) => { return namespace.metadata.name; });
+			const namespaces: {
+				response: any;
+				body: V1NamespaceList;
+			} = await k8sApi.listNamespace();
+			const namespaceNames = namespaces.body.items.map(namespace => namespace.metadata!.name!);
 			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
 				if (namespaceName === undefined) {
 					return;
@@ -45,7 +49,6 @@ async function changeSettings() {
 					globalContext.workspaceState.update('impersonatedPodNamespace', namespaceName);
 				}
 			});
-
 		}
 	});
 }
@@ -133,11 +136,12 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
+		const containerName = globalContext.workspaceState.get<string>('impersonatedContainerName');
 		// Get pods from kubectl and let user select one to mirror
-		let pods = await k8sApi.listNamespacedPod(podNamespace);
-		let podNames = pods.body.items.map((pod: { metadata: { name: any; }; }) => { return pod.metadata.name; });
+		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
+		let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
 
-		return await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+		await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
 			return new Promise(resolve => {
 				console.log(config);
 				// Get pods from kubectl and let user select one to mirror
@@ -159,12 +163,23 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE': podNamespace,
 						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_IMPERSONATED_CONTAINER_NAME': containerName,
+						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false')
 					}
 				};
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
+
+				// let user select container name if there are multiple containers in the pod
+				const pod = pods.body.items.find(p => p.metadata!.name === podName!);
+				const containerNames = pod!.spec!.containers.map(c => c.name!);
+				if (containerNames.length > 0) {
+					vscode.window.showQuickPick(containerNames, { placeHolder: 'Select containerName' }).then(containerName => {
+						globalContext.workspaceState.update('impersonatedContainerName', containerName);
+					});
+				}
 				return resolve(config);
 			});
 		});

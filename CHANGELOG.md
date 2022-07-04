@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
 - mirrord-layer provides `MIRRORD_IMPERSONATED_CONTAINER_NAME` environment variable to specify container name to impersonate. mirrord-cli accepts argument to set variable.
+- vscode-ext provides quick-select for setting `MIRRORD_IMPERSONATED_CONTAINER_NAME`
 
 ### Changed
 - Refactor e2e, enable only Node HTTP mirroring test.

@@ -60,7 +60,7 @@ pub(super) struct ExecArgs {
 
     /// Select container name to impersonate. Default is first container.
     #[clap(long, value_parser)]
-    pub impersonate_container_name: Option<String>,
+    pub impersonated_container_name: Option<String>,
 
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
