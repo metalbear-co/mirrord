@@ -13,8 +13,6 @@ use crate::{
     ResponseError,
 };
 
-pub struct AddrInfo {}
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
@@ -24,6 +22,14 @@ pub struct LogMessage {
 pub struct ReadFileRequest {
     pub fd: usize,
     pub buffer_size: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct AddrInfoHint {
+    pub ai_family: i32,
+    pub ai_socktype: i32,
+    pub ai_protocol: i32,
+    pub ai_flags: i32,
 }
 
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
@@ -133,6 +139,13 @@ pub enum FileRequest {
     Close(CloseFileRequest),
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoRequest {
+    pub node: Option<String>,
+    pub service: Option<String>,
+    pub hints: Option<AddrInfoHint>,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -141,7 +154,7 @@ pub enum ClientMessage {
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
-    GetAddrInfo(String),
+    GetAddrInfoRequest(GetAddrInfoRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

@@ -32,10 +32,15 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
+        "RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-phrpl",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -46,15 +51,22 @@
       "program": "${workspaceFolder}/target/debug/sample-rust",
       "args": [],
       "cwd": "${workspaceFolder}",
-      "sourceMap": {},
+      "sourceMap": {
+        "/rustc/bb8c2f41174caceec00c28bc6c5c20ae9f9a175c": "/home/lanedraex/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust",
+      },
       "sourceLanguages": ["rust"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
+        "RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-phrpl",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
         "RUST_BACKTRACE": "short"
       }
     }

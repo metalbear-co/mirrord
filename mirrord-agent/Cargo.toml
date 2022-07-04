@@ -36,6 +36,7 @@ num-traits = "0.2"
 bollard = "0.13"
 tokio-util = "0.7"
 dns-lookup = "1"
+libc = "0.2"
 
 [dev-dependencies]
 test_bin = "0.4"

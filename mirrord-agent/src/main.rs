@@ -3,8 +3,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    ffi::{CStr, CString},
+    mem,
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    ptr,
 };
 
 use actix_codec::Framed;
@@ -15,8 +18,8 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, ClientMessage, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest,
-    ResponseError,
+    tcp::LayerTcp, AddrInfoHint, ClientMessage, DaemonCodec, DaemonMessage, FileError,
+    GetAddrInfoRequest, GetEnvVarsRequest, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -40,6 +43,45 @@ use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use util::{ClientID, IndexAllocator};
 
 use crate::runtime::get_container_pid;
+
+trait AddrInfoHintExt {
+    fn into_raw(self) -> libc::addrinfo;
+    fn into_lookup(self) -> dns_lookup::AddrInfoHints;
+}
+
+impl AddrInfoHintExt for AddrInfoHint {
+    fn into_raw(self) -> libc::addrinfo {
+        // unsafe {
+        //     libc::addrinfo {
+        //         ai_flags: self.ai_flags,
+        //         ai_family: self.ai_family,
+        //         ai_socktype: self.ai_socktype,
+        //         ai_protocol: self.ai_protocol,
+        //         ai_addrlen: 0,
+        //         ai_addr: mem::zeroed(),
+        //         ai_canonname: mem::zeroed(),
+        //         ai_next: mem::zeroed(),
+        //     }
+        // }
+        let mut addrinfo: libc::addrinfo = unsafe { mem::zeroed() };
+
+        addrinfo.ai_flags = self.ai_flags;
+        addrinfo.ai_family = self.ai_family;
+        addrinfo.ai_socktype = self.ai_socktype;
+        addrinfo.ai_protocol = self.ai_protocol;
+
+        addrinfo
+    }
+
+    fn into_lookup(self) -> dns_lookup::AddrInfoHints {
+        dns_lookup::AddrInfoHints {
+            socktype: self.ai_socktype,
+            protocol: self.ai_protocol,
+            address: self.ai_family,
+            flags: self.ai_flags,
+        }
+    }
+}
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -238,11 +280,52 @@ impl ClientConnectionHandler {
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
             }
-            ClientMessage::GetAddrInfo(hostname) => {
-                trace!("ClientMessage::GetAddrInfo hostname {:#?}", hostname);
+            ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                node,
+                service,
+                hints,
+            }) => {
+                trace!(
+                    "ClientMessage::GetAddrInfo node {:#?} | service {:#?} | hints {:#?}",
+                    node,
+                    service,
+                    hints
+                );
 
-                let ips: Vec<std::net::IpAddr> = dns_lookup::lookup_host(&hostname).unwrap();
-                trace!("ClientMessage::GetAddrInfo ips {:?}", ips);
+                let dns_lookup_result = dns_lookup::getaddrinfo(
+                    node.as_deref(),
+                    service.as_deref(),
+                    hints.map(|h| h.into_lookup()),
+                )
+                .unwrap();
+
+                for lookup in dns_lookup_result {
+                    trace!("ClientMessage::GetAddrInfo dns_lookup_result {:#?}", lookup);
+                }
+
+                unsafe {
+                    let raw_node = node.map(CString::new).transpose().unwrap();
+                    let raw_service = service.map(CString::new).transpose().unwrap();
+                    let raw_hints = hints.map(AddrInfoHint::into_raw);
+
+                    let mut out_addrinfo = ptr::null_mut();
+
+                    let raw_node = raw_node.map(|n| n.as_ptr()).unwrap_or_else(|| ptr::null());
+                    let raw_service = raw_service
+                        .map(|s| s.as_ptr())
+                        .unwrap_or_else(|| ptr::null());
+                    let raw_hints: *const libc::addrinfo = &raw_hints.unwrap();
+
+                    // TODO(alex) [high] 2022-07-04: `EAI_SOCKTYPE` (`-7`) error is being returned.
+                    // `EAI_NONAME` (`-2`) error is being returned now.
+                    let getaddrinfo_result =
+                        libc::getaddrinfo(raw_node, raw_service, raw_hints, &mut out_addrinfo);
+
+                    trace!(
+                        "ClientMessage::GetAddrInfo getaddrinfo_result {:#?}",
+                        getaddrinfo_result
+                    );
+                };
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,

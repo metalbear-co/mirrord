@@ -1,8 +1,8 @@
 use std::{io::SeekFrom, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    AddrInfoHint, CloseFileResponse, GetAddrInfoResponse, OpenFileResponse, OpenOptionsInternal,
+    ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 
@@ -72,7 +72,12 @@ pub struct CloseFileHook {
 }
 
 #[derive(Debug)]
-pub struct GetAddrInfoHook(pub String);
+pub struct GetAddrInfoHook {
+    pub(crate) node: Option<String>,
+    pub(crate) service: Option<String>,
+    pub(crate) hints: Option<AddrInfoHint>,
+    pub(crate) hook_channel_tx: oneshot::Sender<GetAddrInfoResponse>,
+}
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]

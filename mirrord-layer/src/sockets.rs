@@ -11,7 +11,7 @@ use std::{
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_protocol::{DaemonMessage, GetAddrInfoResponse, Port};
+use mirrord_protocol::{AddrInfoHint, DaemonMessage, GetAddrInfoResponse, Port};
 use os_socketaddr::OsSocketAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
@@ -561,50 +561,80 @@ unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_
     dup(oldfd, dup3_fd)
 }
 
+pub(crate) trait AddrInfoHintExt {
+    fn from_raw(raw: libc::addrinfo) -> Self;
+}
+
+impl AddrInfoHintExt for AddrInfoHint {
+    fn from_raw(raw: libc::addrinfo) -> Self {
+        Self {
+            ai_family: raw.ai_family,
+            ai_socktype: raw.ai_socktype,
+            ai_protocol: raw.ai_protocol,
+            ai_flags: raw.ai_flags,
+        }
+    }
+}
+
+/// # WARNING:
+/// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
 unsafe extern "C" fn getaddrinfo_detour(
-    raw_hostname: *const c_char,
-    raw_servname: *const c_char,
+    raw_node: *const c_char,
+    raw_service: *const c_char,
     raw_hints: *const libc::addrinfo,
     result: *mut *mut libc::addrinfo,
 ) -> c_int {
     trace!(
-        "getaddrinfo_detour -> raw_hostname {:#?} | raw_servname {:#?} | raw_hints {:#?}",
-        raw_hostname,
-        raw_servname,
+        "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?}",
+        raw_node,
+        raw_service,
         *raw_hints,
     );
 
-    let hostname: String = match CStr::from_ptr(raw_hostname).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_hostname from `c_char` with {:#?}",
-            fail
-        );
+    let node = match (raw_node.is_null() == false)
+        .then(|| CStr::from_ptr(raw_node).to_str())
+        .transpose()
+        .map_err(|fail| {
+            error!("Failed converting raw_node from `c_char` with {:#?}", fail);
 
-        libc::EAI_MEMORY
-    }) {
-        Ok(hostname) => hostname.into(),
+            libc::EAI_MEMORY
+        }) {
+        Ok(node) => node.map(String::from),
         Err(fail) => return fail,
     };
 
-    unimplemented!();
+    let service = match (raw_service.is_null() == false)
+        .then(|| CStr::from_ptr(raw_service).to_str())
+        .transpose()
+        .map_err(|fail| {
+            error!(
+                "Failed converting raw_service from `c_char` with {:#?}",
+                fail
+            );
 
-    let servname: String = match CStr::from_ptr(raw_servname).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_servname from `c_char` with {:#?}",
-            fail
-        );
-
-        libc::EAI_MEMORY
-    }) {
-        Ok(hostname) => hostname.into(),
+            libc::EAI_MEMORY
+        }) {
+        Ok(service) => service.map(String::from),
         Err(fail) => return fail,
     };
+
+    let hints = (raw_hints.is_null() == false).then(|| AddrInfoHint::from_raw(*raw_hints));
+
+    debug!(
+        "getaddrinfo_detour -> node {:#?} | service {:#?} | hints {:#?}",
+        node, service, hints
+    );
 
     // TODO(alex) [high] 2022-07-01: Finish this implementation, first off try it out to see if
     // it works. Then replace this tuple struct with a proper struct that contains more data
     // (possibly even send the AddrInfo struct to -agent).
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel::<GetAddrInfoResponse>();
-    let hook = GetAddrInfoHook(hostname);
+    let hook = GetAddrInfoHook {
+        node,
+        service,
+        hints,
+        hook_channel_tx,
+    };
 
     blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook)).unwrap();
 

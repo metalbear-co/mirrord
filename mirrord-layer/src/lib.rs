@@ -10,10 +10,12 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+    CloseFileHook, GetAddrInfoHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
+    WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
+use error::LayerError;
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -21,9 +23,9 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
-    FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    FileRequest, FileResponse, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest,
+    OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tcp::TcpHandler;
@@ -96,6 +98,7 @@ async fn handle_hook_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -242,16 +245,28 @@ async fn handle_hook_message(
                 codec_result
             );
         }
-        HookMessage::GetAddrInfoHook(hook) => {
+        HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+            node,
+            service,
+            hints,
+            hook_channel_tx,
+        }) => {
             trace!("HookMessage::GetAddrInfo");
 
-            let request = ClientMessage::GetAddrInfo(hook.0);
+            getaddrinfo_handler.lock().unwrap().push(hook_channel_tx);
+
+            let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                node,
+                service,
+                hints,
+            });
             let codec_result = codec.send(request).await;
 
             trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
         }
     }
 }
+
 
 #[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
@@ -263,6 +278,7 @@ async fn handle_daemon_message(
     seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
     ping: &mut bool,
 ) {
     match daemon_message {
@@ -363,7 +379,15 @@ async fn handle_daemon_message(
             }
         }
         DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
-            todo!()
+            trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
+
+            getaddrinfo_handler
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .send(get_addr_info)
+                .unwrap();
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -394,6 +418,7 @@ async fn poll_agent(
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
+    let getaddrinfo_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
 
@@ -432,26 +457,30 @@ async fn poll_agent(
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(),
-                &mut tcp_mirror_handler,
-                &mut codec,
-                &open_file_handler,
-                &read_file_handler,
-                &seek_file_handler,
-                &write_file_handler,
-                &close_file_handler,
-            ).await;
-            }
-            daemon_message = codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    handle_daemon_message(message,
+                handle_hook_message(
+                    hook_message.unwrap(),
                     &mut tcp_mirror_handler,
+                    &mut codec,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
-                    &mut ping,
+                    &getaddrinfo_handler,
+                ).await;
+            }
+            daemon_message = codec.next() => {
+                if let Some(Ok(message)) = daemon_message {
+                    handle_daemon_message(
+                        message,
+                        &mut tcp_mirror_handler,
+                        &open_file_handler,
+                        &read_file_handler,
+                        &seek_file_handler,
+                        &write_file_handler,
+                        &close_file_handler,
+                        &getaddrinfo_handler,
+                        &mut ping,
                     ).await;
                 } else {
                     error!("agent disconnected");
