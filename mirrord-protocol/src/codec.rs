@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
+    net::SocketAddr,
     path::PathBuf,
 };
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
+use dns_lookup::AddrInfo;
 
 use crate::{
     tcp::{DaemonTcp, LayerTcp},
@@ -24,6 +26,7 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
+// TODO: Should probably live in a separate place (maybe even a separate `util` crate).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct AddrInfoHint {
     pub ai_family: i32,
@@ -34,6 +37,8 @@ pub struct AddrInfoHint {
 
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
 // specific thing).
+//
+// TODO: Should probably live in a separate place (same reasoning as `AddrInfoHint`).
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
 pub struct OpenOptionsInternal {
     pub read: bool,
@@ -191,7 +196,61 @@ pub enum FileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoResponse(pub Result<Vec<std::net::IpAddr>, ResponseError>);
+pub struct AddrInfoInternal {
+    socktype: i32,
+    protocol: i32,
+    address: i32,
+    sockaddr: SocketAddr,
+    canonname: Option<String>,
+    flags: i32,
+}
+
+impl From<AddrInfoInternal> for dns_lookup::AddrInfo {
+    fn from(internal: AddrInfoInternal) -> Self {
+        let AddrInfoInternal {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = internal;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
+}
+
+impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
+    fn from(addrinfo: dns_lookup::AddrInfo) -> Self {
+        let dns_lookup::AddrInfo {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = addrinfo;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoResponse(pub Vec<Result<AddrInfoInternal, ResponseError>>);
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

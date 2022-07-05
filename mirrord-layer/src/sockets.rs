@@ -5,9 +5,11 @@ use std::{
     ffi::{CStr, CString},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    ptr,
     sync::{Arc, LazyLock, Mutex},
 };
 
+use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
@@ -582,7 +584,7 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
     raw_service: *const c_char,
     raw_hints: *const libc::addrinfo,
-    result: *mut *mut libc::addrinfo,
+    out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
     trace!(
         "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?}",
@@ -638,7 +640,54 @@ unsafe extern "C" fn getaddrinfo_detour(
 
     blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook)).unwrap();
 
-    let GetAddrInfoResponse(ips) = hook_channel_rx.blocking_recv().unwrap();
+    let GetAddrInfoResponse(addr_info_list) = hook_channel_rx.blocking_recv().unwrap();
+
+    // TODO(alex) [high] 2022-07-05: This "works" (crashes with invalid pointer), and to fix it
+    // the pointer allocation must outlive this whole mess. Everything here is pretty ad-hoc,
+    // refactoring into some outer functions and so on is a must.
+    for result in addr_info_list
+        .into_iter()
+        .map(|addr_info_result| addr_info_result.map(AddrInfo::from))
+    {
+        match result {
+            Ok(addr_info) => {
+                trace!("Have a proper addr_info {:#?}", addr_info);
+                let AddrInfo {
+                    socktype,
+                    protocol,
+                    address,
+                    sockaddr,
+                    canonname,
+                    flags,
+                } = addr_info;
+
+                let sockaddr = socket2::SockAddr::from(sockaddr);
+                let canonname = canonname.map(CString::new).transpose().unwrap();
+                let name = canonname
+                    .as_ref()
+                    .map_or_else(|| ptr::null(), |s| s.as_ptr());
+
+                let mut raw_addr_info = libc::addrinfo {
+                    ai_flags: flags,
+                    ai_family: address,
+                    ai_socktype: socktype,
+                    ai_protocol: protocol,
+                    ai_addrlen: sockaddr.len(),
+                    ai_addr: sockaddr.as_ptr() as *mut _,
+                    ai_canonname: name as *mut _,
+                    ai_next: ptr::null_mut(),
+                };
+
+                let mut x: *mut _ = &mut raw_addr_info;
+                let x: *mut *mut _ = &mut x;
+
+                *out_addr_info = *x;
+
+                return 0;
+            }
+            Err(fail) => error!("Have an error in addrinfo {:#?}", fail),
+        }
+    }
 
     todo!()
 }

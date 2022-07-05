@@ -1385,7 +1385,6 @@ dependencies = [
  "containerd-client",
  "dns-lookup",
  "futures",
- "libc",
  "mirrord-protocol",
  "nix",
  "num-traits",
@@ -1412,6 +1411,7 @@ dependencies = [
  "bytes",
  "clap 3.2.8",
  "ctor",
+ "dns-lookup",
  "envconfig",
  "errno",
  "frida-gum",
@@ -1428,6 +1428,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "serde_json",
+ "socket2",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1442,6 +1443,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "dns-lookup",
  "thiserror",
 ]
 

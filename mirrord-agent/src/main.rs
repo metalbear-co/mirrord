@@ -19,7 +19,7 @@ use futures::{
 };
 use mirrord_protocol::{
     tcp::LayerTcp, AddrInfoHint, ClientMessage, DaemonCodec, DaemonMessage, FileError,
-    GetAddrInfoRequest, GetEnvVarsRequest, ResponseError,
+    GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -45,34 +45,10 @@ use util::{ClientID, IndexAllocator};
 use crate::runtime::get_container_pid;
 
 trait AddrInfoHintExt {
-    fn into_raw(self) -> libc::addrinfo;
     fn into_lookup(self) -> dns_lookup::AddrInfoHints;
 }
 
 impl AddrInfoHintExt for AddrInfoHint {
-    fn into_raw(self) -> libc::addrinfo {
-        // unsafe {
-        //     libc::addrinfo {
-        //         ai_flags: self.ai_flags,
-        //         ai_family: self.ai_family,
-        //         ai_socktype: self.ai_socktype,
-        //         ai_protocol: self.ai_protocol,
-        //         ai_addrlen: 0,
-        //         ai_addr: mem::zeroed(),
-        //         ai_canonname: mem::zeroed(),
-        //         ai_next: mem::zeroed(),
-        //     }
-        // }
-        let mut addrinfo: libc::addrinfo = unsafe { mem::zeroed() };
-
-        addrinfo.ai_flags = self.ai_flags;
-        addrinfo.ai_family = self.ai_family;
-        addrinfo.ai_socktype = self.ai_socktype;
-        addrinfo.ai_protocol = self.ai_protocol;
-
-        addrinfo
-    }
-
     fn into_lookup(self) -> dns_lookup::AddrInfoHints {
         dns_lookup::AddrInfoHints {
             socktype: self.ai_socktype,
@@ -292,40 +268,26 @@ impl ClientConnectionHandler {
                     hints
                 );
 
-                let dns_lookup_result = dns_lookup::getaddrinfo(
+                let lookup_result = dns_lookup::getaddrinfo(
                     node.as_deref(),
                     service.as_deref(),
                     hints.map(|h| h.into_lookup()),
                 )
-                .unwrap();
+                .map(|addrinfo_iter| {
+                    addrinfo_iter
+                        .map(|result| match result {
+                            Ok(addrinfo) => Ok(addrinfo.into()),
+                            Err(fail) => Err(ResponseError::NotFound),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|fail| AgentError::Lookup(fail))?;
 
-                for lookup in dns_lookup_result {
-                    trace!("ClientMessage::GetAddrInfo dns_lookup_result {:#?}", lookup);
-                }
+                let response = GetAddrInfoResponse(lookup_result);
 
-                unsafe {
-                    let raw_node = node.map(CString::new).transpose().unwrap();
-                    let raw_service = service.map(CString::new).transpose().unwrap();
-                    let raw_hints = hints.map(AddrInfoHint::into_raw);
-
-                    let mut out_addrinfo = ptr::null_mut();
-
-                    let raw_node = raw_node.map(|n| n.as_ptr()).unwrap_or_else(|| ptr::null());
-                    let raw_service = raw_service
-                        .map(|s| s.as_ptr())
-                        .unwrap_or_else(|| ptr::null());
-                    let raw_hints: *const libc::addrinfo = &raw_hints.unwrap();
-
-                    // TODO(alex) [high] 2022-07-04: `EAI_SOCKTYPE` (`-7`) error is being returned.
-                    // `EAI_NONAME` (`-2`) error is being returned now.
-                    let getaddrinfo_result =
-                        libc::getaddrinfo(raw_node, raw_service, raw_hints, &mut out_addrinfo);
-
-                    trace!(
-                        "ClientMessage::GetAddrInfo getaddrinfo_result {:#?}",
-                        getaddrinfo_result
-                    );
-                };
+                self.stream
+                    .send(DaemonMessage::GetAddrInfoResponse(response))
+                    .await?
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
