@@ -23,8 +23,8 @@ use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
     FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest,
+    SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use sockets::SOCKETS;
 use tcp::TcpHandler;
@@ -92,11 +92,11 @@ async fn handle_hook_message(
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -251,11 +251,11 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {
@@ -271,7 +271,7 @@ async fn handle_daemon_message(
                 .lock()?
                 .pop()
                 .ok_or(LayerError::SendErrorFileResponse)?
-                .send(open_file?)
+                .send(open_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
 
             Ok(())
@@ -282,7 +282,7 @@ async fn handle_daemon_message(
                 .inspect(|success| {
                     debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
                 })
-                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail))?;
+                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
             read_file_handler
                 .lock()?
@@ -299,7 +299,7 @@ async fn handle_daemon_message(
                 .lock()?
                 .pop()
                 .ok_or(LayerError::SendErrorFileResponse)?
-                .send(seek_file?)
+                .send(seek_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
             Ok(())
         }
@@ -310,7 +310,7 @@ async fn handle_daemon_message(
                 .lock()?
                 .pop()
                 .ok_or(LayerError::SendErrorFileResponse)?
-                .send(write_file?)
+                .send(write_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
             Ok(())
         }
@@ -321,7 +321,7 @@ async fn handle_daemon_message(
                 .lock()?
                 .pop()
                 .ok_or(LayerError::SendErrorFileResponse)?
-                .send(close_file?)
+                .send(close_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
             Ok(())
         }
