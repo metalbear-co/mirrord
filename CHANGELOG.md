@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
+- `fcntl` error on macOS [#184](https://github.com/metalbear-co/mirrord/issues/184) by a workaround.
 
 ## 2.3.1
 
