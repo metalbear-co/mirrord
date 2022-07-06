@@ -39,7 +39,8 @@ class FileOpsTest(unittest.TestCase):
         dir = os.open(
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
-        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
+        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK |
+                       os.O_CLOEXEC, dir_fd=dir)
         self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)

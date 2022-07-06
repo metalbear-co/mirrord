@@ -1,6 +1,6 @@
 use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
 
-use mirrord_protocol::tcp::LayerTcp;
+use mirrord_protocol::{tcp::LayerTcp, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
@@ -22,6 +22,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
     SendErrorLayerTcp(#[from] SendError<LayerTcp>),
+
+    #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
+    SendErrorFileResponse,
 
     #[error("mirrord-layer: Receiver failed with `{0}`!")]
     RecvError(#[from] RecvError),
@@ -52,4 +55,20 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
+
+    #[error("mirrord-layer: Failed to `Lock` resource!")]
+    LockError,
+
+    #[error("mirrord-layer: Failed while getting a response!")]
+    ResponseError(#[from] ResponseError),
+
+    #[error("mirrord-layer: Unmatched pong!")]
+    UnmatchedPong,
+}
+
+// Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
+impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for LayerError {
+    fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
+        LayerError::LockError
+    }
 }

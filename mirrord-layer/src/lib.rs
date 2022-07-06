@@ -14,6 +14,7 @@ use common::{
 };
 use ctor::ctor;
 use envconfig::Envconfig;
+use error::LayerError;
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -256,82 +257,82 @@ async fn handle_daemon_message(
     write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
     close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
     ping: &mut bool,
-) {
+) -> Result<(), LayerError> {
     match daemon_message {
         DaemonMessage::Tcp(message) => {
-            tcp_mirror_handler
-                .handle_daemon_message(message)
-                .await
-                .unwrap();
+            tcp_mirror_handler.handle_daemon_message(message).await?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
             debug!("file handler = {:#?}", open_file_handler);
+
             open_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(open_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(open_file?)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Read(read_file)) => {
             // The debug message is too big if we just log it directly.
-            let _ = read_file
-                .as_ref()
+            let file_response = read_file
                 .inspect(|success| {
                     debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
                 })
-                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail))?;
 
             read_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(read_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(file_response)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
             debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
 
             seek_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(seek_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(seek_file?)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
             debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
 
             write_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(write_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(write_file?)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
             debug!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
 
             close_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(close_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(close_file?)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::Pong => {
             if *ping {
                 *ping = false;
                 trace!("Daemon sent pong!");
             } else {
-                panic!("Daemon: unmatched pong!");
+                Err(LayerError::UnmatchedPong)?;
             }
+            Ok(())
         }
         DaemonMessage::GetEnvVarsResponse(remote_env_vars) => {
             debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
@@ -353,6 +354,7 @@ async fn handle_daemon_message(
                     fail
                 ),
             }
+            Ok(())
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -433,7 +435,7 @@ async fn poll_agent(
             }
             daemon_message = codec.next() => {
                 if let Some(Ok(message)) = daemon_message {
-                    handle_daemon_message(message,
+                    if let Err(err) = handle_daemon_message(message,
                     &mut tcp_mirror_handler,
                     &open_file_handler,
                     &read_file_handler,
@@ -441,7 +443,10 @@ async fn poll_agent(
                     &write_file_handler,
                     &close_file_handler,
                     &mut ping,
-                    ).await;
+                    ).await {
+                        error!("Error handling daemon message: {:?}", err);
+                        break;
+                    }
                 } else {
                     error!("agent disconnected");
                     break;
