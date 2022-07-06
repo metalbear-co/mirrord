@@ -333,26 +333,8 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
-        DaemonMessage::GetEnvVarsResponse(remote_env_vars) => {
-            debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
-
-            match remote_env_vars {
-                Ok(remote_env_vars) => {
-                    for (key, value) in remote_env_vars.into_iter() {
-                        debug!(
-                            "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
-                            key, value
-                        );
-
-                        std::env::set_var(&key, &value);
-                        debug_assert_eq!(std::env::var(key), Ok(value));
-                    }
-                }
-                Err(fail) => error!(
-                    "Loading remote environment variables failed with {:#?}",
-                    fail
-                ),
-            }
+        DaemonMessage::GetEnvVarsResponse(_) => {
+            panic!("We get env vars only on initialization right now, shouldn't happen")
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -465,6 +447,33 @@ async fn start_layer_thread(
                 codec_result
             );
         }
+    }
+
+    if let Some(Ok(DaemonMessage::GetEnvVarsResponse(remote_env_vars))) = codec.next().await {
+        debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+
+        match remote_env_vars {
+            Ok(remote_env_vars) => {
+                for (key, value) in remote_env_vars.into_iter() {
+                    debug!(
+                        "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                        key, value
+                    );
+
+                    std::env::set_var(&key, &value);
+                    debug_assert_eq!(std::env::var(key), Ok(value));
+                }
+            }
+            Err(fail) => {
+                error!(
+                    "Loading remote environment variables failed with {:#?}",
+                    fail
+                );
+                panic!("invalid environment variables")
+            }
+        }
+    } else {
+        panic!("unexpected response - expected env vars response");
     }
     let _ = tokio::spawn(thread_loop(receiver, codec));
 }
