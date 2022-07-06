@@ -157,7 +157,9 @@ mod tests {
             args: Option<Vec<&str>>,
         ) -> TestProcess {
             let process_cmd = match self {
-                Application::PythonHTTP => vec!["/usr/local/bin/python3", "-u", "python-e2e/app.py"],
+                Application::PythonHTTP => {
+                    vec!["/usr/local/bin/python3", "-u", "python-e2e/app.py"]
+                }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
             run(process_cmd, pod_name, namespace, args).await
@@ -484,10 +486,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(
-            Application::PythonHTTP,
-            Application::NodeHTTP)]
-        application: Application,
+        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
