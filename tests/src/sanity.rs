@@ -158,7 +158,7 @@ mod tests {
         ) -> TestProcess {
             let process_cmd = match self {
                 Application::PythonHTTP => {
-                    vec!["/usr/local/bin/python3", "-u", "python-e2e/app.py"]
+                    vec!["python3", "-u", "python-e2e/app.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
