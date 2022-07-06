@@ -521,6 +521,15 @@ fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
     fcntl_fd
 }
 
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+/// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
+unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+    let arg = arg.arg::<usize>();
+    let fcntl_fd = libc::fcntl(fd, cmd, arg);
+    fcntl(fd, cmd, fcntl_fd)
+}
+
+#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
     fcntl(fd, cmd, fcntl_fd)
