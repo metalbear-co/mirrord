@@ -526,7 +526,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore] // race condition
     pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -543,7 +542,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore] // race condition
     pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
