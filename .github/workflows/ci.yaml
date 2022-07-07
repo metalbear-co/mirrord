@@ -204,7 +204,9 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
-        run: brew install hyperkit docker minikube docker-machine docker-machine-driver-hyperkit
+        run: |
+          brew install hyperkit docker minikube docker-machine 
+          sudo curl https://github.com/machine-drivers/docker-machine-driver-hyperkit/releases/download/v1.0.0/docker-machine-driver-hyperkit -Lo /usr/local/bin/docker-machine-driver-hyperkit
       - name: configure docker 
         run: |
           sudo chown root:wheel /usr/local/bin/docker-machine-driver-hyperkit && sudo chmod u+s /usr/local/bin/docker-machine-driver-hyperkit
