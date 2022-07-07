@@ -204,7 +204,11 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
-        run: brew install hyperkit docker minikube
+        run: brew install hyperkit docker minikube docker-machine
+      - name: configure docker 
+        run: |
+          docker-machine create --driver hyperkit default
+          docker-machine restart
       - name: check docker is running
         run: docker ps
       - name: start minikube
