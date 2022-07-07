@@ -6,7 +6,16 @@ use mirrord_protocol::{
 };
 use tokio::sync::oneshot;
 
-use crate::tcp::HookMessageTcp;
+use crate::{error::LayerError, tcp::HookMessageTcp, HOOK_SENDER};
+
+pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+    unsafe {
+        HOOK_SENDER
+            .as_ref()
+            .ok_or(LayerError::EmptyHookSender)
+            .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
+    }
+}
 
 // TODO: Some ideas around abstracting file operations:
 // Alright, all these are pretty much the same thing, they could be

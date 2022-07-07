@@ -3,11 +3,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ffi::{CStr, CString},
-    mem,
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    ptr,
 };
 
 use actix_codec::Framed;
@@ -277,7 +274,7 @@ impl ClientConnectionHandler {
                     addrinfo_iter
                         .map(|result| match result {
                             Ok(addrinfo) => Ok(addrinfo.into()),
-                            Err(fail) => Err(ResponseError::NotFound),
+                            Err(fail) => todo!(),
                         })
                         .collect::<Vec<_>>()
                 })
