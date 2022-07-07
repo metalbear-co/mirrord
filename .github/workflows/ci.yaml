@@ -200,7 +200,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 14
-      - run: npm install express uuid
+      - run: npm install express
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
