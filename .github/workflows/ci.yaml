@@ -8,39 +8,39 @@ on:
     branches: [main, v2.0]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v1
-      # Needed for agent
-      - run: sudo apt install libpcap-dev cmake
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy -- -D warnings
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: nightly
+  #         components: rustfmt, clippy
+  #     - uses: Swatinem/rust-cache@v1
+  #     # Needed for agent
+  #     - run: sudo apt install libpcap-dev cmake
+  #     - run: cargo fmt --all -- --check
+  #     - run: cargo clippy -- -D warnings
 
-  test_mirrord_protocol:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
-      - run: |
-          cd mirrord-protocol
-          cargo test
+  # test_mirrord_protocol:
+  #   strategy:
+  #     matrix:
+  #       os: [ubuntu-latest]
+  #   runs-on: ${{ matrix.os }}
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: nightly
+  #         target: ${{matrix.target}}
+  #     - uses: Swatinem/rust-cache@v1
+  #       with:
+  #         key: ${{matrix.os}}
+  #     - run: |
+  #         cd mirrord-protocol
+  #         cargo test
   test_agent:
     runs-on: ubuntu-latest
     steps:
@@ -129,55 +129,55 @@ jobs:
       - run: sudo apt install -y libpcap-dev cmake
       - run: cargo +nightly build --manifest-path=./Cargo.toml
 
-  e2e:
-    runs-on: ubuntu-latest
-    name: e2e
-    needs: [build_mirrord, test_agent_image]
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ubuntu-latest
-          cache-on-failure: true
+  # e2e:
+  #   runs-on: ubuntu-latest
+  #   name: e2e
+  #   needs: [build_mirrord, test_agent_image]
+  #   env:
+  #     MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         profile: minimal
+  #         toolchain: nightly
+  #         components: rustfmt
+  #     - uses: Swatinem/rust-cache@v1
+  #       with:
+  #         key: ubuntu-latest
+  #         cache-on-failure: true
 
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 14
-      - run: npm install express
-      - run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libpcap-dev cmake
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - name: start minikube
-        uses: medyagh/setup-minikube@master
-        with:
-          container-runtime: containerd
-      - name: download image
-        uses: actions/download-artifact@v2
-        with:
-          name: test
-          path: /tmp
-      - run: minikube image load /tmp/test.tar
-      - name: cargo test
-        run: cargo test -p tests
-      - name: switch minikube runtime
-        run: |
-          minikube delete
-          minikube start --container-runtime=docker
-          minikube image load /tmp/test.tar
-      - name: test with docker runtime
-        run: cargo test -p tests
-      - name: Collect logs
-        if: ${{ failure() }}
-        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+  #     - uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 14
+  #     - run: npm install express
+  #     - run: |
+  #         sudo apt-get update -y
+  #         sudo apt-get install -y libpcap-dev cmake
+  #     - uses: actions/setup-python@v3
+  #     - run: pip3 install flask
+  #     - name: start minikube
+  #       uses: medyagh/setup-minikube@master
+  #       with:
+  #         container-runtime: containerd
+  #     - name: download image
+  #       uses: actions/download-artifact@v2
+  #       with:
+  #         name: test
+  #         path: /tmp
+  #     - run: minikube image load /tmp/test.tar
+  #     - name: cargo test
+  #       run: cargo test -p tests
+  #     - name: switch minikube runtime
+  #       run: |
+  #         minikube delete
+  #         minikube start --container-runtime=docker
+  #         minikube image load /tmp/test.tar
+  #     - name: test with docker runtime
+  #       run: cargo test -p tests
+  #     - name: Collect logs
+  #       if: ${{ failure() }}
+  #       run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
 
   e2e_macos:
     runs-on: macos-latest
@@ -205,6 +205,8 @@ jobs:
       - run: pip3 install flask
       - name: setup cluster requirements
         run: brew install hyperkit docker minikube
+      - name: check docker is running
+        run: docker ps
       - name: start minikube
         run: minikube start --driver=hyperkit --container-runtime=docker
       - name: download image
