@@ -673,25 +673,30 @@ unsafe extern "C" fn getaddrinfo_detour(
                     } = addr_info;
 
                     let sockaddr = Box::new(socket2::SockAddr::from(sockaddr));
-                    let sockaddr = Box::leak(sockaddr);
+                    let sockaddr = Box::into_raw(sockaddr);
 
                     let canonname = canonname.map(CString::new).transpose().unwrap();
                     let ai_canonname = canonname.map_or_else(
                         || ptr::null(),
                         |s| {
                             let c_str = s.into_boxed_c_str();
-                            let c_str = Box::leak(c_str);
-                            c_str.as_ptr()
+                            let c_str = Box::into_raw(c_str);
+                            (*c_str).as_ptr()
                         },
                     ) as *mut _;
+
+                    // let ai_addr =
+                    //     libc::malloc(mem::size_of::<libc::sockaddr>()) as *mut libc::sockaddr;
+                    // ai_addr.copy_from(sockaddr.as_ptr(), 1);
 
                     let raw_addr_info = libc::addrinfo {
                         ai_flags: flags,
                         ai_family: address,
                         ai_socktype: socktype,
                         ai_protocol: protocol,
-                        ai_addrlen: sockaddr.len(),
-                        ai_addr: sockaddr.as_ptr() as *mut _,
+                        ai_addrlen: (*sockaddr).len(),
+                        ai_addr: (*sockaddr).as_ptr() as *mut _,
+                        // ai_addr,
                         ai_canonname,
                         ai_next: ptr::null_mut(),
                     };
@@ -721,9 +726,11 @@ unsafe extern "C" fn getaddrinfo_detour(
         {
             let slice = raw_list.into_boxed_slice();
             {
-                let raw_slice = Box::leak(slice);
-                let raw_list_ptr = raw_slice.as_mut_ptr();
+                let raw_slice = Box::into_raw(slice);
+                let raw_list_ptr = (*raw_slice).as_mut_ptr();
                 // mem::forget(raw_list);
+
+                // let c_linked_list = libc::malloc(size)
 
                 let res = Box::new(raw_list_ptr);
                 let raw_list_ptr = Box::into_raw(res);
@@ -759,6 +766,8 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 
         current = (*current).ai_next;
     }
+
+    Box::from_raw(addrinfo);
 
     // libc::freeaddrinfo(addrinfo);
 }
