@@ -207,6 +207,7 @@ jobs:
         run: brew install hyperkit docker minikube docker-machine docker-machine-driver-hyperkit
       - name: configure docker 
         run: |
+          sudo chown root:wheel /usr/local/bin/docker-machine-driver-hyperkit && sudo chmod u+s /usr/local/bin/docker-machine-driver-hyperkit
           docker-machine create --driver hyperkit default 
           docker-machine restart
       - name: check docker is running
