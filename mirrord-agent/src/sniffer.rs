@@ -87,7 +87,7 @@ struct TCPSession {
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
 
 fn is_new_connection(flags: u16) -> bool {
-    flags == TcpFlags::SYN
+    0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
 }
 
 fn is_closed_connection(flags: u16) -> bool {
@@ -437,7 +437,7 @@ impl TCPConnectionSniffer {
     }
 
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        debug!("handle_packet -> handling eth_packet {:#?}", eth_packet);
+        debug!("handle_packet -> handling eth_packet");
 
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,
