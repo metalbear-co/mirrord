@@ -1,12 +1,14 @@
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString},
     fs::{File, OpenOptions},
     io::{prelude::*, Result, SeekFrom},
-    mem::size_of,
+    mem::{self, size_of},
     net::{TcpListener, TcpStream},
+    ptr,
 };
 
 fn main() -> Result<()> {
+    /*
     let mut file = File::open("/var/log/dpkg.log")?;
     println!(">>>>> open file {:#?}", file);
 
@@ -73,6 +75,28 @@ fn main() -> Result<()> {
         dir.metadata(),
         dir.metadata().unwrap().is_dir()
     );
+    */
+
+    unsafe {
+        let localhost = CString::new("localhost").unwrap();
+        let node = localhost.as_c_str();
+        let mut addrinfo: libc::addrinfo = mem::zeroed();
+        let mut result: *mut libc::addrinfo = &mut addrinfo;
+        let r: *mut *mut _ = &mut result;
+        libc::getaddrinfo(node.as_ptr(), ptr::null(), ptr::null(), r);
+        println!("r {:#?}", r);
+        println!("*r {:#?}", *r);
+        println!("**r {:#?}", **r);
+        println!("**r.ai_next {:#?}", *(**r).ai_next);
+    }
+
+    {
+        let lookup = dns_lookup::getaddrinfo(Some("localhost"), None, None);
+        for (index, info) in lookup.unwrap().enumerate() {
+            println!("index {:#?} info {:#?}", index, info);
+        }
+        println!("done");
+    }
 
     let listener = TcpListener::bind("127.0.0.1:80")?;
     for stream in listener.incoming() {

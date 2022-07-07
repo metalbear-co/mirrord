@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     ffi::{CStr, CString},
+    mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
@@ -16,7 +17,7 @@ use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, DaemonMessage, GetAddrInfoResponse, Port};
 use os_socketaddr::OsSocketAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     common::{GetAddrInfoHook, HookMessage},
@@ -586,12 +587,14 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_hints: *const libc::addrinfo,
     out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
-    trace!(
-        "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?}",
-        raw_node,
-        raw_service,
-        *raw_hints,
-    );
+    // trace!(
+    //     "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?} | out {:#?}
+    // {:#?}",     raw_node,
+    //     raw_service,
+    //     *raw_hints,
+    //     out_addr_info.is_null(),
+    //     (*out_addr_info).is_null(),
+    // );
 
     let node = match (raw_node.is_null() == false)
         .then(|| CStr::from_ptr(raw_node).to_str())
@@ -645,51 +648,119 @@ unsafe extern "C" fn getaddrinfo_detour(
     // TODO(alex) [high] 2022-07-05: This "works" (crashes with invalid pointer), and to fix it
     // the pointer allocation must outlive this whole mess. Everything here is pretty ad-hoc,
     // refactoring into some outer functions and so on is a must.
-    for result in addr_info_list
-        .into_iter()
-        .map(|addr_info_result| addr_info_result.map(AddrInfo::from))
+    //
+    // To make it (barely) work, use `copy` to copy into the pointer? Ideally we would be able to
+    // turn the iterator into a C linked list (another point of going with a custom crate impl)
+    //
+    // Leave it for the future, for now just have a function that maps this nicely.
+    // TODO(alex) [high] 2022-07-06: `map` instead of for each.
     {
-        match result {
-            Ok(addr_info) => {
-                trace!("Have a proper addr_info {:#?}", addr_info);
-                let AddrInfo {
-                    socktype,
-                    protocol,
-                    address,
-                    sockaddr,
-                    canonname,
-                    flags,
-                } = addr_info;
+        let mut raw_list: Vec<libc::addrinfo> = addr_info_list
+            .into_iter()
+            .map(|addr_info_result| {
+                addr_info_result.map(AddrInfo::from).map(|addr_info| {
+                    trace!(
+                        "getaddrinfo_detour -> dns_lookup::addr_info {:#?}",
+                        addr_info
+                    );
+                    let AddrInfo {
+                        socktype,
+                        protocol,
+                        address,
+                        sockaddr,
+                        canonname,
+                        flags,
+                    } = addr_info;
 
-                let sockaddr = socket2::SockAddr::from(sockaddr);
-                let canonname = canonname.map(CString::new).transpose().unwrap();
-                let name = canonname
-                    .as_ref()
-                    .map_or_else(|| ptr::null(), |s| s.as_ptr());
+                    let sockaddr = Box::new(socket2::SockAddr::from(sockaddr));
+                    let sockaddr = Box::leak(sockaddr);
 
-                let mut raw_addr_info = libc::addrinfo {
-                    ai_flags: flags,
-                    ai_family: address,
-                    ai_socktype: socktype,
-                    ai_protocol: protocol,
-                    ai_addrlen: sockaddr.len(),
-                    ai_addr: sockaddr.as_ptr() as *mut _,
-                    ai_canonname: name as *mut _,
-                    ai_next: ptr::null_mut(),
-                };
+                    let canonname = canonname.map(CString::new).transpose().unwrap();
+                    let ai_canonname = canonname.map_or_else(
+                        || ptr::null(),
+                        |s| {
+                            let c_str = s.into_boxed_c_str();
+                            let c_str = Box::leak(c_str);
+                            c_str.as_ptr()
+                        },
+                    ) as *mut _;
 
-                let mut x: *mut _ = &mut raw_addr_info;
-                let x: *mut *mut _ = &mut x;
+                    let raw_addr_info = libc::addrinfo {
+                        ai_flags: flags,
+                        ai_family: address,
+                        ai_socktype: socktype,
+                        ai_protocol: protocol,
+                        ai_addrlen: sockaddr.len(),
+                        ai_addr: sockaddr.as_ptr() as *mut _,
+                        ai_canonname,
+                        ai_next: ptr::null_mut(),
+                    };
 
-                *out_addr_info = *x;
+                    info!("raw_addr_info {:#?}", raw_addr_info);
 
-                return 0;
+                    raw_addr_info
+                })
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+
+        info!("raw_list {:#?}", raw_list);
+
+        for index in 0..raw_list.len() {
+            if raw_list.get(index).is_none() {
+                break;
             }
-            Err(fail) => error!("Have an error in addrinfo {:#?}", fail),
+
+            let ai_next = raw_list
+                .get_mut(index + 1)
+                .map_or_else(ptr::null_mut, |v| v);
+
+            raw_list.get_mut(index).unwrap().ai_next = ai_next;
         }
+
+        {
+            let slice = raw_list.into_boxed_slice();
+            {
+                let raw_slice = Box::leak(slice);
+                let raw_list_ptr = raw_slice.as_mut_ptr();
+                // mem::forget(raw_list);
+
+                let res = Box::new(raw_list_ptr);
+                let raw_list_ptr = Box::into_raw(res);
+                // info!("before ** {:#?}", **out_addr_info);
+                out_addr_info.copy_from_nonoverlapping(raw_list_ptr, 1);
+                // (*out_addr_info) = raw_list_ptr;
+
+                // info!("raw_list forgotten {:#?}", raw_list);
+            }
+        }
+        info!("slice dropped {:#?}", **out_addr_info);
+    }
+    info!("raw_list dropped {:#?}", **out_addr_info);
+
+    let mut current = *out_addr_info;
+    while current.is_null() == false {
+        info!("value is {:#?}", *current);
+
+        current = (*current).ai_next;
     }
 
-    todo!()
+    0
+}
+
+// TODO(alex) [high] 2022-07-07: Gotta have a layer->agent message to do the same over there?
+unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
+    trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
+
+    let mut current = addrinfo;
+    while current.is_null() == false {
+        info!("value is {:#?}", *current);
+        info!("addr is {:#?}", *(*current).ai_addr);
+
+        current = (*current).ai_next;
+    }
+
+    // libc::freeaddrinfo(addrinfo);
 }
 
 pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
@@ -710,4 +781,5 @@ pub fn enable_socket_hooks(interceptor: &mut Interceptor) {
     }
     try_hook!(interceptor, "accept", accept_detour);
     hook!(interceptor, "getaddrinfo", getaddrinfo_detour);
+    hook!(interceptor, "freeaddrinfo", freeaddrinfo_detour);
 }

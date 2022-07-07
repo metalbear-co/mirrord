@@ -1,3 +1,5 @@
+cargo-features = ["workspace-inheritance"]
+
 [package]
 name = "sample-rust"
 version = "0.1.0"
@@ -7,3 +9,4 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2"
+dns-lookup.workspace = true
