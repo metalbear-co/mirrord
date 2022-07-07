@@ -185,7 +185,7 @@ jobs:
     needs: [build_mirrord, test_agent_image]
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-      USE_MINIKUBE: "true"
+      USE_MINIKUBE: "true"      
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -207,9 +207,10 @@ jobs:
         run: |
           brew install hyperkit docker minikube docker-machine 
           sudo curl https://github.com/machine-drivers/docker-machine-driver-hyperkit/releases/download/v1.0.0/docker-machine-driver-hyperkit -Lo /usr/local/bin/docker-machine-driver-hyperkit
+        env:
+          PATH: "{{ env.PATH }}:/usr/local/bin/docker-machine-driver-hyperkit"
       - name: configure docker 
-        run: |
-          export PATH=$PATH:/usr/local/bin/docker-machine-driver-hyperkit
+        run: |          
           sudo chown root:wheel /usr/local/bin/docker-machine-driver-hyperkit && sudo chmod u+s /usr/local/bin/docker-machine-driver-hyperkit
           docker-machine create --driver hyperkit default 
           docker-machine restart
