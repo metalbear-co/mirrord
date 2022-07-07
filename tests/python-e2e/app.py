@@ -41,10 +41,10 @@ def put():
     with open(DELETE_PATH, "w") as f:
         f.write(TEXT)
 
-    signal.alarm(5)     
-    wait_for_file(DELETE_PATH)
-    signal.alarm(0)
-    
+    # signal.alarm(5)
+    # wait_for_file(DELETE_PATH)
+    # signal.alarm(0)
+
     print("PUT: Request completed")
     return "OK"
 
@@ -58,12 +58,11 @@ def delete():
     return "OK"
 
 
-def wait_for_file(path):
-    while True:
-        if os.path.exists(path):
-            break
+# def wait_for_file(path):
+#     while True:
+#         if os.path.exists(path):
+#             break
 
-    
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=80)
