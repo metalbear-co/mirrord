@@ -199,7 +199,7 @@ unsafe extern "C" fn getaddrinfo_detour(
                     },
                 ) as *mut _;
 
-                let raw_addr_info = libc::addrinfo {
+                let c_addr_info = libc::addrinfo {
                     ai_flags: flags,
                     ai_family: address,
                     ai_socktype: socktype,
@@ -210,7 +210,9 @@ unsafe extern "C" fn getaddrinfo_detour(
                     ai_next: ptr::null_mut(),
                 };
 
-                raw_addr_info
+                info!("c_addr_info {:#?}", c_addr_info);
+
+                c_addr_info
             })
         })
         .collect::<Vec<_>>();
@@ -218,21 +220,21 @@ unsafe extern "C" fn getaddrinfo_detour(
     // Converts a `Vec<addrinfo>` into a C-style linked list.
     let mut c_addr_info_ptr = c_addr_info_list
         .into_iter()
-        .reduce(|mut current, mut next| {
-            let ai_next: *mut _ = &mut next;
-            current.ai_next = ai_next;
+        .rev()
+        .map(Box::new)
+        .map(Box::into_raw)
+        .reduce(|current, mut previous| {
+            info!("current {:#?} | previous {:#?}", current, previous);
 
-            next
+            (*previous).ai_next = current;
+
+            previous
         })
-        .map_or_else(ptr::null_mut, |addr_info| {
-            let boxed_addr_info = Box::new(addr_info);
-            Box::into_raw(boxed_addr_info)
-        });
+        .map_or_else(ptr::null_mut, |addr_info| addr_info);
 
     out_addr_info.copy_from_nonoverlapping(&mut c_addr_info_ptr, 1);
 
-    info!("raw_list dropped {:#?}", **out_addr_info);
-
+    // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
     let mut current = *out_addr_info;
     while current.is_null() == false {
         info!("value is {:#?}", *current);
@@ -253,6 +255,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
+    // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
     let mut current = addrinfo;
     while current.is_null() == false {
         info!("value is {:#?}", *current);
@@ -261,6 +264,8 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
         current = (*current).ai_next;
     }
 
+    // TODO(alex) [mid] 2022-07-07: Should we drop every allocation, or just the `addrinfo`
+    // specified in the function argument?
     Box::from_raw(addrinfo);
 }
 
