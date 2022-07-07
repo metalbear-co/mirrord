@@ -1,5 +1,8 @@
 from os import getcwd, remove, getpid, kill
+import os
 from signal import SIGTERM
+import signal
+import time
 from flask import Flask, request
 import logging
 import sys
@@ -37,6 +40,11 @@ def put():
         f.write(TEXT)
     with open(DELETE_PATH, "w") as f:
         f.write(TEXT)
+
+    signal.alarm(5)     
+    wait_for_file(DELETE_PATH)
+    signal.alarm(0)
+    
     print("PUT: Request completed")
     return "OK"
 
@@ -49,6 +57,13 @@ def delete():
     kill(getpid(), SIGTERM)
     return "OK"
 
+
+def wait_for_file(path):
+    while True:
+        if os.path.exists(path):
+            break
+
+    
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=80)
