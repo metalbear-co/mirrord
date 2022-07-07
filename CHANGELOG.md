@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Refactor e2e, enable only Node HTTP mirroring test.
 - E2E: add macOS to E2E, support using minikube by env var.
 - E2E: Skip loading to docker before loading to minikube (load directly to minikube..)
+- layer: Environment variables now load before process starts, no more race conditions.
 
 ### Fixed
 - Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
