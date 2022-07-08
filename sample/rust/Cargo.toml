@@ -9,4 +9,3 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2"
-dns-lookup.workspace = true

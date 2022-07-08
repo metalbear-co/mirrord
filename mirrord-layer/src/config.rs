@@ -39,4 +39,8 @@ pub struct LayerConfig {
     /// Selects these env vars when overriding is enabled.
     #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", default = "")]
     pub override_env_vars_include: String,
+
+    /// Enables resolving a remote DNS.
+    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
+    pub remote_dns: bool,
 }

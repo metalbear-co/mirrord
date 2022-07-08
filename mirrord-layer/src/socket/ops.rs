@@ -360,6 +360,25 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
     dup_fd
 }
 
+// TODO(alex) [high] 2022-07-08:
+// 4. Blank `launch.json`;
+// 5. Remove debugging stuff (search for custom comment marks);
+// 6. clippy;
+// 7. Test "enable/disable" option for this feature;
+// 8. Write tests for the feature;
+
+// TODO: Should we handle errors in the iterator?
+/// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
+/// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
+/// a linked list of such type).
+///
+/// Even though individual parts of the received list may contain an error, this function will
+/// still work fine, as it filters out such errors and returns a null pointer in this case.
+///
+/// # Protocol
+///
+/// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
+/// for the equivalent of this function).
 pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
@@ -426,12 +445,12 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {
-            // SAFETY: These pointers were just allocated using `Box::new`, so they should be fine
+            // Safety: These pointers were just allocated using `Box::new`, so they should be fine
             // regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .map_or_else(ptr::null_mut, |addr_info| addr_info);
+        .unwrap_or_else(ptr::null_mut);
 
     Ok(c_addr_info_ptr)
 }

@@ -81,7 +81,7 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
@@ -508,13 +508,13 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
     hook!(interceptor, "close", close_detour);
 
-    socket::hooks::enable_socket_hooks(&mut interceptor);
+    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
 
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);

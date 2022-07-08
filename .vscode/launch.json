@@ -41,6 +41,7 @@
         // "MIRRORD_OVERRIDE_ENV_VARS": "true",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         // "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -67,6 +68,7 @@
         // "MIRRORD_OVERRIDE_ENV_VARS": "true",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         // "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
     }

@@ -114,7 +114,9 @@ unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_
     dup(oldfd, dup3_fd)
 }
 
-/// # WARNING:
+/// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
+///
+/// # Warning:
 /// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
 unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
@@ -181,15 +183,18 @@ unsafe extern "C" fn getaddrinfo_detour(
                 _ => libc::EAI_FAIL,
             }
         })
-        // TODO(alex) [mid] 2022-07-08: Use the proper error values like described in
-        // `gai_strerror`.
         .unwrap_or_else(|fail| fail)
 }
 
+/// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
+/// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`.
+///
+/// # Protocol
+///
 /// No need to send any sort of `free` message to `mirrord-agent`, as the `addrinfo` there is not
 /// kept around.
 ///
-/// # WARNING
+/// # Warning
 ///
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
@@ -210,7 +215,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     Box::from_raw(addrinfo);
 }
 
-pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor) {
+pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     hook!(interceptor, "socket", socket_detour);
     hook!(interceptor, "bind", bind_detour);
     hook!(interceptor, "listen", listen_detour);
@@ -227,6 +232,9 @@ pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor) {
         try_hook!(interceptor, "dup3", dup3_detour);
     }
     try_hook!(interceptor, "accept", accept_detour);
-    hook!(interceptor, "getaddrinfo", getaddrinfo_detour);
-    hook!(interceptor, "freeaddrinfo", freeaddrinfo_detour);
+
+    if enabled_remote_dns {
+        hook!(interceptor, "getaddrinfo", getaddrinfo_detour);
+        hook!(interceptor, "freeaddrinfo", freeaddrinfo_detour);
+    }
 }
