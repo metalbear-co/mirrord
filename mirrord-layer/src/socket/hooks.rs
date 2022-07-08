@@ -162,10 +162,8 @@ unsafe extern "C" fn getaddrinfo_detour(
     let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
 
     getaddrinfo(node, service, hints)
-        .map(|mut c_addr_info_ptr| {
-            // Must copy `*mut *mut T`, so the `&mut` part is required.
-            #[allow(clippy::unnecessary_mut_passed)]
-            out_addr_info.copy_from_nonoverlapping(&mut c_addr_info_ptr, 1);
+        .map(|c_addr_info_ptr| {
+            out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
             // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
             let mut current = *out_addr_info;
