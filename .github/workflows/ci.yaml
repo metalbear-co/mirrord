@@ -218,4 +218,4 @@ jobs:
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
-        run: docker logs $(docker ps -a | grep mirrord-agent | grep -v pause | head -n 1|  cut -d' ' -f1)
+        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
