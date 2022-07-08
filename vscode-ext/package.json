@@ -42,12 +42,14 @@
 		"watch": "tsc -watch -p ./",
 		"pretest": "npm run compile && npm run lint",
 		"lint": "eslint src --ext ts",
+		"format": "eslint src --ext ts --fix",
 		"test": "node ./out/test/runTest.js",
 		"vscode:prepublish": "npm run esbuild-base -- --minify",
 		"esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
 		"esbuild": "npm run esbuild-base -- --sourcemap",
 		"esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
-		"test-compile": "tsc -p ./"
+		"test-compile": "tsc -p ./",
+		"package": "vsce package"
 	},
 	"devDependencies": {
 		"@types/glob": "^7.2.0",
@@ -63,7 +65,8 @@
 		"glob": "^7.2.0",
 		"mocha": "^9.1.3",
 		"prettier": "2.5.1",
-		"typescript": "^4.5.4"
+		"typescript": "^4.5.4",
+		"vsce": "^2.9.2"
 	},
 	"dependencies": {
 		"@kubernetes/client-node": "^0.16.3",

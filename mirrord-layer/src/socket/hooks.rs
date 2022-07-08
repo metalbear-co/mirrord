@@ -81,6 +81,15 @@ unsafe extern "C" fn accept4_detour(
     }
 }
 
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+/// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
+unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+    let arg = arg.arg::<usize>();
+    let fcntl_fd = libc::fcntl(fd, cmd, arg);
+    fcntl(fd, cmd, fcntl_fd)
+}
+
+#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
     fcntl(fd, cmd, fcntl_fd)
@@ -180,7 +189,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// No need to send any sort of `free` message to `mirrord-agent`, as the `addrinfo` there is not
 /// kept around.
 ///
-/// # WARN
+/// # WARNING
 ///
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).

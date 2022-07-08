@@ -83,7 +83,7 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops);
 
-    RUNTIME.spawn(poll_agent(port_forwarder, receiver, config));
+    RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -355,26 +355,8 @@ async fn handle_daemon_message(
                 panic!("Daemon: unmatched pong!");
             }
         }
-        DaemonMessage::GetEnvVarsResponse(remote_env_vars) => {
-            debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
-
-            match remote_env_vars {
-                Ok(remote_env_vars) => {
-                    for (key, value) in remote_env_vars.into_iter() {
-                        debug!(
-                            "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
-                            key, value
-                        );
-
-                        std::env::set_var(&key, &value);
-                        debug_assert_eq!(std::env::var(key), Ok(value));
-                    }
-                }
-                Err(fail) => error!(
-                    "Loading remote environment variables failed with {:#?}",
-                    fail
-                ),
-            }
+        DaemonMessage::GetEnvVarsResponse(_) => {
+            unreachable!("We get env vars only on initialization right now, shouldn't happen")
         }
         DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
             trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
@@ -392,16 +374,13 @@ async fn handle_daemon_message(
     }
 }
 
-async fn poll_agent(
-    mut pf: Portforwarder,
+async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
-    config: LayerConfig,
+    mut codec: actix_codec::Framed<
+        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+        ClientCodec,
+    >,
 ) {
-    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
-
-    // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
-    // -layer)
-    let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -419,37 +398,6 @@ async fn poll_agent(
     let getaddrinfo_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
-
-    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
-    {
-        panic!(
-            r#"mirrord-layer encountered an issue:
-
-            mirrord doesn't support specifying both
-            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
-
-            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
-            >> If you want to include all, use `--override_env_vars_include="*"`."#
-        );
-    } else {
-        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
-        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
-
-        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
-            let codec_result = codec
-                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                    env_vars_filter,
-                    env_vars_select,
-                }))
-                .await;
-
-            debug!(
-                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
-                codec_result
-            );
-        }
-    }
-
     let mut tcp_mirror_handler = TcpMirrorHandler::default();
 
     loop {
@@ -496,6 +444,67 @@ async fn poll_agent(
             }
         }
     }
+}
+
+async fn start_layer_thread(
+    mut pf: Portforwarder,
+    receiver: Receiver<HookMessage>,
+    config: LayerConfig,
+) {
+    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+
+    // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
+    // -layer)
+    let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
+
+    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
+    {
+        panic!(
+            r#"mirrord-layer encountered an issue:
+
+            mirrord doesn't support specifying both
+            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
+
+            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
+            >> If you want to include all, use `--override_env_vars_include="*"`."#
+        );
+    } else {
+        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
+        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
+
+        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            let codec_result = codec
+                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                }))
+                .await;
+
+            debug!(
+                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
+                codec_result
+            );
+
+            let msg = codec.next().await;
+            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+                debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+
+                for (key, value) in remote_env_vars.into_iter() {
+                    debug!(
+                        "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                        key, value
+                    );
+
+                    std::env::set_var(&key, &value);
+                    debug_assert_eq!(std::env::var(key), Ok(value));
+                }
+            } else {
+                panic!("unexpected response - expected env vars response {msg:?}");
+            }
+        }
+    }
+
+    let _ = tokio::spawn(thread_loop(receiver, codec));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.

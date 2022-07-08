@@ -67,8 +67,7 @@ mod tests {
     }
 
     enum Application {
-        // Comment back PythonHTTP after we solve
-        // PythonHTTP,
+        PythonHTTP,
         NodeHTTP,
     }
 
@@ -158,7 +157,9 @@ mod tests {
             args: Option<Vec<&str>>,
         ) -> TestProcess {
             let process_cmd = match self {
-                // Application::Python => vec!["python3", "-u", "python-e2e/app.py"],
+                Application::PythonHTTP => {
+                    vec!["python3", "-u", "python-e2e/app.py"]
+                }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
             run(process_cmd, pod_name, namespace, args).await
@@ -485,10 +486,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(
-            // Application::PythonHTTP,
-            Application::NodeHTTP)]
-        application: Application,
+        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -526,7 +524,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore] // race condition
     pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -543,7 +540,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore] // race condition
     pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
