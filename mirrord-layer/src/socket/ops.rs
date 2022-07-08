@@ -363,7 +363,6 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
 // TODO(alex) [high] 2022-07-08:
 // 4. Blank `launch.json`;
 // 5. Remove debugging stuff (search for custom comment marks);
-// 6. clippy;
 // 7. Test "enable/disable" option for this feature;
 // 8. Write tests for the feature;
 
@@ -396,7 +395,7 @@ pub(super) fn getaddrinfo(
 
     let GetAddrInfoResponse(addr_info_list) = hook_channel_rx.blocking_recv()?;
 
-    let c_addr_info_list = addr_info_list
+    let c_addr_info_ptr = addr_info_list
         .into_iter()
         .flat_map(|result| {
             result.map(AddrInfo::from).map(|addr_info| {
@@ -412,13 +411,10 @@ pub(super) fn getaddrinfo(
                 let sockaddr = socket2::SockAddr::from(sockaddr);
 
                 let canonname = canonname.map(CString::new).transpose().unwrap();
-                let ai_canonname = canonname.map_or_else(
-                    || ptr::null(),
-                    |c_string| {
-                        let c_str = c_string.as_c_str();
-                        c_str.as_ptr()
-                    },
-                ) as *mut _;
+                let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
+                    let c_str = c_string.as_c_str();
+                    c_str.as_ptr()
+                }) as *mut _;
 
                 let c_addr_info = libc::addrinfo {
                     ai_flags: flags,
@@ -436,11 +432,6 @@ pub(super) fn getaddrinfo(
                 c_addr_info
             })
         })
-        .collect::<Vec<_>>();
-
-    // Converts a `Vec<addrinfo>` into a C-style linked list.
-    let c_addr_info_ptr = c_addr_info_list
-        .into_iter()
         .rev()
         .map(Box::new)
         .map(Box::into_raw)

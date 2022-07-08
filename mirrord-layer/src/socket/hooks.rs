@@ -132,7 +132,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         out_addr_info.is_null(),
     );
 
-    let node = match (raw_node.is_null() == false)
+    let node = match (!raw_node.is_null())
         .then(|| CStr::from_ptr(raw_node).to_str())
         .transpose()
         .map_err(|fail| {
@@ -144,7 +144,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
-    let service = match (raw_service.is_null() == false)
+    let service = match (!raw_service.is_null())
         .then(|| CStr::from_ptr(raw_service).to_str())
         .transpose()
         .map_err(|fail| {
@@ -159,15 +159,17 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
-    let hints = (raw_hints.is_null() == false).then(|| AddrInfoHint::from_raw(*raw_hints));
+    let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
 
     getaddrinfo(node, service, hints)
         .map(|mut c_addr_info_ptr| {
+            // Must copy `*mut *mut T`, so the `&mut` part is required.
+            #[allow(clippy::unnecessary_mut_passed)]
             out_addr_info.copy_from_nonoverlapping(&mut c_addr_info_ptr, 1);
 
             // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
             let mut current = *out_addr_info;
-            while current.is_null() == false {
+            while !current.is_null() {
                 info!("value is {:#?}", *current);
 
                 current = (*current).ai_next;
@@ -203,7 +205,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 
     // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
     let mut current = addrinfo;
-    while current.is_null() == false {
+    while !current.is_null() {
         info!("value is {:#?}", *current);
         info!("addr is {:#?}", *(*current).ai_addr);
 

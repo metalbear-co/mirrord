@@ -286,7 +286,7 @@ impl ClientConnectionHandler {
                         })
                         .collect::<Vec<_>>()
                 })
-                .map_err(|fail| AgentError::Lookup(fail))?;
+                .map_err(AgentError::Lookup)?;
 
                 let response = GetAddrInfoResponse(lookup_result);
 
