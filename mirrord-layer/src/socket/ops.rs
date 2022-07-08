@@ -1,17 +1,23 @@
 use std::{
+    ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    ptr,
     sync::Arc,
 };
 
+use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::GetAddrInfoResponse;
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, warn};
+use tokio::sync::oneshot;
+use tracing::{debug, error, info, warn};
 
 use super::*;
 use crate::{
-    common::HookMessage,
+    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    error::LayerError,
     tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };
@@ -352,4 +358,80 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
         sockets.insert(dup_fd as RawFd, dup_socket);
     }
     dup_fd
+}
+
+pub(super) fn getaddrinfo(
+    node: Option<String>,
+    service: Option<String>,
+    hints: Option<AddrInfoHint>,
+) -> Result<*mut libc::addrinfo, LayerError> {
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel::<GetAddrInfoResponse>();
+    let hook = GetAddrInfoHook {
+        node,
+        service,
+        hints,
+        hook_channel_tx,
+    };
+
+    blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook))?;
+
+    let GetAddrInfoResponse(addr_info_list) = hook_channel_rx.blocking_recv()?;
+
+    let c_addr_info_list = addr_info_list
+        .into_iter()
+        .flat_map(|result| {
+            result.map(AddrInfo::from).map(|addr_info| {
+                let AddrInfo {
+                    socktype,
+                    protocol,
+                    address,
+                    sockaddr,
+                    canonname,
+                    flags,
+                } = addr_info;
+
+                let sockaddr = socket2::SockAddr::from(sockaddr);
+
+                let canonname = canonname.map(CString::new).transpose().unwrap();
+                let ai_canonname = canonname.map_or_else(
+                    || ptr::null(),
+                    |c_string| {
+                        let c_str = c_string.as_c_str();
+                        c_str.as_ptr()
+                    },
+                ) as *mut _;
+
+                let c_addr_info = libc::addrinfo {
+                    ai_flags: flags,
+                    ai_family: address,
+                    ai_socktype: socktype,
+                    ai_protocol: protocol,
+                    ai_addrlen: sockaddr.len(),
+                    ai_addr: sockaddr.as_ptr() as *mut _,
+                    ai_canonname,
+                    ai_next: ptr::null_mut(),
+                };
+
+                info!("c_addr_info {:#?}", c_addr_info);
+
+                c_addr_info
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Converts a `Vec<addrinfo>` into a C-style linked list.
+    let c_addr_info_ptr = c_addr_info_list
+        .into_iter()
+        .rev()
+        .map(Box::new)
+        .map(Box::into_raw)
+        .reduce(|current, mut previous| {
+            // SAFETY: These pointers were just allocated using `Box::new`, so they should be fine
+            // regarding memory layout, and are not dangling.
+            unsafe { (*previous).ai_next = current };
+            previous
+        })
+        .map_or_else(ptr::null_mut, |addr_info| addr_info);
+
+    Ok(c_addr_info_ptr)
 }

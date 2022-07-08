@@ -8,7 +8,6 @@ use std::{
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
-use dns_lookup::AddrInfo;
 
 use crate::{
     tcp::{DaemonTcp, LayerTcp},

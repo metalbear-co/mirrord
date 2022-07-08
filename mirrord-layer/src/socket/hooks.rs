@@ -1,20 +1,12 @@
-use std::{
-    ffi::{CStr, CString},
-    mem,
-    os::unix::io::RawFd,
-    ptr,
-};
+use std::{ffi::CStr, os::unix::io::RawFd};
 
-use dns_lookup::AddrInfo;
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoHint, GetAddrInfoResponse};
-use tokio::sync::oneshot;
+use mirrord_protocol::AddrInfoHint;
 use tracing::{debug, error, info, trace};
 
 use super::ops::*;
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     macros::{hook, try_hook},
     socket::AddrInfoHintExt,
 };
@@ -158,91 +150,31 @@ unsafe extern "C" fn getaddrinfo_detour(
 
     let hints = (raw_hints.is_null() == false).then(|| AddrInfoHint::from_raw(*raw_hints));
 
-    debug!(
-        "getaddrinfo_detour -> node {:#?} | service {:#?} | hints {:#?}",
-        node, service, hints
-    );
+    getaddrinfo(node, service, hints)
+        .map(|mut c_addr_info_ptr| {
+            out_addr_info.copy_from_nonoverlapping(&mut c_addr_info_ptr, 1);
 
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel::<GetAddrInfoResponse>();
-    let hook = GetAddrInfoHook {
-        node,
-        service,
-        hints,
-        hook_channel_tx,
-    };
+            // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
+            let mut current = *out_addr_info;
+            while current.is_null() == false {
+                info!("value is {:#?}", *current);
 
-    blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook)).unwrap();
+                current = (*current).ai_next;
+            }
 
-    let GetAddrInfoResponse(addr_info_list) = hook_channel_rx.blocking_recv().unwrap();
-
-    let c_addr_info_list = addr_info_list
-        .into_iter()
-        .flat_map(|result| {
-            result.map(AddrInfo::from).map(|addr_info| {
-                let AddrInfo {
-                    socktype,
-                    protocol,
-                    address,
-                    sockaddr,
-                    canonname,
-                    flags,
-                } = addr_info;
-
-                let sockaddr = socket2::SockAddr::from(sockaddr);
-
-                let canonname = canonname.map(CString::new).transpose().unwrap();
-                let ai_canonname = canonname.map_or_else(
-                    || ptr::null(),
-                    |c_string| {
-                        let c_str = c_string.as_c_str();
-                        c_str.as_ptr()
-                    },
-                ) as *mut _;
-
-                let c_addr_info = libc::addrinfo {
-                    ai_flags: flags,
-                    ai_family: address,
-                    ai_socktype: socktype,
-                    ai_protocol: protocol,
-                    ai_addrlen: sockaddr.len(),
-                    ai_addr: sockaddr.as_ptr() as *mut _,
-                    ai_canonname,
-                    ai_next: ptr::null_mut(),
-                };
-
-                info!("c_addr_info {:#?}", c_addr_info);
-
-                c_addr_info
-            })
+            0
         })
-        .collect::<Vec<_>>();
+        .map_err(|fail| {
+            error!("Failed resolving dns with {:#?}", fail);
 
-    // Converts a `Vec<addrinfo>` into a C-style linked list.
-    let mut c_addr_info_ptr = c_addr_info_list
-        .into_iter()
-        .rev()
-        .map(Box::new)
-        .map(Box::into_raw)
-        .reduce(|current, mut previous| {
-            info!("current {:#?} | previous {:#?}", current, previous);
-
-            (*previous).ai_next = current;
-
-            previous
+            match fail {
+                crate::error::LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
+                _ => libc::EAI_FAIL,
+            }
         })
-        .map_or_else(ptr::null_mut, |addr_info| addr_info);
-
-    out_addr_info.copy_from_nonoverlapping(&mut c_addr_info_ptr, 1);
-
-    // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
-    let mut current = *out_addr_info;
-    while current.is_null() == false {
-        info!("value is {:#?}", *current);
-
-        current = (*current).ai_next;
-    }
-
-    0
+        // TODO(alex) [mid] 2022-07-08: Use the proper error values like described in
+        // `gai_strerror`.
+        .unwrap_or_else(|fail| fail)
 }
 
 /// No need to send any sort of `free` message to `mirrord-agent`, as the `addrinfo` there is not
