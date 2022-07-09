@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use futures::{StreamExt, TryStreamExt};
-use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
+use k8s_openapi::api::{
+    batch::v1::Job,
+    core::v1::{EphemeralContainer, Pod},
+};
 use kube::{
-    api::{Api, ListParams, Portforwarder, PostParams},
+    api::{Api, ListParams, Patch, PatchParams, Portforwarder, PostParams},
     core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
@@ -174,6 +177,62 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             }
         ))
         .unwrap();
+
+    println!("Experimental feature begins here");
+    let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
+        "name": "mirrord-agent",
+        "image": agent_image,
+        "imagePullPolicy": image_pull_policy,
+        "target_container_name": impersonated_container_name,
+        "securityContext": {
+            "privileged": true,
+        },
+        "volumeMounts": [
+            {
+                "mountPath": runtime_data.socket_path,
+                "name": "sockpath"
+            }
+        ],
+        "command": [
+            "./mirrord-agent",
+            "--container-id",
+            runtime_data.container_id,
+            "--container-runtime",
+            runtime_data.container_runtime,
+            "-t",
+            "30",
+        ],
+        "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+    }))
+    .unwrap();
+
+    let pod_patch: Pod = serde_json::from_value(json!({
+        "spec": {
+            "ephemeralContainers": [ephemeral_container]
+        }
+    }))
+    .unwrap();
+
+    let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
+
+    let params = PatchParams::apply("mirrord"); // Todo: check what does a "field manager" do/mean?
+
+    let patch = Patch::Apply(&pod_patch);
+
+    pod_api
+        .patch(&env_config.impersonated_pod_name, &params, &patch)
+        .await
+        .with_context(|| "Failed to patch pod")?;
+
+    // list all pods
+    let pod = pod_api
+        .get(&env_config.impersonated_pod_name)
+        .await
+        .unwrap();
+    // let node_name = &pod.spec.unwrap().node_name;
+    let container_statuses = &pod.status.unwrap().ephemeral_container_statuses;
+    println!("{:?}", container_statuses);
+    panic!("End of function!");
 
     let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
     jobs_api
