@@ -104,3 +104,4 @@ Complete refactor and re-write of everything.
 - The CLI/VSCode extension now use `mirrord-layer` which loads into debugged process using `LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`.
   It hooks some of the syscalls in order to proxy incoming traffic into the process as if it was running in the remote pod.
 - Mono repo
+- Fixed unwraps inside of [agent-creation](https://github.com/metalbear-co/mirrord/blob/main/mirrord-layer/src/lib.rs#L75), closes [#191](https://github.com/metalbear-co/mirrord/issues/191)

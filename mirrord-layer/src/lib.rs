@@ -73,7 +73,9 @@ fn init() {
 
     let port_forwarder = RUNTIME
         .block_on(pod_api::create_agent(config.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| {
+            panic!("failed to create agent: {}", e);
+        });
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
