@@ -88,6 +88,10 @@ mod tests {
             assert!(self.stderr.lock().unwrap().is_empty());
         }
 
+        fn assert_python_fileops_stderr(&self) {
+            assert!(!self.stderr.lock().unwrap().contains("FAILED"));
+        }
+
         fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
@@ -505,7 +509,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore] // TODO: Fix this test
     pub async fn test_file_ops(#[future] service: EchoService) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -519,7 +522,7 @@ mod tests {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
+        process.assert_python_fileops_stderr();
     }
 
     #[rstest]
