@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Handle unwraps in fileops to gracefully exit and enable python fileops tests.
+
 ## 2.4.1
 
 ### Added
@@ -23,7 +26,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
 - `fcntl` error on macOS [#184](https://github.com/metalbear-co/mirrord/issues/184) by a workaround.
-- Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 
 ## 2.3.1
 
