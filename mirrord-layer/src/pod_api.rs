@@ -101,6 +101,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             .await
             .with_context(|| "Failed to create client")?
     };
+    let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
 
     let runtime_data = RuntimeData::from_k8s(
         client.clone(),
@@ -109,7 +110,11 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         &impersonated_container_name,
     )
     .await;
-    let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
+
+    let agent_image = agent_image.unwrap_or_else(|| {
+        concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+    });
+
     let pod_name = if env_config.ephemeral_container {
         info!("Experimental feature begins here: ");
         let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
@@ -119,10 +124,10 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             "target_container_name": impersonated_container_name,
             "securityContext": {
                 "privileged": true,
-            },            
+            },
             "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
             "command": [
-                "./mirrord-agent", 
+                "./mirrord-agent",
                 "-t",
                 "30",
             ],
@@ -168,10 +173,6 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 .sample_string(&mut rand::thread_rng(), 10)
                 .to_lowercase()
         );
-
-        let agent_image = agent_image.unwrap_or_else(|| {
-            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-        });
 
         let agent_pod: Job =
             serde_json::from_value(json!({ // Only Jobs support self deletion after completion
