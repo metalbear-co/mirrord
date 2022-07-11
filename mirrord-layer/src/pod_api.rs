@@ -119,10 +119,12 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             "target_container_name": impersonated_container_name,
             "securityContext": {
                 "privileged": true,
-            },
+            },            
             "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
             "command": [
-                "ls"
+                "./mirrord-agent", 
+                "-t",
+                "30",
             ],
         }))
         .unwrap();
