@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
 	"publisher": "MetalBear",
-	"version": "2.3.1",
+	"version": "2.4.1",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -77,6 +77,7 @@
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
-		"semver": "^7.3.7"
+		"semver": "^7.3.7",
+		"es5-ext": "<=0.10.53"
 	}
 }
