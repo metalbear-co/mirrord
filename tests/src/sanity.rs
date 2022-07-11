@@ -89,7 +89,7 @@ mod tests {
         }
 
         fn assert_python_fileops_stderr(&self) {
-            assert!(self.stderr.lock().unwrap().contains("OK"));
+            assert!(!self.stderr.lock().unwrap().contains("FAILED"));
         }
 
         fn wait_for_line(&self, timeout: Duration, line: &str) {
