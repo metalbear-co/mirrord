@@ -143,6 +143,10 @@ pub enum FileRequest {
     Close(CloseFileRequest),
 }
 
+/// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
+///
+/// Even though all parameters are optional, at least one of `node` or `service` must be `Some`,
+/// otherwise this will result in a `ResponseError`.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetAddrInfoRequest {
     pub node: Option<String>,

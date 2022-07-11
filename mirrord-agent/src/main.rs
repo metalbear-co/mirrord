@@ -274,7 +274,7 @@ impl ClientConnectionHandler {
                     addrinfo_iter
                         .map(|result| {
                             // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
-                            // we have to `map` individually.
+                            // we have to `map` individually, then convert to one of our errors.
                             result.map(Into::into).map_err(|fail| {
                                 ResponseError::GAI(GaiError {
                                     raw_os_error: fail.raw_os_error(),
@@ -282,6 +282,7 @@ impl ClientConnectionHandler {
                                 })
                             })
                         })
+                        // Now we can flatten and transpose the whole thing into this.
                         .collect::<Result<Vec<AddrInfoInternal>, _>>()
                 })
                 .map_err(AgentError::Lookup)?;

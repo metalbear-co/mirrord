@@ -12,7 +12,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::GetAddrInfoResponse;
 use os_socketaddr::OsSocketAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::*;
 use crate::{
@@ -360,11 +360,6 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
     dup_fd
 }
 
-// TODO(alex) [high] 2022-07-08:
-// 4. Blank `launch.json`;
-// 5. Remove debugging stuff (search for custom comment marks);
-// 7. Test "enable/disable" option for this feature;
-
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -427,7 +422,7 @@ pub(super) fn getaddrinfo(
                 ai_next: ptr::null_mut(),
             };
 
-            info!("c_addr_info {:#?}", c_addr_info);
+            trace!("getaddrinfo -> c_addr_info {:#?}", c_addr_info);
 
             c_addr_info
         })

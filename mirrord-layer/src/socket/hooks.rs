@@ -3,7 +3,7 @@ use std::{ffi::CStr, os::unix::io::RawFd};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_protocol::AddrInfoHint;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 use super::ops::*;
 use crate::{
@@ -126,7 +126,7 @@ unsafe extern "C" fn getaddrinfo_detour(
     out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
     trace!(
-        "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?} | out {:#?}",
+        "getaddrinfo_detour -> raw_node {:#?} | raw_service {:#?} | raw_hints {:#?} | out? {:#?}",
         raw_node,
         raw_service,
         *raw_hints,
@@ -166,18 +166,10 @@ unsafe extern "C" fn getaddrinfo_detour(
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
-            // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
-            let mut current = *out_addr_info;
-            while !current.is_null() {
-                info!("value is {:#?}", *current);
-
-                current = (*current).ai_next;
-            }
-
             0
         })
         .map_err(|fail| {
-            error!("Failed resolving dns with {:#?}", fail);
+            error!("Failed resolving DNS with {:#?}", fail);
 
             match fail {
                 LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
@@ -191,6 +183,8 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
 /// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`.
 ///
+/// Also follows the `addr_info.ai_next` pointer, deallocating the next pointers in the linked list.
+///
 /// # Protocol
 ///
 /// No need to send any sort of `free` message to `mirrord-agent`, as the `addrinfo` there is not
@@ -203,25 +197,13 @@ unsafe extern "C" fn getaddrinfo_detour(
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
-    // TODO(alex) [mid] 2022-07-07: Remove this (for debugging only).
-    let mut current = addrinfo;
-    while !current.is_null() {
-        info!("value is {:#?}", *current);
-        info!("addr is {:#?}", *(*current).ai_addr);
-
-        current = (*current).ai_next;
-    }
-
-    // TODO(alex) [mid] 2022-07-07: Should we drop every allocation, or just the `addrinfo`
-    // specified in the function argument?
+    // Iterate over `addrinfo` linked list dropping it.
     let mut current = addrinfo;
     while !current.is_null() {
         Box::from_raw(current);
 
         current = (*current).ai_next;
     }
-
-    // Box::from_raw(addrinfo);
 }
 
 pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
