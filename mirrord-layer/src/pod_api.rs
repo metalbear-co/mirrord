@@ -13,7 +13,7 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::config::LayerConfig;
 
@@ -178,7 +178,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         ))
         .unwrap();
 
-    println!("Experimental feature begins here");
+    info!("Experimental feature begins here: ");
     let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
         "name": "mirrord-agent",
         "image": agent_image,
@@ -187,65 +187,46 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         "securityContext": {
             "privileged": true,
         },
-        // "volumeMounts": [
-        //     {
-        //         "mountPath": runtime_data.socket_path,
-        //         "name": "sockpath"
-        //     }
-        // ],
-        // "command": [
-        //     "./mirrord-agent",
-        //     "--container-id",
-        //     runtime_data.container_id,
-        //     "--container-runtime",
-        //     runtime_data.container_runtime,
-        //     "-t",
-        //     "30",
-        // ],
-        // "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+        "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+        "command": [
+            "ls"
+        ],
     }))
     .unwrap();
 
-    // Todo: what should be the pod spec for patching?
-    // let pod_patch: Pod = serde_json::from_value(json!({
-    //     "spec": {
-    //         "ephemeralcontainers": [
-    //             ephemeral_container,
-    //         ],
-    //     },
-    // }))
-    // .unwrap();
-
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
 
-    // let params = PatchParams::default(); // Todo: check what does a "field manager" do/mean?
+    info!("Requesting sub_resource: ");
+    let mut ephemeral_containers_subresource = pod_api
+        .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
+        .await
+        .unwrap();
 
-    // let patch = Patch::Apply(&ephemeral_container);
+    let mut spec = ephemeral_containers_subresource
+        .spec
+        .as_mut()
+        .ok_or("Failed to get spec")
+        .unwrap();
 
-    println!("requesting resource");
-    let mut ephemeral_containers = pod_api.get_subresource(
-        "ephemeralcontainers", &env_config.impersonated_pod_name).await.unwrap();
+    spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
+        Some(mut ephemeral_containers) => {
+            ephemeral_containers.push(ephemeral_container);
+            Some(ephemeral_containers)
+        }
+        None => Some(vec![ephemeral_container]),
+    };
 
-    ephemeral_containers.spec.as_mut().unwrap().ephemeral_containers.as_mut().unwrap().push(ephemeral_container);
-    // println!("ephemeral containers: {:?}", ephemeral_containers);
     pod_api
         .replace_subresource(
             "ephemeralcontainers",
             &env_config.impersonated_pod_name,
             &PostParams::default(),
-            to_vec(&ephemeral_containers).unwrap(),
+            to_vec(&ephemeral_containers_subresource).unwrap(),
         )
         .await
         .with_context(|| "Failed to patch pod")?;
 
     // list all pods
-    let pod = pod_api
-        .get(&env_config.impersonated_pod_name)
-        .await
-        .unwrap();
-    // let node_name = &pod.spec.unwrap().node_name;
-    let container_statuses = &pod.status.unwrap().ephemeral_container_statuses;
-    println!("{:?}", container_statuses);
     panic!("End of function!");
 
     let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
