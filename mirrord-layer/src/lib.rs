@@ -361,7 +361,7 @@ async fn handle_daemon_message(
         DaemonMessage::GetEnvVarsResponse(_) => {
             unreachable!("We get env vars only on initialization right now, shouldn't happen")
         }
-        DaemonMessage::GetAddrInfoResponse(get_addr_info) => Ok({
+        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
             trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
 
             getaddrinfo_handler
@@ -369,8 +369,8 @@ async fn handle_daemon_message(
                 .pop()
                 .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
                 .send(get_addr_info)
-                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)?;
-        }),
+                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
+        }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
