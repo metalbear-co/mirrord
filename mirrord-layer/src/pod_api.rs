@@ -12,7 +12,7 @@ use kube::{
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use serde_json::json;
+use serde_json::{json, to_vec};
 use tracing::{error, info, warn};
 
 use crate::config::LayerConfig;
@@ -187,40 +187,54 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         "securityContext": {
             "privileged": true,
         },
-        "volumeMounts": [
-            {
-                "mountPath": runtime_data.socket_path,
-                "name": "sockpath"
-            }
-        ],
-        "command": [
-            "./mirrord-agent",
-            "--container-id",
-            runtime_data.container_id,
-            "--container-runtime",
-            runtime_data.container_runtime,
-            "-t",
-            "30",
-        ],
-        "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+        // "volumeMounts": [
+        //     {
+        //         "mountPath": runtime_data.socket_path,
+        //         "name": "sockpath"
+        //     }
+        // ],
+        // "command": [
+        //     "./mirrord-agent",
+        //     "--container-id",
+        //     runtime_data.container_id,
+        //     "--container-runtime",
+        //     runtime_data.container_runtime,
+        //     "-t",
+        //     "30",
+        // ],
+        // "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
     }))
     .unwrap();
 
-    let pod_patch: Pod = serde_json::from_value(json!({
-        "spec": {
-            "ephemeralContainers": [ephemeral_container]
-        }
-    }))
-    .unwrap();
+    // Todo: what should be the pod spec for patching?
+    // let pod_patch: Pod = serde_json::from_value(json!({
+    //     "spec": {
+    //         "ephemeralcontainers": [
+    //             ephemeral_container,
+    //         ],
+    //     },
+    // }))
+    // .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
 
-    let params = PatchParams::apply("mirrord"); // Todo: check what does a "field manager" do/mean?
+    // let params = PatchParams::default(); // Todo: check what does a "field manager" do/mean?
 
-    let patch = Patch::Apply(&pod_patch);
+    // let patch = Patch::Apply(&ephemeral_container);
 
+    println!("requesting resource");
+    let mut ephemeral_containers = pod_api.get_subresource(
+        "ephemeralcontainers", &env_config.impersonated_pod_name).await.unwrap();
+
+    ephemeral_containers.spec.as_mut().unwrap().ephemeral_containers.as_mut().unwrap().push(ephemeral_container);
+    // println!("ephemeral containers: {:?}", ephemeral_containers);
     pod_api
-        .patch(&env_config.impersonated_pod_name, &params, &patch)
+        .replace_subresource(
+            "ephemeralcontainers",
+            &env_config.impersonated_pod_name,
+            &PostParams::default(),
+            to_vec(&ephemeral_containers).unwrap(),
+        )
         .await
         .with_context(|| "Failed to patch pod")?;
 
