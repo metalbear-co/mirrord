@@ -67,6 +67,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
+
+    #[error("mirrord-layer: DNS does not resolve!")]
+    DNSNoName,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

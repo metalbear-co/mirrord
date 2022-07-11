@@ -7,6 +7,7 @@ use tracing::{debug, error, info, trace};
 
 use super::ops::*;
 use crate::{
+    error::LayerError,
     macros::{hook, try_hook},
     socket::AddrInfoHintExt,
 };
@@ -179,7 +180,8 @@ unsafe extern "C" fn getaddrinfo_detour(
             error!("Failed resolving dns with {:#?}", fail);
 
             match fail {
-                crate::error::LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
+                LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
+                LayerError::DNSNoName => libc::EAI_NONAME,
                 _ => libc::EAI_FAIL,
             }
         })
@@ -212,7 +214,14 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 
     // TODO(alex) [mid] 2022-07-07: Should we drop every allocation, or just the `addrinfo`
     // specified in the function argument?
-    Box::from_raw(addrinfo);
+    let mut current = addrinfo;
+    while !current.is_null() {
+        Box::from_raw(current);
+
+        current = (*current).ai_next;
+    }
+
+    // Box::from_raw(addrinfo);
 }
 
 pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {

@@ -361,13 +361,10 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
 }
 
 // TODO(alex) [high] 2022-07-08:
-// 3. If iterator `count == 0` should we return some sort of error, or just a null ptr?
 // 4. Blank `launch.json`;
 // 5. Remove debugging stuff (search for custom comment marks);
 // 7. Test "enable/disable" option for this feature;
 
-// TODO: Should we handle errors in the iterator? How do we handle an error at index `[2]`, for
-// example, where every other index succeeded?
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -398,7 +395,7 @@ pub(super) fn getaddrinfo(
 
     let addr_info_list = addr_info_list?;
 
-    let c_addr_info_ptr = addr_info_list
+    addr_info_list
         .into_iter()
         .map(AddrInfo::from)
         .map(|addr_info| {
@@ -443,11 +440,5 @@ pub(super) fn getaddrinfo(
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .unwrap_or_else(ptr::null_mut);
-
-    if c_addr_info_ptr.is_null() {
-        Err(LayerError::SendErrorFileResponse)
-    } else {
-        Ok(c_addr_info_ptr)
-    }
+        .ok_or(LayerError::DNSNoName)
 }
