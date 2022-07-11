@@ -6,14 +6,14 @@ use k8s_openapi::api::{
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, ListParams, Patch, PatchParams, Portforwarder, PostParams},
+    api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::config::LayerConfig;
 
@@ -109,177 +109,177 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         &impersonated_container_name,
     )
     .await;
+    let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
+    let pod_name = if env_config.ephemeral_container {
+        info!("Experimental feature begins here: ");
+        let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
+            "name": "mirrord-agent",
+            "image": agent_image,
+            "imagePullPolicy": image_pull_policy,
+            "target_container_name": impersonated_container_name,
+            "securityContext": {
+                "privileged": true,
+            },
+            "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+            "command": [
+                "ls"
+            ],
+        }))
+        .unwrap();
 
-    let agent_job_name = format!(
-        "mirrord-agent-{}",
-        Alphanumeric
-            .sample_string(&mut rand::thread_rng(), 10)
-            .to_lowercase()
-    );
+        info!("Requesting sub_resource: ");
+        let mut ephemeral_containers_subresource = pod_api
+            .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
+            .await
+            .unwrap();
 
-    let agent_image = agent_image.unwrap_or_else(|| {
-        concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-    });
+        let mut spec = ephemeral_containers_subresource
+            .spec
+            .as_mut()
+            .ok_or("Failed to get spec")
+            .unwrap();
 
-    let agent_pod: Job =
-        serde_json::from_value(json!({ // Only Jobs support self deletion after completion
-                "metadata": {
-                    "name": agent_job_name,
-                    "labels": {
-                        "app": "mirrord"
-                    }
-                },
-                "spec": {
-                "ttlSecondsAfterFinished": env_config.agent_ttl,
+        spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
+            Some(mut ephemeral_containers) => {
+                ephemeral_containers.push(ephemeral_container);
+                Some(ephemeral_containers)
+            }
+            None => Some(vec![ephemeral_container]),
+        };
 
-                    "template": {
-                "spec": {
-                    "hostPID": true,
-                    "nodeName": runtime_data.node_name,
-                    "restartPolicy": "Never",
-                    "volumes": [
-                        {
-                            "name": "sockpath",
-                            "hostPath": {
-                                "path": runtime_data.socket_path
-                            }
+        pod_api
+            .replace_subresource(
+                "ephemeralcontainers",
+                &env_config.impersonated_pod_name,
+                &PostParams::default(),
+                to_vec(&ephemeral_containers_subresource).unwrap(),
+            )
+            .await
+            .with_context(|| "Failed to patch pod")?;
+
+        env_config.impersonated_pod_name
+    } else {
+        // TODO: fix CLI to reject this if the ephemeral container is not enabled
+        let agent_job_name = format!(
+            "mirrord-agent-{}",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+
+        let agent_image = agent_image.unwrap_or_else(|| {
+            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+        });
+
+        let agent_pod: Job =
+            serde_json::from_value(json!({ // Only Jobs support self deletion after completion
+                    "metadata": {
+                        "name": agent_job_name,
+                        "labels": {
+                            "app": "mirrord"
                         }
-                    ],
-                    "containers": [
-                        {
-                            "name": "mirrord-agent",
-                            "image": agent_image,
-                            "imagePullPolicy": image_pull_policy,
-                            "securityContext": {
-                                "privileged": true,
-                            },
-                            "volumeMounts": [
-                                {
-                                    "mountPath": runtime_data.socket_path,
-                                    "name": "sockpath"
+                    },
+                    "spec": {
+                    "ttlSecondsAfterFinished": env_config.agent_ttl,
+
+                        "template": {
+                    "spec": {
+                        "hostPID": true,
+                        "nodeName": runtime_data.node_name,
+                        "restartPolicy": "Never",
+                        "volumes": [
+                            {
+                                "name": "sockpath",
+                                "hostPath": {
+                                    "path": runtime_data.socket_path
                                 }
-                            ],
-                            "command": [
-                                "./mirrord-agent",
-                                "--container-id",
-                                runtime_data.container_id,
-                                "--container-runtime",
-                                runtime_data.container_runtime,
-                                "-t",
-                                "30",
-                            ],
-                            "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
-                        }
-                    ]
+                            }
+                        ],
+                        "containers": [
+                            {
+                                "name": "mirrord-agent",
+                                "image": agent_image,
+                                "imagePullPolicy": image_pull_policy,
+                                "securityContext": {
+                                    "privileged": true,
+                                },
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": runtime_data.socket_path,
+                                        "name": "sockpath"
+                                    }
+                                ],
+                                "command": [
+                                    "./mirrord-agent",
+                                    "--container-id",
+                                    runtime_data.container_id,
+                                    "--container-runtime",
+                                    runtime_data.container_runtime,
+                                    "-t",
+                                    "30",
+                                ],
+                                "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
+                            }
+                        ]
+                    }
                 }
             }
-        }
-            }
-        ))
-        .unwrap();
+                }
+            ))
+            .unwrap();
 
-    info!("Experimental feature begins here: ");
-    let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
-        "name": "mirrord-agent",
-        "image": agent_image,
-        "imagePullPolicy": image_pull_policy,
-        "target_container_name": impersonated_container_name,
-        "securityContext": {
-            "privileged": true,
-        },
-        "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
-        "command": [
-            "ls"
-        ],
-    }))
-    .unwrap();
+        let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
+        jobs_api
+            .create(&PostParams::default(), &agent_pod)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to create jobs api with agent pod {}",
+                    &agent_job_name
+                )
+            })?;
+        let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
+        let params = ListParams::default()
+            .labels(&format!("job-name={}", agent_job_name))
+            .timeout(10);
 
-    let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
-
-    info!("Requesting sub_resource: ");
-    let mut ephemeral_containers_subresource = pod_api
-        .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
-        .await
-        .unwrap();
-
-    let mut spec = ephemeral_containers_subresource
-        .spec
-        .as_mut()
-        .ok_or("Failed to get spec")
-        .unwrap();
-
-    spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
-        Some(mut ephemeral_containers) => {
-            ephemeral_containers.push(ephemeral_container);
-            Some(ephemeral_containers)
-        }
-        None => Some(vec![ephemeral_container]),
-    };
-
-    pod_api
-        .replace_subresource(
-            "ephemeralcontainers",
-            &env_config.impersonated_pod_name,
-            &PostParams::default(),
-            to_vec(&ephemeral_containers_subresource).unwrap(),
-        )
-        .await
-        .with_context(|| "Failed to patch pod")?;
-
-    // list all pods
-    panic!("End of function!");
-
-    let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
-    jobs_api
-        .create(&PostParams::default(), &agent_pod)
-        .await
-        .with_context(|| {
-            format!(
-                "Failed to create jobs api with agent pod {}",
-                &agent_job_name
-            )
-        })?;
-
-    let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
-    let params = ListParams::default()
-        .labels(&format!("job-name={}", agent_job_name))
-        .timeout(10);
-
-    let mut stream = pods_api.watch(&params, "0").await
+        let mut stream = pods_api.watch(&params, "0").await
         .with_context(|| {
             format!(
                 "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
                 )
         })?
         .boxed();
-    while let Some(status) = stream.try_next().await.unwrap() {
-        match status {
-            WatchEvent::Added(_) => break,
-            WatchEvent::Error(s) => {
-                error!("Error watching pods: {:?}", s);
-                break;
+        while let Some(status) = stream.try_next().await.unwrap() {
+            match status {
+                WatchEvent::Added(_) => break,
+                WatchEvent::Error(s) => {
+                    error!("Error watching pods: {:?}", s);
+                    break;
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
 
-    let pods = pods_api
-        .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
-        .await
-        .with_context(|| format!("Failed to list pods for job agent {}", &agent_job_name))?;
-    let pod = pods.items.first().unwrap();
-    let pod_name = pod.metadata.name.clone().unwrap();
-    let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
+        let pods = pods_api
+            .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
+            .await
+            .with_context(|| format!("Failed to list pods for job agent {}", &agent_job_name))?;
+        let pod = pods.items.first().unwrap();
+        let pod_name = pod.metadata.name.clone().unwrap();
+        let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
-        .await
-        .with_context(|| {
-            format!(
-                "Failed to receive a timely response from pod: {:?}",
-                pod_name
-            )
-        })?;
-    pods_api
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to receive a timely response from pod: {:?}",
+                    pod_name
+                )
+            })?;
+        pod_name
+    };
+    pod_api
         .portforward(&pod_name, &[61337])
         .await
         .context("Received an error from the pods API")

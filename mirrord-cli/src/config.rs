@@ -73,4 +73,7 @@ pub(super) struct ExecArgs {
     /// Where to extract the library to (defaults to a temp dir)
     #[clap(long, value_parser)]
     pub extract_path: Option<String>,
+
+    #[clap(long, value_parser)]
+    pub ephemeral_container: bool,
 }
