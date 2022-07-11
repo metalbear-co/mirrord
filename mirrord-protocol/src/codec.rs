@@ -249,7 +249,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoResponse(pub Vec<Result<AddrInfoInternal, ResponseError>>);
+pub struct GetAddrInfoResponse(pub Result<Vec<AddrInfoInternal>, ResponseError>);
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

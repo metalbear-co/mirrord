@@ -15,8 +15,8 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, AddrInfoHint, ClientMessage, DaemonCodec, DaemonMessage, FileError, GaiError,
-    GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
+    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
+    FileError, GaiError, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -276,15 +276,13 @@ impl ClientConnectionHandler {
                             // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
                             // we have to `map` individually.
                             result.map(Into::into).map_err(|fail| {
-                                error!("Failed {:#?}", fail);
-
                                 ResponseError::GAI(GaiError {
                                     raw_os_error: fail.raw_os_error(),
-                                    kind: fail.kind().into(),
+                                    kind: From::from(fail.kind()),
                                 })
                             })
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Result<Vec<AddrInfoInternal>, _>>()
                 })
                 .map_err(AgentError::Lookup)?;
 

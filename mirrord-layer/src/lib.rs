@@ -15,6 +15,7 @@ use common::{
 };
 use ctor::ctor;
 use envconfig::Envconfig;
+use error::LayerError;
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -24,7 +25,7 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
     FileRequest, FileResponse, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest,
     OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -73,7 +74,9 @@ fn init() {
 
     let port_forwarder = RUNTIME
         .block_on(pod_api::create_agent(config.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| {
+            panic!("failed to create agent: {}", e);
+        });
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -92,11 +95,11 @@ async fn handle_hook_message(
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
     getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
 ) {
     match hook_message {
@@ -271,104 +274,103 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
     getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
     ping: &mut bool,
-) {
+) -> Result<(), LayerError> {
     match daemon_message {
         DaemonMessage::Tcp(message) => {
-            tcp_mirror_handler
-                .handle_daemon_message(message)
-                .await
-                .unwrap();
+            tcp_mirror_handler.handle_daemon_message(message).await?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
             debug!("file handler = {:#?}", open_file_handler);
+
             open_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(open_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(open_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Read(read_file)) => {
             // The debug message is too big if we just log it directly.
-            let _ = read_file
-                .as_ref()
+            let file_response = read_file
                 .inspect(|success| {
                     debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
                 })
                 .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
             read_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(read_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(file_response)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
             debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
 
             seek_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(seek_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(seek_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
             debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
 
             write_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(write_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(write_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
             debug!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
 
             close_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(close_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(close_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::Pong => {
             if *ping {
                 *ping = false;
                 trace!("Daemon sent pong!");
             } else {
-                panic!("Daemon: unmatched pong!");
+                Err(LayerError::UnmatchedPong)?;
             }
+            Ok(())
         }
         DaemonMessage::GetEnvVarsResponse(_) => {
             unreachable!("We get env vars only on initialization right now, shouldn't happen")
         }
-        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+        DaemonMessage::GetAddrInfoResponse(get_addr_info) => Ok({
             trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
 
             getaddrinfo_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
+                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
                 .send(get_addr_info)
-                .unwrap();
-        }
+                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)?;
+        }),
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
     }
@@ -417,7 +419,7 @@ async fn thread_loop(
             }
             daemon_message = codec.next() => {
                 if let Some(Ok(message)) = daemon_message {
-                    handle_daemon_message(
+                    if let Err(err) = handle_daemon_message(
                         message,
                         &mut tcp_mirror_handler,
                         &open_file_handler,
@@ -427,7 +429,10 @@ async fn thread_loop(
                         &close_file_handler,
                         &getaddrinfo_handler,
                         &mut ping,
-                    ).await;
+                    ).await {
+                        error!("Error handling daemon message: {:?}", err);
+                        break;
+                    }
                 } else {
                     error!("agent disconnected");
                     break;

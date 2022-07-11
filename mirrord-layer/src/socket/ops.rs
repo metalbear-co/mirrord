@@ -361,12 +361,13 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
 }
 
 // TODO(alex) [high] 2022-07-08:
+// 3. If iterator `count == 0` should we return some sort of error, or just a null ptr?
 // 4. Blank `launch.json`;
 // 5. Remove debugging stuff (search for custom comment marks);
 // 7. Test "enable/disable" option for this feature;
-// 8. Write tests for the feature;
 
-// TODO: Should we handle errors in the iterator?
+// TODO: Should we handle errors in the iterator? How do we handle an error at index `[2]`, for
+// example, where every other index succeeded?
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -395,42 +396,43 @@ pub(super) fn getaddrinfo(
 
     let GetAddrInfoResponse(addr_info_list) = hook_channel_rx.blocking_recv()?;
 
+    let addr_info_list = addr_info_list?;
+
     let c_addr_info_ptr = addr_info_list
         .into_iter()
-        .flat_map(|result| {
-            result.map(AddrInfo::from).map(|addr_info| {
-                let AddrInfo {
-                    socktype,
-                    protocol,
-                    address,
-                    sockaddr,
-                    canonname,
-                    flags,
-                } = addr_info;
+        .map(AddrInfo::from)
+        .map(|addr_info| {
+            let AddrInfo {
+                socktype,
+                protocol,
+                address,
+                sockaddr,
+                canonname,
+                flags,
+            } = addr_info;
 
-                let sockaddr = socket2::SockAddr::from(sockaddr);
+            let sockaddr = socket2::SockAddr::from(sockaddr);
 
-                let canonname = canonname.map(CString::new).transpose().unwrap();
-                let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
-                    let c_str = c_string.as_c_str();
-                    c_str.as_ptr()
-                }) as *mut _;
+            let canonname = canonname.map(CString::new).transpose().unwrap();
+            let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
+                let c_str = c_string.as_c_str();
+                c_str.as_ptr()
+            }) as *mut _;
 
-                let c_addr_info = libc::addrinfo {
-                    ai_flags: flags,
-                    ai_family: address,
-                    ai_socktype: socktype,
-                    ai_protocol: protocol,
-                    ai_addrlen: sockaddr.len(),
-                    ai_addr: sockaddr.as_ptr() as *mut _,
-                    ai_canonname,
-                    ai_next: ptr::null_mut(),
-                };
+            let c_addr_info = libc::addrinfo {
+                ai_flags: flags,
+                ai_family: address,
+                ai_socktype: socktype,
+                ai_protocol: protocol,
+                ai_addrlen: sockaddr.len(),
+                ai_addr: sockaddr.as_ptr() as *mut _,
+                ai_canonname,
+                ai_next: ptr::null_mut(),
+            };
 
-                info!("c_addr_info {:#?}", c_addr_info);
+            info!("c_addr_info {:#?}", c_addr_info);
 
-                c_addr_info
-            })
+            c_addr_info
         })
         .rev()
         .map(Box::new)
@@ -443,5 +445,9 @@ pub(super) fn getaddrinfo(
         })
         .unwrap_or_else(ptr::null_mut);
 
-    Ok(c_addr_info_ptr)
+    if c_addr_info_ptr.is_null() {
+        Err(LayerError::SendErrorFileResponse)
+    } else {
+        Ok(c_addr_info_ptr)
+    }
 }
