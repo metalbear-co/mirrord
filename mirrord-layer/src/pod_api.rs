@@ -165,10 +165,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             .with_context(|| "Failed to patch pod")?;
 
         let params = ListParams::default()
-            .fields(&format!(
-                "metadata.name={}",
-                "mirrord_agent"
-            ))
+            .fields(&format!("metadata.name={}", "mirrord_agent"))
             .timeout(20);
 
         let mut stream = pod_api.watch(&params, "0").await
