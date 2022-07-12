@@ -6,6 +6,12 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+### Fixed
+- Handle unwraps in fileops to gracefully exit and enable python fileops tests.
+
+## 2.4.1
+
 ### Added
 - mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
 - mirrord-layer provides `MIRRORD_IMPERSONATED_CONTAINER_NAME` environment variable to specify container name to impersonate. mirrord-cli accepts argument to set variable.
@@ -98,3 +104,4 @@ Complete refactor and re-write of everything.
 - The CLI/VSCode extension now use `mirrord-layer` which loads into debugged process using `LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`.
   It hooks some of the syscalls in order to proxy incoming traffic into the process as if it was running in the remote pod.
 - Mono repo
+- Fixed unwraps inside of [agent-creation](https://github.com/metalbear-co/mirrord/blob/main/mirrord-layer/src/lib.rs#L75), closes [#191](https://github.com/metalbear-co/mirrord/issues/191)
