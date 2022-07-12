@@ -164,6 +164,31 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             .await
             .with_context(|| "Failed to patch pod")?;
 
+        let params = ListParams::default()
+            .fields(&format!(
+                "metadata.name={}",
+                "mirrord_agent"
+            ))
+            .timeout(20);
+
+        let mut stream = pod_api.watch(&params, "0").await
+        .with_context(|| {
+            format!(
+                "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
+                )
+        })?.boxed();
+
+        while let Some(status) = stream.try_next().await.unwrap() {
+            match status {
+                WatchEvent::Added(_) => break,
+                WatchEvent::Error(s) => {
+                    error!("Error watching pod: {:?}", s);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
         env_config.impersonated_pod_name
     } else {
         // TODO: fix CLI to reject this if the ephemeral container is not enabled
@@ -241,12 +266,11 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                     &agent_job_name
                 )
             })?;
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
         let params = ListParams::default()
             .labels(&format!("job-name={}", agent_job_name))
             .timeout(10);
 
-        let mut stream = pods_api.watch(&params, "0").await
+        let mut stream = pod_api.watch(&params, "0").await
         .with_context(|| {
             format!(
                 "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
@@ -264,13 +288,13 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             }
         }
 
-        let pods = pods_api
+        let pods = pod_api
             .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
             .await
             .with_context(|| format!("Failed to list pods for job agent {}", &agent_job_name))?;
         let pod = pods.items.first().unwrap();
         let pod_name = pod.metadata.name.clone().unwrap();
-        let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
+        let running = await_condition(pod_api.clone(), &pod_name, is_pod_running());
 
         let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
             .await
