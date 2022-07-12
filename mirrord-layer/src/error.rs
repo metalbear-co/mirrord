@@ -1,5 +1,6 @@
 use std::{env::VarError, os::unix::io::RawFd, str::ParseBoolError};
 
+use kube::config::InferConfigError;
 use mirrord_protocol::{tcp::LayerTcp, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
@@ -65,8 +66,20 @@ pub enum LayerError {
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
 
+    #[error("mirrord-layer: Feailed to get `KubeConfig`!")]
+    KubeConfigError(#[from] InferConfigError),
+
     #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
     PodSpecNotFound(String),
+
+    #[error("mirrord-layer: Kube failed with error `{0}`!")]
+    KubeError(#[from] kube::Error),
+
+    #[error("mirrord-layer: JSON convert error")]
+    JSONConvertError(#[from] serde_json::Error),
+
+    #[error("mirrord-layer: Timed Out!")]
+    TimeOutError,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

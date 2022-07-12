@@ -75,7 +75,7 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
+pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
     let LayerConfig {
         agent_rust_log,
         agent_namespace,
@@ -90,16 +90,14 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     let env_config = LayerConfig::init_from_env().unwrap();
 
     let client = if env_config.accept_invalid_certificates {
-        let mut config = Config::infer()
-            .await
-            .with_context(|| "Failed to load kube-config")?;
+        let mut config = Config::infer().await?;
         config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
-        Client::try_from(config).with_context(|| "Failed to create client")?
+        Client::try_from(config).map_err(|e| LayerError::KubeError(e))?
     } else {
         Client::try_default()
             .await
-            .with_context(|| "Failed to create client")?
+            .map_err(|e| LayerError::KubeError(e))?
     };
 
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
@@ -138,7 +136,8 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         debug!("Requesting ephemeral_containers_subresource");
         let mut ephemeral_containers_subresource = pod_api
             .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
-            .await?;
+            .await
+            .map_err(|e| LayerError::KubeError(e))?;
 
         let mut spec =
             ephemeral_containers_subresource
@@ -164,18 +163,17 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 to_vec(&ephemeral_containers_subresource).unwrap(),
             )
             .await
-            .with_context(|| "Failed to patch pod")?;
+            .map_err(|e| LayerError::KubeError(e))?;
 
         let params = ListParams::default()
             .fields(&format!("metadata.name={}", "mirrord_agent"))
             .timeout(20);
 
-        let mut stream = pod_api.watch(&params, "0").await
-        .with_context(|| {
-            format!(
-                "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
-                )
-        })?.boxed();
+        let mut stream = pod_api
+            .watch(&params, "0")
+            .await
+            .map_err(|e| LayerError::KubeError(e))?
+            .boxed();
 
         while let Some(status) = stream.try_next().await? {
             match status {
@@ -258,23 +256,18 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         jobs_api
             .create(&PostParams::default(), &agent_pod)
             .await
-            .with_context(|| {
-                format!(
-                    "Failed to create jobs api with agent pod {}",
-                    &agent_job_name
-                )
-            })?;
+            .map_err(|e| LayerError::KubeError(e))?;
+
         let params = ListParams::default()
             .labels(&format!("job-name={}", agent_job_name))
             .timeout(10);
 
-        let mut stream = pod_api.watch(&params, "0").await
-        .with_context(|| {
-            format!(
-                "Failed to receive a timely response from pods API with params: {:?}, agent is not started!", &params
-                )
-        })?
-        .boxed();
+        let mut stream = pod_api
+            .watch(&params, "0")
+            .await
+            .map_err(|e| LayerError::KubeError(e))?
+            .boxed();
+
         while let Some(status) = stream.try_next().await? {
             match status {
                 WatchEvent::Added(_) => break,
@@ -289,23 +282,19 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
         let pods = pod_api
             .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
             .await
-            .with_context(|| format!("Failed to list pods for job agent {}", &agent_job_name))?;
+            .map_err(|e| LayerError::KubeError(e))?;
+
         let pod = pods.items.first().unwrap();
         let pod_name = pod.metadata.name.clone().unwrap();
         let running = await_condition(pod_api.clone(), &pod_name, is_pod_running());
 
         let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
             .await
-            .with_context(|| {
-                format!(
-                    "Failed to receive a timely response from pod: {:?}",
-                    pod_name
-                )
-            })?;
+            .map_err(|_| LayerError::TimeOutError)?; // TODO: convert the elapsed error to string?
         pod_name
     };
     pod_api
         .portforward(&pod_name, &[61337])
         .await
-        .context("Received an error from the pods API")
+        .map_err(|e| LayerError::KubeError(e))
 }

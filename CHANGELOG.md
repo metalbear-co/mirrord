@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Add support for Ephemeral Containers, closes [#172](https://github.com/metalbear-co/mirrord/issues/172)
+
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 
