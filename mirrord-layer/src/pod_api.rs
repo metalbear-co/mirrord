@@ -93,11 +93,9 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         let mut config = Config::infer().await?;
         config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
-        Client::try_from(config).map_err(|e| LayerError::KubeError(e))?
+        Client::try_from(config).map_err(LayerError::KubeError)?
     } else {
-        Client::try_default()
-            .await
-            .map_err(|e| LayerError::KubeError(e))?
+        Client::try_default().await.map_err(LayerError::KubeError)?
     };
 
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
@@ -137,15 +135,12 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         let mut ephemeral_containers_subresource = pod_api
             .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
             .await
-            .map_err(|e| LayerError::KubeError(e))?;
+            .map_err(LayerError::KubeError)?;
 
-        let mut spec =
-            ephemeral_containers_subresource
-                .spec
-                .as_mut()
-                .ok_or(LayerError::PodSpecNotFound(
-                    env_config.impersonated_pod_name.clone(),
-                ))?;
+        let mut spec = ephemeral_containers_subresource
+            .spec
+            .as_mut()
+            .ok_or_else(|| LayerError::PodSpecNotFound(env_config.impersonated_pod_name.clone()))?;
 
         spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
             Some(mut ephemeral_containers) => {
@@ -163,7 +158,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
                 to_vec(&ephemeral_containers_subresource).unwrap(),
             )
             .await
-            .map_err(|e| LayerError::KubeError(e))?;
+            .map_err(LayerError::KubeError)?;
 
         let params = ListParams::default()
             .fields(&format!("metadata.name={}", "mirrord_agent"))
@@ -172,7 +167,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         let mut stream = pod_api
             .watch(&params, "0")
             .await
-            .map_err(|e| LayerError::KubeError(e))?
+            .map_err(LayerError::KubeError)?
             .boxed();
 
         while let Some(status) = stream.try_next().await? {
@@ -256,7 +251,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         jobs_api
             .create(&PostParams::default(), &agent_pod)
             .await
-            .map_err(|e| LayerError::KubeError(e))?;
+            .map_err(LayerError::KubeError)?;
 
         let params = ListParams::default()
             .labels(&format!("job-name={}", agent_job_name))
@@ -265,7 +260,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         let mut stream = pod_api
             .watch(&params, "0")
             .await
-            .map_err(|e| LayerError::KubeError(e))?
+            .map_err(LayerError::KubeError)?
             .boxed();
 
         while let Some(status) = stream.try_next().await? {
@@ -282,7 +277,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         let pods = pod_api
             .list(&ListParams::default().labels(&format!("job-name={}", agent_job_name)))
             .await
-            .map_err(|e| LayerError::KubeError(e))?;
+            .map_err(LayerError::KubeError)?;
 
         let pod = pods.items.first().unwrap();
         let pod_name = pod.metadata.name.clone().unwrap();
@@ -296,5 +291,5 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
     pod_api
         .portforward(&pod_name, &[61337])
         .await
-        .map_err(|e| LayerError::KubeError(e))
+        .map_err(LayerError::KubeError)
 }
