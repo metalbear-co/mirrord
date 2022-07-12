@@ -120,9 +120,6 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
             "image": agent_image,
             "imagePullPolicy": image_pull_policy,
             "target_container_name": impersonated_container_name,
-            "securityContext": {
-                "privileged": true,
-            },
             "env": [{"name": "RUST_LOG", "value": agent_rust_log}],
             "command": [
                 "./mirrord-agent",
@@ -162,7 +159,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
 
         let params = ListParams::default()
             .fields(&format!("metadata.name={}", "mirrord_agent"))
-            .timeout(20);
+            .timeout(10);
 
         let mut stream = pod_api
             .watch(&params, "0")

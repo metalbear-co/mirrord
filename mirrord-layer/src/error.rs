@@ -66,7 +66,7 @@ pub enum LayerError {
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
 
-    #[error("mirrord-layer: Feailed to get `KubeConfig`!")]
+    #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] InferConfigError),
 
     #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
