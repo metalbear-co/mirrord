@@ -64,6 +64,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
+
+    #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
+    PodSpecNotFound(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

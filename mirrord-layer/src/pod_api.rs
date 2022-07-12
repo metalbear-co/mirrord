@@ -13,9 +13,9 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
-use crate::config::LayerConfig;
+use crate::{config::LayerConfig, error::LayerError};
 
 struct RuntimeData {
     container_id: String,
@@ -101,6 +101,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
             .await
             .with_context(|| "Failed to create client")?
     };
+
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
 
     let runtime_data = RuntimeData::from_k8s(
@@ -116,7 +117,8 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
     });
 
     let pod_name = if env_config.ephemeral_container {
-        info!("Experimental feature begins here: ");
+        warn!("Ephemeral Containers is an experimental feature
+              >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
         let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
             "name": "mirrord-agent",
             "image": agent_image,
@@ -131,20 +133,20 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 "-t",
                 "30",
             ],
-        }))
-        .unwrap();
+        }))?;
 
-        info!("Requesting sub_resource: ");
+        debug!("Requesting ephemeral_containers_subresource");
         let mut ephemeral_containers_subresource = pod_api
             .get_subresource("ephemeralcontainers", &env_config.impersonated_pod_name)
-            .await
-            .unwrap();
+            .await?;
 
-        let mut spec = ephemeral_containers_subresource
-            .spec
-            .as_mut()
-            .ok_or("Failed to get spec")
-            .unwrap();
+        let mut spec =
+            ephemeral_containers_subresource
+                .spec
+                .as_mut()
+                .ok_or(LayerError::PodSpecNotFound(
+                    env_config.impersonated_pod_name.clone(),
+                ))?;
 
         spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
             Some(mut ephemeral_containers) => {
@@ -175,7 +177,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 )
         })?.boxed();
 
-        while let Some(status) = stream.try_next().await.unwrap() {
+        while let Some(status) = stream.try_next().await? {
             match status {
                 WatchEvent::Added(_) => break,
                 WatchEvent::Error(s) => {
@@ -250,8 +252,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 }
             }
                 }
-            ))
-            .unwrap();
+            ))?;
 
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
         jobs_api
@@ -274,7 +275,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder> {
                 )
         })?
         .boxed();
-        while let Some(status) = stream.try_next().await.unwrap() {
+        while let Some(status) = stream.try_next().await? {
             match status {
                 WatchEvent::Added(_) => break,
                 WatchEvent::Error(s) => {
