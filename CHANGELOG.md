@@ -8,9 +8,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
+
 - New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
 It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
 `true`, or using the `-d` option in mirrord-cli.
+- New feature, [Ephemeral Containers](https://github.com/metalbear-co/mirrord/issues/172).
+Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `--ephemeral-container` flag.
 
 ### Changed
 - E2E: Collect minikube logs and fix collecting container logs

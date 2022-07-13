@@ -1,3 +1,4 @@
+#![feature(stmt_expr_attributes)]
 #[cfg(test)]
 
 mod tests {
@@ -21,7 +22,10 @@ mod tests {
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
     };
-    use rand::{distributions::Alphanumeric, Rng};
+    use rand::{
+        distributions::{Alphanumeric, DistString},
+        Rng,
+    };
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -69,6 +73,10 @@ mod tests {
     enum Application {
         PythonHTTP,
         NodeHTTP,
+    }
+    pub enum Agent {
+        Ephemeral,
+        Job,
     }
 
     struct TestProcess {
@@ -167,6 +175,15 @@ mod tests {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
             run(process_cmd, pod_name, namespace, args).await
+        }
+    }
+
+    impl Agent {
+        fn flag(&self) -> Option<Vec<&str>> {
+            match self {
+                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
+                Agent::Job => None,
+            }
         }
     }
 
@@ -485,18 +502,20 @@ mod tests {
         res.bytes().await.unwrap();
     }
 
+    #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), None)
+            .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
         send_requests(&url).await;
@@ -507,17 +526,93 @@ mod tests {
         process.assert_stderr();
     }
 
+    fn get_shared_lib_path() -> String {
+        let agent_name = format!(
+            "/tmp/{}",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+        std::fs::create_dir(&agent_name).unwrap();
+        agent_name
+    }
+
+    #[cfg(target_os = "macos")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService) {
+    async fn test_mirror_http_traffic(
+        #[future] service: EchoService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut process = application
+            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .await;
+        process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
+        send_requests(&url).await;
+        timeout(Duration::from_secs(40), process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        process.assert_stderr();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_file_ops(
+        #[future] service: EchoService,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
+
+        let shared_lib_path = get_shared_lib_path();
+
+        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+
+        if let Some(ephemeral_flag) = agent.flag() {
+            args.extend(ephemeral_flag);
+        }
+
         let mut process = run(
             python_command,
             &service.pod_name,
             Some(&service.namespace),
-            Some(vec!["--enable-fs", "--extract-path", "/tmp/fs"]),
+            Some(args),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_python_fileops_stderr();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+        let service = service.await;
+        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+        let python_command = vec!["python3", "python-e2e/ops.py"];
+
+        let shared_lib_path = get_shared_lib_path();
+
+        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+
+        if let Some(ephemeral_flag) = agent.flag() {
+            args.extend(ephemeral_flag);
+        }
+
+        let mut process = run(
+            python_command,
+            &service.pod_name,
+            Some(&service.namespace),
+            Some(args),
         )
         .await;
         let res = process.child.wait().await.unwrap();
