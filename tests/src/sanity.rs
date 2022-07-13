@@ -1,3 +1,4 @@
+#![feature(stmt_expr_attributes)]
 #[cfg(test)]
 
 mod tests {
@@ -506,7 +507,7 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+        #[values(#[cfg(target_os="linux")]Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -572,8 +573,4 @@ mod tests {
         assert!(res.success());
         process.assert_stderr();
     }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_ephemeral_file_ops(#[future] service: EchoService) {}
 }
