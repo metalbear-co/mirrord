@@ -13,6 +13,7 @@ It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE
 `true`, or using the `-d` option in mirrord-cli.
 
 ### Changed
+- E2E: Collect minikube logs and fix collecting container logs
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
 
 ### Fixed
