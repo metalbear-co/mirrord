@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use envconfig::Envconfig;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
@@ -78,15 +77,16 @@ impl RuntimeData {
 pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
     let LayerConfig {
         agent_image,
+        agent_namespace,
         impersonated_pod_name,
         impersonated_pod_namespace,
         impersonated_container_name,
+        ephemeral_container,
+        accept_invalid_certificates,
         ..
-    } = config;
+    } = config.clone();
 
-    let env_config = LayerConfig::init_from_env().unwrap();
-
-    let client = if config.accept_invalid_certificates {
+    let client = if accept_invalid_certificates {
         let mut config = Config::infer().await?;
         config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
@@ -95,14 +95,14 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         Client::try_default().await.map_err(LayerError::KubeError)?
     };
 
-    let pods_api: Api<Pod> = Api::namespaced(client.clone(), &env_config.agent_namespace);
+    let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
 
     let agent_image = agent_image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
-    let pod_name = if env_config.ephemeral_container {
-        create_ephemeral_container_agent(env_config, agent_image, &pods_api).await?
+    let pod_name = if ephemeral_container {
+        create_ephemeral_container_agent(config, agent_image, &pods_api).await?
     } else {
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
@@ -111,9 +111,9 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
             &impersonated_container_name,
         )
         .await;
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), &env_config.agent_namespace);
+        let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
-        create_job_pod_agent(env_config, agent_image, &pods_api, runtime_data, &jobs_api).await?
+        create_job_pod_agent(config, agent_image, &pods_api, runtime_data, &jobs_api).await?
     };
     pods_api
         .portforward(&pod_name, &[61337])
@@ -134,7 +134,7 @@ fn get_agent_name() -> String {
 async fn create_ephemeral_container_agent(
     config: LayerConfig,
     agent_image: String,
-    pod_api: &Api<Pod>,
+    pods_api: &Api<Pod>,
 ) -> Result<String, LayerError> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
@@ -155,7 +155,7 @@ async fn create_ephemeral_container_agent(
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
-    let mut ephemeral_containers_subresource = pod_api
+    let mut ephemeral_containers_subresource = pods_api
         .get_subresource("ephemeralcontainers", &config.impersonated_pod_name)
         .await
         .map_err(LayerError::KubeError)?;
@@ -173,7 +173,7 @@ async fn create_ephemeral_container_agent(
         None => Some(vec![ephemeral_container]),
     };
 
-    pod_api
+    pods_api
         .replace_subresource(
             "ephemeralcontainers",
             &config.impersonated_pod_name,
@@ -187,7 +187,7 @@ async fn create_ephemeral_container_agent(
         .fields(&format!("metadata.name={}", "mirrord_agent"))
         .timeout(10);
 
-    let mut stream = pod_api
+    let mut stream = pods_api
         .watch(&params, "0")
         .await
         .map_err(LayerError::KubeError)?
@@ -210,7 +210,7 @@ async fn create_ephemeral_container_agent(
 async fn create_job_pod_agent(
     config: LayerConfig,
     agent_image: String,
-    pod_api: &Api<Pod>,
+    pods_api: &Api<Pod>,
     runtime_data: RuntimeData,
     job_api: &Api<Job>,
 ) -> Result<String, LayerError> {
@@ -280,7 +280,7 @@ async fn create_job_pod_agent(
         .labels(&format!("job-name={}", mirrord_agent_job_name))
         .timeout(10);
 
-    let mut stream = pod_api
+    let mut stream = pods_api
         .watch(&params, "0")
         .await
         .map_err(LayerError::KubeError)?
@@ -297,14 +297,14 @@ async fn create_job_pod_agent(
         }
     }
 
-    let pods = pod_api
+    let pods = pods_api
         .list(&ListParams::default().labels(&format!("job-name={}", mirrord_agent_job_name)))
         .await
         .map_err(LayerError::KubeError)?;
 
     let pod = pods.items.first().unwrap();
     let pod_name = pod.metadata.name.clone().unwrap();
-    let running = await_condition(pod_api.clone(), &pod_name, is_pod_running());
+    let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
         .await

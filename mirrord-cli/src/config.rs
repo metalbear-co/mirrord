@@ -74,6 +74,7 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub extract_path: Option<String>,
 
-    #[clap(long, value_parser)]
+    /// Use an Ephemeral Container to mirror traffic.
+    #[clap(short, long, value_parser)]
     pub ephemeral_container: bool,
 }
