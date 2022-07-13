@@ -70,6 +70,11 @@ mod tests {
         PythonHTTP,
         NodeHTTP,
     }
+    enum Agent {
+        #[cfg(target_os = "linux")]
+        Ephemeral,
+        Job,
+    }
 
     struct TestProcess {
         pub child: Child,
@@ -167,6 +172,16 @@ mod tests {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             };
             run(process_cmd, pod_name, namespace, args).await
+        }
+    }
+
+    impl Agent {
+        fn flag(&self) -> Option<Vec<&str>> {
+            match self {
+                #[cfg(target_os = "linux")]
+                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
+                Agent::Job => None,
+            }
         }
     }
 
@@ -491,12 +506,13 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), None)
+            .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
         send_requests(&url).await;
@@ -556,4 +572,8 @@ mod tests {
         assert!(res.success());
         process.assert_stderr();
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_ephemeral_file_ops(#[future] service: EchoService) {}
 }
