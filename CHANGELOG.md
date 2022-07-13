@@ -7,6 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
+It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
+`true`, or using the `-d` option in mirrord-cli.
+
+### Changed
+- Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
+- Refactored `file` related functions, created `FileHandler` and improved structure.
+
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 

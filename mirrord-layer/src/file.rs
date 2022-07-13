@@ -10,13 +10,14 @@ use std::{
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, FileRequest, OpenFileRequest, OpenFileResponse,
-    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ResponseError,
-    SeekFileRequest, SeekFileResponse, WriteFileResponse,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tokio::sync::oneshot;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::error::LayerError;
 
@@ -119,15 +120,58 @@ impl OpenOptionsInternalExt for OpenOptionsInternal {
 
 type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 #[derive(Default)]
-struct FileHandler {
+pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
+    write_queue: ResponseDeque<WriteFileResponse>,
+    close_queue: ResponseDeque<CloseFileResponse>,
+}
+
+/// Comfort function for popping oldest request from queue and sending given value into the channel.
+fn pop_send<T>(deque: &mut ResponseDeque<T>, value: FileResult<T>) -> Result<(), LayerError> {
+    deque
+        .pop_front()
+        .ok_or(LayerError::SendErrorFileResponse)?
+        .send(value)
+        .map_err(|_| LayerError::SendErrorFileResponse)
 }
 
 impl FileHandler {
-    pub fn handle_hook_message(
+    pub async fn handle_daemon_message(&mut self, message: FileResponse) -> Result<(), LayerError> {
+        use FileResponse::*;
+        match message {
+            Open(open) => {
+                debug!("DaemonMessage::OpenFileResponse {open:#?}!");
+                pop_send(&mut self.open_queue, open)
+            }
+            Read(read) => {
+                // The debug message is too big if we just log it directly.
+                let file_response = read
+                    .inspect(|success| {
+                        debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
+                    })
+                    .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+
+                pop_send(&mut self.read_queue, file_response)
+            }
+            Seek(seek) => {
+                debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
+                pop_send(&mut self.seek_queue, seek)
+            }
+            Write(write) => {
+                debug!("DaemonMessage::WriteFileResponse {:#?}!", write);
+                pop_send(&mut self.write_queue, write)
+            }
+            Close(close) => {
+                debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
+                pop_send(&mut self.close_queue, close)
+            }
+        }
+    }
+
+    pub async fn handle_hook_message(
         &mut self,
         message: HookMessageFile,
         codec: &mut actix_codec::Framed<
@@ -145,26 +189,8 @@ impl FileHandler {
             Read(read) => self.handle_hook_read(read, codec).await,
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
-            HookMessage::CloseFileHook(CloseFileHook {
-                fd,
-                file_channel_tx,
-            }) => {
-                debug!("HookMessage::CloseFileHook fd {:#?}", fd);
-
-                close_file_handler.lock().unwrap().push(file_channel_tx);
-
-                let close_file_request = CloseFileRequest { fd };
-
-                let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
-                let codec_result = codec.send(request).await;
-
-                debug!(
-                    "HookMessage::CloseFileHook codec_result {:#?}",
-                    codec_result
-                );
-            }
+            Close(close) => self.handle_hook_close(close, codec).await,
         }
-        Ok(())
     }
 
     async fn handle_hook_open(
@@ -190,10 +216,7 @@ impl FileHandler {
         let open_file_request = OpenFileRequest { path, open_options };
 
         let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
-        let codec_result = codec.send(request).await;
-
-        debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
-        Ok(())
+        codec.send(request).await.map_err(From::from)
     }
     async fn handle_hook_open_relative(
         &mut self,
@@ -224,10 +247,7 @@ impl FileHandler {
 
         let request =
             ClientMessage::FileRequest(FileRequest::OpenRelative(open_relative_file_request));
-        let codec_result = codec.send(request).await;
-
-        debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
-        Ok(())
+        codec.send(request).await.map_err(From::from)
     }
 
     async fn handle_hook_read(
@@ -258,10 +278,7 @@ impl FileHandler {
         );
 
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
-        let codec_result = codec.send(request).await;
-
-        debug!("HookMessage::ReadFileHook codec_result {:#?}", codec_result);
-        Ok(())
+        codec.send(request).await.map_err(From::from)
     }
 
     async fn handle_hook_seek(
@@ -290,10 +307,7 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::Seek(seek_file_request));
-        let codec_result = codec.send(request).await;
-
-        debug!("HookMessage::SeekFileHook codec_result {:#?}", codec_result);
-        Ok(())
+        codec.send(request).await.map_err(From::from)
     }
 
     async fn handle_hook_write(
@@ -315,22 +329,38 @@ impl FileHandler {
             write_bytes.len()
         );
 
-        write_file_handler.lock().unwrap().push(file_channel_tx);
+        self.write_queue.push_back(file_channel_tx);
 
         let write_file_request = WriteFileRequest { fd, write_bytes };
 
         let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
-        let codec_result = codec.send(request).await;
+        codec.send(request).await.map_err(From::from)
+    }
 
-        debug!(
-            "HookMessage::WriteFileHook codec_result {:#?}",
-            codec_result
-        );
-        Ok(())
+    async fn handle_hook_close(
+        &mut self,
+        close: Close,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
+        let Close {
+            fd,
+            file_channel_tx,
+        } = close;
+        debug!("HookMessage::CloseFileHook fd {:#?}", fd);
+
+        self.close_queue.push_back(file_channel_tx);
+
+        let close_file_request = CloseFileRequest { fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+        codec.send(request).await.map_err(From::from)
     }
 }
-
-type ResponseChannel<T> = oneshot::Sender<Result<T, ResponseError>>;
+type FileResult<T> = Result<T, ResponseError>;
+type ResponseChannel<T> = oneshot::Sender<FileResult<T>>;
 
 #[derive(Debug)]
 pub struct Open {
@@ -371,7 +401,7 @@ pub struct Write {
 #[derive(Debug)]
 pub struct Close {
     pub(crate) fd: usize,
-    pub(crate) file_channel_tx: ResponseChannel<WriteFileResponse>,
+    pub(crate) file_channel_tx: ResponseChannel<CloseFileResponse>,
 }
 
 #[derive(Debug)]

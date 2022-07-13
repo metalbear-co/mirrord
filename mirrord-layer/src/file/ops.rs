@@ -14,19 +14,16 @@ use crate::{
         WriteFileHook,
     },
     error::LayerError,
-    file::{OpenOptionsInternalExt, OPEN_FILES},
-    HOOK_SENDER,
+    file::{
+        Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek, Write,
+        OPEN_FILES,
+    },
+    HookMessage,
 };
 
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
-    unsafe {
-        HOOK_SENDER
-            .as_ref()
-            .ok_or(LayerError::EmptyHookSender)
-            .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
-    }
+fn blocking_send_file_message(message: HookMessageFile) -> Result<(), LayerError> {
+    blocking_send_hook_message(HookMessage::File(message))
 }
-
 /// Blocking wrapper around `libc::open` call.
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory
@@ -38,16 +35,15 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
 pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<OpenFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
-    let requesting_file = OpenFileHook {
+    let requesting_file = Open {
         path,
         open_options,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::OpenFileHook(requesting_file))?;
+    blocking_send_file_message(HookMessageFile::Open(requesting_file))?;
 
     let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
 
@@ -90,7 +86,7 @@ fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse, LayerErr
     let (file_channel_tx, file_channel_rx) =
         oneshot::channel::<Result<CloseFileResponse, ResponseError>>();
 
-    blocking_send_hook_message(HookMessage::CloseFileHook(CloseFileHook {
+    blocking_send_file_message(HookMessageFile::Close(Close {
         fd,
         file_channel_tx,
     }))?;
@@ -112,14 +108,14 @@ pub(crate) fn openat(
 
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    let requesting_file = OpenRelativeFileHook {
+    let requesting_file = OpenRelative {
         relative_fd,
         path,
         open_options,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::OpenRelativeFileHook(requesting_file))?;
+    blocking_send_file_message(HookMessageFile::OpenRelative(requesting_file))?;
 
     let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
     let fake_file_name = CString::new(remote_fd.to_string())?;
@@ -198,13 +194,13 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, La
     let (file_channel_tx, file_channel_rx) =
         oneshot::channel::<Result<ReadFileResponse, ResponseError>>();
 
-    let reading_file = ReadFileHook {
+    let reading_file = Read {
         fd,
         buffer_size: read_amount,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::ReadFileHook(reading_file))?;
+    blocking_send_file_message(HookMessageFile::Read(reading_file))?;
 
     let read_file_response = file_channel_rx.blocking_recv()??;
     Ok(read_file_response)
@@ -215,13 +211,13 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
     let (file_channel_tx, file_channel_rx) =
         oneshot::channel::<Result<SeekFileResponse, ResponseError>>();
 
-    let seeking_file = SeekFileHook {
+    let seeking_file = Seek {
         fd,
         seek_from,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::SeekFileHook(seeking_file))?;
+    blocking_send_file_message(HookMessageFile::Seek(seeking_file))?;
 
     let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
     Ok(result_offset)
@@ -232,13 +228,13 @@ pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError
     let (file_channel_tx, file_channel_rx) =
         oneshot::channel::<Result<WriteFileResponse, ResponseError>>();
 
-    let writing_file = WriteFileHook {
+    let writing_file = Write {
         fd,
         write_bytes,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::WriteFileHook(writing_file))?;
+    blocking_send_file_message(HookMessageFile::Write(writing_file))?;
 
     let WriteFileResponse { written_amount } = file_channel_rx.blocking_recv()??;
     Ok(written_amount.try_into()?)
@@ -249,12 +245,12 @@ pub(crate) fn close(fd: usize) -> Result<c_int, LayerError> {
     let (file_channel_tx, file_channel_rx) =
         oneshot::channel::<Result<CloseFileResponse, ResponseError>>();
 
-    let closing_file = CloseFileHook {
+    let closing_file = Close {
         fd,
         file_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::CloseFileHook(closing_file))?;
+    blocking_send_file_message(HookMessageFile::Close(closing_file))?;
 
     file_channel_rx.blocking_recv()??;
     Ok(0)
