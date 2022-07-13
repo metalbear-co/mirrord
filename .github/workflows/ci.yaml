@@ -180,7 +180,7 @@ jobs:
         run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
 
   e2e_macos:
-    runs-on: macos-latest
+    runs-on: macos-12
     name: e2e macOS
     needs: [build_mirrord, test_agent_image]
     env:
