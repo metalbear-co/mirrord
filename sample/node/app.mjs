@@ -1,6 +1,8 @@
 import { Buffer } from "node:buffer";
 import { createServer } from "net";
 import { open, readFile } from "fs/promises";
+import http from "http";
+import { getServers, resolveAny, resolve, lookup } from "dns/promises";
 
 async function debug_file_ops() {
   try {
@@ -28,35 +30,87 @@ async function debug_file_ops() {
   }
 }
 
+function debug_request() {
+  const options = {
+    // hostname: "remote-meow",
+    // hostname: "local-meow",
+    // hostname: "nginx",
+    hostname: "apache",
+    // hostname: "localhost",
+    // hostname: "google.com",
+    port: 80,
+    path: "/",
+    method: "GET",
+  };
+
+  const request = http.request(options, (response) => {
+    console.log(`statusCode: ${response.statusCode}`);
+
+    response.on("data", (d) => {
+      process.stdout.write(d);
+    });
+  });
+
+  request.on("error", (error) => {
+    console.error(error);
+  });
+
+  request.end();
+}
+
+let a = lookup("google.com").then((values) => {
+  console.log("resolved ", values);
+});
+
+let b = lookup("nginx").then((values) => {
+  console.log("resolved ", values);
+});
+
 // debug_file_ops();
 
-const server = createServer();
-server.on("connection", handleConnection);
-server.listen(
-  {
-    host: "localhost",
-    port: 80,
-  },
-  function () {
-    console.log("server listening to %j", server.address());
-  }
-);
+// debug_request();
+// debug_listen();
 
-function handleConnection(conn) {
-  var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-  console.log("new client connection from %s", remoteAddress);
-  conn.on("data", onConnData);
-  conn.once("close", onConnClose);
-  conn.on("error", onConnError);
+function debug_listen() {
+  const server = createServer();
+  server.on("connection", handleConnection);
+  server.listen(
+    {
+      host: "localhost",
+      port: 80,
+    },
+    function () {
+      console.log(">>>>> server listening to %j", server.address());
 
-  function onConnData(d) {
-    console.log("connection data from %s: %j", remoteAddress, d.toString());
-    conn.write(d);
-  }
-  function onConnClose() {
-    console.log("connection from %s closed", remoteAddress);
-  }
-  function onConnError(err) {
-    console.log("Connection %s error: %s", remoteAddress, err.message);
+      let servers = getServers();
+      console.log(">>>>> dns servers ", servers);
+
+      let a = resolve("google.com").then((values) => {
+        console.log("resolved ", values);
+      });
+
+      let b = resolve("nginx").then((values) => {
+        console.log("resolved ", values);
+      });
+    }
+  );
+
+  function handleConnection(conn) {
+    var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
+    console.log("new client connection from %s", remoteAddress);
+    conn.on("data", onConnData);
+    conn.once("close", onConnClose);
+    conn.on("error", onConnError);
+
+    function onConnData(d) {
+      console.log("connection data from %s: %j", remoteAddress, d.toString());
+      conn.write(d);
+    }
+    function onConnClose() {
+      console.log("connection from %s closed", remoteAddress);
+    }
+    function onConnError(err) {
+      console.log("Connection %s error: %s", remoteAddress, err.message);
+    }
   }
 }
