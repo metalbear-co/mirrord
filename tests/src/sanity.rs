@@ -176,10 +176,10 @@ mod tests {
     }
 
     impl Agent {
-        fn flag(&self) -> &str {
+        fn flag(&self) -> Option<Vec<&str>> {
             match self {
-                Agent::Ephemeral => "--ephemeral-container",
-                Agent::Job => "",
+                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
+                Agent::Job => None,
             }
         }
     }
@@ -512,11 +512,7 @@ mod tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(
-                &service.pod_name,
-                Some(&service.namespace),
-                Some(vec![agent.flag()]),
-            )
+            .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
         send_requests(&url).await;
@@ -562,16 +558,17 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
+        let mut args = vec!["--enable-fs", "--extract-path", "/tmp/fs"];
+
+        if let Some(ephemeral_flag) = agent.flag() {
+            args.extend(ephemeral_flag);
+        }
+
         let mut process = run(
             python_command,
             &service.pod_name,
             Some(&service.namespace),
-            Some(vec![
-                "--enable-fs",
-                "--extract-path",
-                "/tmp/fs",
-                agent.flag(),
-            ]),
+            Some(args),
         )
         .await;
         let res = process.child.wait().await.unwrap();
@@ -587,16 +584,17 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
+        let mut args = vec!["--enable-fs", "--extract-path", "/tmp/fs"];
+
+        if let Some(ephemeral_flag) = agent.flag() {
+            args.extend(ephemeral_flag);
+        }
+
         let mut process = run(
             python_command,
             &service.pod_name,
             Some(&service.namespace),
-            Some(vec![
-                "--enable-fs",
-                "--extract-path",
-                "/tmp/fs",
-                agent.flag(),
-            ]),
+            Some(args),
         )
         .await;
         let res = process.child.wait().await.unwrap();

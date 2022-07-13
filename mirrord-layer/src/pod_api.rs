@@ -102,7 +102,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
     });
 
     let pod_name = if ephemeral_container {
-        create_ephemeral_container_agent(config, agent_image, &pods_api).await?
+        create_ephemeral_container_agent(&config, agent_image, &pods_api).await?
     } else {
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
@@ -113,7 +113,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         .await;
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
-        create_job_pod_agent(config, agent_image, &pods_api, runtime_data, &jobs_api).await?
+        create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
     };
     pods_api
         .portforward(&pod_name, &[61337])
@@ -132,7 +132,7 @@ fn get_agent_name() -> String {
 }
 
 async fn create_ephemeral_container_agent(
-    config: LayerConfig,
+    config: &LayerConfig,
     agent_image: String,
     pods_api: &Api<Pod>,
 ) -> Result<String, LayerError> {
@@ -204,11 +204,11 @@ async fn create_ephemeral_container_agent(
         }
     }
 
-    Ok(config.impersonated_pod_name)
+    Ok(config.impersonated_pod_name.clone())
 }
 
 async fn create_job_pod_agent(
-    config: LayerConfig,
+    config: &LayerConfig,
     agent_image: String,
     pods_api: &Api<Pod>,
     runtime_data: RuntimeData,
