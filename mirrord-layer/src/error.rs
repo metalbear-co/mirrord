@@ -27,6 +27,9 @@ pub enum LayerError {
     #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
     SendErrorFileResponse,
 
+    #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
+    SendErrorGetAddrInfoResponse,
+
     #[error("mirrord-layer: Receiver failed with `{0}`!")]
     RecvError(#[from] RecvError),
 
@@ -80,6 +83,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Timed Out!")]
     TimeOutError,
+
+    #[error("mirrord-layer: DNS does not resolve!")]
+    DNSNoName,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

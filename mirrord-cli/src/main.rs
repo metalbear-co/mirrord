@@ -126,6 +126,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         );
     }
 
+    if args.remote_dns {
+        std::env::set_var("MIRRORD_REMOTE_DNS", true.to_string());
+    }
+
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }

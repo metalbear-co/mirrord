@@ -391,9 +391,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5999502d32b9c48d492abe66392408144895020ec4709e549e840799f3bb74c0"
+checksum = "2ccfd8c0ee4cce11e45b3fd6f9d5e69e0cc62912aa6a0cb1bf4617b0eba5a12f"
 dependencies = [
  "generic-array",
  "typenum",
@@ -522,6 +522,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-lookup"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53ecafc952c4528d9b51a458d1a8904b81783feff9fde08ab6ed2545ff396872"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "socket2",
+ "winapi",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -629,9 +641,9 @@ dependencies = [
 
 [[package]]
 name = "fixedbitset"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "279fb028e20b3c4c320317955b77c5e0c9701f05a1d309905d6fc702cdc5053e"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "fnv"
@@ -850,9 +862,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db0d4cf898abf0081f964436dc980e96670a0f36863e4b83aaacdb65c9d7ccc3"
+checksum = "607c8a29735385251a339424dd462993c0fed8fa09d378f259377df08c126022"
 
 [[package]]
 name = "heck"
@@ -932,9 +944,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.19"
+version = "0.14.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42dc3c131584288d375f2d07f822b0cb012d8c6fb899a5b9fdb3cb7eb9b6004f"
+checksum = "02c929dc5c39e335a03c405292728118860721b10190d98c2a0f0efd5baafbac"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1371,6 +1383,7 @@ dependencies = [
  "bollard",
  "clap 3.2.8",
  "containerd-client",
+ "dns-lookup",
  "futures",
  "mirrord-protocol",
  "nix",
@@ -1398,6 +1411,7 @@ dependencies = [
  "bytes",
  "clap 3.2.8",
  "ctor",
+ "dns-lookup",
  "envconfig",
  "errno",
  "frida-gum",
@@ -1414,6 +1428,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "serde_json",
+ "socket2",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1428,6 +1443,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "dns-lookup",
  "thiserror",
 ]
 
@@ -1597,15 +1613,15 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7709cef83f0c1f58f666e746a08b21e0085f7440fa6a29cc194d68aac97a4225"
+checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
 
 [[package]]
 name = "openssl"
-version = "0.10.40"
+version = "0.10.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb81a6430ac911acb25fe5ac8f1d2af1b4ea8a4fdfda0f1ee4292af2e2d8eb0e"
+checksum = "618febf65336490dfcf20b73f885f5651a0c89c64c2d4a8c3662585a70bf5bd0"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1635,9 +1651,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.74"
+version = "0.9.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "835363342df5fba8354c5b453325b110ffd54044e588c539cf2f20a8014e4cb1"
+checksum = "e5f9bd0c2710541a3cda73d6f9ac4f1b240de4ae261065d309dbe73d9dceb42f"
 dependencies = [
  "autocfg",
  "cc",
@@ -2068,9 +2084,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.5.6"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d83f127d94bdbcda4c8cc2e50f6f84f4b611f69c902699ca385a39c3a75f9ff1"
+checksum = "4c4eb3267174b8c6c2f654116623910a0fef09c4753f8dd83db29c48a0df988b"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -2088,9 +2104,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.6.26"
+version = "0.6.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49b3de9ec5dc0a3417da371aab17d729997c15010e7fd24ff707773a33bddb64"
+checksum = "a3f87b73ce11b1619a3c6332f45341e0047173771e8b8b73f87bfeefb7b56244"
 
 [[package]]
 name = "remove_dir_all"
@@ -2329,9 +2345,9 @@ checksum = "a2333e6df6d6598f2b1974829f853c2b4c5f4a6e503c10af918081aa6f8564e1"
 
 [[package]]
 name = "serde"
-version = "1.0.138"
+version = "1.0.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1578c6245786b9d168c5447eeacfb96856573ca56c9d68fdcf394be134882a47"
+checksum = "0171ebb889e45aa68b44aee0859b3eede84c6f5f5c228e6f140c0b2a0a46cad6"
 dependencies = [
  "serde_derive",
 ]
@@ -2348,9 +2364,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.138"
+version = "1.0.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "023e9b1467aef8a10fb88f25611870ada9800ef7e22afce356bb0d2387b6f27c"
+checksum = "dc1d3230c1de7932af58ad8ffbe1d784bd55efd5a9d84ac24f69c72d83543dfb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2416,9 +2432,9 @@ dependencies = [
 
 [[package]]
 name = "serde_yaml"
-version = "0.8.24"
+version = "0.8.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707d15895415db6628332b737c838b88c598522e4dc70647e59b72312924aebc"
+checksum = "1ec0091e1f5aa338283ce049bd9dfefd55e1f168ac233e85c1ffe0038fb48cbe"
 dependencies = [
  "indexmap",
  "ryu",

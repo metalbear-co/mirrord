@@ -42,4 +42,8 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral_container: bool,
+    
+    /// Enables resolving a remote DNS.
+    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
+    pub remote_dns: bool,
 }
