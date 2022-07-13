@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Add support for Ephemeral Containers, closes [#172](https://github.com/metalbear-co/mirrord/issues/172)
 
+### Changed
+- E2E: Collect minikube logs and fix collecting container logs
+
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 
