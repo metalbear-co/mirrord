@@ -14,7 +14,7 @@ It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE
 
 ### Changed
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
-
+- Refactored `file` related functions, created `FileHandler` and improved structure.
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 
