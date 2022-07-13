@@ -71,8 +71,7 @@ mod tests {
         PythonHTTP,
         NodeHTTP,
     }
-    enum Agent {
-        #[cfg(target_os = "linux")]
+    pub enum Agent {
         Ephemeral,
         Job,
     }
@@ -177,13 +176,10 @@ mod tests {
     }
 
     impl Agent {
-        fn flag(&self) -> Option<Vec<&str>> {
+        fn flag(&self) -> &str {
             match self {
-                #[cfg(target_os = "linux")]
-                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),            
-                #[cfg(target_os = "macos")]
-                Agent::Ephemeral => None,
-                Agent::Job => None,
+                Agent::Ephemeral => "--ephemeral-container",
+                Agent::Job => "",
             }
         }
     }
@@ -503,6 +499,7 @@ mod tests {
         res.bytes().await.unwrap();
     }
 
+    #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
@@ -510,6 +507,34 @@ mod tests {
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut process = application
+            .run(
+                &service.pod_name,
+                Some(&service.namespace),
+                Some(vec![agent.flag()]),
+            )
+            .await;
+        process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
+        send_requests(&url).await;
+        timeout(Duration::from_secs(40), process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        process.assert_stderr();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_mirror_http_traffic(
+        #[future] service: EchoService,
+        #[future] kube_client: Client,
+        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -526,17 +551,52 @@ mod tests {
         process.assert_stderr();
     }
 
+    #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService) {
+    pub async fn test_file_ops(
+        #[future] service: EchoService,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
+
         let mut process = run(
             python_command,
             &service.pod_name,
             Some(&service.namespace),
-            Some(vec!["--enable-fs", "--extract-path", "/tmp/fs"]),
+            Some(vec![
+                "--enable-fs",
+                "--extract-path",
+                "/tmp/fs",
+                agent.flag(),
+            ]),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_python_fileops_stderr();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+        let service = service.await;
+        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+        let python_command = vec!["python3", "python-e2e/ops.py"];
+
+        let mut process = run(
+            python_command,
+            &service.pod_name,
+            Some(&service.namespace),
+            Some(vec![
+                "--enable-fs",
+                "--extract-path",
+                "/tmp/fs",
+                agent.flag(),
+            ]),
         )
         .await;
         let res = process.child.wait().await.unwrap();
