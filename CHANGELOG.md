@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- E2E: Collect minikube logs and fix collecting container logs
+
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
 

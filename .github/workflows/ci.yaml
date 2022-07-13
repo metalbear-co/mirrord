@@ -216,6 +216,9 @@ jobs:
         run: minikube image load /tmp/test.tar
       - name: cargo test
         run: cargo test -p tests
-      - name: Collect logs
+      - name: Collect container logs
         if: ${{ failure() }}
-        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+        run: minikube docker-env; for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+      - name: Collect minikube logs
+        if: ${{ failure() }}
+        run: minikube logs
