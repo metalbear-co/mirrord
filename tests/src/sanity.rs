@@ -533,6 +533,7 @@ mod tests {
                 .sample_string(&mut rand::thread_rng(), 10)
                 .to_lowercase()
         );
+        std::fs::create_dir(&agent_name).unwrap();
         agent_name
     }
 
