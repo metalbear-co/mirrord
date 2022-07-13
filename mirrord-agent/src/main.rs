@@ -158,6 +158,43 @@ async fn select_env_vars(
     Ok(env_vars)
 }
 
+/// Handles the `getaddrinfo` call from mirrord-layer.
+fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
+    trace!("get_addr_info -> request {:#?}", request);
+
+    let GetAddrInfoRequest {
+        node,
+        service,
+        hints,
+    } = request;
+
+    let lookup_result = dns_lookup::getaddrinfo(
+        node.as_deref(),
+        service.as_deref(),
+        hints.map(|h| h.into_lookup()),
+    )
+    .map(|addrinfo_iter| {
+        addrinfo_iter
+            .map(|result| {
+                // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
+                // we have to `map` individually, then convert to one of our errors.
+                result
+                    .map(Into::into)
+                    .map_err(|fail| ResponseError::GAI(GaiError::from(fail)))
+            })
+            // Now we can flatten and transpose the whole thing into this.
+            .collect::<Result<Vec<AddrInfoInternal>, _>>()
+    })
+    .map_err(|fail| {
+        let fail_as_std = std::io::Error::from(fail);
+        ResponseError::GAI(GaiError::from(fail_as_std))
+    })
+    // Stable rust equivalent to `Result::flatten`.
+    .and_then(std::convert::identity);
+
+    GetAddrInfoResponse(lookup_result)
+}
+
 struct ClientConnectionHandler {
     id: ClientID,
     file_manager: FileManager,
@@ -177,6 +214,7 @@ impl ClientConnectionHandler {
     ) -> Result<(), AgentError> {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
@@ -188,7 +226,9 @@ impl ClientConnectionHandler {
             pid,
             tcp_sniffer_api,
         };
+
         client_handler.handle_loop(cancel_token).await?;
+
         Ok(())
     }
 
@@ -251,41 +291,10 @@ impl ClientConnectionHandler {
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
             }
-            ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                node,
-                service,
-                hints,
-            }) => {
-                trace!(
-                    "ClientMessage::GetAddrInfo node {:#?} | service {:#?} | hints {:#?}",
-                    node,
-                    service,
-                    hints
-                );
+            ClientMessage::GetAddrInfoRequest(request) => {
+                let response = get_addr_info(request);
 
-                let lookup_result = dns_lookup::getaddrinfo(
-                    node.as_deref(),
-                    service.as_deref(),
-                    hints.map(|h| h.into_lookup()),
-                )
-                .map(|addrinfo_iter| {
-                    addrinfo_iter
-                        .map(|result| {
-                            // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
-                            // we have to `map` individually, then convert to one of our errors.
-                            result.map(Into::into).map_err(|fail| {
-                                ResponseError::GAI(GaiError {
-                                    raw_os_error: fail.raw_os_error(),
-                                    kind: From::from(fail.kind()),
-                                })
-                            })
-                        })
-                        // Now we can flatten and transpose the whole thing into this.
-                        .collect::<Result<Vec<AddrInfoInternal>, _>>()
-                })
-                .map_err(AgentError::Lookup)?;
-
-                let response = GetAddrInfoResponse(lookup_result);
+                trace!("GetAddrInfoRequest -> response {:#?}", response);
 
                 self.stream
                     .send(DaemonMessage::GetAddrInfoResponse(response))
@@ -321,6 +330,7 @@ async fn start_agent() -> Result<(), AgentError> {
         args.communicate_port,
     ))
     .await?;
+
     let pid = match (args.container_id, args.container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
             Some(get_container_pid(&container_id, &container_runtime).await?)

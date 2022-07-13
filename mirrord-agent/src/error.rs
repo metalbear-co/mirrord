@@ -49,7 +49,4 @@ pub enum AgentError {
 
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
-
-    #[error("Lookup failed with `{0:#?}`")]
-    Lookup(dns_lookup::LookupError),
 }

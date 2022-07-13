@@ -32,6 +32,15 @@ pub struct FileError {
     pub kind: ErrorKindInternal,
 }
 
+impl From<io::Error> for GaiError {
+    fn from(io_error: io::Error) -> Self {
+        Self {
+            raw_os_error: io_error.raw_os_error(),
+            kind: From::from(io_error.kind()),
+        }
+    }
+}
+
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ErrorKindInternal {

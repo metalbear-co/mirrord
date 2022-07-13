@@ -559,11 +559,43 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_remote_dns_resolving_works(#[future] service: EchoService) {
+    pub async fn test_remote_dns_enabled_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
             "node",
-            "node-e2e/remote_dns/test_remote_dns_resolving_works.mjs",
+            "node-e2e/remote_dns/test_remote_dns_eneabled_works.mjs",
+        ];
+        let mirrord_args = vec!["-d", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_remote_dns_lookup_google(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
+        ];
+        let mirrord_args = vec!["-d", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_remote_dns_lookup_pod_service(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/remote_dns/test_remote_dns_lookup_pod_service.mjs",
         ];
         let mirrord_args = vec!["-d", "true"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
