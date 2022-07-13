@@ -180,7 +180,9 @@ mod tests {
         fn flag(&self) -> Option<Vec<&str>> {
             match self {
                 #[cfg(target_os = "linux")]
-                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
+                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),            
+                #[cfg(target_os = "macos")]
+                Agent::Ephemeral => None,
                 Agent::Job => None,
             }
         }
@@ -507,7 +509,7 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
-        #[values(#[cfg(target_os="linux")]Agent::Ephemeral, Agent::Job)] agent: Agent,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
