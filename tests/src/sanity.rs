@@ -22,7 +22,10 @@ mod tests {
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
     };
-    use rand::{distributions::Alphanumeric, Rng};
+    use rand::{
+        distributions::{Alphanumeric, DistString},
+        Rng,
+    };
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -523,6 +526,16 @@ mod tests {
         process.assert_stderr();
     }
 
+    fn get_shared_lib_path() -> String {
+        let agent_name = format!(
+            "/tmp/{}",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+        agent_name
+    }
+
     #[cfg(target_os = "macos")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -558,7 +571,9 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
-        let mut args = vec!["--enable-fs", "--extract-path", "/tmp/fs"];
+        let shared_lib_path = get_shared_lib_path();
+
+        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
@@ -584,7 +599,9 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
-        let mut args = vec!["--enable-fs", "--extract-path", "/tmp/fs"];
+        let shared_lib_path = get_shared_lib_path();
+
+        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
