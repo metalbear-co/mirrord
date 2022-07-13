@@ -189,13 +189,16 @@ pub struct WriteFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileResponse;
 
+/// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
+pub type RemoteResult<T> = Result<T, ResponseError>;
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileResponse {
-    Open(Result<OpenFileResponse, ResponseError>),
-    Read(Result<ReadFileResponse, ResponseError>),
-    Seek(Result<SeekFileResponse, ResponseError>),
-    Write(Result<WriteFileResponse, ResponseError>),
-    Close(Result<CloseFileResponse, ResponseError>),
+    Open(RemoteResult<OpenFileResponse>),
+    Read(RemoteResult<ReadFileResponse>),
+    Seek(RemoteResult<SeekFileResponse>),
+    Write(RemoteResult<WriteFileResponse>),
+    Close(RemoteResult<CloseFileResponse>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -253,7 +256,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoResponse(pub Result<Vec<AddrInfoInternal>, ResponseError>);
+pub struct GetAddrInfoResponse(pub RemoteResult<Vec<AddrInfoInternal>>);
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -263,7 +266,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     FileResponse(FileResponse),
     Pong,
-    GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
+    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
 }
 
