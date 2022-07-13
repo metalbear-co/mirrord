@@ -50,6 +50,10 @@ pub(super) struct ExecArgs {
     #[clap(short = 's', long, value_parser)]
     pub override_env_vars_include: Option<String>,
 
+    /// Enables resolving a remote DNS.
+    #[clap(short = 'd', long, value_parser)]
+    pub remote_dns: bool,
+
     /// Binary to execute and mirror traffic into.
     #[clap(value_parser)]
     pub binary: String,

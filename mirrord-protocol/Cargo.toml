@@ -19,4 +19,5 @@ edition.workspace = true
 actix-codec.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+dns-lookup.workspace = true
 bincode =  { version = "2.0.0-rc.1" }
