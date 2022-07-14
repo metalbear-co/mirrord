@@ -444,28 +444,19 @@ mod tests {
         if host_ip.parse::<Ipv4Addr>().unwrap().is_private() {
             host_ip = resolve_node_host();
         }
-
-        let port = if let Ok(port) = std::env::var("SERVICE_PORT") {
-            port.parse().unwrap()
-        } else {
-            let services_api: Api<Service> =
-                Api::namespaced(kube_client.clone(), &service.namespace);
-            let services = services_api
-                .list(&ListParams::default().labels(&format!("app={}", service.name)))
-                .await
-                .unwrap();
-            services
-                .into_iter()
-                .next()
-                .and_then(|service| service.spec)
-                .and_then(|spec| spec.ports)
-                .and_then(|mut ports| ports.pop())
-                .unwrap()
-                .node_port
-                .unwrap()
-        };
-
-        format!("http://{}:{}", host_ip, port)
+        let services_api: Api<Service> = Api::namespaced(kube_client.clone(), &service.namespace);
+        let services = services_api
+            .list(&ListParams::default().labels(&format!("app={}", service.name)))
+            .await
+            .unwrap();
+        let port = services
+            .into_iter()
+            .next()
+            .and_then(|service| service.spec)
+            .and_then(|spec| spec.ports)
+            .and_then(|mut ports| ports.pop())
+            .unwrap();
+        format!("http://{}:{}", host_ip, port.node_port.unwrap())
     }
 
     pub async fn get_pod_instance(
