@@ -16,7 +16,7 @@ use futures::{
 };
 use mirrord_protocol::{
     tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
-    GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
+    GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -90,7 +90,7 @@ async fn select_env_vars(
     environ_path: PathBuf,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
-) -> Result<HashMap<String, String>, ResponseError> {
+) -> RemoteResult<HashMap<String, String>> {
     debug!(
         "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
         environ_path, filter_env_vars, select_env_vars
@@ -145,7 +145,7 @@ async fn select_env_vars(
 }
 
 /// Handles the `getaddrinfo` call from mirrord-layer.
-fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
+fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoInternal>> {
     trace!("get_addr_info -> request {:#?}", request);
 
     let GetAddrInfoRequest {
@@ -154,7 +154,7 @@ fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
         hints,
     } = request;
 
-    let lookup_result = dns_lookup::getaddrinfo(
+    dns_lookup::getaddrinfo(
         node.as_deref(),
         service.as_deref(),
         hints.map(|h| h.into_lookup()),
@@ -171,9 +171,7 @@ fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
     })
     .map_err(|fail| ResponseError::from(std::io::Error::from(fail)))
     // Stable rust equivalent to `Result::flatten`.
-    .and_then(std::convert::identity);
-
-    GetAddrInfoResponse(lookup_result)
+    .and_then(std::convert::identity)
 }
 
 struct ClientConnectionHandler {

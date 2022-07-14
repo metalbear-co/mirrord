@@ -2,7 +2,7 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ResponseError,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, RemoteResult,
     SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
@@ -27,8 +27,7 @@ use crate::{
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
 pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<OpenFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<OpenFileResponse>>();
 
     let requesting_file = OpenFileHook {
         path,
@@ -76,8 +75,7 @@ fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse, LayerErr
     // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
 
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<CloseFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<CloseFileResponse>>();
 
     blocking_send_hook_message(HookMessage::CloseFileHook(CloseFileHook {
         fd,
@@ -96,8 +94,7 @@ pub(crate) fn openat(
         "openat -> trying to open valid file {:?} with relative dir {:?}.",
         path, relative_fd
     );
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<OpenFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<OpenFileResponse>>();
 
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
@@ -184,8 +181,7 @@ pub(crate) fn fdopen(
 pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
     debug!("read -> trying to read valid file {:?}.", fd);
 
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<ReadFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<ReadFileResponse>>();
 
     let reading_file = ReadFileHook {
         fd,
@@ -201,8 +197,7 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, La
 
 pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
     debug!("lseek -> trying to seek valid file {:?}.", fd);
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<SeekFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<SeekFileResponse>>();
 
     let seeking_file = SeekFileHook {
         fd,
@@ -218,8 +213,7 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
 
 pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
     debug!("write -> trying to write valid file {:?}.", fd);
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<WriteFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<WriteFileResponse>>();
 
     let writing_file = WriteFileHook {
         fd,
@@ -235,8 +229,7 @@ pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError
 
 pub(crate) fn close(fd: usize) -> Result<c_int, LayerError> {
     debug!("close -> trying to close valid file {:?}.", fd);
-    let (file_channel_tx, file_channel_rx) =
-        oneshot::channel::<Result<CloseFileResponse, ResponseError>>();
+    let (file_channel_tx, file_channel_rx) = oneshot::channel::<RemoteResult<CloseFileResponse>>();
 
     let closing_file = CloseFileHook {
         fd,

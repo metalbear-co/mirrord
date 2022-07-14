@@ -22,10 +22,10 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
-    FileRequest, FileResponse, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest,
+    AddrInfoInternal, ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse,
+    DaemonMessage, EnvVars, FileRequest, FileResponse, GetAddrInfoRequest, GetEnvVarsRequest,
     OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -95,12 +95,12 @@ async fn handle_hook_message(
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<OpenFileResponse>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<ReadFileResponse>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<SeekFileResponse>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<WriteFileResponse>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<CloseFileResponse>>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<Vec<AddrInfoInternal>>>>>,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -274,12 +274,12 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<OpenFileResponse>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<ReadFileResponse>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<SeekFileResponse>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<WriteFileResponse>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<CloseFileResponse>>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<Vec<AddrInfoInternal>>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {

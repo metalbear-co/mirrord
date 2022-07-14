@@ -255,9 +255,6 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
     }
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoResponse(pub RemoteResult<Vec<AddrInfoInternal>>);
-
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
@@ -267,7 +264,7 @@ pub enum DaemonMessage {
     FileResponse(FileResponse),
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
-    GetAddrInfoResponse(GetAddrInfoResponse),
+    GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
 }
 
 pub struct ClientCodec {
