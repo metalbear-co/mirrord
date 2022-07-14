@@ -9,7 +9,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::GetAddrInfoHook;
+use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
 use error::LayerError;
@@ -19,7 +19,7 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest, GetAddrInfoResponse,
+    AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
 use socket::SOCKETS;
@@ -28,10 +28,7 @@ use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, trace};
@@ -83,12 +80,11 @@ fn init() {
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
     file_handler: &mut FileHandler,
 ) {
     match hook_message {
@@ -119,19 +115,18 @@ async fn handle_hook_message(
                 service,
                 hints,
             });
-            let codec_result = codec.send(request).await;
 
-            trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
+            let _codec_result = codec.send(request).await;
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     file_handler: &mut FileHandler,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {
@@ -144,6 +139,7 @@ async fn handle_daemon_message(
             } else {
                 Err(LayerError::UnmatchedPong)?;
             }
+
             Ok(())
         }
         DaemonMessage::GetEnvVarsResponse(_) => {
@@ -254,17 +250,13 @@ async fn start_layer_thread(
         let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
 
         if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
-            let codec_result = codec
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
+            let _codec_result = codec
                 .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                     env_vars_filter,
                     env_vars_select,
                 }))
                 .await;
-
-            debug!(
-                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
-                codec_result
-            );
 
             let msg = codec.next().await;
             if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {

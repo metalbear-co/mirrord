@@ -17,8 +17,12 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 
 ### Changed
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
+<<<<<<< HEAD
+- Refactored the error part of the many `Result<Response, ResponseError>`.
+=======
 - Refactored `file` related functions, created `FileHandler` and improved structure.
 - E2E: Collect minikube logs and fix collecting container logs
+>>>>>>> 0d7f1b10697426981e0908a915667944314c0dbe
 - E2E: macOS use colima instead of minikube.
 
 ### Fixed

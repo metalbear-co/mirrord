@@ -16,7 +16,7 @@ use futures::{
 };
 use mirrord_protocol::{
     tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
-    FileError, GaiError, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
+    GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -90,38 +90,21 @@ async fn select_env_vars(
     environ_path: PathBuf,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
-) -> Result<HashMap<String, String>, ResponseError> {
-    debug!(
+) -> RemoteResult<HashMap<String, String>> {
+    trace!(
         "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
-        environ_path, filter_env_vars, select_env_vars
+        environ_path,
+        filter_env_vars,
+        select_env_vars
     );
 
-    let mut environ_file = tokio::fs::File::open(environ_path).await.map_err(|fail| {
-        ResponseError::FileOperation(FileError {
-            operation: "open".to_string(),
-            raw_os_error: fail.raw_os_error(),
-            kind: fail.kind().into(),
-        })
-    })?;
+    let mut environ_file = tokio::fs::File::open(environ_path).await?;
 
     let mut raw_env_vars = String::with_capacity(8192);
 
     // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
     // "nginx -g daemon off;".
-    let read_amount = environ_file
-        .read_to_string(&mut raw_env_vars)
-        .await
-        .map_err(|fail| {
-            ResponseError::FileOperation(FileError {
-                operation: "read_to_string".to_string(),
-                raw_os_error: fail.raw_os_error(),
-                kind: fail.kind().into(),
-            })
-        })?;
-    debug!(
-        "select_env_vars -> read {:#?} bytes with pure ENV_VARS {:#?}",
-        read_amount, raw_env_vars
-    );
+    let _read_amount = environ_file.read_to_string(&mut raw_env_vars).await?;
 
     // TODO: These are env vars that should usually be ignored. Revisit this list if a user
     // ever asks for a way to NOT filter out these.
@@ -153,13 +136,11 @@ async fn select_env_vars(
         // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
 
-    debug!("select_env_vars -> selected env vars found {:?}", env_vars);
-
     Ok(env_vars)
 }
 
 /// Handles the `getaddrinfo` call from mirrord-layer.
-fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
+fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoInternal>> {
     trace!("get_addr_info -> request {:#?}", request);
 
     let GetAddrInfoRequest {
@@ -168,7 +149,7 @@ fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
         hints,
     } = request;
 
-    let lookup_result = dns_lookup::getaddrinfo(
+    dns_lookup::getaddrinfo(
         node.as_deref(),
         service.as_deref(),
         hints.map(|h| h.into_lookup()),
@@ -178,21 +159,14 @@ fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
             .map(|result| {
                 // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
                 // we have to `map` individually, then convert to one of our errors.
-                result
-                    .map(Into::into)
-                    .map_err(|fail| ResponseError::GAI(GaiError::from(fail)))
+                result.map(Into::into).map_err(From::from)
             })
             // Now we can flatten and transpose the whole thing into this.
             .collect::<Result<Vec<AddrInfoInternal>, _>>()
     })
-    .map_err(|fail| {
-        let fail_as_std = std::io::Error::from(fail);
-        ResponseError::GAI(GaiError::from(fail_as_std))
-    })
+    .map_err(|fail| ResponseError::from(std::io::Error::from(fail)))
     // Stable rust equivalent to `Result::flatten`.
-    .and_then(std::convert::identity);
-
-    GetAddrInfoResponse(lookup_result)
+    .and_then(std::convert::identity)
 }
 
 struct ClientConnectionHandler {
