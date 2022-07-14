@@ -185,6 +185,7 @@ jobs:
     needs: [build_mirrord, test_agent_image]
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+      SERVICE_PORT: "30000"
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
