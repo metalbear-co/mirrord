@@ -203,7 +203,7 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
-        run: brew install kind
+        run: brew install kind docker
       - name: create cluster
         run: kind create cluster --config tests/kind.yaml
       - name: download image
