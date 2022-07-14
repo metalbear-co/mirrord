@@ -115,6 +115,8 @@ async fn handle_hook_message(
                 service,
                 hints,
             });
+
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
             let _codec_result = codec.send(request).await;
         }
     }
@@ -248,6 +250,7 @@ async fn start_layer_thread(
         let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
 
         if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
             let _codec_result = codec
                 .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                     env_vars_filter,
