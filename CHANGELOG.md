@@ -13,6 +13,7 @@ It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE
 `true`, or using the `-d` option in mirrord-cli.
 - New feature, [Ephemeral Containers](https://github.com/metalbear-co/mirrord/issues/172).
 Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `--ephemeral-container` flag.
+- E2E tests for Golang using the Gin framework.
 
 ### Changed
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
