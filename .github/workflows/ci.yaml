@@ -185,7 +185,6 @@ jobs:
     needs: [build_mirrord, test_agent_image]
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-      USE_MINIKUBE: "true"
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -211,21 +210,18 @@ jobs:
           go build 
           cd ../..
       - name: setup cluster requirements
-        run: brew install hyperkit docker minikube
-      - name: start minikube
-        run: minikube start --driver=hyperkit --container-runtime=docker
+        run: brew install docker colima kubectl
+      - name: create cluster
+        run: colima start --kubernetes --network-address
       - name: download image
         uses: actions/download-artifact@v2
         with:
           name: test
           path: /tmp
       - name: load image
-        run: minikube image load /tmp/test.tar
+        run: docker load --input /tmp/test.tar
       - name: cargo test
         run: cargo test -p tests
       - name: Collect container logs
         if: ${{ failure() }}
-        run: eval $(minikube -p minikube docker-env); for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
-      - name: Collect minikube logs
-        if: ${{ failure() }}
-        run: minikube logs
+        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do docker logs $CONTAINER; done
