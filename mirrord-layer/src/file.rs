@@ -57,6 +57,9 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
+type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
+type FileResult<T> = Result<T, ResponseError>;
+type ResponseChannel<T> = oneshot::Sender<FileResult<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -118,7 +121,6 @@ impl OpenOptionsInternalExt for OpenOptionsInternal {
     }
 }
 
-type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 #[derive(Default)]
 pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
@@ -359,8 +361,6 @@ impl FileHandler {
         codec.send(request).await.map_err(From::from)
     }
 }
-type FileResult<T> = Result<T, ResponseError>;
-type ResponseChannel<T> = oneshot::Sender<FileResult<T>>;
 
 #[derive(Debug)]
 pub struct Open {

@@ -20,7 +20,6 @@ pub struct GetAddrInfoHook {
     pub(crate) hook_channel_tx: oneshot::Sender<GetAddrInfoResponse>,
 }
 
-
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub enum HookMessage {
