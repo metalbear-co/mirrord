@@ -157,12 +157,12 @@ pub(crate) fn fopen(
         path, open_options
     );
 
-    let local_file_fd = open(path, open_options)?;
+    let local_file_fd = open(path.clone(), open_options)?;
     let open_files = OPEN_FILES.lock().unwrap();
 
     open_files
         .get_key_value(&local_file_fd)
-        .ok_or(LayerError::LocalFDNotFound(local_file_fd))
+        .ok_or(LayerError::LocalFDNotFound(local_file_fd, path))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }
