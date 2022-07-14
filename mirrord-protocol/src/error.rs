@@ -10,6 +10,17 @@ pub enum ResponseError {
 
     #[error("Failed to find resource!")]
     NotFound,
+
+    #[error("Response for a `FileOperation` failed with `{0}!")]
+    GAI(GaiError),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+#[error("Failed performing `getaddrinfo` with {raw_os_error:?} and kind {kind:?}!")]
+pub struct GaiError {
+    // TODO: `operation` could be an `enum` instead of a `String` value.
+    pub raw_os_error: Option<i32>,
+    pub kind: ErrorKindInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
@@ -19,6 +30,15 @@ pub struct FileError {
     pub operation: String,
     pub raw_os_error: Option<i32>,
     pub kind: ErrorKindInternal,
+}
+
+impl From<io::Error> for GaiError {
+    fn from(io_error: io::Error) -> Self {
+        Self {
+            raw_os_error: io_error.raw_os_error(),
+            kind: From::from(io_error.kind()),
+        }
+    }
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.

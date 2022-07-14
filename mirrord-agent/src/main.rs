@@ -15,8 +15,8 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, ClientMessage, DaemonCodec, DaemonMessage, FileError, GetEnvVarsRequest,
-    ResponseError,
+    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
+    FileError, GaiError, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest, ResponseError,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -25,7 +25,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod cli;
@@ -40,6 +40,21 @@ use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use util::{ClientID, IndexAllocator};
 
 use crate::runtime::get_container_pid;
+
+trait AddrInfoHintExt {
+    fn into_lookup(self) -> dns_lookup::AddrInfoHints;
+}
+
+impl AddrInfoHintExt for AddrInfoHint {
+    fn into_lookup(self) -> dns_lookup::AddrInfoHints {
+        dns_lookup::AddrInfoHints {
+            socktype: self.ai_socktype,
+            protocol: self.ai_protocol,
+            address: self.ai_family,
+            flags: self.ai_flags,
+        }
+    }
+}
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -143,6 +158,43 @@ async fn select_env_vars(
     Ok(env_vars)
 }
 
+/// Handles the `getaddrinfo` call from mirrord-layer.
+fn get_addr_info(request: GetAddrInfoRequest) -> GetAddrInfoResponse {
+    trace!("get_addr_info -> request {:#?}", request);
+
+    let GetAddrInfoRequest {
+        node,
+        service,
+        hints,
+    } = request;
+
+    let lookup_result = dns_lookup::getaddrinfo(
+        node.as_deref(),
+        service.as_deref(),
+        hints.map(|h| h.into_lookup()),
+    )
+    .map(|addrinfo_iter| {
+        addrinfo_iter
+            .map(|result| {
+                // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
+                // we have to `map` individually, then convert to one of our errors.
+                result
+                    .map(Into::into)
+                    .map_err(|fail| ResponseError::GAI(GaiError::from(fail)))
+            })
+            // Now we can flatten and transpose the whole thing into this.
+            .collect::<Result<Vec<AddrInfoInternal>, _>>()
+    })
+    .map_err(|fail| {
+        let fail_as_std = std::io::Error::from(fail);
+        ResponseError::GAI(GaiError::from(fail_as_std))
+    })
+    // Stable rust equivalent to `Result::flatten`.
+    .and_then(std::convert::identity);
+
+    GetAddrInfoResponse(lookup_result)
+}
+
 struct ClientConnectionHandler {
     id: ClientID,
     file_manager: FileManager,
@@ -162,6 +214,7 @@ impl ClientConnectionHandler {
     ) -> Result<(), AgentError> {
         let file_manager = FileManager::new(pid);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
+
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
@@ -173,7 +226,9 @@ impl ClientConnectionHandler {
             pid,
             tcp_sniffer_api,
         };
+
         client_handler.handle_loop(cancel_token).await?;
+
         Ok(())
     }
 
@@ -236,6 +291,15 @@ impl ClientConnectionHandler {
                     .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
             }
+            ClientMessage::GetAddrInfoRequest(request) => {
+                let response = get_addr_info(request);
+
+                trace!("GetAddrInfoRequest -> response {:#?}", response);
+
+                self.stream
+                    .send(DaemonMessage::GetAddrInfoResponse(response))
+                    .await?
+            }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
             ClientMessage::Close => {
@@ -266,6 +330,7 @@ async fn start_agent() -> Result<(), AgentError> {
         args.communicate_port,
     ))
     .await?;
+
     let pid = match (args.container_id, args.container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
             Some(get_container_pid(&container_id, &container_runtime).await?)

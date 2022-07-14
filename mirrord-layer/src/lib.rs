@@ -22,7 +22,7 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest, GetAddrInfoResponse,
     GetEnvVarsRequest,
 };
-use sockets::SOCKETS;
+use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
@@ -43,7 +43,7 @@ mod error;
 mod file;
 mod macros;
 mod pod_api;
-mod sockets;
+mod socket;
 mod tcp;
 mod tcp_mirror;
 
@@ -78,7 +78,7 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
@@ -103,6 +103,25 @@ async fn handle_hook_message(
                 .handle_hook_message(message, codec)
                 .await
                 .unwrap();
+        }
+        HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+            node,
+            service,
+            hints,
+            hook_channel_tx,
+        }) => {
+            trace!("HookMessage::GetAddrInfo");
+
+            getaddrinfo_handler.lock().unwrap().push(hook_channel_tx);
+
+            let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                node,
+                service,
+                hints,
+            });
+            let codec_result = codec.send(request).await;
+
+            trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
         }
     }
 }
@@ -129,6 +148,16 @@ async fn handle_daemon_message(
         }
         DaemonMessage::GetEnvVarsResponse(_) => {
             unreachable!("We get env vars only on initialization right now, shouldn't happen")
+        }
+        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+            trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
+
+            getaddrinfo_handler
+                .lock()?
+                .pop()
+                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
+                .send(get_addr_info)
+                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -160,19 +189,8 @@ async fn thread_loop(
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(),
-                &mut tcp_mirror_handler,
-                &mut codec,
-                &open_file_handler,
-                &read_file_handler,
-                &seek_file_handler,
-                &write_file_handler,
-                &close_file_handler,
-            ).await;
-            }
-            daemon_message = codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    if let Err(err) = handle_daemon_message(message,
+                handle_hook_message(
+                    hook_message.unwrap(),
                     &mut tcp_mirror_handler,
                     &mut codec,
                     &getaddrinfo_handler,
@@ -271,13 +289,13 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
     hook!(interceptor, "close", close_detour);
 
-    sockets::enable_socket_hooks(&mut interceptor);
+    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
 
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);

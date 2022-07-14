@@ -11,10 +11,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
 It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
 `true`, or using the `-d` option in mirrord-cli.
+- New feature, [Ephemeral Containers](https://github.com/metalbear-co/mirrord/issues/172).
+Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `--ephemeral-container` flag.
 
 ### Changed
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
 - Refactored `file` related functions, created `FileHandler` and improved structure.
+- E2E: Collect minikube logs and fix collecting container logs
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
@@ -67,7 +70,7 @@ It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE
 - CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
 - Handle relative paths for open, openat
 - Fix once cell renamings, PR [#98165](https://github.com/rust-lang/rust/pull/98165)
-- Enable the blocking feature of the `reqwest` library 
+- Enable the blocking feature of the `reqwest` library
 
 ## 2.2.1
 

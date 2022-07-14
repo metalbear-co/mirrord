@@ -9,10 +9,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 use crate::{
-    common::{
-        CloseFileHook, HookMessage, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
-        WriteFileHook,
-    },
+    common::blocking_send_hook_message,
     error::LayerError,
     file::{
         Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek, Write,
