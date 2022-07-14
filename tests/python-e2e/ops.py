@@ -1,6 +1,6 @@
 import os
-import unittest
 import uuid
+import unittest
 
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 
@@ -39,7 +39,8 @@ class FileOpsTest(unittest.TestCase):
         dir = os.open(
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
-        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
+        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK |
+                       os.O_CLOEXEC, dir_fd=dir)
         self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)

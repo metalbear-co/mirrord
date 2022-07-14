@@ -5,20 +5,38 @@ use thiserror::Error;
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
-    #[error("Response for `FileOperation` failed with `{0}!")]
-    FileOperation(FileError),
+    #[error("Index allocator is full, operation `{0}` failed!")]
+    AllocationFailure(String),
 
-    #[error("Failed to find resource!")]
-    NotFound,
+    #[error("Failed to find resource `{0}`!")]
+    NotFound(usize),
+
+    #[error("Remote operation expected fd `{0}` to be a directory, but it's a file!")]
+    NotDirectory(usize),
+
+    #[error("Remote operation expected fd `{0}` to be a file, but it's a directory!")]
+    NotFile(usize),
+
+    #[error("IO failed for remote operation with `{0}!")]
+    RemoteIO(RemoteIOError),
 }
 
+/// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
+/// mirrord-agent.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing file operation {operation:?} with {raw_os_error:?} and kind {kind:?}!")]
-pub struct FileError {
-    // TODO: `operation` could be an `enum` instead of a `String` value.
-    pub operation: String,
+#[error("Failed performing `getaddrinfo` with {raw_os_error:?} and kind {kind:?}!")]
+pub struct RemoteIOError {
     pub raw_os_error: Option<i32>,
     pub kind: ErrorKindInternal,
+}
+
+impl From<io::Error> for ResponseError {
+    fn from(io_error: io::Error) -> Self {
+        Self::RemoteIO(RemoteIOError {
+            raw_os_error: io_error.raw_os_error(),
+            kind: From::from(io_error.kind()),
+        })
+    }
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.

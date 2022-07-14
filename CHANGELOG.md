@@ -7,6 +7,44 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
+It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
+`true`, or using the `-d` option in mirrord-cli.
+- New feature, [Ephemeral Containers](https://github.com/metalbear-co/mirrord/issues/172).
+Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `--ephemeral-container` flag.
+- E2E tests for Golang using the Gin framework.
+
+### Changed
+- Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
+<<<<<<< HEAD
+- Refactored the error part of the many `Result<Response, ResponseError>`.
+=======
+- Refactored `file` related functions, created `FileHandler` and improved structure.
+- E2E: Collect minikube logs and fix collecting container logs
+>>>>>>> 0d7f1b10697426981e0908a915667944314c0dbe
+- E2E: macOS use colima instead of minikube.
+
+### Fixed
+- Handle unwraps in fileops to gracefully exit and enable python fileops tests.
+
+## 2.4.1
+
+### Added
+- mirrord-cli `exec` subcommand accepts `--extract-path` argument to set the directory to extract the library to. Used for tests mainly.
+- mirrord-layer provides `MIRRORD_IMPERSONATED_CONTAINER_NAME` environment variable to specify container name to impersonate. mirrord-cli accepts argument to set variable.
+- vscode-ext provides quick-select for setting `MIRRORD_IMPERSONATED_CONTAINER_NAME`
+
+### Changed
+- Refactor e2e, enable only Node HTTP mirroring test.
+- E2E: add macOS to E2E, support using minikube by env var.
+- E2E: Skip loading to docker before loading to minikube (load directly to minikube..)
+- layer: Environment variables now load before process starts, no more race conditions.
+
+### Fixed
+- Support connections that start with tcp flags in addition to Syn (on macOS CI we saw CWR + NS)
+- `fcntl` error on macOS [#184](https://github.com/metalbear-co/mirrord/issues/184) by a workaround.
+
 ## 2.3.1
 
 ### Changed
@@ -38,7 +76,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Add sleep after local app finishes loading for agent to load filter make tests less flaky.
 - Handle relative paths for open, openat
 - Fix once cell renamings, PR [#98165](https://github.com/rust-lang/rust/pull/98165)
-- Enable the blocking feature of the `reqwest` library 
+- Enable the blocking feature of the `reqwest` library
 
 ## 2.2.1
 
@@ -84,3 +122,4 @@ Complete refactor and re-write of everything.
 - The CLI/VSCode extension now use `mirrord-layer` which loads into debugged process using `LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`.
   It hooks some of the syscalls in order to proxy incoming traffic into the process as if it was running in the remote pod.
 - Mono repo
+- Fixed unwraps inside of [agent-creation](https://github.com/metalbear-co/mirrord/blob/main/mirrord-layer/src/lib.rs#L75), closes [#191](https://github.com/metalbear-co/mirrord/issues/191)

@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          tag: test
+          tags: test
           file: mirrord-agent/Dockerfile
           outputs: type=docker,dest=/tmp/test.tar
           cache-from: type=gha
@@ -145,6 +145,8 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ubuntu-latest
+          cache-on-failure: true
+
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -163,25 +165,63 @@ jobs:
         with:
           name: test
           path: /tmp
-      - name: load image
-        run: docker load --input /tmp/test.tar
-      - run: docker image tag $(docker images | awk '{print $3}' | awk 'NR==2') test:latest
-      - run: minikube image load test:latest
-      - name: setup py-serv
-        run: kubectl apply -f tests/app.yaml
+      - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+        run: cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
           minikube start --container-runtime=docker
-          minikube image load test:latest
-      - name: setup py-serv
-        run: kubectl apply -f tests/app.yaml
-      - name: wait for http-echo pod
-        run: kubectl wait --for=condition=ready pod -l app=py-serv --timeout=20s
+          minikube image load /tmp/test.tar
       - name: test with docker runtime
-        run: cargo test --package tests --lib -- tests --nocapture --test-threads 1
+        run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
         run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+
+  e2e_macos:
+    runs-on: macos-12
+    name: e2e macOS
+    needs: [build_mirrord, test_agent_image]
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: macos-latest
+          cache-on-failure: true
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.0"
+      - run: |
+          cd tests/go-e2e
+          go build 
+          cd ../..
+      - name: setup cluster requirements
+        run: brew install docker colima kubectl
+      - name: create cluster
+        run: colima start --kubernetes --network-address
+      - name: download image
+        uses: actions/download-artifact@v2
+        with:
+          name: test
+          path: /tmp
+      - name: load image
+        run: docker load --input /tmp/test.tar
+      - name: cargo test
+        run: cargo test -p tests
+      - name: Collect container logs
+        if: ${{ failure() }}
+        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do docker logs $CONTAINER; done

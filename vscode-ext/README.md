@@ -23,3 +23,4 @@ mirrord lets you easily mirror traffic from your Kubernetes cluster to your loca
 
 - You can control the namespace mirrord will find pods by changing the impersonated pod namespace by clicking the settings button next to the Enable/Disable mirrord button
 - You can also control in which k8s namespace the mirrord-agent will spawn using the same setting button.
+- You can control which container to impersonate within the impersonated pod

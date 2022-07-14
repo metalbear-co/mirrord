@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
+    net::SocketAddr,
     path::PathBuf,
 };
 
@@ -24,8 +25,19 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
+// TODO: Should probably live in a separate place (maybe even a separate `util` crate).
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct AddrInfoHint {
+    pub ai_family: i32,
+    pub ai_socktype: i32,
+    pub ai_protocol: i32,
+    pub ai_flags: i32,
+}
+
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
 // specific thing).
+//
+// TODO: Should probably live in a separate place (same reasoning as `AddrInfoHint`).
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
 pub struct OpenOptionsInternal {
     pub read: bool,
@@ -131,6 +143,17 @@ pub enum FileRequest {
     Close(CloseFileRequest),
 }
 
+/// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
+///
+/// Even though all parameters are optional, at least one of `node` or `service` must be `Some`,
+/// otherwise this will result in a `ResponseError`.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoRequest {
+    pub node: Option<String>,
+    pub service: Option<String>,
+    pub hints: Option<AddrInfoHint>,
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -139,6 +162,7 @@ pub enum ClientMessage {
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
+    GetAddrInfoRequest(GetAddrInfoRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -165,13 +189,70 @@ pub struct WriteFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileResponse;
 
+/// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
+pub type RemoteResult<T> = Result<T, ResponseError>;
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum FileResponse {
-    Open(Result<OpenFileResponse, ResponseError>),
-    Read(Result<ReadFileResponse, ResponseError>),
-    Seek(Result<SeekFileResponse, ResponseError>),
-    Write(Result<WriteFileResponse, ResponseError>),
-    Close(Result<CloseFileResponse, ResponseError>),
+    Open(RemoteResult<OpenFileResponse>),
+    Read(RemoteResult<ReadFileResponse>),
+    Seek(RemoteResult<SeekFileResponse>),
+    Write(RemoteResult<WriteFileResponse>),
+    Close(RemoteResult<CloseFileResponse>),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AddrInfoInternal {
+    socktype: i32,
+    protocol: i32,
+    address: i32,
+    sockaddr: SocketAddr,
+    canonname: Option<String>,
+    flags: i32,
+}
+
+impl From<AddrInfoInternal> for dns_lookup::AddrInfo {
+    fn from(internal: AddrInfoInternal) -> Self {
+        let AddrInfoInternal {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = internal;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
+}
+
+impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
+    fn from(addrinfo: dns_lookup::AddrInfo) -> Self {
+        let dns_lookup::AddrInfo {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = addrinfo;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
 }
 
 /// `-agent` --> `-layer` messages.
@@ -180,9 +261,10 @@ pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
     LogMessage(LogMessage),
-    FileResponse(FileResponse),
+    File(FileResponse),
     Pong,
-    GetEnvVarsResponse(Result<HashMap<String, String>, ResponseError>),
+    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
 }
 
 pub struct ClientCodec {
