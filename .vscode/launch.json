@@ -36,6 +36,7 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -55,6 +56,7 @@
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
     }

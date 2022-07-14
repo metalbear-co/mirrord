@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const process = require("process");
 const fs = require("fs");
 const app = express();
@@ -6,8 +7,7 @@ const PORT = 80;
 
 const TEXT =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
-var path = process.cwd() + "/test";
-var deletePath = process.cwd() + "/deletetest";
+var path = process.cwd() + crypto.randomBytes(16).toString("hex");
 
 app.get("/", (req, res) => {
   console.log("GET: Request completed");
@@ -28,19 +28,14 @@ app.put("/", (req, res) => {
       if (err) {
         throw err;
       }
-    });
-    fs.writeFile(deletePath, data.toString(), (err) => {
-      if (err) {
-        throw err;
-      }
-    });
+    });    
   });
   console.log("PUT: Request completed");
 });
 
 app.delete("/", (req, res) => {
   req.on("data", (data) => {
-    fs.unlink(deletePath, (err) => {
+    fs.unlink(path, (err) => {
       if (err) {
         console.err("app.js failed with ", err);
         throw err;

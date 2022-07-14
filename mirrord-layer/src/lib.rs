@@ -10,10 +10,12 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook, WriteFileHook,
+    CloseFileHook, GetAddrInfoHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
+    WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
+use error::LayerError;
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -21,11 +23,11 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, DaemonMessage, EnvVars,
-    FileRequest, FileResponse, GetEnvVarsRequest, OpenFileRequest, OpenFileResponse,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    FileRequest, FileResponse, GetAddrInfoRequest, GetAddrInfoResponse, GetEnvVarsRequest,
+    OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
-use sockets::SOCKETS;
+use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
@@ -46,7 +48,7 @@ mod error;
 mod file;
 mod macros;
 mod pod_api;
-mod sockets;
+mod socket;
 mod tcp;
 mod tcp_mirror;
 
@@ -72,7 +74,9 @@ fn init() {
 
     let port_forwarder = RUNTIME
         .block_on(pod_api::create_agent(config.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| {
+            panic!("failed to create agent: {}", e);
+        });
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -80,7 +84,7 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
@@ -91,11 +95,12 @@ async fn handle_hook_message(
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -242,6 +247,25 @@ async fn handle_hook_message(
                 codec_result
             );
         }
+        HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+            node,
+            service,
+            hints,
+            hook_channel_tx,
+        }) => {
+            trace!("HookMessage::GetAddrInfo");
+
+            getaddrinfo_handler.lock().unwrap().push(hook_channel_tx);
+
+            let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                node,
+                service,
+                hints,
+            });
+            let codec_result = codec.send(request).await;
+
+            trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
+        }
     }
 }
 
@@ -250,91 +274,102 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<CloseFileResponse>>>,
+    open_file_handler: &Mutex<Vec<oneshot::Sender<Result<OpenFileResponse, ResponseError>>>>,
+    read_file_handler: &Mutex<Vec<oneshot::Sender<Result<ReadFileResponse, ResponseError>>>>,
+    seek_file_handler: &Mutex<Vec<oneshot::Sender<Result<SeekFileResponse, ResponseError>>>>,
+    write_file_handler: &Mutex<Vec<oneshot::Sender<Result<WriteFileResponse, ResponseError>>>>,
+    close_file_handler: &Mutex<Vec<oneshot::Sender<Result<CloseFileResponse, ResponseError>>>>,
+    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<GetAddrInfoResponse>>>,
     ping: &mut bool,
-) {
+) -> Result<(), LayerError> {
     match daemon_message {
         DaemonMessage::Tcp(message) => {
-            tcp_mirror_handler
-                .handle_daemon_message(message)
-                .await
-                .unwrap();
+            tcp_mirror_handler.handle_daemon_message(message).await?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
             debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
             debug!("file handler = {:#?}", open_file_handler);
+
             open_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(open_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(open_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Read(read_file)) => {
             // The debug message is too big if we just log it directly.
-            let _ = read_file
-                .as_ref()
+            let file_response = read_file
                 .inspect(|success| {
                     debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
                 })
                 .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
             read_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(read_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(file_response)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
             debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
 
             seek_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(seek_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(seek_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
             debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
 
             write_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(write_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(write_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
             debug!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
 
             close_file_handler
-                .lock()
-                .unwrap()
+                .lock()?
                 .pop()
-                .unwrap()
-                .send(close_file.unwrap())
-                .unwrap();
+                .ok_or(LayerError::SendErrorFileResponse)?
+                .send(close_file)
+                .map_err(|_| LayerError::SendErrorFileResponse)?;
+            Ok(())
         }
         DaemonMessage::Pong => {
             if *ping {
                 *ping = false;
                 trace!("Daemon sent pong!");
             } else {
-                panic!("Daemon: unmatched pong!");
+                Err(LayerError::UnmatchedPong)?;
             }
+            Ok(())
         }
         DaemonMessage::GetEnvVarsResponse(_) => {
             unreachable!("We get env vars only on initialization right now, shouldn't happen")
+        }
+        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+            trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
+
+            getaddrinfo_handler
+                .lock()?
+                .pop()
+                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
+                .send(get_addr_info)
+                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
         }
         DaemonMessage::Close => todo!(),
         DaemonMessage::LogMessage(_) => todo!(),
@@ -362,6 +397,7 @@ async fn thread_loop(
     let seek_file_handler = Mutex::new(Vec::with_capacity(4));
     let write_file_handler = Mutex::new(Vec::with_capacity(4));
     let close_file_handler = Mutex::new(Vec::with_capacity(4));
+    let getaddrinfo_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
     let mut tcp_mirror_handler = TcpMirrorHandler::default();
@@ -369,27 +405,34 @@ async fn thread_loop(
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(),
-                &mut tcp_mirror_handler,
-                &mut codec,
-                &open_file_handler,
-                &read_file_handler,
-                &seek_file_handler,
-                &write_file_handler,
-                &close_file_handler,
-            ).await;
-            }
-            daemon_message = codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    handle_daemon_message(message,
+                handle_hook_message(
+                    hook_message.unwrap(),
                     &mut tcp_mirror_handler,
+                    &mut codec,
                     &open_file_handler,
                     &read_file_handler,
                     &seek_file_handler,
                     &write_file_handler,
                     &close_file_handler,
-                    &mut ping,
-                    ).await;
+                    &getaddrinfo_handler,
+                ).await;
+            }
+            daemon_message = codec.next() => {
+                if let Some(Ok(message)) = daemon_message {
+                    if let Err(err) = handle_daemon_message(
+                        message,
+                        &mut tcp_mirror_handler,
+                        &open_file_handler,
+                        &read_file_handler,
+                        &seek_file_handler,
+                        &write_file_handler,
+                        &close_file_handler,
+                        &getaddrinfo_handler,
+                        &mut ping,
+                    ).await {
+                        error!("Error handling daemon message: {:?}", err);
+                        break;
+                    }
                 } else {
                     error!("agent disconnected");
                     break;
@@ -470,13 +513,13 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
     hook!(interceptor, "close", close_detour);
 
-    sockets::enable_socket_hooks(&mut interceptor);
+    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
 
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);

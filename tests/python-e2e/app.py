@@ -3,6 +3,7 @@ from signal import SIGTERM
 from flask import Flask, request
 import logging
 import sys
+import uuid
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -14,8 +15,7 @@ cli.show_server_banner = lambda *x: print("Server listening on port 80")
 app = Flask(__name__)
 
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-DELETE_PATH = getcwd() + "/deletetest"
-CREATE_PATH = getcwd() + "/test"
+PATH = getcwd() + str(uuid.uuid4())
 
 
 @app.route("/", methods=["GET"])
@@ -33,17 +33,15 @@ def post():
 
 @app.route("/", methods=["PUT"])
 def put():
-    with open(CREATE_PATH, "w") as f:
-        f.write(TEXT)
-    with open(DELETE_PATH, "w") as f:
-        f.write(TEXT)
+    with open(PATH, "w") as f:
+        f.write(TEXT)    
     print("PUT: Request completed")
     return "OK"
 
 
 @app.route("/", methods=["DELETE"])
 def delete():
-    remove(DELETE_PATH)
+    remove(PATH)
     print("DELETE: Request completed")
     # killing Flask is the hardest thing I've done in my life - A.H
     kill(getpid(), SIGTERM)

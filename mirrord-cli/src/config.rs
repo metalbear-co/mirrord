@@ -50,6 +50,10 @@ pub(super) struct ExecArgs {
     #[clap(short = 's', long, value_parser)]
     pub override_env_vars_include: Option<String>,
 
+    /// Enables resolving a remote DNS.
+    #[clap(short = 'd', long, value_parser)]
+    pub remote_dns: bool,
+
     /// Binary to execute and mirror traffic into.
     #[clap(value_parser)]
     pub binary: String,
@@ -73,4 +77,8 @@ pub(super) struct ExecArgs {
     /// Where to extract the library to (defaults to a temp dir)
     #[clap(long, value_parser)]
     pub extract_path: Option<String>,
+
+    /// Use an Ephemeral Container to mirror traffic.
+    #[clap(short, long, value_parser)]
+    pub ephemeral_container: bool,
 }
