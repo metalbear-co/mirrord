@@ -12,8 +12,8 @@ use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRO
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, RemoteResult,
+    ReadFileRequest, ReadFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
