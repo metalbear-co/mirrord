@@ -203,7 +203,7 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - name: setup cluster requirements
-        run: 
+        run: |
           brew install kind
           HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask docker
           sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
