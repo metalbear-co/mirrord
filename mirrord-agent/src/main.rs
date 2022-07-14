@@ -91,9 +91,11 @@ async fn select_env_vars(
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
 ) -> RemoteResult<HashMap<String, String>> {
-    debug!(
+    trace!(
         "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
-        environ_path, filter_env_vars, select_env_vars
+        environ_path,
+        filter_env_vars,
+        select_env_vars
     );
 
     let mut environ_file = tokio::fs::File::open(environ_path).await?;
@@ -102,12 +104,7 @@ async fn select_env_vars(
 
     // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
     // "nginx -g daemon off;".
-    let read_amount = environ_file.read_to_string(&mut raw_env_vars).await?;
-
-    debug!(
-        "select_env_vars -> read {:#?} bytes with pure ENV_VARS {:#?}",
-        read_amount, raw_env_vars
-    );
+    let _read_amount = environ_file.read_to_string(&mut raw_env_vars).await?;
 
     // TODO: These are env vars that should usually be ignored. Revisit this list if a user
     // ever asks for a way to NOT filter out these.
@@ -138,8 +135,6 @@ async fn select_env_vars(
         })
         // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
-
-    debug!("select_env_vars -> selected env vars found {:?}", env_vars);
 
     Ok(env_vars)
 }

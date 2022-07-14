@@ -111,9 +111,10 @@ async fn handle_hook_message(
             file_channel_tx,
             open_options,
         }) => {
-            debug!(
+            trace!(
                 "HookMessage::OpenFileHook path {:#?} | options {:#?}",
-                path, open_options
+                path,
+                open_options
             );
 
             // Lock the file handler and insert a channel that will be used to retrieve the file
@@ -123,9 +124,7 @@ async fn handle_hook_message(
             let open_file_request = OpenFileRequest { path, open_options };
 
             let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::OpenRelativeFileHook(OpenRelativeFileHook {
             relative_fd,
@@ -133,9 +132,11 @@ async fn handle_hook_message(
             file_channel_tx,
             open_options,
         }) => {
-            debug!(
+            trace!(
                 "HookMessage::OpenRelativeFileHook fd {:#?} | path {:#?} | options {:#?}",
-                relative_fd, path, open_options
+                relative_fd,
+                path,
+                open_options
             );
 
             open_file_handler.lock().unwrap().push(file_channel_tx);
@@ -148,47 +149,35 @@ async fn handle_hook_message(
 
             let request =
                 ClientMessage::FileRequest(FileRequest::OpenRelative(open_relative_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!("HookMessage::OpenFileHook codec_result {:#?}", codec_result);
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::ReadFileHook(ReadFileHook {
             fd,
             buffer_size,
             file_channel_tx,
         }) => {
-            debug!(
+            trace!(
                 "HookMessage::ReadFileHook fd {:#?} | buffer_size {:#?}",
-                fd, buffer_size
+                fd,
+                buffer_size
             );
 
             read_file_handler.lock().unwrap().push(file_channel_tx);
 
-            debug!(
-                "HookMessage::ReadFileHook read_file_handler {:#?}",
-                read_file_handler
-            );
-
             let read_file_request = ReadFileRequest { fd, buffer_size };
 
-            debug!(
-                "HookMessage::ReadFileHook read_file_request {:#?}",
-                read_file_request
-            );
-
             let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!("HookMessage::ReadFileHook codec_result {:#?}", codec_result);
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::SeekFileHook(SeekFileHook {
             fd,
             seek_from,
             file_channel_tx,
         }) => {
-            debug!(
+            trace!(
                 "HookMessage::SeekFileHook fd {:#?} | seek_from {:#?}",
-                fd, seek_from
+                fd,
+                seek_from
             );
 
             seek_file_handler.lock().unwrap().push(file_channel_tx);
@@ -199,16 +188,14 @@ async fn handle_hook_message(
             };
 
             let request = ClientMessage::FileRequest(FileRequest::Seek(seek_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!("HookMessage::SeekFileHook codec_result {:#?}", codec_result);
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::WriteFileHook(WriteFileHook {
             fd,
             write_bytes,
             file_channel_tx,
         }) => {
-            debug!(
+            trace!(
                 "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
                 fd,
                 write_bytes.len()
@@ -219,30 +206,20 @@ async fn handle_hook_message(
             let write_file_request = WriteFileRequest { fd, write_bytes };
 
             let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!(
-                "HookMessage::WriteFileHook codec_result {:#?}",
-                codec_result
-            );
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::CloseFileHook(CloseFileHook {
             fd,
             file_channel_tx,
         }) => {
-            debug!("HookMessage::CloseFileHook fd {:#?}", fd);
+            trace!("HookMessage::CloseFileHook fd {:#?}", fd);
 
             close_file_handler.lock().unwrap().push(file_channel_tx);
 
             let close_file_request = CloseFileRequest { fd };
 
             let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
-            let codec_result = codec.send(request).await;
-
-            debug!(
-                "HookMessage::CloseFileHook codec_result {:#?}",
-                codec_result
-            );
+            let _codec_result = codec.send(request).await;
         }
         HookMessage::GetAddrInfoHook(GetAddrInfoHook {
             node,
@@ -259,9 +236,7 @@ async fn handle_hook_message(
                 service,
                 hints,
             });
-            let codec_result = codec.send(request).await;
-
-            trace!("HookMessage::GetAddrInfo codec_result {:#?}", codec_result);
+            let _codec_result = codec.send(request).await;
         }
     }
 }
@@ -285,8 +260,7 @@ async fn handle_daemon_message(
             Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
-            debug!("DaemonMessage::OpenFileResponse {open_file:#?}!");
-            debug!("file handler = {:#?}", open_file_handler);
+            trace!("DaemonMessage::OpenFileResponse {open_file:#?}!");
 
             open_file_handler
                 .lock()?
@@ -311,10 +285,11 @@ async fn handle_daemon_message(
                 .ok_or(LayerError::SendErrorFileResponse)?
                 .send(file_response)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
+
             Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
-            debug!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
+            trace!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
 
             seek_file_handler
                 .lock()?
@@ -322,10 +297,11 @@ async fn handle_daemon_message(
                 .ok_or(LayerError::SendErrorFileResponse)?
                 .send(seek_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
+
             Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
-            debug!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
+            trace!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
 
             write_file_handler
                 .lock()?
@@ -333,10 +309,11 @@ async fn handle_daemon_message(
                 .ok_or(LayerError::SendErrorFileResponse)?
                 .send(write_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
+
             Ok(())
         }
         DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
-            debug!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
+            trace!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
 
             close_file_handler
                 .lock()?
@@ -344,6 +321,7 @@ async fn handle_daemon_message(
                 .ok_or(LayerError::SendErrorFileResponse)?
                 .send(close_file)
                 .map_err(|_| LayerError::SendErrorFileResponse)?;
+
             Ok(())
         }
         DaemonMessage::Pong => {
@@ -353,6 +331,7 @@ async fn handle_daemon_message(
             } else {
                 Err(LayerError::UnmatchedPong)?;
             }
+
             Ok(())
         }
         DaemonMessage::GetEnvVarsResponse(_) => {
@@ -475,17 +454,12 @@ async fn start_layer_thread(
         let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
 
         if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
-            let codec_result = codec
+            let _codec_result = codec
                 .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                     env_vars_filter,
                     env_vars_select,
                 }))
                 .await;
-
-            debug!(
-                "ClientMessage::GetEnvVarsRequest codec_result {:#?}",
-                codec_result
-            );
 
             let msg = codec.next().await;
             if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {

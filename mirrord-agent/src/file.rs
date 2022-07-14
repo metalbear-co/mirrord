@@ -12,7 +12,7 @@ use mirrord_protocol::{
     ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use tracing::{debug, error, trace};
+use tracing::{error, trace};
 
 use crate::{error::AgentError, util::IndexAllocator};
 
@@ -104,7 +104,6 @@ impl FileManager {
             .ok_or_else(|| ResponseError::AllocationFailure("FileManager::open".to_string()))?;
 
         let metadata = file.metadata()?;
-        debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
 
         let remote_file = if metadata.is_dir() {
             RemoteFile::Directory(path)
@@ -138,11 +137,6 @@ impl FileManager {
         if let RemoteFile::Directory(relative_dir) = relative_dir {
             let path = relative_dir.join(&path);
 
-            debug!(
-                "FileManager::open_relative -> Trying to open complete path: {:#?}",
-                path
-            );
-
             let file = OpenOptions::from(open_options).open(&path)?;
 
             let fd = self.index_allocator.next_index().ok_or_else(|| {
@@ -150,8 +144,6 @@ impl FileManager {
             })?;
 
             let metadata = file.metadata()?;
-
-            debug!("FileManager::open -> Got metadata for file {:#?}", metadata);
 
             let remote_file = if metadata.is_dir() {
                 RemoteFile::Directory(path)
@@ -179,23 +171,12 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    debug!(
-                        "FileManager::read -> Trying to read file {:#?}, with count {:#?}",
-                        file, buffer_size
-                    );
-
                     let mut buffer = vec![0; buffer_size];
-                    let read_amount = file.read(&mut buffer).map(|read_amount| {
-                        debug!(
-                            "FileManager::read -> read {:#?} bytes from fd {:#?}",
-                            read_amount, fd
-                        );
-
-                        ReadFileResponse {
+                    let read_amount =
+                        file.read(&mut buffer).map(|read_amount| ReadFileResponse {
                             bytes: buffer,
                             read_amount,
-                        }
-                    })?;
+                        })?;
 
                     Ok(read_amount)
                 } else {
@@ -209,16 +190,17 @@ impl FileManager {
         fd: usize,
         seek_from: SeekFrom,
     ) -> RemoteResult<SeekFileResponse> {
+        trace!(
+            "FileManager::seek -> fd {:#?} | seek_from {:#?}",
+            fd,
+            seek_from
+        );
+
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    debug!(
-                        "FileManager::seek -> Trying to seek file {:#?}, with seek {:#?}",
-                        file, seek_from
-                    );
-
                     let seek_result = file
                         .seek(seek_from)
                         .map(|result_offset| SeekFileResponse { result_offset })?;
@@ -235,26 +217,22 @@ impl FileManager {
         fd: usize,
         write_bytes: Vec<u8>,
     ) -> RemoteResult<WriteFileResponse> {
+        trace!(
+            "FileManager::write -> fd {:#?} | write_bytes (length) {:#?}",
+            fd,
+            write_bytes.len()
+        );
+
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    debug!(
-                        "FileManager::write -> Trying to write file {:#?}, with bytes {:#?}",
-                        file, write_bytes
-                    );
-
-                    let write_result = file.write(&write_bytes).map(|write_amount| {
-                        debug!(
-                            "FileManager::write -> wrote {:#?} bytes to fd {:#?}",
-                            write_amount, fd
-                        );
-
-                        WriteFileResponse {
-                            written_amount: write_amount,
-                        }
-                    })?;
+                    let write_result =
+                        file.write(&write_bytes)
+                            .map(|write_amount| WriteFileResponse {
+                                written_amount: write_amount,
+                            })?;
 
                     Ok(write_result)
                 } else {
@@ -264,13 +242,14 @@ impl FileManager {
     }
 
     pub(crate) fn close(&mut self, fd: usize) -> RemoteResult<CloseFileResponse> {
-        let file = self
+        trace!("FileManager::close -> fd {:#?}", fd,);
+
+        let _file = self
             .open_files
             .remove(&fd)
             .ok_or(ResponseError::NotFound(fd))?;
 
         self.index_allocator.free_index(fd);
-        debug!("FileManager::write -> Trying to close file {:#?}", file);
 
         Ok(CloseFileResponse)
     }
