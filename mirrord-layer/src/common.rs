@@ -1,12 +1,21 @@
 use std::{io::SeekFrom, path::PathBuf};
 
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ResponseError,
-    SeekFileResponse, WriteFileResponse,
+    AddrInfoHint, CloseFileResponse, GetAddrInfoResponse, OpenFileResponse, OpenOptionsInternal,
+    ReadFileResponse, ResponseError, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 
-use crate::tcp::HookMessageTcp;
+use crate::{error::LayerError, tcp::HookMessageTcp, HOOK_SENDER};
+
+pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+    unsafe {
+        HOOK_SENDER
+            .as_ref()
+            .ok_or(LayerError::EmptyHookSender)
+            .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
+    }
+}
 
 // TODO: Some ideas around abstracting file operations:
 // Alright, all these are pretty much the same thing, they could be
@@ -71,6 +80,14 @@ pub struct CloseFileHook {
     pub(crate) file_channel_tx: oneshot::Sender<Result<CloseFileResponse, ResponseError>>,
 }
 
+#[derive(Debug)]
+pub struct GetAddrInfoHook {
+    pub(crate) node: Option<String>,
+    pub(crate) service: Option<String>,
+    pub(crate) hints: Option<AddrInfoHint>,
+    pub(crate) hook_channel_tx: oneshot::Sender<GetAddrInfoResponse>,
+}
+
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub enum HookMessage {
@@ -81,4 +98,5 @@ pub enum HookMessage {
     SeekFileHook(SeekFileHook),
     WriteFileHook(WriteFileHook),
     CloseFileHook(CloseFileHook),
+    GetAddrInfoHook(GetAddrInfoHook),
 }

@@ -19,7 +19,7 @@ use tracing::debug;
 
 use crate::{
     error::LayerError,
-    sockets::{SocketInformation, CONNECTION_QUEUE},
+    socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ pub trait TcpHandler {
 
     /// Returns true to let caller know to keep running
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        debug!("handle_incoming_message -> message {:#?}", message);
+        debug!("handle_incoming_message -> message {:?}", message);
 
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {

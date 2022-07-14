@@ -126,9 +126,17 @@ fn exec(args: &ExecArgs) -> Result<()> {
         );
     }
 
+    if args.remote_dns {
+        std::env::set_var("MIRRORD_REMOTE_DNS", true.to_string());
+    }
+
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
     }
+
+    if args.ephemeral_container {
+        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
+    };
 
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
