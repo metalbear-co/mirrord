@@ -10,8 +10,8 @@ use std::{
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use common::{
-    CloseFileHook, GetAddrInfoHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook, SeekFileHook,
-    WriteFileHook,
+    CloseFileHook, GetAddrInfoHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook,
+    ResponseSender, SeekFileHook, WriteFileHook,
 };
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -25,7 +25,7 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse,
     DaemonMessage, EnvVars, FileRequest, FileResponse, GetAddrInfoRequest, GetEnvVarsRequest,
     OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -33,10 +33,7 @@ use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
 use tracing::{debug, error, info, trace};
@@ -95,12 +92,12 @@ async fn handle_hook_message(
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<OpenFileResponse>>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<ReadFileResponse>>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<SeekFileResponse>>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<WriteFileResponse>>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<CloseFileResponse>>>>,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<Vec<AddrInfoInternal>>>>>,
+    open_file_handler: &Mutex<Vec<ResponseSender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<ResponseSender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<ResponseSender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<ResponseSender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<ResponseSender<CloseFileResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -274,12 +271,12 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<OpenFileResponse>>>>,
-    read_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<ReadFileResponse>>>>,
-    seek_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<SeekFileResponse>>>>,
-    write_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<WriteFileResponse>>>>,
-    close_file_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<CloseFileResponse>>>>,
-    getaddrinfo_handler: &Mutex<Vec<oneshot::Sender<RemoteResult<Vec<AddrInfoInternal>>>>>,
+    open_file_handler: &Mutex<Vec<ResponseSender<OpenFileResponse>>>,
+    read_file_handler: &Mutex<Vec<ResponseSender<ReadFileResponse>>>,
+    seek_file_handler: &Mutex<Vec<ResponseSender<SeekFileResponse>>>,
+    write_file_handler: &Mutex<Vec<ResponseSender<WriteFileResponse>>>,
+    close_file_handler: &Mutex<Vec<ResponseSender<CloseFileResponse>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {

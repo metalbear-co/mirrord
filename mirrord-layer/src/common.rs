@@ -17,6 +17,8 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
     }
 }
 
+pub(crate) type ResponseSender<T> = oneshot::Sender<RemoteResult<T>>;
+
 // TODO: Some ideas around abstracting file operations:
 // Alright, all these are pretty much the same thing, they could be
 // abstract over a generic dependent-ish type like so:
@@ -41,7 +43,7 @@ impl FileOperation for OpenHook {
 #[derive(Debug)]
 pub struct OpenFileHook {
     pub(crate) path: PathBuf,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<OpenFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<OpenFileResponse>,
     pub(crate) open_options: OpenOptionsInternal,
 }
 
@@ -49,7 +51,7 @@ pub struct OpenFileHook {
 pub struct OpenRelativeFileHook {
     pub(crate) relative_fd: usize,
     pub(crate) path: PathBuf,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<OpenFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<OpenFileResponse>,
     pub(crate) open_options: OpenOptionsInternal,
 }
 
@@ -57,27 +59,27 @@ pub struct OpenRelativeFileHook {
 pub struct ReadFileHook {
     pub(crate) fd: usize,
     pub(crate) buffer_size: usize,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<ReadFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<ReadFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct SeekFileHook {
     pub(crate) fd: usize,
     pub(crate) seek_from: SeekFrom,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<SeekFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<SeekFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct WriteFileHook {
     pub(crate) fd: usize,
     pub(crate) write_bytes: Vec<u8>,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<WriteFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<WriteFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct CloseFileHook {
     pub(crate) fd: usize,
-    pub(crate) file_channel_tx: oneshot::Sender<RemoteResult<CloseFileResponse>>,
+    pub(crate) file_channel_tx: ResponseSender<CloseFileResponse>,
 }
 
 #[derive(Debug)]
@@ -85,7 +87,7 @@ pub struct GetAddrInfoHook {
     pub(crate) node: Option<String>,
     pub(crate) service: Option<String>,
     pub(crate) hints: Option<AddrInfoHint>,
-    pub(crate) hook_channel_tx: oneshot::Sender<RemoteResult<Vec<AddrInfoInternal>>>,
+    pub(crate) hook_channel_tx: ResponseSender<Vec<AddrInfoInternal>>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
