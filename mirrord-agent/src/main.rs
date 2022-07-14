@@ -267,9 +267,7 @@ impl ClientConnectionHandler {
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
-                self.stream
-                    .send(DaemonMessage::FileResponse(response))
-                    .await?
+                self.stream.send(DaemonMessage::File(response)).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
