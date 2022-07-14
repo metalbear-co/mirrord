@@ -9,7 +9,6 @@ use std::{
 use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoInternal, RemoteResult};
 use os_socketaddr::OsSocketAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
@@ -376,8 +375,7 @@ pub(super) fn getaddrinfo(
     service: Option<String>,
     hints: Option<AddrInfoHint>,
 ) -> Result<*mut libc::addrinfo, LayerError> {
-    let (hook_channel_tx, hook_channel_rx) =
-        oneshot::channel::<RemoteResult<Vec<AddrInfoInternal>>>();
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
         service,
