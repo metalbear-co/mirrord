@@ -73,9 +73,11 @@ mod tests {
     enum Application {
         PythonHTTP,
         NodeHTTP,
+        #[cfg(target_os = "macos")]
         GoHTTP,
     }
     pub enum Agent {
+        #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
     }
@@ -174,6 +176,7 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+                #[cfg(target_os = "macos")]
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
@@ -183,6 +186,7 @@ mod tests {
     impl Agent {
         fn flag(&self) -> Option<Vec<&str>> {
             match self {
+                #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
             }

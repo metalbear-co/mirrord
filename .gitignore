@@ -6,7 +6,7 @@ node_modules
 .DS_Store
 **/.DS_Store
 target
-.tests/go-e2e/go-e2e
+./tests/go-e2e/go-e2e
 
 ### VSCode ###
 .vscode/*
