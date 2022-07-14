@@ -9,10 +9,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{
-    CloseFileHook, GetAddrInfoHook, OpenFileHook, OpenRelativeFileHook, ReadFileHook,
-    ResponseSender, SeekFileHook, WriteFileHook,
-};
+use common::{GetAddrInfoHook, ResponseSender};
 use ctor::ctor;
 use envconfig::Envconfig;
 use error::LayerError;
@@ -22,10 +19,8 @@ use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_protocol::{
-    AddrInfoInternal, ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse,
-    DaemonMessage, EnvVars, FileRequest, FileResponse, GetAddrInfoRequest, GetEnvVarsRequest,
-    OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
+    GetEnvVarsRequest,
 };
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -49,8 +44,7 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, macros::hook};
-
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
@@ -86,18 +80,12 @@ fn init() {
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_hook_message(
     hook_message: HookMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
-    // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<ResponseSender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<ResponseSender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<ResponseSender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<ResponseSender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<ResponseSender<CloseFileResponse>>>,
     getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
+    file_handler: &mut FileHandler,
 ) {
     match hook_message {
         HookMessage::Tcp(message) => {
@@ -106,120 +94,11 @@ async fn handle_hook_message(
                 .await
                 .unwrap();
         }
-        HookMessage::OpenFileHook(OpenFileHook {
-            path,
-            file_channel_tx,
-            open_options,
-        }) => {
-            trace!(
-                "HookMessage::OpenFileHook path {:#?} | options {:#?}",
-                path,
-                open_options
-            );
-
-            // Lock the file handler and insert a channel that will be used to retrieve the file
-            // data when it comes back from `DaemonMessage::OpenFileResponse`.
-            open_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let open_file_request = OpenFileRequest { path, open_options };
-
-            let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
-            let _codec_result = codec.send(request).await;
-        }
-        HookMessage::OpenRelativeFileHook(OpenRelativeFileHook {
-            relative_fd,
-            path,
-            file_channel_tx,
-            open_options,
-        }) => {
-            trace!(
-                "HookMessage::OpenRelativeFileHook fd {:#?} | path {:#?} | options {:#?}",
-                relative_fd,
-                path,
-                open_options
-            );
-
-            open_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let open_relative_file_request = OpenRelativeFileRequest {
-                relative_fd,
-                path,
-                open_options,
-            };
-
-            let request =
-                ClientMessage::FileRequest(FileRequest::OpenRelative(open_relative_file_request));
-            let _codec_result = codec.send(request).await;
-        }
-        HookMessage::ReadFileHook(ReadFileHook {
-            fd,
-            buffer_size,
-            file_channel_tx,
-        }) => {
-            trace!(
-                "HookMessage::ReadFileHook fd {:#?} | buffer_size {:#?}",
-                fd,
-                buffer_size
-            );
-
-            read_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let read_file_request = ReadFileRequest { fd, buffer_size };
-
-            let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
-            let _codec_result = codec.send(request).await;
-        }
-        HookMessage::SeekFileHook(SeekFileHook {
-            fd,
-            seek_from,
-            file_channel_tx,
-        }) => {
-            trace!(
-                "HookMessage::SeekFileHook fd {:#?} | seek_from {:#?}",
-                fd,
-                seek_from
-            );
-
-            seek_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let seek_file_request = SeekFileRequest {
-                fd,
-                seek_from: seek_from.into(),
-            };
-
-            let request = ClientMessage::FileRequest(FileRequest::Seek(seek_file_request));
-            let _codec_result = codec.send(request).await;
-        }
-        HookMessage::WriteFileHook(WriteFileHook {
-            fd,
-            write_bytes,
-            file_channel_tx,
-        }) => {
-            trace!(
-                "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
-                fd,
-                write_bytes.len()
-            );
-
-            write_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let write_file_request = WriteFileRequest { fd, write_bytes };
-
-            let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
-            let _codec_result = codec.send(request).await;
-        }
-        HookMessage::CloseFileHook(CloseFileHook {
-            fd,
-            file_channel_tx,
-        }) => {
-            trace!("HookMessage::CloseFileHook fd {:#?}", fd);
-
-            close_file_handler.lock().unwrap().push(file_channel_tx);
-
-            let close_file_request = CloseFileRequest { fd };
-
-            let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
-            let _codec_result = codec.send(request).await;
+        HookMessage::File(message) => {
+            file_handler
+                .handle_hook_message(message, codec)
+                .await
+                .unwrap();
         }
         HookMessage::GetAddrInfoHook(GetAddrInfoHook {
             node,
@@ -241,89 +120,16 @@ async fn handle_hook_message(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
-    // TODO: There is probably a better abstraction for this.
-    open_file_handler: &Mutex<Vec<ResponseSender<OpenFileResponse>>>,
-    read_file_handler: &Mutex<Vec<ResponseSender<ReadFileResponse>>>,
-    seek_file_handler: &Mutex<Vec<ResponseSender<SeekFileResponse>>>,
-    write_file_handler: &Mutex<Vec<ResponseSender<WriteFileResponse>>>,
-    close_file_handler: &Mutex<Vec<ResponseSender<CloseFileResponse>>>,
+    file_handler: &mut FileHandler,
     getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {
-        DaemonMessage::Tcp(message) => {
-            tcp_mirror_handler.handle_daemon_message(message).await?;
-            Ok(())
-        }
-        DaemonMessage::FileResponse(FileResponse::Open(open_file)) => {
-            trace!("DaemonMessage::OpenFileResponse {open_file:#?}!");
-
-            open_file_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorFileResponse)?
-                .send(open_file)
-                .map_err(|_| LayerError::SendErrorFileResponse)?;
-
-            Ok(())
-        }
-        DaemonMessage::FileResponse(FileResponse::Read(read_file)) => {
-            // The debug message is too big if we just log it directly.
-            let file_response = read_file
-                .inspect(|success| {
-                    debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
-                })
-                .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
-
-            read_file_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorFileResponse)?
-                .send(file_response)
-                .map_err(|_| LayerError::SendErrorFileResponse)?;
-
-            Ok(())
-        }
-        DaemonMessage::FileResponse(FileResponse::Seek(seek_file)) => {
-            trace!("DaemonMessage::SeekFileResponse {:#?}!", seek_file);
-
-            seek_file_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorFileResponse)?
-                .send(seek_file)
-                .map_err(|_| LayerError::SendErrorFileResponse)?;
-
-            Ok(())
-        }
-        DaemonMessage::FileResponse(FileResponse::Write(write_file)) => {
-            trace!("DaemonMessage::WriteFileResponse {:#?}!", write_file);
-
-            write_file_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorFileResponse)?
-                .send(write_file)
-                .map_err(|_| LayerError::SendErrorFileResponse)?;
-
-            Ok(())
-        }
-        DaemonMessage::FileResponse(FileResponse::Close(close_file)) => {
-            trace!("DaemonMessage::CloseFileResponse {:#?}!", close_file);
-
-            close_file_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorFileResponse)?
-                .send(close_file)
-                .map_err(|_| LayerError::SendErrorFileResponse)?;
-
-            Ok(())
-        }
+        DaemonMessage::Tcp(message) => tcp_mirror_handler.handle_daemon_message(message).await,
+        DaemonMessage::File(message) => file_handler.handle_daemon_message(message).await,
         DaemonMessage::Pong => {
             if *ping {
                 *ping = false;
@@ -368,15 +174,11 @@ async fn thread_loop(
 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
-    let open_file_handler = Mutex::new(Vec::with_capacity(4));
-    let read_file_handler = Mutex::new(Vec::with_capacity(4));
-    let seek_file_handler = Mutex::new(Vec::with_capacity(4));
-    let write_file_handler = Mutex::new(Vec::with_capacity(4));
-    let close_file_handler = Mutex::new(Vec::with_capacity(4));
     let getaddrinfo_handler = Mutex::new(Vec::with_capacity(4));
 
     let mut ping = false;
     let mut tcp_mirror_handler = TcpMirrorHandler::default();
+    let mut file_handler = FileHandler::default();
 
     loop {
         select! {
@@ -385,12 +187,8 @@ async fn thread_loop(
                     hook_message.unwrap(),
                     &mut tcp_mirror_handler,
                     &mut codec,
-                    &open_file_handler,
-                    &read_file_handler,
-                    &seek_file_handler,
-                    &write_file_handler,
-                    &close_file_handler,
                     &getaddrinfo_handler,
+                    &mut file_handler,
                 ).await;
             }
             daemon_message = codec.next() => {
@@ -398,11 +196,7 @@ async fn thread_loop(
                     if let Err(err) = handle_daemon_message(
                         message,
                         &mut tcp_mirror_handler,
-                        &open_file_handler,
-                        &read_file_handler,
-                        &seek_file_handler,
-                        &write_file_handler,
-                        &close_file_handler,
+                        &mut file_handler,
                         &getaddrinfo_handler,
                         &mut ping,
                     ).await {

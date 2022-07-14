@@ -261,7 +261,7 @@ pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
     LogMessage(LogMessage),
-    FileResponse(FileResponse),
+    File(FileResponse),
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),

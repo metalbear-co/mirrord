@@ -105,6 +105,8 @@ mod tests {
             while now.elapsed() < timeout {
                 let stdout = self.get_stdout();
                 if stdout.contains(line) {
+                    // for race conditions
+                    std::thread::sleep(Duration::from_millis(100));
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(100));
