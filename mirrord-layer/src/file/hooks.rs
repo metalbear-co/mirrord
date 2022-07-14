@@ -10,6 +10,7 @@ use super::{
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
+    error::LayerError,
     file::ops::{lseek, open, read, write},
     macros::hook,
 };
@@ -18,15 +19,13 @@ use crate::{
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        -1
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
     // Calls with non absolute paths are sent to libc::open.
@@ -48,26 +47,22 @@ pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
 ) -> *mut FILE {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
-    let mode: String = match CStr::from_ptr(raw_mode).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_mode {:#?} from `c_char` with {:#?}",
-            raw_mode, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(mode_str) => mode_str.into(),
-        Err(fail) => return fail,
+    let mode = match CStr::from_ptr(raw_mode)
+        .to_str()
+        .map(String::from)
+        .map_err(LayerError::from)
+    {
+        Ok(mode) => mode,
+        Err(fail) => return fail.into(),
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
@@ -86,15 +81,13 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let mode: String = match CStr::from_ptr(raw_mode).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_mode {:#?} from `c_char` with {:#?}",
-            raw_mode, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(mode_str) => mode_str.into(),
-        Err(fail) => return fail,
+    let mode = match CStr::from_ptr(raw_mode)
+        .to_str()
+        .map(String::from)
+        .map_err(LayerError::from)
+    {
+        Ok(mode) => mode,
+        Err(fail) => return fail.into(),
     };
 
     let open_files = OPEN_FILES.lock().unwrap();
@@ -121,15 +114,13 @@ pub(super) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        -1
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
     // `openat` behaves the same as `open` when the path is absolute.
