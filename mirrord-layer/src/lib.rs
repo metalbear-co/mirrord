@@ -9,7 +9,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{GetAddrInfoHook, ResponseSender};
+use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
 use error::LayerError;
@@ -84,7 +84,7 @@ async fn handle_hook_message(
     hook_message: HookMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
-    getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
     file_handler: &mut FileHandler,
 ) {
     match hook_message {
@@ -124,7 +124,7 @@ async fn handle_daemon_message(
     daemon_message: DaemonMessage,
     tcp_mirror_handler: &mut TcpMirrorHandler,
     file_handler: &mut FileHandler,
-    getaddrinfo_handler: &Mutex<Vec<ResponseSender<Vec<AddrInfoInternal>>>>,
+    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
     ping: &mut bool,
 ) -> Result<(), LayerError> {
     match daemon_message {

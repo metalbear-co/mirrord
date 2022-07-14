@@ -12,14 +12,13 @@ use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRO
 use mirrord_protocol::{
     ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    ReadFileRequest, ReadFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+    WriteFileResponse, RemoteResult,
 };
 use regex::RegexSet;
-use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
 
-use crate::error::LayerError;
+use crate::{common::ResponseChannel, error::LayerError};
 
 pub(crate) mod hooks;
 pub(crate) mod ops;
@@ -58,8 +57,6 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
 type LocalFd = RawFd;
 type RemoteFd = usize;
 type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
-type FileResult<T> = Result<T, ResponseError>;
-type ResponseChannel<T> = oneshot::Sender<FileResult<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -132,7 +129,7 @@ pub struct FileHandler {
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
-fn pop_send<T>(deque: &mut ResponseDeque<T>, value: FileResult<T>) -> Result<(), LayerError> {
+fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(), LayerError> {
     deque
         .pop_front()
         .ok_or(LayerError::SendErrorFileResponse)?

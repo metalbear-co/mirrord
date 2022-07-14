@@ -12,14 +12,14 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
     }
 }
 
-pub(crate) type ResponseSender<T> = oneshot::Sender<RemoteResult<T>>;
+pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 #[derive(Debug)]
 pub struct GetAddrInfoHook {
     pub(crate) node: Option<String>,
     pub(crate) service: Option<String>,
     pub(crate) hints: Option<AddrInfoHint>,
-    pub(crate) hook_channel_tx: ResponseSender<Vec<AddrInfoInternal>>,
+    pub(crate) hook_channel_tx: ResponseChannel<Vec<AddrInfoInternal>>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
