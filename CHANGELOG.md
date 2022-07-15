@@ -8,16 +8,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
-
 - New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
 It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
 `true`, or using the `-d` option in mirrord-cli.
 - New feature, [Ephemeral Containers](https://github.com/metalbear-co/mirrord/issues/172).
 Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `--ephemeral-container` flag.
+- E2E tests on macos for Golang using the Gin framework.
 
 ### Changed
-- E2E: Collect minikube logs and fix collecting container logs
 - Refactored `mirrord-layer/socket` into a module structure similar to `mirrord-layer/file`.
+- Refactored the error part of the many `Result<Response, ResponseError>`.
+- Refactored `file` related functions, created `FileHandler` and improved structure.
+- Refactored error handling in mirrord-layer.
+- E2E: Collect minikube logs and fix collecting container logs
+- E2E: macOS use colima instead of minikube.
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.

@@ -73,8 +73,11 @@ mod tests {
     enum Application {
         PythonHTTP,
         NodeHTTP,
+        #[cfg(target_os = "macos")]
+        GoHTTP,
     }
     pub enum Agent {
+        #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
     }
@@ -105,6 +108,8 @@ mod tests {
             while now.elapsed() < timeout {
                 let stdout = self.get_stdout();
                 if stdout.contains(line) {
+                    // for race conditions
+                    std::thread::sleep(Duration::from_millis(100));
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -173,6 +178,8 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+                #[cfg(target_os = "macos")]
+                Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
         }
@@ -181,6 +188,7 @@ mod tests {
     impl Agent {
         fn flag(&self) -> Option<Vec<&str>> {
             match self {
+                #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
             }
@@ -517,7 +525,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
+        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
         send_requests(&url).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
@@ -543,7 +551,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -552,7 +560,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "Server listening on port 80");
+        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
         send_requests(&url).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await

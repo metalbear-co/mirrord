@@ -10,6 +10,7 @@ use super::{
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
+    error::LayerError,
     file::ops::{lseek, open, read, write},
     macros::hook,
 };
@@ -18,15 +19,13 @@ use crate::{
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        -1
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
     // Calls with non absolute paths are sent to libc::open.
@@ -36,12 +35,8 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
         let open_result = open(path, open_options);
 
-        open_result
-            .map_err(|fail| {
-                error!("Failed opening file with {:#?}", fail);
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = open_result.map_err(From::from);
+        result
     }
 }
 
@@ -52,26 +47,22 @@ pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
 ) -> *mut FILE {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
-    let mode: String = match CStr::from_ptr(raw_mode).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_mode {:#?} from `c_char` with {:#?}",
-            raw_mode, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(mode_str) => mode_str.into(),
-        Err(fail) => return fail,
+    let mode = match CStr::from_ptr(raw_mode)
+        .to_str()
+        .map(String::from)
+        .map_err(LayerError::from)
+    {
+        Ok(mode) => mode,
+        Err(fail) => return fail.into(),
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
@@ -80,12 +71,8 @@ pub(super) unsafe extern "C" fn fopen_detour(
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fopen_result = fopen(path, open_options);
 
-        fopen_result
-            .map_err(|fail| {
-                error!("Failed opening file with {fail:#?}");
-                ptr::null_mut()
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = fopen_result.map_err(From::from);
+        result
     }
 }
 
@@ -94,15 +81,13 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let mode: String = match CStr::from_ptr(raw_mode).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_mode {:#?} from `c_char` with {:#?}",
-            raw_mode, fail
-        );
-        std::ptr::null_mut()
-    }) {
-        Ok(mode_str) => mode_str.into(),
-        Err(fail) => return fail,
+    let mode = match CStr::from_ptr(raw_mode)
+        .to_str()
+        .map(String::from)
+        .map_err(LayerError::from)
+    {
+        Ok(mode) => mode,
+        Err(fail) => return fail.into(),
     };
 
     let open_files = OPEN_FILES.lock().unwrap();
@@ -112,12 +97,8 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
 
-        fdopen_result
-            .map_err(|fail| {
-                error!("Failed fdopen file with {fail:#?}");
-                ptr::null_mut()
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
+        result
     } else {
         libc::fdopen(fd, raw_mode)
     }
@@ -133,15 +114,13 @@ pub(super) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path: PathBuf = match CStr::from_ptr(raw_path).to_str().map_err(|fail| {
-        error!(
-            "Failed converting raw_path {:#?} from `c_char` with {:#?}",
-            raw_path, fail
-        );
-        -1
-    }) {
-        Ok(path_str) => path_str.into(),
-        Err(fail) => return fail,
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
     };
 
     // `openat` behaves the same as `open` when the path is absolute.
@@ -158,12 +137,8 @@ pub(super) unsafe extern "C" fn openat_detour(
         if let Some(remote_fd) = remote_fd {
             let openat_result = openat(path, open_flags, remote_fd);
 
-            openat_result
-                .map_err(|fail| {
-                    error!("Failed opening file with {fail:#?}");
-                    -1
-                })
-                .unwrap_or_else(|fail| fail)
+            let (Ok(result) | Err(result)) = openat_result.map_err(From::from);
+            result
         } else {
             // Nope, it's relative outside of our hands.
 
@@ -200,12 +175,8 @@ pub(crate) unsafe extern "C" fn read_detour(
             read_amount.try_into().unwrap()
         });
 
-        read_result
-            .map_err(|fail| {
-                error!("Failed reading file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
+        result
     } else {
         libc::read(fd, out_buffer, count)
     }
@@ -243,12 +214,8 @@ pub(crate) unsafe extern "C" fn fread_detour(
             read_amount
         });
 
-        read_result
-            .map_err(|fail| {
-                error!("Failed reading file with {fail:#?}");
-                0
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
+        result
     } else {
         libc::fread(out_buffer, element_size, number_of_elements, file_stream)
     }
@@ -289,12 +256,8 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 
         let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
 
-        lseek_result
-            .map_err(|fail| {
-                error!("Failed lseek operation with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = lseek_result.map_err(From::from);
+        result
     } else {
         libc::lseek(fd, offset, whence)
     }
@@ -322,12 +285,8 @@ pub(crate) unsafe extern "C" fn write_detour(
 
         let write_result = write(remote_fd, write_bytes);
 
-        write_result
-            .map_err(|fail| {
-                error!("Failed writing file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
+        let (Ok(result) | Err(result)) = write_result.map_err(From::from);
+        result
     } else {
         libc::write(fd, buffer, count)
     }
