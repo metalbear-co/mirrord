@@ -86,7 +86,16 @@ where
     pub codec: actix_codec::Framed<T, ClientCodec>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
+    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
+    // pretty much just `std::fs::File` things, so I think the best approach would be to create
+    // a `FakeFile`, and implement `std::io` traits on it.
+    //
+    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
+    // `common` module above `XHook` structs.
     file_handler: FileHandler,
+
+    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
+    // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
 }
 
@@ -183,15 +192,6 @@ async fn thread_loop(
         ClientCodec,
     >,
 ) {
-    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
-    // pretty much just `std::fs::File` things, so I think the best approach would be to create
-    // a `FakeFile`, and implement `std::io` traits on it.
-    //
-    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
-    // `common` module above `XHook` structs.
-
-    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
-    // to -agent, and when we receive a message from -agent to -layer).
     let mut layer = Layer::new(codec);
     loop {
         select! {
