@@ -1,14 +1,18 @@
-use std::{io, net::IpAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    io::{self, SeekFrom},
+    net::SocketAddr,
+    path::PathBuf,
+};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
-
-use crate::types::*;
-use crate::steal::{StealClientMessage, StealDaemonMessage};
-use crate::tcp::*;
-
+use crate::{
+    tcp::{DaemonTcp, LayerTcp},
+    ResponseError,
+};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
@@ -16,22 +20,251 @@ pub struct LogMessage {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum ClientMessage {
-    PortSubscribe(Vec<u16>),
-    Close,
-    ConnectionUnsubscribe(ConnectionID),
-    PortSteal(Port),
-    StealClientMessage
+pub struct ReadFileRequest {
+    pub fd: usize,
+    pub buffer_size: usize,
+}
+
+// TODO: Should probably live in a separate place (maybe even a separate `util` crate).
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct AddrInfoHint {
+    pub ai_family: i32,
+    pub ai_socktype: i32,
+    pub ai_protocol: i32,
+    pub ai_flags: i32,
+}
+
+// TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
+// specific thing).
+//
+// TODO: Should probably live in a separate place (same reasoning as `AddrInfoHint`).
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
+pub struct OpenOptionsInternal {
+    pub read: bool,
+    pub write: bool,
+    pub append: bool,
+    pub truncate: bool,
+    pub create: bool,
+    pub create_new: bool,
+}
+
+impl From<OpenOptionsInternal> for std::fs::OpenOptions {
+    fn from(internal: OpenOptionsInternal) -> Self {
+        let OpenOptionsInternal {
+            read,
+            write,
+            append,
+            truncate,
+            create,
+            create_new,
+        } = internal;
+
+        std::fs::OpenOptions::new()
+            .read(read)
+            .write(write)
+            .append(append)
+            .truncate(truncate)
+            .create(create)
+            .create_new(create_new)
+            .to_owned()
+    }
+}
+
+/// Alternative to `std::io::SeekFrom`, used to implement `bincode::Encode` and `bincode::Decode`.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
+pub enum SeekFromInternal {
+    Start(u64),
+    End(i64),
+    Current(i64),
+}
+
+impl const From<SeekFromInternal> for SeekFrom {
+    fn from(seek_from: SeekFromInternal) -> Self {
+        match seek_from {
+            SeekFromInternal::Start(start) => SeekFrom::Start(start),
+            SeekFromInternal::End(end) => SeekFrom::End(end),
+            SeekFromInternal::Current(current) => SeekFrom::Current(current),
+        }
+    }
+}
+
+impl const From<SeekFrom> for SeekFromInternal {
+    fn from(seek_from: SeekFrom) -> Self {
+        match seek_from {
+            SeekFrom::Start(start) => SeekFromInternal::Start(start),
+            SeekFrom::End(end) => SeekFromInternal::End(end),
+            SeekFrom::Current(current) => SeekFromInternal::Current(current),
+        }
+    }
+}
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenFileRequest {
+    pub path: PathBuf,
+    pub open_options: OpenOptionsInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenRelativeFileRequest {
+    pub relative_fd: usize,
+    pub path: PathBuf,
+    pub open_options: OpenOptionsInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SeekFileRequest {
+    pub fd: usize,
+    pub seek_from: SeekFromInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteFileRequest {
+    pub fd: usize,
+    pub write_bytes: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct CloseFileRequest {
+    pub fd: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetEnvVarsRequest {
+    pub env_vars_filter: HashSet<String>,
+    pub env_vars_select: HashSet<String>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum FileRequest {
+    Open(OpenFileRequest),
+    OpenRelative(OpenRelativeFileRequest),
+    Read(ReadFileRequest),
+    Seek(SeekFileRequest),
+    Write(WriteFileRequest),
+    Close(CloseFileRequest),
+}
+
+/// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
+///
+/// Even though all parameters are optional, at least one of `node` or `service` must be `Some`,
+/// otherwise this will result in a `ResponseError`.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoRequest {
+    pub node: Option<String>,
+    pub service: Option<String>,
+    pub hints: Option<AddrInfoHint>,
+}
+
+/// `-layer` --> `-agent` messages.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ClientMessage {
+    Close,
+    Tcp(LayerTcp),
+    FileRequest(FileRequest),
+    GetEnvVarsRequest(GetEnvVarsRequest),
+    Ping,
+    GetAddrInfoRequest(GetAddrInfoRequest),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenFileResponse {
+    pub fd: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadFileResponse {
+    pub bytes: Vec<u8>,
+    pub read_amount: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SeekFileResponse {
+    pub result_offset: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteFileResponse {
+    pub written_amount: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct CloseFileResponse;
+
+/// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
+pub type RemoteResult<T> = Result<T, ResponseError>;
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum FileResponse {
+    Open(RemoteResult<OpenFileResponse>),
+    Read(RemoteResult<ReadFileResponse>),
+    Seek(RemoteResult<SeekFileResponse>),
+    Write(RemoteResult<WriteFileResponse>),
+    Close(RemoteResult<CloseFileResponse>),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AddrInfoInternal {
+    socktype: i32,
+    protocol: i32,
+    address: i32,
+    sockaddr: SocketAddr,
+    canonname: Option<String>,
+    flags: i32,
+}
+
+impl From<AddrInfoInternal> for dns_lookup::AddrInfo {
+    fn from(internal: AddrInfoInternal) -> Self {
+        let AddrInfoInternal {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = internal;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
+}
+
+impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
+    fn from(addrinfo: dns_lookup::AddrInfo) -> Self {
+        let dns_lookup::AddrInfo {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        } = addrinfo;
+
+        Self {
+            socktype,
+            protocol,
+            address,
+            sockaddr,
+            canonname,
+            flags,
+        }
+    }
+}
+
+/// `-agent` --> `-layer` messages.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
     Close,
-    NewTCPConnection(NewTCPConnection),
-    TCPData(TCPData),
-    TCPClose(TCPClose),
+    Tcp(DaemonTcp),
     LogMessage(LogMessage),
-    StealDaemonMessage
+    File(FileResponse),
+    Pong,
+    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
 }
 
 pub struct ClientCodec {
@@ -141,6 +374,7 @@ mod tests {
     use bytes::BytesMut;
 
     use super::*;
+    use crate::tcp::TcpData;
 
     #[test]
     fn sanity_client_encode_decode() {
@@ -148,7 +382,7 @@ mod tests {
         let mut daemon_codec = DaemonCodec::new();
         let mut buf = BytesMut::new();
 
-        let msg = ClientMessage::PortSubscribe(vec![1, 2, 3]);
+        let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
 
         client_codec.encode(msg.clone(), &mut buf).unwrap();
 
@@ -164,10 +398,10 @@ mod tests {
         let mut daemon_codec = DaemonCodec::new();
         let mut buf = BytesMut::new();
 
-        let msg = DaemonMessage::TCPData(TCPData {
+        let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
-            data: vec![1, 2, 3],
-        });
+            bytes: vec![1, 2, 3],
+        }));
 
         daemon_codec.encode(msg.clone(), &mut buf).unwrap();
 
@@ -210,14 +444,5 @@ mod tests {
             Ok(_) => panic!("Should have failed"),
             Err(err) => assert_eq!(err.kind(), io::ErrorKind::Other),
         }
-    }
-
-    #[test]
-    fn decode_daemon_partial_data() {
-        let mut codec = DaemonCodec::new();
-        let mut buf = BytesMut::new();
-        buf.put_u8(0);
-
-        assert!(codec.decode(&mut buf).unwrap().is_none());
     }
 }

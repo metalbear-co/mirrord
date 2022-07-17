@@ -21,6 +21,10 @@ edition.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-mirrord-layer = { artifact = "cdylib", path="../mirrord-layer" }
 exec = "0.3"
 anyhow.workspace = true
+reqwest.workspace = true
+semver = "1"
+
+[build-dependencies]
+mirrord-layer = { artifact = "cdylib", path="../mirrord-layer" }

@@ -12,13 +12,6 @@ jobs:
           - os: ubuntu-18.04
             extension: so
             target: x86_64-unknown-linux-gnu
-          - os: macos-11
-            extension: dylib
-            target: x86_64-apple-darwin
-          - os: macos-11
-            extension: dylib
-            target: aarch64-apple-darwin
-            code-target: darwin-arm64
     runs-on: ${{matrix.os}}
     steps:
       - uses: actions/checkout@v2
@@ -38,6 +31,43 @@ jobs:
           path: |
             target/${{matrix.target}}/release/mirrord
             target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
+          if-no-files-found: error
+  build_binaries_macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v1
+      - name: build mirrord-layer x86-64
+        run: cargo +nightly build --release -p mirrord-layer --target=x86_64-apple-darwin
+      - name: build mirrord-layer macOS arm
+        run: cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
+      - name: create universal target dir
+        run: mkdir -p /tmp/target/universal-apple-darwin/release
+      - name: create universal dylib
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+      - name: build macOS arm cli with universal dylib
+        env:
+          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
+        run: cargo +nightly build --release -p mirrord --target=aarch64-apple-darwin
+      - name: build macOS x86-64 cli with universal dylib
+        env:
+          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
+        run: cargo +nightly build --release -p mirrord --target=x86_64-apple-darwin
+      - name: create universal macOS cli
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
+      - name: adjust directory layout for upload
+        run: cp -rf /tmp/target .
+      - uses: actions/upload-artifact@v3
+        with:
+          name: universal-apple-darwin
+          path: |
+            target/universal-apple-darwin/release/mirrord
+            target/universal-apple-darwin/release/libmirrord_layer.dylib
           if-no-files-found: error
 
   release_docker_image:
@@ -74,7 +104,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [build_binaries, release_docker_image]
+    needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -95,22 +125,21 @@ jobs:
       - run: npm install -g vsce typescript esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target linux-x64
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target linux-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
-      - run: mv /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-x64
+      - run: mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
+      # Same binary for darwin
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      - run: rm vscode-ext/libmirrord_layer.dylib
-      - run: mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --allow-star-activation --target darwin-arm64
+      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   release_gh:
-    needs: [build_binaries, release_docker_image, release_vscode_ext]
+    needs: [build_binaries, build_binaries_macos, release_docker_image, release_vscode_ext]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -127,13 +156,10 @@ jobs:
           mkdir /tmp/release
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
-          mv /tmp/artifacts/x86_64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_x86_64.dylib
-          mv /tmp/artifacts/x86_64-apple-darwin/mirrord /tmp/release/mirrord_mac_x86_64
-          mv /tmp/artifacts/aarch64-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_aarch64.dylib
-          mv /tmp/artifacts/aarch64-apple-darwin/mirrord /tmp/release/mirrord_mac_aarch64
+          mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib
+          mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           files: /tmp/release/**
-

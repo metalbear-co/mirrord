@@ -1,100 +1,55 @@
+#![feature(c_variadic)]
+#![feature(once_cell)]
+#![feature(result_option_inspect)]
+#![feature(const_trait_impl)]
+
 use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    collections::{HashSet, VecDeque},
+    sync::{LazyLock, OnceLock},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite};
+use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
+use error::LayerError;
+use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
-use lazy_static::lazy_static;
+use libc::c_int;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, ConnectionID, DaemonMessage, TCPClose, TCPData,
+    AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
+    GetEnvVarsRequest,
 };
+use socket::SOCKETS;
+use tcp::TcpHandler;
+use tcp_mirror::TcpMirrorHandler;
 use tokio::{
-    io::{copy_bidirectional, duplex, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
-    net::TcpStream,
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    task,
+    time::{sleep, Duration},
 };
-use tokio_stream::StreamMap;
-use tokio_util::io::ReaderStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace};
+use tracing_subscriber::prelude::*;
 
 mod common;
 mod config;
+mod error;
+mod file;
 mod macros;
 mod pod_api;
-mod sockets;
-mod steal;
+mod socket;
 mod tcp;
+mod tcp_mirror;
 
-use tracing_subscriber::prelude::*;
-
-use crate::{
-    common::{HookMessage, Port},
-    config::Config,
-    sockets::{SocketInformation, CONNECTION_QUEUE},
-};
-
-lazy_static! {
-    static ref GUM: Gum = unsafe { Gum::obtain() };
-    static ref RUNTIME: Runtime = Runtime::new().unwrap();
-}
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
+static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
-#[derive(Debug)]
-enum TcpTunnelMessages {
-    Data(Vec<u8>),
-    Close,
-}
-
-#[derive(Debug, Clone)]
-struct ListenData {
-    ipv6: bool,
-    port: Port,
-    fd: RawFd,
-}
-
-// TODO: We can probably drop the tcptunnelmessage close and just drop the sender, would make code
-// simpler.
-async fn tcp_tunnel(mut local_stream: TcpStream, mut receiver: Receiver<TcpTunnelMessages>) {
-    loop {
-        select! {
-            message = receiver.recv() => {
-                match message {
-                    Some(TcpTunnelMessages::Data(data)) => {
-                        local_stream.write_all(&data).await.unwrap()
-                    },
-                    Some(TcpTunnelMessages::Close) => break,
-                    None => break
-                };
-            },
-            _ = local_stream.readable() => {
-                let mut data = vec![0; 1024];
-                match local_stream.try_read(&mut data) {
-                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        continue
-                        },
-                    Err(err) => {
-                        debug!("local stream ended with err {:?}", err);
-                        break;
-                    }
-                    Ok(n) if n == 0 => break,
-                    Ok(_) => {}
-                }
-
-            }
-        }
-    }
-    debug!("exiting tcp tunnel");
-}
+pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
@@ -105,215 +60,268 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let config = Config::init_from_env().unwrap();
+    let config = LayerConfig::init_from_env().unwrap();
 
-    let pf = RUNTIME.block_on(pod_api::create_agent(
-        &config.impersonated_pod_name,
-        &config.impersonated_pod_namespace,
-        &config.agent_namespace,
-        config.agent_rust_log,
-        config.agent_image.unwrap_or_else(|| {
-            concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-        }),
-    ));
+    let port_forwarder = RUNTIME
+        .block_on(pod_api::create_agent(config.clone()))
+        .unwrap_or_else(|e| {
+            panic!("failed to create agent: {}", e);
+        });
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
         HOOK_SENDER = Some(sender);
     };
 
-    enable_hooks();
+    let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
-    RUNTIME.spawn(poll_agent(pf, receiver, config.steal_traffic));
+    RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
-#[inline]
-async fn handle_hook_message(
-    hook_message: HookMessage,
-    port_mapping: &mut HashMap<Port, ListenData>,
-    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin, ClientCodec>,
-    steal_traffic: bool,
-) {
-    match hook_message {
-        HookMessage::Listen(listen_message) => {
-            debug!("HookMessage::Listen {:?}", listen_message);
-            let msg = if steal_traffic {
-                ClientMessage::PortSteal(listen_message.real_port)
-            } else {
-                ClientMessage::PortSubscribe(vec![listen_message.real_port])
-            };
-            let _listen_data = codec.send(msg).await.map(|()| {
-                port_mapping.insert(
-                    listen_message.real_port,
-                    ListenData {
-                        port: listen_message.fake_port,
-                        ipv6: listen_message.ipv6,
-                        fd: listen_message.fd,
-                    },
-                )
-            });
+struct Layer<T>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
+    pub codec: actix_codec::Framed<T, ClientCodec>,
+    ping: bool,
+    tcp_mirror_handler: TcpMirrorHandler,
+    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
+    // pretty much just `std::fs::File` things, so I think the best approach would be to create
+    // a `FakeFile`, and implement `std::io` traits on it.
+    //
+    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
+    // `common` module above `XHook` structs.
+    file_handler: FileHandler,
+
+    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
+    // to -agent, and when we receive a message from -agent to -layer).
+    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+}
+
+impl<T> Layer<T>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
+    fn new(codec: actix_codec::Framed<T, ClientCodec>) -> Layer<T> {
+        Self {
+            codec,
+            ping: false,
+            tcp_mirror_handler: TcpMirrorHandler::default(),
+            file_handler: FileHandler::default(),
+            getaddrinfo_handler_queue: VecDeque::new(),
         }
     }
-}
 
-#[inline]
-async fn handle_daemon_message(
-    daemon_message: DaemonMessage,
-    port_mapping: &mut HashMap<Port, ListenData>,
-    active_connections: &mut HashMap<ConnectionID, Sender<TcpTunnelMessages>>,
-    stolen_reads: &mut StreamMap<ConnectionID, ReaderStream<ReadHalf<DuplexStream>>>,
-    stolen_writes: &mut HashMap<ConnectionID, WriteHalf<DuplexStream>>,
-) {
-    match &daemon_message {
-        DaemonMessage::NewTCPConnection(conn) | DaemonMessage::NewStolenConnection(conn) => {
-            debug!("DaemonMessage::NewTCPConnection {conn:#?}");
-            let _ = port_mapping
-                .get(&conn.destination_port)
-                .map(|listen_data| {
-                    let addr = match listen_data.ipv6 {
-                        false => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen_data.port),
-                        true => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen_data.port),
-                    };
+    async fn handle_hook_message(&mut self, hook_message: HookMessage) {
+        match hook_message {
+            HookMessage::Tcp(message) => {
+                self.tcp_mirror_handler
+                    .handle_hook_message(message, &mut self.codec)
+                    .await
+                    .unwrap();
+            }
+            HookMessage::File(message) => {
+                self.file_handler
+                    .handle_hook_message(message, &mut self.codec)
+                    .await
+                    .unwrap();
+            }
+            HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+                node,
+                service,
+                hints,
+                hook_channel_tx,
+            }) => {
+                trace!("HookMessage::GetAddrInfo");
 
-                    let info =
-                        SocketInformation::new(SocketAddr::new(conn.address, conn.source_port));
-                    {
-                        CONNECTION_QUEUE.lock().unwrap().add(&listen_data.fd, info);
-                    }
+                self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
 
-                    TcpStream::connect(addr)
-                })
-                .map(|stream| {
-                    match daemon_message {
-                        DaemonMessage::NewTCPConnection(_) => {
-                            let (sender, receiver) = channel::<TcpTunnelMessages>(1000);
-                            active_connections.insert(conn.connection_id, sender);
-                            task::spawn(async move {
-                                tcp_tunnel(stream.await.unwrap(), receiver).await;
-                            });
-                        }
-                        DaemonMessage::NewStolenConnection(_) => {
-                            let (mut a, b) = duplex(1024);
-                            let (read_half, write_half) = split(b);
-                            stolen_writes.insert(conn.connection_id, write_half);
-                            stolen_reads.insert(conn.connection_id, ReaderStream::new(read_half));
-                            task::spawn(async move {
-                                let mut stream = stream.await.unwrap();
-                                copy_bidirectional(&mut a, &mut stream).await.unwrap();
-                            });
-                        }
-                        _ => unreachable!("can't get here"),
-                    };
+                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                    node,
+                    service,
+                    hints,
                 });
-        }
-        DaemonMessage::TCPData(msg) => {
-            debug!("Received data from connection id {}", msg.connection_id);
-            let connection = active_connections.get(&msg.connection_id);
-            if connection.is_none() {
-                debug!("Connection {} not found", msg.connection_id);
-                return;
-            }
-            if let Err(fail) = connection
-                .map(|sender| sender.send(TcpTunnelMessages::Data(msg.data.clone())))
-                .unwrap()
-                .await
-            {
-                error!("DaemonMessage::TCPData error {fail:#?}");
-                active_connections.remove(&msg.connection_id);
+
+                self.codec.send(request).await.unwrap();
             }
         }
-        DaemonMessage::TCPClose(msg) => {
-            debug!("Closing connection {}", msg.connection_id);
-            // TODO: This should be take.. no?
-            if let Err(fail) = active_connections
-                .get(&msg.connection_id)
-                .map(|sender| sender.send(TcpTunnelMessages::Close))
-                .unwrap()
-                .await
-            {
-                error!("DaemonMessage::TCPClose error {fail:#?}");
-                active_connections.remove(&msg.connection_id);
+    }
+
+    async fn handle_daemon_message(
+        &mut self,
+        daemon_message: DaemonMessage,
+    ) -> Result<(), LayerError> {
+        match daemon_message {
+            DaemonMessage::Tcp(message) => {
+                self.tcp_mirror_handler.handle_daemon_message(message).await
             }
+            DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
+            DaemonMessage::Pong => {
+                if self.ping {
+                    self.ping = false;
+                    trace!("Daemon sent pong!");
+                } else {
+                    Err(LayerError::UnmatchedPong)?;
+                }
+
+                Ok(())
+            }
+            DaemonMessage::GetEnvVarsResponse(_) => {
+                unreachable!("We get env vars only on initialization right now, shouldn't happen")
+            }
+            DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+                trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
+
+                self.getaddrinfo_handler_queue
+                    .pop_front()
+                    .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
+                    .send(get_addr_info)
+                    .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
+            }
+            DaemonMessage::Close => todo!(),
+            DaemonMessage::LogMessage(_) => todo!(),
         }
-        DaemonMessage::Close => todo!(),
-        DaemonMessage::LogMessage(_) => todo!(),
-        DaemonMessage::StolenTCPData(msg) => {
-            debug!("Received data from connection id {}", msg.connection_id);
-            let connection = stolen_writes.get_mut(&msg.connection_id);
-            if connection.is_none() {
-                debug!("Connection {} not found", msg.connection_id);
-                return;
+    }
+}
+
+async fn thread_loop(
+    mut receiver: Receiver<HookMessage>,
+    codec: actix_codec::Framed<
+        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+        ClientCodec,
+    >,
+) {
+    let mut layer = Layer::new(codec);
+    loop {
+        select! {
+            hook_message = receiver.recv() => {
+                layer.handle_hook_message(hook_message.unwrap()).await;
             }
-            if let Err(fail) = connection
-                .map(|sender| sender.write_all(&msg.data))
-                .unwrap()
-                .await
-            {
-                error!("DaemonMessage::StolenTCPData error {fail:#?}");
-                stolen_reads.remove(&msg.connection_id);
-                stolen_writes.remove(&msg.connection_id);
-            }
-        }
-        DaemonMessage::StolenTCPClose(msg) => {
-            debug!("Closing connection {}", msg.connection_id);
-            if stolen_writes.remove(&msg.connection_id).is_none() {
-                warn!("Connection wasn't found {:?}", msg.connection_id);
-            }
-            if stolen_reads.remove(&msg.connection_id).is_none() {
-                warn!("Connection wasn't found {:?}", msg.connection_id);
+            daemon_message = layer.codec.next() => {
+                if let Some(Ok(message)) = daemon_message {
+                    if let Err(err) = layer.handle_daemon_message(
+                        message).await {
+                        error!("Error handling daemon message: {:?}", err);
+                        break;
+                    }
+                } else {
+                    error!("agent disconnected");
+                    break;
+                }
+            },
+            _ = sleep(Duration::from_secs(60)) => {
+                if !layer.ping {
+                    layer.codec.send(ClientMessage::Ping).await.unwrap();
+                    trace!("sent ping to daemon");
+                    layer.ping = true;
+                } else {
+                    panic!("Client: unmatched ping");
+                }
             }
         }
     }
 }
 
-async fn poll_agent(
+async fn start_layer_thread(
     mut pf: Portforwarder,
-    mut receiver: Receiver<HookMessage>,
-    steal_traffic: bool,
+    receiver: Receiver<HookMessage>,
+    config: LayerConfig,
 ) {
     let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
-    let mut port_mapping: HashMap<Port, ListenData> = HashMap::new();
-    let mut active_connections = HashMap::new();
-    let mut stolen_reads = StreamMap::new();
-    let mut stolen_writes = HashMap::new();
-    loop {
-        select! {
-            hook_message = receiver.recv() => {
-                handle_hook_message(hook_message.unwrap(), &mut port_mapping, &mut codec, steal_traffic).await;
-            },
-            daemon_message = codec.next() => {
-                handle_daemon_message(daemon_message.unwrap().unwrap(), &mut port_mapping, &mut active_connections, &mut stolen_reads, &mut stolen_writes).await;
-            },
-            Some((connection_id, message)) = stolen_reads.next() => {
-                debug!("{message:?}");
-                match message {
-                    Err(err) => {
 
-                    }
-                    // Err(err) => {
-                    //     debug!("connection ended {connection_id:?}");
-                    //     stolen_reads.remove(&connection_id);
-                    //     stolen_writes.remove(&connection_id);
-                    //     codec.send(ClientMessage::CloseStolenConnection(TCPClose {
-                    //         connection_id
-                    //     })).await;
-                    // },
-                    // Some(data) => {
-                    //     codec.send(ClientMessage::StolenTCPData(TCPData {connection_id, data: data.to_vec()})).await;
-                    // }
+    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
+    {
+        panic!(
+            r#"mirrord-layer encountered an issue:
 
+            mirrord doesn't support specifying both
+            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
+
+            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
+            >> If you want to include all, use `--override_env_vars_include="*"`."#
+        );
+    } else {
+        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
+        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
+
+        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
+            let _codec_result = codec
+                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                }))
+                .await;
+
+            let msg = codec.next().await;
+            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+                debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+
+                for (key, value) in remote_env_vars.into_iter() {
+                    debug!(
+                        "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                        key, value
+                    );
+
+                    std::env::set_var(&key, &value);
+                    debug_assert_eq!(std::env::var(key), Ok(value));
                 }
-
+            } else {
+                panic!("unexpected response - expected env vars response {msg:?}");
             }
         };
     }
+
+    let _ = tokio::spawn(thread_loop(receiver, codec));
 }
 
-fn enable_hooks() {
-    let interceptor = Interceptor::obtain(&GUM);
-    sockets::enable_hooks(interceptor)
+/// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
+    let mut interceptor = Interceptor::obtain(&GUM);
+    interceptor.begin_transaction();
+
+    hook!(interceptor, "close", close_detour);
+
+    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
+
+    if enabled_file_ops {
+        file::hooks::enable_file_hooks(&mut interceptor);
+    }
+
+    interceptor.end_transaction();
+}
+
+/// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
+/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
+/// so it tries to do the same for files.
+unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get()
+        .expect("Should be set during initialization!");
+
+    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
+        libc::close(fd)
+    } else if *enabled_file_ops {
+        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
+
+        if let Some(remote_fd) = remote_fd {
+            let close_file_result = file::ops::close(remote_fd);
+
+            close_file_result
+                .map_err(|fail| {
+                    error!("Failed writing file with {fail:#?}");
+                    -1
+                })
+                .unwrap_or_else(|fail| fail)
+        } else {
+            libc::close(fd)
+        }
+    } else {
+        libc::close(fd)
+    }
 }

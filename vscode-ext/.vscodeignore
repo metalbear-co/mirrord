@@ -1,0 +1,6 @@
+**/*.ts
+tsconfig.json
+.eslintrc.json
+node_modules
+dist
+*.vsix

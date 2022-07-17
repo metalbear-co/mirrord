@@ -13,6 +13,8 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
+pub type ClientID = u32;
+
 impl<T, C> Subscriptions<T, C>
 where
     T: Eq + Hash + Clone + Copy,
@@ -30,13 +32,6 @@ where
             .entry(topic)
             .or_insert_with(HashSet::new)
             .insert(client);
-    }
-
-    /// Subscribe many topics at once
-    pub fn subscribe_many(&mut self, client: C, topics: impl IntoIterator<Item = T>) {
-        for topic in topics {
-            self.subscribe(client, topic);
-        }
     }
 
     /// Remove a subscription of given client from the topic.
@@ -83,6 +78,7 @@ where
     }
 
     /// Removes a topic and all of it's clients
+    #[allow(dead_code)] // we might want it later on
     pub fn remove_topic(&mut self, topic: T) {
         self._inner.remove(&topic);
     }
@@ -128,15 +124,23 @@ where
     }
 }
 
+impl Default for IndexAllocator<usize> {
+    fn default() -> Self {
+        IndexAllocator::new()
+    }
+}
+
 #[cfg(test)]
 mod subscription_tests {
+    use mirrord_protocol::Port;
+
     use super::Subscriptions;
-    use crate::Port;
 
     #[test]
     fn sanity() {
         let mut subscriptions = Subscriptions::<Port, _>::new();
-        subscriptions.subscribe_many(3, vec![3, 2]);
+        subscriptions.subscribe(3, 2);
+        subscriptions.subscribe(3, 3);
         subscriptions.subscribe(3, 1);
         subscriptions.subscribe(1, 4);
         subscriptions.subscribe(2, 1);

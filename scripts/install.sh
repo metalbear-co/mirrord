@@ -28,7 +28,7 @@ copy() {
       fi
       mv /tmp/mirrord "$HOME/.local/bin/mirrord"
   else
-      echo "/usr/local/bin which is write protected, installing it requires sudo"
+      echo "installation target directory is write protected, run as root to override"
       sudo mv /tmp/mirrord /usr/local/bin/mirrord
   fi
 }
@@ -44,10 +44,7 @@ install() {
           exit 1
       fi
   elif [[ "$OSTYPE" == "darwin"* ]]; then
-      ARCH=$(uname -m);
-      if [[ "$ARCH" == "arm64" ]]; then
-          ARCH="aarch64";
-      fi
+      ARCH="universal";
       OS="mac";
   else
       echo "mirrord isn't supported for your platform - $OSTYPE"

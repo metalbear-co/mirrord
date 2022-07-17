@@ -1,11 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use std::{io::ErrorKind, net::IpAddr, process::Stdio, sync::Arc};
+    use std::{io::ErrorKind, net::IpAddr, sync::Arc};
 
     use actix_codec::Framed;
     use futures::SinkExt;
     use mirrord_protocol::{
-        ClientCodec, ClientMessage, DaemonMessage, NewTCPConnection, TCPClose, TCPData,
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+        ClientCodec, ClientMessage, DaemonMessage,
     };
     use test_bin::get_test_bin;
     use tokio::{
@@ -25,8 +26,6 @@ mod tests {
             .arg("2")
             .arg("-i")
             .arg("lo")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .spawn()
             .expect("mirrord-agent failed to start");
         // Wait for agent to listen
@@ -66,7 +65,7 @@ mod tests {
         let mut codec = Framed::new(stream, ClientCodec::new());
 
         codec
-            .send(ClientMessage::PortSubscribe(vec![1337, 1338]))
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
             .await
             .expect("port subscribe failed");
         // Let message be acknowledged and dummy socket to start listening
@@ -98,37 +97,42 @@ mod tests {
             .expect("got invalid message");
         assert_eq!(
             new_conn_msg,
-            DaemonMessage::NewTCPConnection(NewTCPConnection {
+            DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id: 0,
                 address: IpAddr::V4("127.0.0.1".parse().unwrap()),
                 destination_port: 1337,
                 source_port: port
-            })
+            }))
         );
 
         assert_eq!(
             data_msg,
-            DaemonMessage::TCPData(TCPData {
+            DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 0,
-                data: test_data.to_vec()
-            })
+                bytes: test_data.to_vec()
+            }))
         );
 
         assert_eq!(
             close_msg,
-            DaemonMessage::TCPClose(TCPClose { connection_id: 0 })
+            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 }))
         );
+
         drop(codec);
         drop(guard);
         drop(mutex);
+
         task.await.unwrap();
         let result = child.wait_with_output().unwrap();
         assert!(result.status.success());
+
         let stderr = String::from_utf8_lossy(&result.stderr);
-        print!("{:?}", stderr);
+        println!("stderr: {:?}", stderr);
+
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        println!("stdout: {:?}", stdout);
+
         assert!(!stderr.to_ascii_lowercase().contains("error"));
-        assert!(!String::from_utf8_lossy(&result.stdout)
-            .to_ascii_lowercase()
-            .contains("error"));
+        assert!(!stdout.to_ascii_lowercase().contains("error"));
     }
 }

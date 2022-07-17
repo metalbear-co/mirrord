@@ -1,171 +1,62 @@
-//! We implement each hook function in a safe function as much as possible, having the unsafe do the
-//! absolute minimum
 use std::{
-    borrow::Borrow,
-    collections::{HashMap, HashSet, VecDeque},
-    hash::{Hash, Hasher},
+    ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::Mutex,
+    ptr,
+    sync::Arc,
 };
 
+use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
-use frida_gum::interceptor::Interceptor;
-use lazy_static::lazy_static;
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error};
+use tokio::sync::oneshot;
+use tracing::{debug, error, trace, warn};
 
+use super::*;
 use crate::{
-    common::{HookMessage, Listen, Port},
-    macros::{hook, try_hook},
+    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    error::LayerError,
+    tcp::{HookMessageTcp, Listen},
     HOOK_SENDER,
 };
 
-lazy_static! {
-    static ref SOCKETS: Mutex<HashSet<Socket>> = Mutex::new(HashSet::new());
-    pub static ref CONNECTION_QUEUE: Mutex<ConnectionQueue> =
-        Mutex::new(ConnectionQueue::default());
-}
-
-/// Struct sent over the socket once created to pass metadata to the hook
-#[derive(Debug)]
-pub struct SocketInformation {
-    pub address: SocketAddr,
-}
-
-/// poll_agent loop inserts connection data into this queue, and accept reads it.
-#[derive(Debug, Default)]
-pub struct ConnectionQueue {
-    connections: HashMap<RawFd, VecDeque<SocketInformation>>,
-}
-
-impl ConnectionQueue {
-    pub fn add(&mut self, fd: &RawFd, info: SocketInformation) {
-        self.connections.entry(*fd).or_default().push_back(info);
-    }
-    pub fn get(&mut self, fd: &RawFd) -> Option<SocketInformation> {
-        let mut queue = self.connections.remove(fd)?;
-        if let Some(info) = queue.pop_front() {
-            if !queue.is_empty() {
-                self.connections.insert(*fd, queue);
-            }
-            Some(info)
-        } else {
-            None
-        }
-    }
-}
-
-impl SocketInformation {
-    pub fn new(address: SocketAddr) -> Self {
-        Self { address }
-    }
-}
-
-trait GetPeerName {
-    fn get_peer_name(&self) -> SocketAddr;
-}
-
-#[derive(Debug)]
-pub struct Connected {
-    /// Remote address we're connected to
-    remote_address: SocketAddr,
-    /// Local address it's connected from
-    local_address: SocketAddr,
-}
-
-#[derive(Debug, Clone)]
-pub struct Bound {
-    address: SocketAddr,
-}
-
-#[derive(Debug)]
-pub enum SocketState {
-    Initialized,
-    Bound(Bound),
-    Listening(Bound),
-    Connected(Connected),
-}
-
-impl Default for SocketState {
-    fn default() -> Self {
-        SocketState::Initialized
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-struct Socket {
-    fd: RawFd,
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-    pub state: SocketState,
-}
-
-impl PartialEq for Socket {
-    fn eq(&self, other: &Self) -> bool {
-        self.fd == other.fd
-    }
-}
-
-impl Eq for Socket {}
-
-impl Hash for Socket {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.fd.hash(state);
-    }
-}
-
-impl Borrow<RawFd> for Socket {
-    fn borrow(&self) -> &RawFd {
-        &self.fd
-    }
-}
-
-#[inline]
-fn is_ignored_port(port: Port) -> bool {
-    port == 0 || (port > 50000 && port < 60000)
-}
-
-/// Create the socket, add it to SOCKETS if sucesssful and matching protocol and domain (TCPv4/v6)
-fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
+/// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
     if fd == -1 {
         error!("socket failed");
         return fd;
     }
-    // We don't handle non TCPv4 sockets
+    // We don't handle non Tcpv4 sockets
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
     {
-        debug!("non TCP socket domain:{:?}, type:{:?}", domain, type_);
+        debug!("non Tcp socket domain:{:?}, type:{:?}", domain, type_);
         return fd;
     }
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(Socket {
+    sockets.insert(
         fd,
-        domain,
-        type_,
-        protocol,
-        state: SocketState::default(),
-    });
+        Arc::new(Socket {
+            domain,
+            type_,
+            protocol,
+            state: SocketState::default(),
+        }),
+    );
     fd
 }
-
-unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int) -> c_int {
-    socket(domain, type_, protocol)
-}
-
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
     debug!("bind called sockfd: {:?}", sockfd);
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match sockets.remove(&sockfd) {
             Some(socket) if !matches!(socket.state, SocketState::Initialized) => {
                 error!("socket is in invalid state for bind {:?}", socket.state);
                 return libc::EINVAL;
@@ -193,30 +84,23 @@ fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int {
         return unsafe { libc::bind(sockfd, addr, addrlen) };
     }
 
-    socket.state = SocketState::Bound(Bound {
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         address: parsed_addr,
     });
 
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(socket);
+    sockets.insert(sockfd, socket);
     0
 }
-
-unsafe extern "C" fn bind_detour(
-    sockfd: c_int,
-    addr: *const sockaddr,
-    addrlen: socklen_t,
-) -> c_int {
-    bind(sockfd, addr, addrlen)
-}
-
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     debug!("listen called");
     let mut socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+        match sockets.remove(&sockfd) {
             Some(socket) => socket,
             None => {
                 debug!("listen: no socket found for fd: {}", &sockfd);
@@ -224,10 +108,10 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
             }
         }
     };
-    match socket.state {
+    match &socket.state {
         SocketState::Bound(bound) => {
             let real_port = bound.address.port();
-            socket.state = SocketState::Listening(bound);
+            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
             let mut os_addr = match socket.domain {
                 libc::AF_INET => {
                     OsSocketAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -245,9 +129,9 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
             let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
             if ret != 0 {
                 error!(
-                    "listen: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}, errno: {:?}",
-                    ret, os_addr, sockfd, errno()
-                );
+                        "listen: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}, errno: {:?}",
+                        ret, os_addr, sockfd, errno()
+                    );
                 return ret;
             }
             let mut addr_len = os_addr.len();
@@ -277,12 +161,12 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
                 return ret;
             }
             let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-            match sender.blocking_send(HookMessage::Listen(Listen {
+            match sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
                 fake_port: result_addr.port(),
                 real_port,
                 ipv6: result_addr.is_ipv6(),
                 fd: sockfd,
-            })) {
+            }))) {
                 Ok(_) => {}
                 Err(e) => {
                     error!("listen: failed to send listen message: {:?}", e);
@@ -300,30 +184,29 @@ fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     }
     debug!("listen: success");
     let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(socket);
+    sockets.insert(sockfd, socket);
     0
 }
 
-unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    listen(sockfd, backlog)
-}
-
-fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect called");
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
+    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
 
     let socket = {
         let mut sockets = SOCKETS.lock().unwrap();
-        match sockets.take(&sockfd) {
+
+        match sockets.remove(&sockfd) {
             Some(socket) => socket,
             None => {
-                debug!("connect: no socket found for fd: {}", &sockfd);
+                warn!("connect: no socket found for fd: {}", &sockfd);
                 return unsafe { libc::connect(sockfd, address, len) };
             }
         }
     };
 
     // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = socket.state {
+    if let SocketState::Bound(bound) = &socket.state {
         let os_addr = OsSocketAddr::from(bound.address);
         let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
         if ret != 0 {
@@ -336,18 +219,15 @@ fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     };
     unsafe { libc::connect(sockfd, address, len) }
 }
-
-unsafe extern "C" fn connect_detour(
-    sockfd: RawFd,
-    address: *const sockaddr,
-    len: socklen_t,
-) -> c_int {
-    connect(sockfd, address, len)
-}
-
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn getpeername(
+    sockfd: RawFd,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
     debug!("getpeername called");
     let remote_address = {
         let sockets = SOCKETS.lock().unwrap();
@@ -372,17 +252,14 @@ fn getpeername(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_
     debug!("remote_address: {:?}", remote_address);
     fill_address(address, address_len, remote_address)
 }
-
-unsafe extern "C" fn getpeername_detour(
+/// Resolve the fake local address to the real local address.
+#[allow(clippy::significant_drop_in_scrutinee)]
+/// See https://github.com/rust-lang/rust-clippy/issues/8963
+pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> i32 {
-    getpeername(sockfd, address, address_len)
-}
-
-/// Resolve the fake local address to the real local address.
-fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
+) -> c_int {
     debug!("getsockname called");
     let local_address = {
         let sockets = SOCKETS.lock().unwrap();
@@ -409,66 +286,19 @@ fn getsockname(sockfd: RawFd, address: *mut sockaddr, address_len: *mut socklen_
     fill_address(address, address_len, local_address)
 }
 
-unsafe extern "C" fn getsockname_detour(
-    sockfd: RawFd,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    getsockname(sockfd, address, address_len)
-}
-
-// unsafe extern "C" fn setsockopt_detour(
-//     _sockfd: i32,
-//     _level: i32,
-//     _optname: i32,
-//     _optval: *mut c_char,
-//     _optlen: socklen_t,
-// ) -> i32 {
-//     0
-// }
-
-/// Fill in the sockaddr structure for the given address.
-#[inline]
-fn fill_address(
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    new_address: SocketAddr,
-) -> c_int {
-    if address.is_null() {
-        return 0;
-    }
-    if address_len.is_null() {
-        set_errno(Errno(libc::EINVAL));
-        return -1;
-    }
-    let os_address: OsSocketAddr = new_address.into();
-    unsafe {
-        let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-        std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);
-        *address_len = os_address.len();
-    }
-    0
-}
-
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock This enables us to have a safe way to get "remote" information
 /// (remote ip, port, etc).
-fn accept(
+pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> RawFd {
-    let (origin_fd, local_address, domain, protocol, type_) = {
+    let (local_address, domain, protocol, type_) = {
         if let Some(socket) = SOCKETS.lock().unwrap().get(&sockfd) {
             if let SocketState::Listening(bound) = &socket.state {
-                (
-                    socket.fd,
-                    bound.address,
-                    socket.domain,
-                    socket.protocol,
-                    socket.type_,
-                )
+                (bound.address, socket.domain, socket.protocol, socket.type_)
             } else {
                 error!("original socket is not listening");
                 return new_fd;
@@ -478,7 +308,7 @@ fn accept(
             return new_fd;
         }
     };
-    let socket_info = { CONNECTION_QUEUE.lock().unwrap().get(&origin_fd) };
+    let socket_info = { CONNECTION_QUEUE.lock().unwrap().get(&sockfd) };
     let remote_address = match socket_info {
         Some(socket_info) => socket_info,
         None => {
@@ -488,7 +318,6 @@ fn accept(
     }
     .address;
     let new_socket = Socket {
-        fd: new_fd,
         domain,
         protocol,
         type_,
@@ -499,68 +328,109 @@ fn accept(
     };
     fill_address(address, address_len, remote_address);
 
-    SOCKETS.lock().unwrap().insert(new_socket);
+    SOCKETS.lock().unwrap().insert(new_fd, Arc::new(new_socket));
     new_fd
 }
 
-unsafe extern "C" fn accept_detour(
-    sockfd: c_int,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-) -> i32 {
-    let res = libc::accept(sockfd, address, address_len);
-    if res < 0 {
-        return res;
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
+    if fcntl_fd == -1 {
+        error!("fcntl failed");
+        return fcntl_fd;
     }
-    accept(sockfd, address, address_len, res)
-    //     let socket_addr = SOCKETS.get_connection_socket_address(sockfd).unwrap();
-
-    //     if !addr.is_null() {
-    //         debug!("received non-null address in accept");
-    //         let os_addr: OsSocketAddr = socket_addr.into();
-    //         std::ptr::copy_nonoverlapping(os_addr.as_ptr(), addr, os_addr.len() as usize);
-    //     }
-
-    //     let connection_id = SOCKETS.read_single_connection(sockfd);
-    //     SOCKETS.create_data_socket(connection_id, socket_addr)
-}
-
-#[cfg(target_os = "linux")]
-unsafe extern "C" fn accept4_detour(
-    sockfd: i32,
-    address: *mut sockaddr,
-    address_len: *mut socklen_t,
-    flags: i32,
-) -> i32 {
-    let res = libc::accept4(sockfd, address, address_len, flags);
-    if res < 0 {
-        return res;
+    match cmd {
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
+            dup(orig_fd, fcntl_fd);
+        }
+        _ => (),
     }
-    accept(sockfd, address, address_len, res)
+    fcntl_fd
 }
 
-fn close(fd: c_int) {
-    SOCKETS.lock().unwrap().remove(&fd);
-}
-
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    close(fd);
-    libc::close(fd)
-}
-
-pub fn enable_hooks(mut interceptor: Interceptor) {
-    hook!(interceptor, "close", close_detour);
-    hook!(interceptor, "socket", socket_detour);
-    hook!(interceptor, "bind", bind_detour);
-    hook!(interceptor, "listen", listen_detour);
-    hook!(interceptor, "connect", connect_detour);
-    try_hook!(interceptor, "getpeername", getpeername_detour);
-    try_hook!(interceptor, "getsockname", getsockname_detour);
-    // hook!(interceptor, "setsockopt", setsockopt_detour);
-    #[cfg(target_os = "linux")]
-    {
-        try_hook!(interceptor, "uv__accept4", accept4_detour);
-        try_hook!(interceptor, "accept4", accept4_detour);
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
+    if dup_fd == -1 {
+        error!("dup failed");
+        return dup_fd;
     }
-    try_hook!(interceptor, "accept", accept_detour);
+    let mut sockets = SOCKETS.lock().unwrap();
+    if let Some(socket) = sockets.get(&fd) {
+        let dup_socket = socket.clone();
+        sockets.insert(dup_fd as RawFd, dup_socket);
+    }
+    dup_fd
+}
+
+/// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
+/// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
+/// a linked list of such type).
+///
+/// Even though individual parts of the received list may contain an error, this function will
+/// still work fine, as it filters out such errors and returns a null pointer in this case.
+///
+/// # Protocol
+///
+/// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
+/// for the equivalent of this function).
+pub(super) fn getaddrinfo(
+    node: Option<String>,
+    service: Option<String>,
+    hints: Option<AddrInfoHint>,
+) -> Result<*mut libc::addrinfo, LayerError> {
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+    let hook = GetAddrInfoHook {
+        node,
+        service,
+        hints,
+        hook_channel_tx,
+    };
+
+    blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook))?;
+
+    let addr_info_list = hook_channel_rx.blocking_recv()??;
+
+    addr_info_list
+        .into_iter()
+        .map(AddrInfo::from)
+        .map(|addr_info| {
+            let AddrInfo {
+                socktype,
+                protocol,
+                address,
+                sockaddr,
+                canonname,
+                flags,
+            } = addr_info;
+
+            let sockaddr = socket2::SockAddr::from(sockaddr);
+
+            let canonname = canonname.map(CString::new).transpose().unwrap();
+            let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
+                let c_str = c_string.as_c_str();
+                c_str.as_ptr()
+            }) as *mut _;
+
+            let c_addr_info = libc::addrinfo {
+                ai_flags: flags,
+                ai_family: address,
+                ai_socktype: socktype,
+                ai_protocol: protocol,
+                ai_addrlen: sockaddr.len(),
+                ai_addr: sockaddr.as_ptr() as *mut _,
+                ai_canonname,
+                ai_next: ptr::null_mut(),
+            };
+
+            trace!("getaddrinfo -> c_addr_info {:#?}", c_addr_info);
+
+            c_addr_info
+        })
+        .rev()
+        .map(Box::new)
+        .map(Box::into_raw)
+        .reduce(|current, mut previous| {
+            // Safety: These pointers were just allocated using `Box::new`, so they should be fine
+            // regarding memory layout, and are not dangling.
+            unsafe { (*previous).ai_next = current };
+            previous
+        })
+        .ok_or(LayerError::DNSNoName)
 }
