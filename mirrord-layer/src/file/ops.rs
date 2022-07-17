@@ -162,7 +162,7 @@ pub(crate) fn fopen(
 
     open_files
         .get_key_value(&local_file_fd)
-        .ok_or(LayerError::LocalFDNotFound(local_file_fd, path))
+        .ok_or(LayerError::LocalFDNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }

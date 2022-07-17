@@ -28,8 +28,14 @@ pub struct ListenClose {
 }
 
 #[derive(Debug, Clone)]
+pub struct Connect {
+    pub remote_address: SocketAddr,
+}
+
+#[derive(Debug, Clone)]
 pub enum HookMessageTcp {
     Listen(Listen),
+    Connect(Connect),
     Close(ListenClose),
 }
 

@@ -1,7 +1,7 @@
 use std::{
     ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, prelude::FromRawFd},
     ptr,
     sync::Arc,
 };
@@ -10,6 +10,7 @@ use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
 
@@ -17,7 +18,7 @@ use super::*;
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
-    tcp::{HookMessageTcp, Listen},
+    tcp::{Connect, HookMessageTcp, Listen},
     HOOK_SENDER,
 };
 
@@ -38,7 +39,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     let mut sockets = SOCKETS.lock().unwrap();
     sockets.insert(
         fd,
-        Arc::new(Socket {
+        Arc::new(MirrorSocket {
             domain,
             type_,
             protocol,
@@ -190,34 +191,93 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
 
 #[allow(clippy::significant_drop_in_scrutinee)]
 /// See https://github.com/rust-lang/rust-clippy/issues/8963
-pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    debug!("connect -> sockfd {:#?} | len {:#?}", sockfd, len);
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
+    trace!(
+        "connect -> sockfd {:#?} | remote_address {:#?}",
+        sockfd,
+        remote_address
+    );
 
-    let socket = {
-        let mut sockets = SOCKETS.lock().unwrap();
-
-        match sockets.remove(&sockfd) {
-            Some(socket) => socket,
-            None => {
-                warn!("connect: no socket found for fd: {}", &sockfd);
-                return unsafe { libc::connect(sockfd, address, len) };
-            }
-        }
+    let mirror_socket = {
+        SOCKETS
+            .lock()?
+            .remove(&sockfd)
+            .ok_or(LayerError::LocalFDNotFound(sockfd))?
     };
 
-    // We don't handle this socket, so restore state if there was any. (delay execute bind)
-    if let SocketState::Bound(bound) = &socket.state {
-        let os_addr = OsSocketAddr::from(bound.address);
-        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
-        if ret != 0 {
-            error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
-            );
-            return ret;
+    let socket = unsafe { socket2::Socket::from_raw_fd(sockfd) };
+
+    match mirror_socket.state {
+        SocketState::Bound(bound) => {
+            let Bound {
+                address: bound_address,
+            } = bound;
+
+            let connected = Connected {
+                remote_address,
+                bound_address,
+            };
+
+            // TODO(alex) [high] 2022-07-15: Implementation plan
+            // 1. Send connect message to `agent`;
+            // 2. `agent` creates a socket to handle this `layer`->`agent` connection;
+            // 3. `agent` creates another socket that calls `connect` to the `remote_address`;
+            // 4. Calls to read on this socket in `agent` will contain data the we log, and then
+            // write to `remote_address`;
+            let connect = Connect { remote_address };
+            let connect_hook = HookMessageTcp::Connect(connect);
+            blocking_send_hook_message(HookMessage::Tcp(connect_hook))?;
+
+            Arc::get_mut(&mut mirror_socket).unwrap().state = SocketState::Connected(connected);
+
+            let unbound_local_address = (mirror_socket.domain == libc::AF_INET)
+                .then(|| SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)))
+                .or_else(|| {
+                    Some(SockAddr::from(SocketAddr::new(
+                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                        0,
+                    )))
+                })
+                .ok_or(LayerError::UnsupportedDomain(mirror_socket.domain))?;
+
+            socket.bind(&unbound_local_address)?;
+
+            // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
+            // connect to.
+            let local_address = socket.local_addr()?;
+
+            // TODO(alex) [high] 2202-07-16:
+            // 1. We send a hook message to the agent;
+            // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
+            // 3. agent sends back to layer this address;
+            // 4. layer connects to this intercepted address;
+            //
+            // Need a thread that will hold all these intercepted addresses in agent, so we can use
+            // `set_namespace` in there.
+            // let intercept_address = hook_channel_rx.recv()?;
+            socket.connect(intercept_address)?;
+
+            let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
+            match sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
+                fake_port: result_addr.port(),
+                real_port,
+                ipv6: result_addr.is_ipv6(),
+                fd: sockfd,
+            }))) {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("listen: failed to send listen message: {:?}", e);
+                    return libc::EFAULT;
+                }
+            };
         }
-    };
-    unsafe { libc::connect(sockfd, address, len) }
+        _ => todo!(),
+    }
+
+    let mut sockets = SOCKETS.lock().unwrap();
+    sockets.insert(sockfd, mirror_socket);
+
+    Ok(())
 }
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
@@ -265,7 +325,7 @@ pub(super) fn getsockname(
         let sockets = SOCKETS.lock().unwrap();
         match sockets.get(&sockfd) {
             Some(socket) => match &socket.state {
-                SocketState::Connected(connected) => connected.local_address,
+                SocketState::Connected(connected) => connected.bound_address,
                 SocketState::Bound(bound) => bound.address,
                 SocketState::Listening(bound) => bound.address,
                 _ => {
@@ -317,13 +377,13 @@ pub(super) fn accept(
         }
     }
     .address;
-    let new_socket = Socket {
+    let new_socket = MirrorSocket {
         domain,
         protocol,
         type_,
         state: SocketState::Connected(Connected {
             remote_address,
-            local_address,
+            bound_address: local_address,
         }),
     };
     fill_address(address, address_len, remote_address);

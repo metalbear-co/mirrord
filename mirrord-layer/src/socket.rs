@@ -15,7 +15,7 @@ use os_socketaddr::OsSocketAddr;
 pub(super) mod hooks;
 mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
@@ -65,7 +65,7 @@ pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
     /// Local address it's connected from
-    local_address: SocketAddr,
+    bound_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +89,7 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct Socket {
+pub struct MirrorSocket {
     domain: c_int,
     type_: c_int,
     protocol: c_int,

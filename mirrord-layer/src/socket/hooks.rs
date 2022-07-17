@@ -3,6 +3,7 @@ use std::{ffi::CStr, os::unix::io::RawFd};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_protocol::AddrInfoHint;
+use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, trace};
 
 use super::ops::*;
@@ -30,10 +31,27 @@ unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
 
 unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
-    address: *const sockaddr,
-    len: socklen_t,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
 ) -> c_int {
-    connect(sockfd, address, len)
+    let address =
+        match OsSocketAddr::from_raw_parts(raw_address as *const _, address_length as usize)
+            .into_addr()
+            .ok_or(LayerError::AddressConversion)
+        {
+            Ok(address) => address,
+            Err(fail) => return fail.into(),
+        };
+
+    let (Ok(result) | Err(result)) =
+        connect(sockfd, address)
+            .map(|()| 0)
+            .map_err(|fail| match fail {
+                LayerError::LocalFDNotFound(fd) => libc::connect(fd, raw_address, address_length),
+                other => other.into(),
+            });
+
+    result
 }
 
 unsafe extern "C" fn getpeername_detour(
