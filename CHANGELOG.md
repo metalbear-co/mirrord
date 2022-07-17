@@ -22,7 +22,7 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 - Refactored error handling in mirrord-layer.
 - E2E: Collect minikube logs and fix collecting container logs
 - E2E: macOS use colima instead of minikube.
-- Refactored `mirrord-layer/lib.rs` - no more passsing many arguments! :)
+- Refactored `mirrord-layer/lib.rs` - no more passing many arguments! :)
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
