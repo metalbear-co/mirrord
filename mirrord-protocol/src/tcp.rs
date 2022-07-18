@@ -1,8 +1,8 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use bincode::{Decode, Encode};
 
-use crate::{ConnectionID, Port};
+use crate::{ConnectionID, Port, RemoteResult};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -23,12 +23,23 @@ pub struct TcpClose {
     pub connection_id: ConnectionID,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectRequest {
+    pub remote_address: SocketAddr,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectResponse {
+    pub intercept_address: SocketAddr,
+}
+
 /// Messages related to Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcp {
     PortSubscribe(Port),
     ConnectionUnsubscribe(ConnectionID),
     PortUnsubscribe(Port),
+    ConnectRequest(ConnectRequest),
 }
 
 /// Messages related to Tcp handler from server.
@@ -37,4 +48,5 @@ pub enum DaemonTcp {
     NewConnection(NewTcpConnection),
     Data(TcpData),
     Close(TcpClose),
+    ConnectResponse(RemoteResult<ConnectResponse>),
 }

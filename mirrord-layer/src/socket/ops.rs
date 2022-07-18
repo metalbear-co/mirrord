@@ -9,6 +9,7 @@ use std::{
 use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::tcp::ConnectResponse;
 use os_socketaddr::OsSocketAddr;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -189,8 +190,6 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
     0
 }
 
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
     trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
@@ -198,7 +197,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         remote_address
     );
 
-    let mirror_socket = {
+    let mut mirror_socket = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
@@ -207,77 +206,70 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
     let socket = unsafe { socket2::Socket::from_raw_fd(sockfd) };
 
-    match mirror_socket.state {
-        SocketState::Bound(bound) => {
-            let Bound {
-                address: bound_address,
-            } = bound;
+    if let SocketState::Bound(bound) = mirror_socket.state {
+        let Bound {
+            address: bound_address,
+        } = bound;
 
-            let connected = Connected {
-                remote_address,
-                bound_address,
-            };
+        let connected = Connected {
+            remote_address,
+            bound_address,
+        };
 
-            // TODO(alex) [high] 2022-07-15: Implementation plan
-            // 1. Send connect message to `agent`;
-            // 2. `agent` creates a socket to handle this `layer`->`agent` connection;
-            // 3. `agent` creates another socket that calls `connect` to the `remote_address`;
-            // 4. Calls to read on this socket in `agent` will contain data the we log, and then
-            // write to `remote_address`;
-            let connect = Connect { remote_address };
-            let connect_hook = HookMessageTcp::Connect(connect);
-            blocking_send_hook_message(HookMessage::Tcp(connect_hook))?;
+        // TODO(alex) [high] 2022-07-15: Implementation plan
+        // 1. Send connect message to `agent`;
+        // 2. `agent` creates a socket to handle this `layer`->`agent` connection;
+        // 3. `agent` creates another socket that calls `connect` to the `remote_address`;
+        // 4. Calls to read on this socket in `agent` will contain data the we log, and then
+        // write to `remote_address`;
+        let unbound_local_address = (mirror_socket.domain == libc::AF_INET)
+            .then(|| SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)))
+            .or_else(|| {
+                Some(SockAddr::from(SocketAddr::new(
+                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                    0,
+                )))
+            })
+            .ok_or(LayerError::UnsupportedDomain(mirror_socket.domain))?;
 
-            Arc::get_mut(&mut mirror_socket).unwrap().state = SocketState::Connected(connected);
+        socket.bind(&unbound_local_address)?;
 
-            let unbound_local_address = (mirror_socket.domain == libc::AF_INET)
-                .then(|| SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)))
-                .or_else(|| {
-                    Some(SockAddr::from(SocketAddr::new(
-                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                        0,
-                    )))
-                })
-                .ok_or(LayerError::UnsupportedDomain(mirror_socket.domain))?;
+        let (channel_tx, channel_rx) = oneshot::channel();
 
-            socket.bind(&unbound_local_address)?;
+        let connect = Connect {
+            remote_address,
+            channel_tx,
+        };
 
-            // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
-            // connect to.
-            let local_address = socket.local_addr()?;
+        let connect_hook = HookMessageTcp::Connect(connect);
+        blocking_send_hook_message(HookMessage::Tcp(connect_hook))?;
 
-            // TODO(alex) [high] 2202-07-16:
-            // 1. We send a hook message to the agent;
-            // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
-            // 3. agent sends back to layer this address;
-            // 4. layer connects to this intercepted address;
-            //
-            // Need a thread that will hold all these intercepted addresses in agent, so we can use
-            // `set_namespace` in there.
-            // let intercept_address = hook_channel_rx.recv()?;
-            socket.connect(intercept_address)?;
+        Arc::get_mut(&mut mirror_socket).unwrap().state = SocketState::Connected(connected);
 
-            let sender = unsafe { HOOK_SENDER.as_ref().unwrap() };
-            match sender.blocking_send(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
-                fake_port: result_addr.port(),
-                real_port,
-                ipv6: result_addr.is_ipv6(),
-                fd: sockfd,
-            }))) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("listen: failed to send listen message: {:?}", e);
-                    return libc::EFAULT;
-                }
-            };
-        }
-        _ => todo!(),
+        // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
+        // connect to.
+        let local_address = socket.local_addr()?;
+
+        let ConnectResponse { intercept_address } = channel_rx.blocking_recv()??;
+
+        // TODO(alex) [high] 2202-07-16:
+        // // 1. We send a hook message to the agent;
+        // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
+        // 3. agent sends back to layer this address;
+        // 4. layer connects to this intercepted address;
+        //
+        // Need a thread that will hold all these intercepted addresses in agent, so we can use
+        // `set_namespace` in there.
+        // let intercept_address = hook_channel_rx.recv()?;
+        socket.connect(&intercept_address.into())?;
+
+        let mut sockets = SOCKETS.lock().unwrap();
+        sockets.insert(sockfd, mirror_socket);
+
+        Ok(())
+    } else {
+        todo!()
     }
-
-    let mut sockets = SOCKETS.lock().unwrap();
-    sockets.insert(sockfd, mirror_socket);
-
-    Ok(())
 }
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)

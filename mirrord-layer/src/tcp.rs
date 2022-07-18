@@ -11,13 +11,16 @@ use std::{
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, Port,
+    tcp::{
+        ConnectRequest, ConnectResponse, DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData,
+    },
+    ClientCodec, ClientMessage, Port, RemoteResult,
 };
 use tokio::net::TcpStream;
 use tracing::debug;
 
 use crate::{
+    common::ResponseChannel,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
 };
@@ -27,12 +30,13 @@ pub struct ListenClose {
     pub port: Port,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Connect {
     pub remote_address: SocketAddr,
+    pub(crate) channel_tx: ResponseChannel<ConnectResponse>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum HookMessageTcp {
     Listen(Listen),
     Connect(Connect),
@@ -95,12 +99,18 @@ pub trait TcpHandler {
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
+            DaemonTcp::ConnectResponse(tcp_connect) => self.handle_connect_response(tcp_connect),
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);
 
         handled
     }
+
+    fn handle_connect_response(
+        &mut self,
+        tcp_connect: RemoteResult<ConnectResponse>,
+    ) -> Result<(), LayerError>;
 
     async fn handle_hook_message(
         &mut self,
@@ -113,6 +123,7 @@ pub trait TcpHandler {
         match message {
             HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
+            HookMessageTcp::Connect(connect) => self.handle_connect_request(connect, codec).await,
         }
     }
 
@@ -150,6 +161,15 @@ pub trait TcpHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
+
+    async fn handle_connect_request(
+        &mut self,
+        connect: Connect,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError>;
 
     /// Handle listen request
     async fn handle_listen(

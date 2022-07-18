@@ -1,7 +1,11 @@
+use std::collections::VecDeque;
+
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
 use crate::{error::LayerError, file::HookMessageFile, tcp::HookMessageTcp, HOOK_SENDER};
+
+pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
