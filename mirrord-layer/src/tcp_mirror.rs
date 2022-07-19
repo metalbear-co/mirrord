@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{ConnectRequest, ConnectResponse, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{ConnectRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, ConnectionID,
 };
 use tokio::{
@@ -24,7 +24,7 @@ use tracing::{debug, error, warn};
 use crate::{
     common::ResponseDeque,
     error::LayerError,
-    tcp::{Connect, Listen, TcpHandler},
+    tcp::{Listen, TcpHandler},
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
@@ -110,7 +110,6 @@ impl Borrow<ConnectionID> for Connection {
 pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
-    connect_queue: ResponseDeque<ConnectResponse>,
 }
 
 #[async_trait]
@@ -173,44 +172,11 @@ impl TcpHandler for TcpMirrorHandler {
             .ok_or(LayerError::ConnectionIdNotFound(connection_id))
     }
 
-    async fn handle_connect_request(
-        &mut self,
-        connect: Connect,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError> {
-        let Connect {
-            remote_address,
-            channel_tx,
-        } = connect;
-
-        self.connect_queue.push_back(channel_tx);
-
-        Ok(codec
-            .send(ClientMessage::Tcp(LayerTcp::ConnectRequest(
-                ConnectRequest { remote_address },
-            )))
-            .await?)
-    }
-
     fn ports(&self) -> &HashSet<Listen> {
         &self.ports
     }
 
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
-    }
-
-    fn handle_connect_response(
-        &mut self,
-        tcp_connect: mirrord_protocol::RemoteResult<ConnectResponse>,
-    ) -> Result<(), LayerError> {
-        self.connect_queue
-            .pop_front()
-            .ok_or(LayerError::SendErrorTcpResponse)?
-            .send(tcp_connect)
-            .map_err(|_| LayerError::SendErrorTcpResponse)
     }
 }

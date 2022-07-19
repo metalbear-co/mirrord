@@ -74,7 +74,7 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
+pub(crate) async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
     let LayerConfig {
         agent_image,
         agent_namespace,

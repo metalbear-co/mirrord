@@ -22,7 +22,7 @@ use mirrord_protocol::{
     GetEnvVarsRequest,
 };
 use socket::SOCKETS;
-use tcp::TcpHandler;
+use tcp::{outgoing::OutgoingTrafficHandler, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
@@ -47,7 +47,7 @@ use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros:
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
-pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
@@ -86,6 +86,7 @@ where
     pub codec: actix_codec::Framed<T, ClientCodec>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
+    outgoing_traffic_handler: OutgoingTrafficHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -108,6 +109,7 @@ where
             codec,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
+            outgoing_traffic_handler: OutgoingTrafficHandler::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
         }
@@ -145,6 +147,11 @@ where
 
                 self.codec.send(request).await.unwrap();
             }
+            HookMessage::OutgoingTraffic(message) => self
+                .outgoing_traffic_handler
+                .handle_hook_message(message, &mut self.codec)
+                .await
+                .unwrap(),
         }
     }
 
@@ -157,6 +164,11 @@ where
                 self.tcp_mirror_handler.handle_daemon_message(message).await
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
+            DaemonMessage::OutgoingTraffic(message) => {
+                self.outgoing_traffic_handler
+                    .handle_daemon_message(message)
+                    .await
+            }
             DaemonMessage::Pong => {
                 if self.ping {
                     self.ping = false;

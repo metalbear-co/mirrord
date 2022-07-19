@@ -202,6 +202,14 @@ pub enum FileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectResponse;
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum OutgoingTrafficResponse {
+    Connect(RemoteResult<ConnectResponse>),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AddrInfoInternal {
     socktype: i32,
     protocol: i32,
@@ -260,6 +268,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
+    OutgoingTraffic(OutgoingTrafficResponse),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

@@ -11,7 +11,7 @@ use tracing::error;
 use super::HookMessage;
 
 #[derive(Error, Debug)]
-pub enum LayerError {
+pub(crate) enum LayerError {
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
 

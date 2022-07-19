@@ -16,9 +16,9 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::{ConnectRequest, ConnectResponse, LayerTcp},
-    AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage, GetAddrInfoRequest,
-    GetEnvVarsRequest, RemoteResult, ResponseError,
+    tcp::{ConnectRequest, LayerTcp},
+    AddrInfoHint, AddrInfoInternal, ClientMessage, ConnectResponse, DaemonCodec, DaemonMessage,
+    GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use runtime::set_namespace;
 use tokio::{
@@ -231,9 +231,7 @@ impl OutgoingTcpHandler {
 
                                 match mirror_address {
                                     Ok(mirror_address) => {
-                                        let response = ConnectResponse {
-                                            intercept_address: mirror_address,
-                                        };
+                                        let response = ConnectResponse;
 
                                         response_channel_tx.send(Ok(response)).await;
 

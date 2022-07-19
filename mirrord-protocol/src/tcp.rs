@@ -28,11 +28,6 @@ pub struct ConnectRequest {
     pub remote_address: SocketAddr,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ConnectResponse {
-    pub intercept_address: SocketAddr,
-}
-
 /// Messages related to Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcp {
@@ -48,5 +43,4 @@ pub enum DaemonTcp {
     NewConnection(NewTcpConnection),
     Data(TcpData),
     Close(TcpClose),
-    ConnectResponse(RemoteResult<ConnectResponse>),
 }

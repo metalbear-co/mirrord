@@ -11,12 +11,10 @@ use std::{
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{
-        ConnectRequest, ConnectResponse, DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData,
-    },
+    tcp::{ConnectRequest, DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, Port, RemoteResult,
 };
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tracing::debug;
 
 use crate::{
@@ -25,26 +23,21 @@ use crate::{
     socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
+pub(crate) mod outgoing;
+
 #[derive(Debug, Clone)]
-pub struct ListenClose {
+pub(crate) struct ListenClose {
     pub port: Port,
 }
 
 #[derive(Debug)]
-pub struct Connect {
-    pub remote_address: SocketAddr,
-    pub(crate) channel_tx: ResponseChannel<ConnectResponse>,
-}
-
-#[derive(Debug)]
-pub enum HookMessageTcp {
+pub(crate) enum HookMessageTcp {
     Listen(Listen),
-    Connect(Connect),
     Close(ListenClose),
 }
 
 #[derive(Debug, Clone)]
-pub struct Listen {
+pub(crate) struct Listen {
     pub fake_port: Port,
     pub real_port: Port,
     pub ipv6: bool,
@@ -85,7 +78,7 @@ impl From<&Listen> for SocketAddr {
 }
 
 #[async_trait]
-pub trait TcpHandler {
+pub(crate) trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
@@ -99,18 +92,12 @@ pub trait TcpHandler {
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
-            DaemonTcp::ConnectResponse(tcp_connect) => self.handle_connect_response(tcp_connect),
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);
 
         handled
     }
-
-    fn handle_connect_response(
-        &mut self,
-        tcp_connect: RemoteResult<ConnectResponse>,
-    ) -> Result<(), LayerError>;
 
     async fn handle_hook_message(
         &mut self,
@@ -123,7 +110,6 @@ pub trait TcpHandler {
         match message {
             HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
-            HookMessageTcp::Connect(connect) => self.handle_connect_request(connect, codec).await,
         }
     }
 
@@ -161,15 +147,6 @@ pub trait TcpHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
-
-    async fn handle_connect_request(
-        &mut self,
-        connect: Connect,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError>;
 
     /// Handle listen request
     async fn handle_listen(

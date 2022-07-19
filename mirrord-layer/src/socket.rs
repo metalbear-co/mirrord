@@ -65,7 +65,7 @@ pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
     /// Local address it's connected from
-    bound_address: SocketAddr,
+    mirror_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
