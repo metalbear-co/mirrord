@@ -154,11 +154,22 @@ pub struct GetAddrInfoRequest {
     pub hints: Option<AddrInfoHint>,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectRequest {
+    pub remote_address: SocketAddr,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum OutgoingTrafficRequest {
+    Connect(ConnectRequest),
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
+    OutgoingTraffic(OutgoingTrafficRequest),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,

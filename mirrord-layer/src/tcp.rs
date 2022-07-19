@@ -11,7 +11,7 @@ use std::{
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{ConnectRequest, DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, Port, RemoteResult,
 };
 use tokio::net::{TcpListener, TcpStream};

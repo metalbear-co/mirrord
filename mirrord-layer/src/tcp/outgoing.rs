@@ -2,8 +2,8 @@ use std::{collections::HashMap, net::SocketAddr};
 
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{ConnectRequest, LayerTcp},
-    ClientCodec, ClientMessage, ConnectResponse, OutgoingTrafficResponse,
+    tcp::LayerTcp, ClientCodec, ClientMessage, ConnectRequest, ConnectResponse,
+    OutgoingTrafficRequest, OutgoingTrafficResponse,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tracing::trace;
@@ -65,9 +65,9 @@ impl OutgoingTrafficHandler {
                 self.connect_queue.push_back(channel_tx);
 
                 Ok(codec
-                    .send(ClientMessage::Tcp(LayerTcp::ConnectRequest(
-                        ConnectRequest { remote_address },
-                    )))
+                    .send(ClientMessage::OutgoingTraffic(
+                        OutgoingTrafficRequest::Connect(ConnectRequest { remote_address }),
+                    ))
                     .await?)
             }
         }

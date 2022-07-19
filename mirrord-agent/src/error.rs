@@ -1,7 +1,4 @@
-use mirrord_protocol::{
-    tcp::{ConnectRequest, DaemonTcp},
-    FileRequest, FileResponse,
-};
+use mirrord_protocol::{tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse};
 use thiserror::Error;
 
 use crate::sniffer::SnifferCommand;

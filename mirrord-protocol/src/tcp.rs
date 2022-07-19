@@ -23,10 +23,6 @@ pub struct TcpClose {
     pub connection_id: ConnectionID,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ConnectRequest {
-    pub remote_address: SocketAddr,
-}
 
 /// Messages related to Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -34,7 +30,6 @@ pub enum LayerTcp {
     PortSubscribe(Port),
     ConnectionUnsubscribe(ConnectionID),
     PortUnsubscribe(Port),
-    ConnectRequest(ConnectRequest),
 }
 
 /// Messages related to Tcp handler from server.

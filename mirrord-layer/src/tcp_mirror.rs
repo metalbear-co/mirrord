@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{ConnectRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, ConnectionID,
 };
 use tokio::{
