@@ -14,7 +14,7 @@ use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use socket2::{Domain, SockAddr};
-use tokio::sync::oneshot;
+use tokio::{net::TcpStream, sync::oneshot};
 use tracing::{debug, error, trace, warn};
 
 use super::*;
@@ -22,7 +22,7 @@ use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
     tcp::{
-        outgoing::{Connect, OutgoingTraffic},
+        outgoing::{Connect, OutgoingTraffic, UserStream},
         HookMessageTcp, Listen,
     },
     HOOK_SENDER,
@@ -262,16 +262,19 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
         user_socket.connect(&mirror_address.into())?;
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+        let user_stream = TcpStream::from_std(std::net::TcpStream::from(user_socket))?;
 
-        let mut sockets = SOCKETS.lock().unwrap();
-        sockets.insert(sockfd, user_socket_info);
+        let user_stream = UserStream {
+            stream: user_stream,
+        };
+
+        let user_stream_hook = OutgoingTraffic::UserStream(user_stream);
+        blocking_send_hook_message(HookMessage::OutgoingTraffic(user_stream_hook))?;
 
         Ok(())
     } else {
         user_socket.connect(&SockAddr::from(remote_address))
     }?;
-
-    user_socket.into_raw_fd();
 
     Ok(())
 }

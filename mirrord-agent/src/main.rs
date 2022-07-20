@@ -22,7 +22,7 @@ use mirrord_protocol::{
 };
 use runtime::set_namespace;
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use tcp::outgoing::OutgoingTcpHandler;
+use tcp::outgoing::OutgoingTrafficHandler;
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -179,7 +179,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
-    outgoing_tcp_handler: OutgoingTcpHandler,
+    outgoing_traffic_handler: OutgoingTrafficHandler,
 }
 
 impl ClientConnectionHandler {
@@ -198,7 +198,7 @@ impl ClientConnectionHandler {
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
-        let outgoing_tcp_handler = OutgoingTcpHandler::new(pid);
+        let outgoing_traffic_handler = OutgoingTrafficHandler::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
             id,
@@ -206,7 +206,7 @@ impl ClientConnectionHandler {
             stream,
             pid,
             tcp_sniffer_api,
-            outgoing_tcp_handler,
+            outgoing_traffic_handler,
         };
 
         client_handler.handle_loop(cancel_token).await?;
@@ -252,7 +252,11 @@ impl ClientConnectionHandler {
                 self.stream.send(DaemonMessage::File(response)).await?
             }
             ClientMessage::OutgoingTraffic(request) => {
-                let response = self.outgoing_tcp_handler.handle_message(request)?;
+                let response = self
+                    .outgoing_traffic_handler
+                    .handle_request(request)
+                    .await?;
+
                 self.stream
                     .send(DaemonMessage::OutgoingTraffic(response))
                     .await?

@@ -173,7 +173,6 @@ pub struct WriteRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OutgoingTrafficRequest {
     Connect(ConnectRequest),
-    Read(ReadRequest),
     Write(WriteRequest),
 }
 

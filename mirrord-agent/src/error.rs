@@ -1,5 +1,6 @@
 use mirrord_protocol::{
-    tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse, OutgoingTrafficResponse,
+    tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse, OutgoingTrafficRequest,
+    OutgoingTrafficResponse,
 };
 use thiserror::Error;
 
@@ -24,6 +25,12 @@ pub enum AgentError {
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendConnectRequest(#[from] tokio::sync::mpsc::error::SendError<ConnectRequest>),
+
+    #[error("OutgoingTrafficRequest sender failed with `{0}`")]
+    SendOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<OutgoingTrafficRequest>),
+
+    #[error("Receiver channel is closed!")]
+    ReceiverClosed,
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendOutgoingTrafficResponse(

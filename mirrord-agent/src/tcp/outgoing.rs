@@ -1,48 +1,28 @@
-use std::{
-    collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
-    os::unix::prelude::AsRawFd,
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 
-use actix_codec::Framed;
-use futures::{
-    future::TryFutureExt,
-    stream::{FuturesUnordered, StreamExt},
-    SinkExt,
-};
 use mirrord_protocol::{
-    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, ConnectRequest, ConnectResponse,
-    DaemonCodec, DaemonMessage, GetAddrInfoRequest, GetEnvVarsRequest, OutgoingTrafficRequest,
-    OutgoingTrafficResponse, ReadRequest, ReadResponse, RemoteResult, ResponseError, WriteRequest,
-    WriteResponse,
+    ConnectRequest, ConnectResponse, OutgoingTrafficRequest, OutgoingTrafficResponse, ReadRequest,
+    ReadResponse, RemoteResult, ResponseError, WriteRequest, WriteResponse,
 };
 use tokio::{
-    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    select,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
     sync::mpsc::{self, Receiver, Sender},
     task,
 };
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace};
-use tracing_subscriber::prelude::*;
 
-use crate::{
-    error::AgentError,
-    runtime::{get_container_pid, set_namespace},
-};
+use crate::{error::AgentError, runtime::set_namespace};
 
 type Request = OutgoingTrafficRequest;
 type Response = OutgoingTrafficResponse;
 
-pub(crate) struct OutgoingTcpHandler {
+pub(crate) struct OutgoingTrafficHandler {
     task: task::JoinHandle<()>,
     request_channel_tx: Sender<Request>,
     response_channel_rx: Receiver<Response>,
 }
 
-impl OutgoingTcpHandler {
+impl OutgoingTrafficHandler {
     pub(crate) fn new(pid: Option<u64>) -> Self {
         let (request_channel_tx, request_channel_rx) = mpsc::channel(1000);
         let (response_channel_tx, response_channel_rx) = mpsc::channel(1000);
@@ -88,29 +68,6 @@ impl OutgoingTcpHandler {
                         let response = OutgoingTrafficResponse::Connect(connect_response);
                         response_channel_tx.send(response).await.unwrap();
                     }
-                    OutgoingTrafficRequest::Read(ReadRequest { id }) => {
-                        if let Some(stream) = agent_remote_streams.get_mut(&id) {
-                            let read_response: RemoteResult<_> = stream
-                                .read(&mut read_buffer)
-                                .await
-                                .map_err(From::from)
-                                .and_then(|read_amount| {
-                                    Ok(ReadResponse {
-                                        id,
-                                        bytes: read_buffer[..read_amount].to_vec(),
-                                    })
-                                });
-
-                            let response = OutgoingTrafficResponse::Read(read_response);
-                            response_channel_tx.send(response).await.unwrap();
-                        } else {
-                            let response = OutgoingTrafficResponse::Read(Err(
-                                ResponseError::NotFound(id as usize),
-                            ));
-
-                            response_channel_tx.send(response).await.unwrap();
-                        }
-                    }
                     OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
                         if let Some(stream) = agent_remote_streams.get_mut(&id) {
                             let write_response: RemoteResult<_> =
@@ -135,105 +92,34 @@ impl OutgoingTcpHandler {
                 }
             }
 
-            for (id, remote_stream) in agent_remote_streams.iter_mut() {}
+            for (id, stream) in agent_remote_streams.iter_mut() {
+                let read_response: RemoteResult<_> = stream
+                    .read(&mut read_buffer)
+                    .await
+                    .map_err(From::from)
+                    .and_then(|read_amount| {
+                        Ok(ReadResponse {
+                            id: *id,
+                            bytes: read_buffer[..read_amount].to_vec(),
+                        })
+                    });
 
-            // TODO(alex) [high] 2022-07-19:
-            // 1. Loop through `agent_remote_streams` for `recv`;
-            // 2. Send the data back as `DaemonMessage::OutgoingTraffic(Recv)` to the respective
-            // `mirror_socket` (layer <-> agent connection);
-            // 3. layer reads a `DaemonMessage` and triggers a call to
-            // `outgoing_traffic_handler.recv(data)`;
-            // 4. It sends a message from `mirror_socket` to `user_socket`;
-            //
-            // Something similar must be done for `send`.
-
-            // if let Some(ConnectRequest { remote_address }) = request_channel_rx.recv().await {
-            //     let connect_result: RemoteResult<_> =
-            //         TcpStream::connect(remote_address).await.map_err(From::from);
-
-            //     match connect_result {
-            //         Ok(tcp_stream) => {
-            //             let fd = tcp_stream.as_raw_fd();
-            //             agent_remote_streams.insert(fd, tcp_stream);
-
-            //             let bind_result: RemoteResult<_> =
-            //                 TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST),
-            // 0))                     .await
-            //                     .map_err(From::from);
-
-            //             match bind_result {
-            //                 Ok(listener) => {
-            //                     let mirror_address = listener.local_addr().map_err(From::from);
-
-            //                     match mirror_address {
-            //                         Ok(mirror_address) => {
-            //                             let response = ConnectResponse;
-
-            //                             response_channel_tx.send(Ok(response)).await;
-
-            //                             let accept_result =
-            //                                 listener.accept().await.map_err(From::from);
-
-            //                             match accept_result {
-            //                                 Ok((stream, address)) => {
-            //                                     let fd = stream.as_raw_fd();
-            //                                     layer_agent_streams.insert(fd, stream);
-            //                                 }
-            //                                 Err(fail) => {
-            //                                     response_channel_tx.send(Err(fail)).await;
-            //                                 }
-            //                             }
-            //                         }
-            //                         Err(fail) => {
-            //                             response_channel_tx.send(Err(fail)).await;
-            //                         }
-            //                     }
-            //                 }
-            //                 Err(fail) => {
-            //                     response_channel_tx.send(Err(fail)).await;
-            //                 }
-            //             }
-            //         }
-            //         Err(fail) => {
-            //             response_channel_tx.send(Err(fail)).await;
-            //         }
-            //     };
-            // }
-
-            // for (_, layer_agent_stream) in layer_agent_streams.iter_mut() {
-            //     let read = layer_agent_stream.read(&mut read_buffer).await;
-            //     debug!(
-            //         "OutgoingTcpHandler::run -> layer_agent_stream::read {:#?}",
-            //         read
-            //     );
-            //     // TODO(alex) [high] 2022-07-18: Gotta send the message we just read to the
-            // remote     // stream, this means we need an association of `layer` to
-            // `remote` (the `fd` alone     // as the key for the map is not enough).
-            // }
-
-            // for (_, agent_remote_stream) in agent_remote_streams.iter_mut() {
-            //     let read = agent_remote_stream.read(&mut read_buffer).await;
-            //     debug!(
-            //         "OutgoingTcpHandler::run -> agent_remote_stream::read {:#?}",
-            //         read
-            //     );
-            // }
+                let response = OutgoingTrafficResponse::Read(read_response);
+                response_channel_tx.send(response).await.unwrap();
+            }
         }
     }
 
-    async fn connect(&mut self, request: ConnectRequest) -> Result<(), AgentError> {
-        // self.request_channel_tx.send(request).await?;
-
-        // TODO(alex) [high] 2202-07-18: Receive the address that we're going to send back to layer.
-        self.response_channel_rx.recv();
-
-        Ok(todo!())
-    }
-
-    pub(crate) fn handle_message(
-        &self,
+    pub(crate) async fn handle_request(
+        &mut self,
         request: OutgoingTrafficRequest,
     ) -> Result<OutgoingTrafficResponse, AgentError> {
-        todo!()
+        self.request_channel_tx.send(request).await?;
+
+        Ok(self
+            .response_channel_rx
+            .recv()
+            .await
+            .ok_or(AgentError::ReceiverClosed)?)
     }
 }
