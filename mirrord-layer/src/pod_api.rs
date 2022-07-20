@@ -29,11 +29,11 @@ impl RuntimeData {
         pod_name: &str,
         pod_namespace: &str,
         container_name: &Option<String>,
-    ) -> Self {
+    ) -> Result<Self> {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
-        let pod = pods_api.get(pod_name).await.unwrap();
-        let node_name = &pod.spec.unwrap().node_name;
-        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+        let pod = pods_api.get(pod_name).await?;
+        let node_name = &pod.spec?.node_name;
+        let container_statuses = &pod.status?.container_statuses?;
         let container_info = if let Some(container_name) = container_name {
             &container_statuses
                 .iter()
@@ -43,19 +43,14 @@ impl RuntimeData {
                         "no container named {} found in namespace={}, pod={}",
                         &container_name, &pod_namespace, &pod_name
                     )
-                })
-                .unwrap()
+                })?
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
-            &container_statuses.first().unwrap().container_id
+            &container_statuses.first()?.container_id
         };
 
-        let container_info = container_info
-            .as_ref()
-            .unwrap()
-            .split("://")
-            .collect::<Vec<&str>>();
+        let container_info = container_info.as_ref()?.split("://").collect::<Vec<&str>>();
 
         let (container_runtime, socket_path) = match container_info.first() {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
@@ -63,14 +58,14 @@ impl RuntimeData {
             _ => panic!("unsupported container runtime"),
         };
 
-        let container_id = container_info.last().unwrap();
+        let container_id = container_info.last()?;
 
-        RuntimeData {
+        Ok(RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
-            node_name: node_name.as_ref().unwrap().to_string(),
+            node_name: node_name.as_ref()?.to_string(),
             socket_path: socket_path.to_string(),
-        }
+        })
     }
 }
 
