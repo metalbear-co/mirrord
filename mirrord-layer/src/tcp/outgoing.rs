@@ -89,6 +89,14 @@ impl OutgoingTrafficHandler {
                 .ok_or(LayerError::SendErrorTcpResponse)?
                 .send(connect)
                 .map_err(|_| LayerError::SendErrorTcpResponse),
+            OutgoingTrafficResponse::Read(read) => {
+                // TODO(alex) [high] 2022-07-20: Send the message (response) back to layer.
+                todo!();
+            }
+            OutgoingTrafficResponse::Write(_) => {
+                // TODO(alex) [high] 2022-07-20: Send the message (response) back to layer.
+                todo!();
+            }
         }
     }
 }

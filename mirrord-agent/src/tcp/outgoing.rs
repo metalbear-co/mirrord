@@ -14,7 +14,8 @@ use futures::{
 use mirrord_protocol::{
     tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, ConnectRequest, ConnectResponse,
     DaemonCodec, DaemonMessage, GetAddrInfoRequest, GetEnvVarsRequest, OutgoingTrafficRequest,
-    OutgoingTrafficResponse, RemoteResult, ResponseError,
+    OutgoingTrafficResponse, ReadRequest, ReadResponse, RemoteResult, ResponseError, WriteRequest,
+    WriteResponse,
 };
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -69,7 +70,6 @@ impl OutgoingTcpHandler {
         }
 
         let mut agent_remote_streams: HashMap<i32, TcpStream> = HashMap::with_capacity(4);
-        let mut layer_agent_streams: HashMap<i32, TcpStream> = HashMap::with_capacity(4);
         let mut read_buffer = vec![0; 1500];
 
         loop {
@@ -86,10 +86,66 @@ impl OutgoingTcpHandler {
                             });
 
                         let response = OutgoingTrafficResponse::Connect(connect_response);
-                        response_channel_tx.send(response);
+                        response_channel_tx.send(response).await.unwrap();
+                    }
+                    OutgoingTrafficRequest::Read(ReadRequest { id }) => {
+                        if let Some(stream) = agent_remote_streams.get_mut(&id) {
+                            let read_response: RemoteResult<_> = stream
+                                .read(&mut read_buffer)
+                                .await
+                                .map_err(From::from)
+                                .and_then(|read_amount| {
+                                    Ok(ReadResponse {
+                                        id,
+                                        bytes: read_buffer[..read_amount].to_vec(),
+                                    })
+                                });
+
+                            let response = OutgoingTrafficResponse::Read(read_response);
+                            response_channel_tx.send(response).await.unwrap();
+                        } else {
+                            let response = OutgoingTrafficResponse::Read(Err(
+                                ResponseError::NotFound(id as usize),
+                            ));
+
+                            response_channel_tx.send(response).await.unwrap();
+                        }
+                    }
+                    OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
+                        if let Some(stream) = agent_remote_streams.get_mut(&id) {
+                            let write_response: RemoteResult<_> =
+                                stream.write(&bytes).await.map_err(From::from).and_then(
+                                    |written_amount| {
+                                        Ok(WriteResponse {
+                                            id,
+                                            amount: written_amount,
+                                        })
+                                    },
+                                );
+
+                            let response = OutgoingTrafficResponse::Write(write_response);
+                            response_channel_tx.send(response).await.unwrap();
+                        } else {
+                            let response = OutgoingTrafficResponse::Write(Err(
+                                ResponseError::NotFound(id as usize),
+                            ));
+                            response_channel_tx.send(response).await.unwrap();
+                        }
                     }
                 }
             }
+
+            for (id, remote_stream) in agent_remote_streams.iter_mut() {}
+
+            // TODO(alex) [high] 2022-07-19:
+            // 1. Loop through `agent_remote_streams` for `recv`;
+            // 2. Send the data back as `DaemonMessage::OutgoingTraffic(Recv)` to the respective
+            // `mirror_socket` (layer <-> agent connection);
+            // 3. layer reads a `DaemonMessage` and triggers a call to
+            // `outgoing_traffic_handler.recv(data)`;
+            // 4. It sends a message from `mirror_socket` to `user_socket`;
+            //
+            // Something similar must be done for `send`.
 
             // if let Some(ConnectRequest { remote_address }) = request_channel_rx.recv().await {
             //     let connect_result: RemoteResult<_> =

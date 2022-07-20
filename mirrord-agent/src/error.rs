@@ -1,4 +1,6 @@
-use mirrord_protocol::{tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse};
+use mirrord_protocol::{
+    tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse, OutgoingTrafficResponse,
+};
 use thiserror::Error;
 
 use crate::sniffer::SnifferCommand;
@@ -22,6 +24,11 @@ pub enum AgentError {
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendConnectRequest(#[from] tokio::sync::mpsc::error::SendError<ConnectRequest>),
+
+    #[error("ConnectRequest sender failed with `{0}`")]
+    SendOutgoingTrafficResponse(
+        #[from] tokio::sync::mpsc::error::SendError<OutgoingTrafficResponse>,
+    ),
 
     #[error("task::Join failed with `{0}`")]
     Join(#[from] tokio::task::JoinError),

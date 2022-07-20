@@ -160,8 +160,21 @@ pub struct ConnectRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadRequest {
+    pub id: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteRequest {
+    pub id: i32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OutgoingTrafficRequest {
     Connect(ConnectRequest),
+    Read(ReadRequest),
+    Write(WriteRequest),
 }
 
 /// `-layer` --> `-agent` messages.
@@ -216,8 +229,22 @@ pub enum FileResponse {
 pub struct ConnectResponse;
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadResponse {
+    pub id: i32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteResponse {
+    pub id: i32,
+    pub amount: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OutgoingTrafficResponse {
     Connect(RemoteResult<ConnectResponse>),
+    Read(RemoteResult<ReadResponse>),
+    Write(RemoteResult<WriteResponse>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
