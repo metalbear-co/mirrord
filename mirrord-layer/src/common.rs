@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
+use tracing::trace;
 
 use crate::{
     error::LayerError,

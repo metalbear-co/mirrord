@@ -27,6 +27,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
     SendErrorLayerTcp(#[from] SendError<LayerTcp>),
 
+    #[error("mirrord-layer: JoinError failed with `{0}`!")]
+    Join(#[from] tokio::task::JoinError),
+
     #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
     SendErrorFileResponse,
 
@@ -121,6 +124,7 @@ impl From<LayerError> for i64 {
             LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
             LayerError::SendErrorConnection(_) => libc::EBADMSG,
+            LayerError::Join(_) => libc::EBADMSG,
             LayerError::SendErrorLayerTcp(_) => libc::EBADMSG,
             LayerError::RecvError(_) => libc::EBADMSG,
             LayerError::Null(_) => libc::EINVAL,

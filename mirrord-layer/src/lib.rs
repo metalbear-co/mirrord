@@ -116,6 +116,11 @@ where
     }
 
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
+        trace!(
+            "Layer::handle_hook_message -> hook_message {:#?}",
+            hook_message
+        );
+
         match hook_message {
             HookMessage::Tcp(message) => {
                 self.tcp_mirror_handler

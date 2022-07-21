@@ -78,6 +78,11 @@ impl OutgoingTrafficHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
+        trace!(
+            "OutgoingTrafficHandler::handle_hook_message -> message {:#?}",
+            message
+        );
+
         for (id, mirror) in self.mirror_streams.iter_mut() {
             let read_amount = mirror.read(&mut self.read_buffer).await?;
 
@@ -99,6 +104,12 @@ impl OutgoingTrafficHandler {
                 // TODO(alex) [mid] 2022-07-20: Has to be socket address, rather than fd?
                 user_fd,
             }) => {
+                trace!(
+                    "OutgoingTraffic::Connect -> remote_address {:#?} | mirror_listener {:#?}",
+                    remote_address,
+                    mirror_listener
+                );
+
                 let (mirror_stream, _) = mirror_listener.accept().await?;
                 self.mirror_streams.insert(user_fd, mirror_stream);
 

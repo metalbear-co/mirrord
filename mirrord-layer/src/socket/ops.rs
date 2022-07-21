@@ -14,7 +14,7 @@ use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use socket2::{Domain, SockAddr};
-use tokio::{net::TcpStream, sync::oneshot};
+use tokio::{net::TcpStream, runtime::Handle, sync::oneshot, task};
 use tracing::{debug, error, trace, warn};
 
 use super::*;
@@ -212,6 +212,10 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
     let user_socket = unsafe { socket2::Socket::from_raw_fd(sockfd) };
 
     if let SocketState::Initialized = user_socket_info.state {
+        trace!(
+            "connect -> SocketState::Initialized {:#?}",
+            user_socket_info
+        );
         // TODO(alex) [high] 2022-07-15: Implementation plan
         // 1. Send connect message to `agent`;
         // 2. `agent` creates a socket to handle this `layer`->`agent` connection;
@@ -226,58 +230,81 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             _ => Err(LayerError::UnsupportedDomain(user_socket_info.domain)),
         }?;
 
-        let connect_task = std::thread::spawn(move || -> Result<(), LayerError> {
-            let (channel_tx, channel_rx) = oneshot::channel();
+        let (channel_tx, channel_rx) = oneshot::channel();
 
-            let mirror_listener: tokio::net::TcpListener =
-                TcpListener::bind(unbound_mirror_address)?.try_into()?;
+        let mirror_listener: tokio::net::TcpListener =
+            TcpListener::bind(unbound_mirror_address)?.try_into()?;
 
-            let mirror_address = mirror_listener.local_addr()?;
+        let mirror_address = mirror_listener.local_addr()?;
+        trace!("connect -> mirror_address {:#?}", mirror_address);
 
-            let connect = Connect {
-                mirror_listener,
-                user_fd: sockfd,
-                remote_address,
-                channel_tx,
-            };
+        let connect = Connect {
+            mirror_listener,
+            user_fd: sockfd,
+            remote_address,
+            channel_tx,
+        };
 
-            let connect_hook = OutgoingTraffic::Connect(connect);
-            blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
+        let connect_hook = OutgoingTraffic::Connect(connect);
 
-            channel_rx.blocking_recv()??;
+        // TODO(alex) [high] 2202-07-20: Send this crap as blocking, try to bypass tokio.
+        blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
+        channel_rx.blocking_recv()??;
 
-            let connected = Connected {
-                remote_address,
-                mirror_address,
-            };
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
 
-            // TODO(alex) [high] 2202-07-16:
-            // // 1. We send a hook message to the agent;
-            // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
-            // 3. agent sends back to layer this address;
-            // 4. layer connects to this intercepted address;
-            //
-            // Need a thread that will hold all these intercepted addresses in agent, so we can use
-            // `set_namespace` in there.
-            // let intercept_address = hook_channel_rx.recv()?;
+        trace!("connect -> connected {:#?}", connected);
 
-            user_socket.connect(&mirror_address.into())?;
-            Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-            let user_stream = TcpStream::from_std(std::net::TcpStream::from(user_socket))?;
+        // TODO(alex) [high] 2202-07-16:
+        // // 1. We send a hook message to the agent;
+        // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
+        // 3. agent sends back to layer this address;
+        // 4. layer connects to this intercepted address;
+        //
+        // Need a thread that will hold all these intercepted addresses in agent, so we can use
+        // `set_namespace` in there.
+        // let intercept_address = hook_channel_rx.recv()?;
 
-            let user_stream = UserStream {
-                stream: user_stream,
-            };
+        user_socket.connect(&mirror_address.into())?;
+        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+        let user_stream = TcpStream::from_std(std::net::TcpStream::from(user_socket))?;
 
-            let user_stream_hook = OutgoingTraffic::UserStream(user_stream);
-            blocking_send_hook_message(HookMessage::OutgoingTraffic(user_stream_hook))?;
+        let user_stream = UserStream {
+            stream: user_stream,
+        };
 
+        let user_stream_hook = OutgoingTraffic::UserStream(user_stream);
+
+        blocking_send_hook_message(HookMessage::OutgoingTraffic(user_stream_hook))?;
+
+        Ok(())
+    } else if let SocketState::Bound(bound) = user_socket_info.state {
+        trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
+        let os_addr = OsSocketAddr::from(bound.address);
+        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
+
+        user_socket.into_raw_fd();
+
+        if ret != 0 {
+            error!(
+                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
+                ret, os_addr, sockfd
+            );
+
+            return Err(LayerError::AddressConversion);
+        } else {
             Ok(())
-        });
-
-        Ok(connect_task.join().unwrap()?)
+        }
     } else {
-        user_socket.connect(&SockAddr::from(remote_address))
+        user_socket
+            .connect(&SockAddr::from(remote_address))
+            .and_then(|()| {
+                user_socket.into_raw_fd();
+                Ok(())
+            })
     }?;
 
     Ok(())
