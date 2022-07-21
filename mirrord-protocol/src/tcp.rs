@@ -38,3 +38,12 @@ pub enum DaemonTcp {
     Data(TcpData),
     Close(TcpClose),
 }
+
+/// Messages related to Steal Tcp handler from client.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ClientStealTcp {
+    PortSubscribe(Port),
+    ConnectionUnsubscribe(ConnectionID),
+    PortUnsubscribe(Port),
+    Data(TcpData),
+}

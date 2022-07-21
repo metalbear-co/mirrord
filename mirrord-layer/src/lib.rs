@@ -24,6 +24,7 @@ use mirrord_protocol::{
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
+use tcp_steal::TcpStealHandler;
 use tokio::{
     runtime::Runtime,
     select,
@@ -42,6 +43,7 @@ mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
+mod tcp_steal;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
@@ -97,19 +99,29 @@ where
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+
+    tcp_steal_handler: Option<TcpStealHandler>,
 }
 
 impl<T> Layer<T>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
-    fn new(codec: actix_codec::Framed<T, ClientCodec>) -> Layer<T> {
+    fn new(codec: actix_codec::Framed<T, ClientCodec>, steal: bool) -> Layer<T> {
+        let tcp_steal_handler = {
+            if steal {
+                Some(TcpStealHandler::default())
+            } else {
+                None
+            }
+        };
         Self {
             codec,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
+            tcp_steal_handler,
         }
     }
 
@@ -156,6 +168,13 @@ where
             DaemonMessage::Tcp(message) => {
                 self.tcp_mirror_handler.handle_daemon_message(message).await
             }
+            DaemonMessage::StealTcp(message) => {
+                self.tcp_steal_handler
+                    .as_mut()
+                    .ok_or(LayerError::UninitializedTcpSteal)?
+                    .handle_daemon_message(message)
+                    .await
+            }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::Pong => {
                 if self.ping {
@@ -191,8 +210,9 @@ async fn thread_loop(
         impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
         ClientCodec,
     >,
+    steal: bool,
 ) {
-    let mut layer = Layer::new(codec);
+    let mut layer = Layer::new(codec, steal);
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -277,7 +297,7 @@ async fn start_layer_thread(
         };
     }
 
-    let _ = tokio::spawn(thread_loop(receiver, codec));
+    let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_steal_traffic));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.

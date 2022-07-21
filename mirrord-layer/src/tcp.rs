@@ -153,21 +153,7 @@ pub trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
-        debug!("handle_listen -> listen {:#?}", listen);
-
-        let port = listen.real_port;
-
-        self.ports_mut()
-            .insert(listen)
-            .then_some(())
-            .ok_or(LayerError::ListenAlreadyExists)?;
-
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
-            .await
-            .map_err(From::from)
-    }
+    ) -> Result<(), LayerError>;
 
     /// Handle when a listen socket closes on layer
     async fn handle_listen_close(
@@ -177,10 +163,5 @@ pub trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
-            .await
-            .map_err(From::from)
-    }
+    ) -> Result<(), LayerError>;
 }

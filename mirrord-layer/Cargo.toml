@@ -37,6 +37,7 @@ mirrord-protocol = { path = "../mirrord-protocol"}
 actix-codec.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
 queues = "1"
@@ -48,6 +49,7 @@ errno = "0.2"
 async-trait = "0.1"
 socket2 = "0.4"
 anyhow.workspace = true
+streammap-ext = "0.1"
 
 [lib]
 crate_type = ["cdylib"]

@@ -10,7 +10,7 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    tcp::{DaemonTcp, LayerTcp},
+    tcp::{ClientStealTcp, DaemonTcp, LayerTcp},
     ResponseError,
 };
 
@@ -159,6 +159,7 @@ pub struct GetAddrInfoRequest {
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
+    TcpSteal(ClientStealTcp),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -260,6 +261,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
+    StealTcp(DaemonTcp),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

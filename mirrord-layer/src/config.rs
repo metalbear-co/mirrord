@@ -31,7 +31,7 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_AGENT_STEAL_TRAFFIC", default = "false")]
     pub agent_steal_traffic: bool,
-    
+
     #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
 
