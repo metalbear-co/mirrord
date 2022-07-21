@@ -100,7 +100,9 @@ where
     // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
 
-    tcp_steal_handler: Option<TcpStealHandler>,
+    pub tcp_steal_handler: TcpStealHandler,
+
+    steal: bool,
 }
 
 impl<T> Layer<T>
@@ -108,30 +110,31 @@ where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
     fn new(codec: actix_codec::Framed<T, ClientCodec>, steal: bool) -> Layer<T> {
-        let tcp_steal_handler = {
-            if steal {
-                Some(TcpStealHandler::default())
-            } else {
-                None
-            }
-        };
         Self {
             codec,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler,
+            tcp_steal_handler: TcpStealHandler::default(),
+            steal,
         }
     }
 
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
             HookMessage::Tcp(message) => {
-                self.tcp_mirror_handler
-                    .handle_hook_message(message, &mut self.codec)
-                    .await
-                    .unwrap();
+                if self.steal {
+                    self.tcp_steal_handler
+                        .handle_hook_message(message, &mut self.codec)
+                        .await
+                        .unwrap();
+                } else {
+                    self.tcp_mirror_handler
+                        .handle_hook_message(message, &mut self.codec)
+                        .await
+                        .unwrap();
+                }
             }
             HookMessage::File(message) => {
                 self.file_handler
@@ -169,11 +172,7 @@ where
                 self.tcp_mirror_handler.handle_daemon_message(message).await
             }
             DaemonMessage::StealTcp(message) => {
-                self.tcp_steal_handler
-                    .as_mut()
-                    .ok_or(LayerError::UninitializedTcpSteal)?
-                    .handle_daemon_message(message)
-                    .await
+                self.tcp_steal_handler.handle_daemon_message(message).await
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::Pong => {
@@ -229,6 +228,9 @@ async fn thread_loop(
                     error!("agent disconnected");
                     break;
                 }
+            },
+            Some(message) = layer.tcp_steal_handler.next() => {
+                layer.codec.send(message).await.unwrap();
             },
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {

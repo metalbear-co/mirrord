@@ -9,10 +9,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, Port,
+    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, Port,
 };
 use tokio::net::TcpStream;
 use tracing::debug;

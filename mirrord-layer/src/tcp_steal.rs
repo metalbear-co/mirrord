@@ -9,12 +9,12 @@ use mirrord_protocol::{
 };
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::{
     error::LayerError,
@@ -142,20 +142,22 @@ impl TcpHandler for TcpStealHandler {
 }
 
 impl TcpStealHandler {
-    async fn next(&mut self) -> Option<ClientStealTcp> {
+    pub async fn next(&mut self) -> Option<ClientMessage> {
         let (connection_id, value) = self.read_streams.next().await?;
         match value {
             Some(Ok(bytes)) => {
-                return Some(ClientStealTcp::Data(TcpData {
+                return Some(ClientMessage::TcpSteal(ClientStealTcp::Data(TcpData {
                     connection_id,
                     bytes: bytes.to_vec(),
-                }))
+                })))
             }
             Some(Err(err)) => {
                 error!("connection id {connection_id:?} read error: {err:?}");
                 None
             }
-            None => Some(ClientStealTcp::ConnectionUnsubscribe(connection_id)),
+            None => Some(ClientMessage::TcpSteal(
+                ClientStealTcp::ConnectionUnsubscribe(connection_id),
+            )),
         }
     }
 }
