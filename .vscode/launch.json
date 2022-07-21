@@ -34,7 +34,7 @@
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=trace",
         // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-2pz76",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
         "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
