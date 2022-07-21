@@ -105,8 +105,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
             &impersonated_pod_namespace,
             &impersonated_container_name,
         )
-        .unwrap()
-        .await;
+        .await?;
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
         create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
