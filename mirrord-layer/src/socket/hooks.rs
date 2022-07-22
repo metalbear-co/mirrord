@@ -200,9 +200,10 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     // Iterate over `addrinfo` linked list dropping it.
     let mut current = addrinfo;
     while !current.is_null() {
-        Box::from_raw(current);
+        let current_box = Box::from_raw(current);
 
         current = (*current).ai_next;
+        drop(current_box);
     }
 }
 

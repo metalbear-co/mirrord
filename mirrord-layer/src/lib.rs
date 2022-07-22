@@ -4,11 +4,10 @@
 #![feature(const_trait_impl)]
 
 use std::{
-    collections::HashSet,
-    sync::{LazyLock, Mutex, OnceLock},
+    collections::{HashSet, VecDeque},
+    sync::{LazyLock, OnceLock},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
@@ -80,128 +79,129 @@ fn init() {
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
-async fn handle_hook_message(
-    hook_message: HookMessage,
-    tcp_mirror_handler: &mut TcpMirrorHandler,
-    codec: &mut actix_codec::Framed<impl AsyncRead + AsyncWrite + Unpin + Send, ClientCodec>,
-    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
-    file_handler: &mut FileHandler,
-) {
-    match hook_message {
-        HookMessage::Tcp(message) => {
-            tcp_mirror_handler
-                .handle_hook_message(message, codec)
-                .await
-                .unwrap();
-        }
-        HookMessage::File(message) => {
-            file_handler
-                .handle_hook_message(message, codec)
-                .await
-                .unwrap();
-        }
-        HookMessage::GetAddrInfoHook(GetAddrInfoHook {
-            node,
-            service,
-            hints,
-            hook_channel_tx,
-        }) => {
-            trace!("HookMessage::GetAddrInfo");
-
-            getaddrinfo_handler.lock().unwrap().push(hook_channel_tx);
-
-            let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                node,
-                service,
-                hints,
-            });
-
-            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-            let _codec_result = codec.send(request).await;
-        }
-    }
-}
-
-async fn handle_daemon_message(
-    daemon_message: DaemonMessage,
-    tcp_mirror_handler: &mut TcpMirrorHandler,
-    file_handler: &mut FileHandler,
-    getaddrinfo_handler: &Mutex<Vec<ResponseChannel<Vec<AddrInfoInternal>>>>,
-    ping: &mut bool,
-) -> Result<(), LayerError> {
-    match daemon_message {
-        DaemonMessage::Tcp(message) => tcp_mirror_handler.handle_daemon_message(message).await,
-        DaemonMessage::File(message) => file_handler.handle_daemon_message(message).await,
-        DaemonMessage::Pong => {
-            if *ping {
-                *ping = false;
-                trace!("Daemon sent pong!");
-            } else {
-                Err(LayerError::UnmatchedPong)?;
-            }
-
-            Ok(())
-        }
-        DaemonMessage::GetEnvVarsResponse(_) => {
-            unreachable!("We get env vars only on initialization right now, shouldn't happen")
-        }
-        DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
-            trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
-
-            getaddrinfo_handler
-                .lock()?
-                .pop()
-                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
-                .send(get_addr_info)
-                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
-        }
-        DaemonMessage::Close => todo!(),
-        DaemonMessage::LogMessage(_) => todo!(),
-    }
-}
-
-async fn thread_loop(
-    mut receiver: Receiver<HookMessage>,
-    mut codec: actix_codec::Framed<
-        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-        ClientCodec,
-    >,
-) {
+struct Layer<T>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
+    pub codec: actix_codec::Framed<T, ClientCodec>,
+    ping: bool,
+    tcp_mirror_handler: TcpMirrorHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
     //
     // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
     // `common` module above `XHook` structs.
+    file_handler: FileHandler,
 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
-    let getaddrinfo_handler = Mutex::new(Vec::with_capacity(4));
+    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+}
 
-    let mut ping = false;
-    let mut tcp_mirror_handler = TcpMirrorHandler::default();
-    let mut file_handler = FileHandler::default();
+impl<T> Layer<T>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
+    fn new(codec: actix_codec::Framed<T, ClientCodec>) -> Layer<T> {
+        Self {
+            codec,
+            ping: false,
+            tcp_mirror_handler: TcpMirrorHandler::default(),
+            file_handler: FileHandler::default(),
+            getaddrinfo_handler_queue: VecDeque::new(),
+        }
+    }
 
+    async fn handle_hook_message(&mut self, hook_message: HookMessage) {
+        match hook_message {
+            HookMessage::Tcp(message) => {
+                self.tcp_mirror_handler
+                    .handle_hook_message(message, &mut self.codec)
+                    .await
+                    .unwrap();
+            }
+            HookMessage::File(message) => {
+                self.file_handler
+                    .handle_hook_message(message, &mut self.codec)
+                    .await
+                    .unwrap();
+            }
+            HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+                node,
+                service,
+                hints,
+                hook_channel_tx,
+            }) => {
+                trace!("HookMessage::GetAddrInfo");
+
+                self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
+
+                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                    node,
+                    service,
+                    hints,
+                });
+
+                self.codec.send(request).await.unwrap();
+            }
+        }
+    }
+
+    async fn handle_daemon_message(
+        &mut self,
+        daemon_message: DaemonMessage,
+    ) -> Result<(), LayerError> {
+        match daemon_message {
+            DaemonMessage::Tcp(message) => {
+                self.tcp_mirror_handler.handle_daemon_message(message).await
+            }
+            DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
+            DaemonMessage::Pong => {
+                if self.ping {
+                    self.ping = false;
+                    trace!("Daemon sent pong!");
+                } else {
+                    Err(LayerError::UnmatchedPong)?;
+                }
+
+                Ok(())
+            }
+            DaemonMessage::GetEnvVarsResponse(_) => {
+                unreachable!("We get env vars only on initialization right now, shouldn't happen")
+            }
+            DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
+                trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
+
+                self.getaddrinfo_handler_queue
+                    .pop_front()
+                    .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
+                    .send(get_addr_info)
+                    .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
+            }
+            DaemonMessage::Close => todo!(),
+            DaemonMessage::LogMessage(_) => todo!(),
+        }
+    }
+}
+
+async fn thread_loop(
+    mut receiver: Receiver<HookMessage>,
+    codec: actix_codec::Framed<
+        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+        ClientCodec,
+    >,
+) {
+    let mut layer = Layer::new(codec);
     loop {
         select! {
             hook_message = receiver.recv() => {
-                handle_hook_message(
-                    hook_message.unwrap(),
-                    &mut tcp_mirror_handler,
-                    &mut codec,
-                    &getaddrinfo_handler,
-                    &mut file_handler,
-                ).await;
+                layer.handle_hook_message(hook_message.unwrap()).await;
             }
-            daemon_message = codec.next() => {
+            daemon_message = layer.codec.next() => {
                 if let Some(Ok(message)) = daemon_message {
-                    if let Err(err) = handle_daemon_message(
-                        message,
-                        &mut tcp_mirror_handler,
-                        &mut file_handler,
-                        &getaddrinfo_handler,
-                        &mut ping,
-                    ).await {
+                    if let Err(err) = layer.handle_daemon_message(
+                        message).await {
                         error!("Error handling daemon message: {:?}", err);
                         break;
                     }
@@ -211,10 +211,10 @@ async fn thread_loop(
                 }
             },
             _ = sleep(Duration::from_secs(60)) => {
-                if !ping {
-                    codec.send(ClientMessage::Ping).await.unwrap();
+                if !layer.ping {
+                    layer.codec.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
-                    ping = true;
+                    layer.ping = true;
                 } else {
                     panic!("Client: unmatched ping");
                 }

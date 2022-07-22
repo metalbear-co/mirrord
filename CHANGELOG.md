@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.5.0
+
 ### Added
 - New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
 It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
@@ -22,9 +24,11 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 - Refactored error handling in mirrord-layer.
 - E2E: Collect minikube logs and fix collecting container logs
 - E2E: macOS use colima instead of minikube.
+- Refactored `mirrord-layer/lib.rs` - no more passing many arguments! :)
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
+- Changed `addrinfo` to `VecDeque` - fixes a potential bug (loss of order)
 
 ## 2.4.1
 
