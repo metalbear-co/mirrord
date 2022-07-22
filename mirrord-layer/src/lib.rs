@@ -44,6 +44,7 @@ mod tcp;
 mod tcp_mirror;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
+
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
@@ -302,9 +303,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    hook!(interceptor, "close", close_detour);
+    unsafe { hook!(interceptor, "close", close_detour) };
 
-    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
+    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);

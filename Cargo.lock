@@ -679,8 +679,7 @@ dependencies = [
 [[package]]
 name = "frida-build"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c4d5d5eedcceaae76eae494338aee0b8fceab952934568287b834d555e01a0a"
+source = "git+https://github.com/aviramha/frida-rust?branch=replace_fix#7cb1ad895d28dad29565d7c4be7c2b33b6fc9891"
 dependencies = [
  "reqwest",
  "tar",
@@ -690,8 +689,7 @@ dependencies = [
 [[package]]
 name = "frida-gum"
 version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1e2d59d3b7986689332e52cee912200c79ed7db1ab5085b0f109987f3c239e8"
+source = "git+https://github.com/aviramha/frida-rust?branch=replace_fix#7cb1ad895d28dad29565d7c4be7c2b33b6fc9891"
 dependencies = [
  "capstone",
  "capstone-sys",
@@ -706,8 +704,7 @@ dependencies = [
 [[package]]
 name = "frida-gum-sys"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1783513909bdc7b7699b8bac67c92c835ab78d3c86fde514f161eb5b88264a66"
+source = "git+https://github.com/aviramha/frida-rust?branch=replace_fix#7cb1ad895d28dad29565d7c4be7c2b33b6fc9891"
 dependencies = [
  "bindgen",
  "frida-build",
@@ -1419,6 +1416,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "libc",
+ "mirrord-macro",
  "mirrord-protocol",
  "multi-map",
  "nanoid",
@@ -1434,6 +1432,15 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mirrord-macro"
+version = "2.4.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

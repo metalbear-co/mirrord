@@ -22,6 +22,14 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
     }
 }
 
+pub(crate) async fn send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+    trace!("send_hook_message -> message {:#?}", message);
+
+    let hook_sender = unsafe { HOOK_SENDER.as_ref().ok_or(LayerError::EmptyHookSender)? };
+
+    Ok(hook_sender.send(message).await?)
+}
+
 pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 #[derive(Debug)]

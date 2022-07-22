@@ -128,7 +128,8 @@ impl TcpHandler for TcpMirrorHandler {
         let new_connection = Connection::new(tcp_connection.connection_id, sender);
         self.connections.insert(new_connection);
 
-        task::spawn(async move { tcp_tunnel(stream, receiver).await });
+        // task::spawn(async move { tcp_tunnel(stream, receiver).await });
+        tcp_tunnel(stream, receiver).await;
 
         Ok(())
     }

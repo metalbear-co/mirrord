@@ -15,18 +15,23 @@ use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use socket2::{Domain, SockAddr};
 use tokio::{net::TcpStream, runtime::Handle, sync::oneshot, task};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    common::{blocking_send_hook_message, send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
     tcp::{
         outgoing::{Connect, OutgoingTraffic, UserStream},
         HookMessageTcp, Listen,
     },
-    HOOK_SENDER,
+    HOOK_SENDER, RUNTIME,
 };
+
+// TODO(alex) [high] 2022-07-21: Separate sockets into 2 compartments, listen sockets go into a
+// thread for listening, connect sockets into another thread. Try to get rid of the overall global
+// theme around sockets.
+// Worth it?
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {

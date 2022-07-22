@@ -12,6 +12,9 @@ use super::HookMessage;
 
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
+    #[error("mirrord-layer: Frida failed with `{0}`!")]
+    Frida(#[from] frida_gum::Error),
+
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
 
@@ -120,6 +123,7 @@ impl From<LayerError> for i64 {
         error!("Error occured in Layer >> {:?}", fail);
 
         let libc_error = match fail {
+            LayerError::Frida(_) => libc::EINVAL,
             LayerError::VarError(_) => libc::EINVAL,
             LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,

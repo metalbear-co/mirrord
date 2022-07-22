@@ -1,7 +1,8 @@
-use std::{ffi::CStr, os::unix::io::RawFd};
+use std::{any::Any, ffi::CStr, os::unix::io::RawFd, sync::OnceLock};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
+use mirrord_macro::proc_hook;
 use mirrord_protocol::AddrInfoHint;
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, trace};
@@ -13,6 +14,7 @@ use crate::{
     socket::AddrInfoHintExt,
 };
 
+#[proc_hook]
 unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int) -> c_int {
     socket(domain, type_, protocol)
 }
@@ -58,7 +60,7 @@ unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> i32 {
+) -> c_int {
     getpeername(sockfd, address, address_len)
 }
 
@@ -225,15 +227,46 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     }
 }
 
-pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
-    hook!(interceptor, "socket", socket_detour);
-    hook!(interceptor, "bind", bind_detour);
-    hook!(interceptor, "listen", listen_detour);
-    hook!(interceptor, "connect", connect_detour);
+// type FnSocket = unsafe extern "C" fn(c_int, c_int, c_int) -> c_int;
+// type FnBind = unsafe extern "C" fn(c_int, *const sockaddr, socklen_t) -> c_int;
+// type FnListen = unsafe extern "C" fn(RawFd, c_int) -> c_int;
+// type FnConnect = unsafe extern "C" fn(RawFd, *const sockaddr, socklen_t) -> c_int;
+// type FnGetPeerName = unsafe extern "C" fn(RawFd, *mut sockaddr, *mut socklen_t) -> c_int;
+
+// pub(super) static FN_SOCKET: OnceLock<FnSocket> = OnceLock::new();
+// pub(super) static FN_BIND: OnceLock<FnBind> = OnceLock::new();
+// pub(super) static FN_LISTEN: OnceLock<FnConnect> = OnceLock::new();
+// pub(super) static FN_CONNECT: OnceLock<FnConnect> = OnceLock::new();
+// pub(super) static FN_GET_PEER_NAME: OnceLock<FnGetPeerName> = OnceLock::new();
+
+// unsafe fn hook(
+//     interceptor: &mut Interceptor,
+//     symbol_name: &str,
+//     detour: FnSocket,
+// ) -> Result<FnSocket, LayerError> {
+//     let function =
+//         frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(LayerError::DNSNoName)?;
+
+//     let replaced = interceptor.replace(
+//         function,
+//         frida_gum::NativePointer(detour as *mut libc::c_void),
+//         frida_gum::NativePointer(std::ptr::null_mut()),
+//     )?;
+
+//     let t = std::mem::transmute(replaced);
+
+//     Ok(t)
+// }
+
+pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
+    // FN_SOCKET.set(hook!(interceptor, "socket", socket_detour));
+    // FN_BIND.set(hook!(interceptor, "bind", bind_detour));
+    // FN_LISTEN.set(hook!(interceptor, "listen", listen_detour));
+    // FN_CONNECT.set(hook!(interceptor, "connect", connect_detour));
+    // try_hook!(interceptor, "getpeername", getpeername_detour);
     hook!(interceptor, "fcntl", fcntl_detour);
     hook!(interceptor, "dup", dup_detour);
     hook!(interceptor, "dup2", dup2_detour);
-    try_hook!(interceptor, "getpeername", getpeername_detour);
     try_hook!(interceptor, "getsockname", getsockname_detour);
     #[cfg(target_os = "linux")]
     {

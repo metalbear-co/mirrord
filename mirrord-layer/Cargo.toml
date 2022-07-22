@@ -23,7 +23,7 @@ nix.workspace = true
 os_socketaddr = "0.2"
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = {version = "0.6", features = ["auto-download"]}
+frida-gum = { git = "https://github.com/aviramha/frida-rust", branch = "replace_fix", features = ["auto-download"] }
 futures.workspace = true
 clap.workspace = true
 k8s-openapi.workspace = true
@@ -33,7 +33,8 @@ tokio.workspace = true
 serde_json.workspace = true
 
 nanoid = "0.4"
-mirrord-protocol = { path = "../mirrord-protocol"}
+mirrord-protocol = { path = "../mirrord-protocol" }
+mirrord-macro = { path = "../mirrord-macro" }
 actix-codec.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true
