@@ -18,6 +18,49 @@ class FileOpsTest(unittest.TestCase):
             self.assertEqual(read_text, TEXT)
             rw_file.close()
 
+    def test_fopen(self):
+        """
+        Opens a file in "/tmp/"
+        """
+        file_path, _ = self._create_new_tmp_file()
+        self.assertFalse(self._check_path_exists_on_host(file_path))
+        with open(file_path, "r") as f:
+            f.seek(0)
+            txt = f.readline()
+        self.assertEqual(txt, TEXT)
+
+    def test_fdopen(self):
+        """
+        Opens a file in "/tmp"
+        """
+        file_path, _ = self._create_new_tmp_file()
+        self.assertFalse(self._check_path_exists_on_host(file_path))
+        fd = os.open(file_path, os.O_RDONLY)
+        self.assertEqual(fd, 3)
+        fd.close()
+
+    def test_fread(self):
+        """
+        Reads a file to test `fread()`
+        """
+        file_path, _ = self._create_new_tmp_file()
+        self.assertFalse(self._check_path_exists_on_host(file_path))
+        fd = os.open(file_path, os.O_RDONLY)
+        self.assertEqual(fd, 3)
+        fd.close()
+
+    def test_fileno(self):
+        """
+        Gets a fd from a file stream
+        """
+        file_path, _ = self._create_new_tmp_file()
+        self.assertFalse(self._check_path_exists_on_host(file_path))
+        fd = os.open(file_path, os.O_RDONLY)
+        self.assertEqual(fd, 3)
+        with open(file_path, "r") as f:
+            self.assertEqual(fd, f.fileno())
+        fd.close()
+
     def test_lseek(self):
         """
         Seeks character by character in a file with Lorem Ipsum text in "/tmp" and verifies the concatenation of the text.
