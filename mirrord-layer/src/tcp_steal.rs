@@ -64,7 +64,7 @@ impl TcpHandler for TcpStealHandler {
         );
         // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be told
         // that we just removed it).
-        connection.write(&data.bytes[..]).await?;
+        connection.write_all(&data.bytes[..]).await?;
 
         self.write_streams.insert(data.connection_id, connection);
         debug!("handle_new_data -> success");
@@ -80,11 +80,11 @@ impl TcpHandler for TcpStealHandler {
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
         self.read_streams
             .remove(&connection_id)
-            .ok_or_else(|| LayerError::ConnectionIdNotFound(connection_id))?;
+            .ok_or(LayerError::ConnectionIdNotFound(connection_id))?;
 
         self.write_streams
             .remove(&connection_id)
-            .ok_or_else(|| LayerError::ConnectionIdNotFound(connection_id))?;
+            .ok_or(LayerError::ConnectionIdNotFound(connection_id))?;
 
         Ok(())
     }
@@ -141,12 +141,10 @@ impl TcpStealHandler {
     pub async fn next(&mut self) -> Option<ClientMessage> {
         let (connection_id, value) = self.read_streams.next().await?;
         match value {
-            Some(Ok(bytes)) => {
-                return Some(ClientMessage::TcpSteal(LayerStealTcp::Data(TcpData {
-                    connection_id,
-                    bytes: bytes.to_vec(),
-                })))
-            }
+            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerStealTcp::Data(TcpData {
+                connection_id,
+                bytes: bytes.to_vec(),
+            }))),
             Some(Err(err)) => {
                 error!("connection id {connection_id:?} read error: {err:?}");
                 None
