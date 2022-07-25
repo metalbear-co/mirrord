@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.5.0
+
 ### Added
 - New feature, [remote DNS resolving](https://github.com/metalbear-co/mirrord/issues/27#issuecomment-1154072686).
 It is now possible to use the remote's `addrinfo` by setting the `MIRRORD_REMOTE_DNS` variable to
