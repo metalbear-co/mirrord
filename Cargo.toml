@@ -43,6 +43,8 @@ kube = { version = "0.73", default-features = false, features = ["runtime", "der
 dns-lookup = "1"
 tokio-util = "0.7"
 rand = "0.8"
+streammap-ext = "0.1"
+
 
 # latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032

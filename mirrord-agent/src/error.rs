@@ -1,4 +1,7 @@
-use mirrord_protocol::{tcp::DaemonTcp, FileRequest, FileResponse, Port};
+use mirrord_protocol::{
+    tcp::{DaemonTcp, LayerStealTcp},
+    FileRequest, FileResponse, Port,
+};
 use thiserror::Error;
 
 use crate::sniffer::SnifferCommand;
@@ -51,7 +54,13 @@ pub enum AgentError {
     Bollard(#[from] bollard::errors::Error),
 
     #[error("Connection received from unexepcted port `{0}`")]
-    UnexpectedConnection(Port)
+    UnexpectedConnection(Port),
+
+    #[error("LayerStealTcp sender failed with `{0}`")]
+    SendLayerStealTcp(#[from] tokio::sync::mpsc::error::SendError<LayerStealTcp>),
+
+    #[error("IPTables failed with `{0}`")]
+    IPTablesError(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;

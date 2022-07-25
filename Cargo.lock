@@ -1071,6 +1071,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptables"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c488ad8e743814579544d5a17bda107cd7a4009ade4d55ce94f4c3ec0281147"
+dependencies = [
+ "lazy_static",
+ "nix 0.23.1",
+ "regex",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1385,14 +1396,17 @@ dependencies = [
  "containerd-client",
  "dns-lookup",
  "futures",
+ "iptables",
+ "libc",
  "mirrord-protocol",
- "nix",
+ "nix 0.24.2",
  "num-traits",
  "pcap",
  "pnet",
  "rand 0.8.5",
  "serde",
  "serde_json",
+ "streammap-ext",
  "test_bin",
  "thiserror",
  "tokio",
@@ -1423,7 +1437,7 @@ dependencies = [
  "mirrord-protocol",
  "multi-map",
  "nanoid",
- "nix",
+ "nix 0.24.2",
  "os_socketaddr",
  "queues",
  "rand 0.8.5",
@@ -1487,6 +1501,19 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nix"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "memoffset",
 ]
 
 [[package]]

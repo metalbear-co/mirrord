@@ -37,6 +37,9 @@ num-traits = "0.2"
 bollard = "0.13"
 tokio-util.workspace = true
 rand.workspace = true
+streammap-ext.workspace = true
+iptables = "0.5.0"
+libc = "0.2"
 
 [dev-dependencies]
 test_bin = "0.4"

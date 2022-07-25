@@ -3,7 +3,7 @@ use std::{env::VarError, os::unix::io::RawFd, path::PathBuf, ptr, str::ParseBool
 use errno::set_errno;
 use kube::config::InferConfigError;
 use libc::FILE;
-use mirrord_protocol::{tcp::LayerTcp, ResponseError};
+use mirrord_protocol::{tcp::LayerTcp, ConnectionID, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::error;
@@ -49,7 +49,7 @@ pub enum LayerError {
     EmptyHookSender,
 
     #[error("mirrord-layer: No connection found for id `{0}`!")]
-    NoConnectionId(u16),
+    NoConnectionId(ConnectionID),
 
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
@@ -58,7 +58,7 @@ pub enum LayerError {
     PortNotFound(u16),
 
     #[error("mirrord-layer: Failed to find connection_id `{0}`!")]
-    ConnectionIdNotFound(u16),
+    ConnectionIdNotFound(ConnectionID),
 
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,

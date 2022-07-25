@@ -1,25 +1,30 @@
-use std::{collections::{HashSet, HashMap}, fmt::format, net::SocketAddr, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::format,
+    net::SocketAddr,
+    path::PathBuf,
+};
 
-use drain::Watch;
 use iptables;
 use mirrord_protocol::{
-    tcp::{ClientStealTcp, DaemonTcp, LayerTcp, NewTcpConnection},
-    Port, ConnectionID,
+    tcp::{DaemonTcp, LayerStealTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    ConnectionID, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
+use streammap_ext::StreamMap;
 use tokio::{
-    io::{copy_bidirectional, duplex, DuplexStream, WriteHalf, ReadHalf},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{Receiver, Sender},
 };
-use tokio_stream::StreamMap;
+use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error};
+use tracing::{debug, error, info, log::warn};
 
 use crate::{
-    error::{Result, AgentError},
-    runtime::{set_namespace},
+    error::{AgentError, Result},
+    runtime::set_namespace,
 };
 
 struct SafeIpTables {
@@ -37,30 +42,40 @@ impl SafeIpTables {
         let ipt = iptables::new(false).unwrap();
         let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
         let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
-        ipt.new_chain(IPTABLES_TABLE_NAME, chain_name)?;
-        ipt.append(IPTABLES_TABLE_NAME, chain_name, "-j RETURN")?;
+        ipt.new_chain(IPTABLES_TABLE_NAME, &chain_name)
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+        ipt.append(IPTABLES_TABLE_NAME, &chain_name, "-j RETURN")
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
         ipt.append(
             IPTABLES_TABLE_NAME,
             "PREROUTING",
-            format!("-j {}", chain_name),
-        )?;
+            &format!("-j {}", chain_name),
+        )
+        .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
         Ok(Self {
             inner: ipt,
             chain_name,
         })
     }
 
-    pub fn add_redirect(
-        &mut self,
-        redirected_port: Port,
-        target_port: Port,
-    ) -> Result<()> {
+    pub fn add_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
         let rule = format!(
             "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
             redirected_port, target_port
         );
         self.inner
-            .insert(IPTABLES_TABLE_NAME, self.chain_name, &rule, 0)
+            .insert(IPTABLES_TABLE_NAME, &self.chain_name, &rule, 0)
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+    }
+
+    pub fn remove_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
+        let rule = format!(
+            "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
+            redirected_port, target_port
+        );
+        self.inner
+            .delete(IPTABLES_TABLE_NAME, &self.chain_name, &rule)
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 }
 
@@ -71,22 +86,24 @@ impl Drop for SafeIpTables {
             .delete(
                 IPTABLES_TABLE_NAME,
                 "PREROUTING",
-                format!("-j {}", self.chain_name),
+                &format!("-j {}", self.chain_name),
             )
             .unwrap();
         let _ = self
             .inner
-            .delete_chain(IPTABLES_TABLE_NAME, self.chain_name);
+            .delete_chain(IPTABLES_TABLE_NAME, &self.chain_name)
+            .unwrap();
     }
 }
 
-struct StealWorker {
+pub struct StealWorker {
     pub sender: Sender<DaemonTcp>,
     iptables: SafeIpTables,
     ports: HashSet<Port>,
     listen_port: Port,
     write_streams: HashMap<ConnectionID, WriteHalf<TcpStream>>,
-    read_streams: StreamMap<ConnectionID, ReaderStream<ReadHalf<TcpStream>>>
+    read_streams: StreamMap<ConnectionID, ReaderStream<ReadHalf<TcpStream>>>,
+    connection_index: u64,
 }
 
 impl StealWorker {
@@ -98,43 +115,99 @@ impl StealWorker {
             listen_port,
             write_streams: HashMap::default(),
             read_streams: StreamMap::default(),
+            connection_index: 0,
         })
     }
 
-    pub fn handle_client_message(&mut self, message: ClientStealTcp) -> Result<()> {
-        use ClientStealTcp::*;
+    pub async fn handle_client_message(&mut self, message: LayerStealTcp) -> Result<()> {
+        use LayerStealTcp::*;
         match message {
-            PortSubscribe(port) => self.iptables.add_redirect(port, self.listen_port),
-            ConnectionUnsubscribe(connection_id) => unimplemented!(),
-            PortUnsubscribe(port) => unimplemented!(),
-            Data(data) => unimplemented!(),
+            PortSubscribe(port) => {
+                if self.ports.contains(&port) {
+                    self.iptables.add_redirect(port, self.listen_port)
+                } else {
+                    warn!("Port {port:?} is already subscribed");
+                    Ok(())
+                }
+            }
+            ConnectionUnsubscribe(connection_id) => {
+                info!("Closing connection {connection_id:?}");
+                self.write_streams.remove(&connection_id);
+                self.read_streams.remove(&connection_id);
+                Ok(())
+            }
+            PortUnsubscribe(port) => {
+                if self.ports.remove(&port) {
+                    self.iptables.remove_redirect(port, self.listen_port)
+                } else {
+                    warn!("removing unsubscribed port {port:?}");
+                    Ok(())
+                }
+            }
+
+            Data(data) => {
+                if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
+                    stream.write(&data.bytes[..]).await?;
+                    Ok(())
+                } else {
+                    warn!(
+                        "Trying to send data to closed connection {:?}",
+                        data.connection_id
+                    );
+                    Ok(())
+                }
+            }
         }
     }
 
-    pub fn handle_incoming_connection(&mut self, stream: TcpStream, address: SocketAddr) -> Result<()> {
+    pub async fn handle_incoming_connection(
+        &mut self,
+        stream: TcpStream,
+        address: SocketAddr,
+    ) -> Result<()> {
         let real_addr = orig_dst::orig_dst_addr(&stream)?;
         if !self.ports.contains(&real_addr.port()) {
             return Err(AgentError::UnexpectedConnection(real_addr.port()));
         }
-        let (side_a, mut side_b) = duplex(1024);
-        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
-            stream: side_a,
-            destination_port: real_addr.port(),
-            address
-        });
-        tx.send(new_connection).await.unwrap();
-        tokio::spawn(async move{
-            let _ = copy_bidirectional(&mut side_b, &mut stream).await;
-        });
+        let connection_id = self.connection_index;
+        self.connection_index += 1;
 
-    
+        let (read_half, write_half) = tokio::io::split(stream);
+        self.write_streams.insert(connection_id, write_half);
+        self.read_streams
+            .insert(connection_id, ReaderStream::new(read_half));
+
+        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
+            connection_id,
+            destination_port: real_addr.port(),
+            source_port: address.port(),
+            address: address.ip(),
+        });
+        self.sender.send(new_connection).await?;
         Ok(())
     }
+
+    pub async fn next(&mut self) -> Option<DaemonTcp> {
+        let (connection_id, value) = self.read_streams.next().await?;
+        match value {
+            Some(Ok(bytes)) => {
+                return Some(DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes: bytes.to_vec(),
+                }))
+            }
+            Some(Err(err)) => {
+                error!("connection id {connection_id:?} read error: {err:?}");
+                None
+            }
+            None => Some(DaemonTcp::Close(TcpClose { connection_id })),
+        }
+    }
 }
-async fn steal_worker(
-    mut rx: Receiver<ClientStealTcp>,
+
+pub async fn steal_worker(
+    mut rx: Receiver<LayerStealTcp>,
     tx: Sender<DaemonTcp>,
-    watch: Watch,
     pid: Option<u64>,
 ) -> Result<()> {
     debug!("setting namespace");
@@ -148,13 +221,12 @@ async fn steal_worker(
     debug!("preparing sniffer");
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
-    let mut ports: HashSet<Port> = HashSet::new();
     let mut worker = StealWorker::new(tx, listen_port)?;
     loop {
         select! {
             msg = rx.recv() => {
                 if let Some(msg) = msg {
-                    worker.handle_client_message(msg)?;
+                    worker.handle_client_message(msg).await?;
                 } else {
                     debug!("rx closed, breaking");
                     break;
@@ -162,13 +234,18 @@ async fn steal_worker(
             },
             accept = listener.accept() => {
                 match accept {
-                    Ok((mut stream, address)) => {
+                    Ok((stream, address)) => {
                         worker.handle_incoming_connection(stream, address).await?;
                     },
                     Err(err) => {
                         error!("accept error {err:?}");
                         break;
                     }
+                }
+            },
+            message = worker.next() => {
+                if let Some(message) = message {
+                    worker.sender.send(message).await?;
                 }
             }
         }

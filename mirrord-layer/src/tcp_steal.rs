@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{ClientStealTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerStealTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, ConnectionID,
 };
 use streammap_ext::StreamMap;
@@ -119,7 +119,7 @@ impl TcpHandler for TcpStealHandler {
             .ok_or(LayerError::ListenAlreadyExists)?;
 
         codec
-            .send(ClientMessage::TcpSteal(ClientStealTcp::PortSubscribe(port)))
+            .send(ClientMessage::TcpSteal(LayerStealTcp::PortSubscribe(port)))
             .await
             .map_err(From::from)
     }
@@ -133,7 +133,7 @@ impl TcpHandler for TcpStealHandler {
         >,
     ) -> Result<(), LayerError> {
         codec
-            .send(ClientMessage::TcpSteal(ClientStealTcp::PortUnsubscribe(
+            .send(ClientMessage::TcpSteal(LayerStealTcp::PortUnsubscribe(
                 close.port,
             )))
             .await
@@ -146,7 +146,7 @@ impl TcpStealHandler {
         let (connection_id, value) = self.read_streams.next().await?;
         match value {
             Some(Ok(bytes)) => {
-                return Some(ClientMessage::TcpSteal(ClientStealTcp::Data(TcpData {
+                return Some(ClientMessage::TcpSteal(LayerStealTcp::Data(TcpData {
                     connection_id,
                     bytes: bytes.to_vec(),
                 })))
@@ -156,7 +156,7 @@ impl TcpStealHandler {
                 None
             }
             None => Some(ClientMessage::TcpSteal(
-                ClientStealTcp::ConnectionUnsubscribe(connection_id),
+                LayerStealTcp::ConnectionUnsubscribe(connection_id),
             )),
         }
     }

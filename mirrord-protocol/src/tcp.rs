@@ -41,7 +41,7 @@ pub enum DaemonTcp {
 
 /// Messages related to Steal Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum ClientStealTcp {
+pub enum LayerStealTcp {
     PortSubscribe(Port),
     ConnectionUnsubscribe(ConnectionID),
     PortUnsubscribe(Port),

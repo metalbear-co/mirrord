@@ -10,7 +10,7 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    tcp::{ClientStealTcp, DaemonTcp, LayerTcp},
+    tcp::{DaemonTcp, LayerStealTcp, LayerTcp},
     ResponseError,
 };
 
@@ -159,7 +159,7 @@ pub struct GetAddrInfoRequest {
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
-    TcpSteal(ClientStealTcp),
+    TcpSteal(LayerStealTcp),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
