@@ -15,7 +15,7 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
+    tcp::{LayerTcp, ClientStealTcp}, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
     GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use tokio::{
@@ -176,6 +176,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
+    tcp_stealer: TCPStealer,
 }
 
 impl ClientConnectionHandler {
@@ -193,6 +194,8 @@ impl ClientConnectionHandler {
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
+        
+        let tcp_stealer = TCPStealer::new(_, _, _).await?;
 
         let mut client_handler = ClientConnectionHandler {
             id,
@@ -200,6 +203,7 @@ impl ClientConnectionHandler {
             stream,
             pid,
             tcp_sniffer_api,
+            tcp_stealer
         };
 
         client_handler.handle_loop(cancel_token).await?;
@@ -277,6 +281,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
+            ClientMessage::TcpSteal(message) => self.handle_client_steal_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }
@@ -293,6 +298,20 @@ impl ClientConnectionHandler {
                     .await
             }
             LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.port_unsubscribe(port).await,
+        }
+    }
+
+    async fn handle_client_steal_tcp(&mut self, message: ClientStealTcp) -> Result<(), AgentError> {
+        use ClientStealTcp::*;
+        match message {
+            PortSubscribe(port) => self.tcp_stealer.subscribe(port).await,
+            ConnectionUnsubscribe(connection_id) => {
+                self.tcp_stealer
+                    .connection_unsubscribe(connection_id)
+                    .await
+            },
+            PortUnsubscribe(port) => self.tcp_stealer.port_unsubscribe(port).await,
+            Data(data) => self.tcp_stealer.data(data).await,
         }
     }
 }

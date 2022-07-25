@@ -1,4 +1,4 @@
-use mirrord_protocol::{tcp::DaemonTcp, FileRequest, FileResponse};
+use mirrord_protocol::{tcp::DaemonTcp, FileRequest, FileResponse, Port};
 use thiserror::Error;
 
 use crate::sniffer::SnifferCommand;
@@ -49,4 +49,9 @@ pub enum AgentError {
 
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
+
+    #[error("Connection received from unexepcted port `{0}`")]
+    UnexpectedConnection(Port)
 }
+
+pub type Result<T> = std::result::Result<T, AgentError>;

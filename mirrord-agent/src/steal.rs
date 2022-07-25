@@ -1,21 +1,30 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{collections::{HashSet, HashMap}, fmt::format, net::SocketAddr, path::PathBuf};
 
-use const_format::concatcp;
 use drain::Watch;
 use iptables;
-use mirrord_protocol::Port;
+use mirrord_protocol::{
+    tcp::{ClientStealTcp, DaemonTcp, LayerTcp, NewTcpConnection},
+    Port, ConnectionID,
+};
+use rand::distributions::{Alphanumeric, DistString};
 use tokio::{
-    io::{copy_bidirectional, duplex, DuplexStream},
-    net::TcpListener,
+    io::{copy_bidirectional, duplex, DuplexStream, WriteHalf, ReadHalf},
+    net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio_stream::StreamMap;
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error};
 
-use crate::runtime::{get_container_namespace, set_namespace};
+use crate::{
+    error::{Result, AgentError},
+    runtime::{set_namespace},
+};
 
-struct SafeIPTables {
-    pub inner: iptables::IPTables,
+struct SafeIpTables {
+    inner: iptables::IPTables,
+    chain_name: String,
 }
 
 struct PacketData(Vec<u8>);
@@ -23,98 +32,129 @@ struct PacketData(Vec<u8>);
 const IPTABLES_TABLE_NAME: &str = "nat";
 const MIRRORD_CHAIN_NAME: &str = "MIRRORD_REDIRECT";
 
-enum StealInput {
-    AddPort(Port),
-    DeletePort(Port),
-}
-
-#[derive(Debug)]
-pub struct NewConnection {
-    pub stream: DuplexStream,
-    pub destination_port: Port,
-    pub address: SocketAddr,
-}
-
-#[derive(Debug)]
-enum StealOutput {
-    NewConnection(NewConnection),
-}
-
-impl SafeIPTables {
-    pub fn new() -> Self {
+impl SafeIpTables {
+    pub fn new() -> Result<Self> {
         let ipt = iptables::new(false).unwrap();
-        ipt.new_chain(IPTABLES_TABLE_NAME, MIRRORD_CHAIN_NAME)
-            .unwrap();
-        ipt.append(IPTABLES_TABLE_NAME, MIRRORD_CHAIN_NAME, "-j RETURN")
-            .unwrap();
+        let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
+        let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
+        ipt.new_chain(IPTABLES_TABLE_NAME, chain_name)?;
+        ipt.append(IPTABLES_TABLE_NAME, chain_name, "-j RETURN")?;
         ipt.append(
             IPTABLES_TABLE_NAME,
             "PREROUTING",
-            concatcp!("-j ", MIRRORD_CHAIN_NAME),
-        )
-        .unwrap();
-        Self { inner: ipt }
+            format!("-j {}", chain_name),
+        )?;
+        Ok(Self {
+            inner: ipt,
+            chain_name,
+        })
+    }
+
+    pub fn add_redirect(
+        &mut self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        let rule = format!(
+            "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
+            redirected_port, target_port
+        );
+        self.inner
+            .insert(IPTABLES_TABLE_NAME, self.chain_name, &rule, 0)
     }
 }
 
-impl Drop for SafeIPTables {
+impl Drop for SafeIpTables {
     fn drop(&mut self) {
         let _ = self
             .inner
             .delete(
                 IPTABLES_TABLE_NAME,
                 "PREROUTING",
-                concatcp!("-j ", MIRRORD_CHAIN_NAME),
+                format!("-j {}", self.chain_name),
             )
             .unwrap();
         let _ = self
             .inner
-            .delete_chain(IPTABLES_TABLE_NAME, MIRRORD_CHAIN_NAME);
+            .delete_chain(IPTABLES_TABLE_NAME, self.chain_name);
     }
 }
 
-fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
-    format!(
-        "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
-        redirected_port, target_port
-    )
+struct StealWorker {
+    pub sender: Sender<DaemonTcp>,
+    iptables: SafeIpTables,
+    ports: HashSet<Port>,
+    listen_port: Port,
+    write_streams: HashMap<ConnectionID, WriteHalf<TcpStream>>,
+    read_streams: StreamMap<ConnectionID, ReaderStream<ReadHalf<TcpStream>>>
 }
 
+impl StealWorker {
+    pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<Self> {
+        Ok(Self {
+            sender,
+            iptables: SafeIpTables::new()?,
+            ports: HashSet::default(),
+            listen_port,
+            write_streams: HashMap::default(),
+            read_streams: StreamMap::default(),
+        })
+    }
+
+    pub fn handle_client_message(&mut self, message: ClientStealTcp) -> Result<()> {
+        use ClientStealTcp::*;
+        match message {
+            PortSubscribe(port) => self.iptables.add_redirect(port, self.listen_port),
+            ConnectionUnsubscribe(connection_id) => unimplemented!(),
+            PortUnsubscribe(port) => unimplemented!(),
+            Data(data) => unimplemented!(),
+        }
+    }
+
+    pub fn handle_incoming_connection(&mut self, stream: TcpStream, address: SocketAddr) -> Result<()> {
+        let real_addr = orig_dst::orig_dst_addr(&stream)?;
+        if !self.ports.contains(&real_addr.port()) {
+            return Err(AgentError::UnexpectedConnection(real_addr.port()));
+        }
+        let (side_a, mut side_b) = duplex(1024);
+        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
+            stream: side_a,
+            destination_port: real_addr.port(),
+            address
+        });
+        tx.send(new_connection).await.unwrap();
+        tokio::spawn(async move{
+            let _ = copy_bidirectional(&mut side_b, &mut stream).await;
+        });
+
+    
+        Ok(())
+    }
+}
 async fn steal_worker(
-    mut rx: Receiver<StealInput>,
-    tx: Sender<StealOutput>,
+    mut rx: Receiver<ClientStealTcp>,
+    tx: Sender<DaemonTcp>,
     watch: Watch,
-    container_id: Option<String>,
-) {
+    pid: Option<u64>,
+) -> Result<()> {
     debug!("setting namespace");
-    if let Some(container_id) = container_id {
-        let namespace = get_container_namespace(container_id).await.unwrap();
-        debug!("Found namespace to attach to {:?}", &namespace);
-        set_namespace(&namespace).unwrap();
+    if let Some(pid) = pid {
+        let namespace = PathBuf::from("/proc")
+            .join(PathBuf::from(pid.to_string()))
+            .join(PathBuf::from("ns/net"));
+
+        set_namespace(namespace)?;
     }
     debug!("preparing sniffer");
-    let ipt = SafeIPTables::new();
-    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
-    let listen_port = listener.local_addr().unwrap().port();
+    let listener = TcpListener::bind("0.0.0.0:0").await?;
+    let listen_port = listener.local_addr()?.port();
     let mut ports: HashSet<Port> = HashSet::new();
-
+    let mut worker = StealWorker::new(tx, listen_port)?;
     loop {
         select! {
             msg = rx.recv() => {
                 if let Some(msg) = msg {
-                    match msg {
-                        StealInput::AddPort(port) => {
-                            if ports.insert(port) {
-                                ipt.inner.insert(IPTABLES_TABLE_NAME, MIRRORD_CHAIN_NAME, &format_redirect_rule(port, listen_port), 0).unwrap();
-                            } else {
-                                debug!("Port already added {port:?}");
-                            }
-                        },
-                        StealInput::DeletePort(port) => {
-                            ports.remove(&port);
-                            ipt.inner.delete(IPTABLES_TABLE_NAME, MIRRORD_CHAIN_NAME, &format_redirect_rule(port, listen_port)).unwrap();
-                        }
-                    }
+                    worker.handle_client_message(msg)?;
                 } else {
                     debug!("rx closed, breaking");
                     break;
@@ -123,23 +163,7 @@ async fn steal_worker(
             accept = listener.accept() => {
                 match accept {
                     Ok((mut stream, address)) => {
-                        let real_addr = orig_dst::orig_dst_addr(&stream).unwrap();
-                        if ports.contains(&real_addr.port()) {
-                            let (side_a, mut side_b) = duplex(1024);
-                            let new_connection = StealOutput::NewConnection(NewConnection {
-                                stream: side_a,
-                                destination_port: real_addr.port(),
-                                address
-                            });
-                            tx.send(new_connection).await.unwrap();
-                            tokio::spawn(async move{
-                                let _ = copy_bidirectional(&mut side_b, &mut stream).await;
-                            });
-
-                        } else {
-                            error!("someone connected directly to listen socket, bug!");
-                            break;
-                        }
+                        worker.handle_incoming_connection(stream, address).await?;
                     },
                     Err(err) => {
                         error!("accept error {err:?}");
@@ -149,6 +173,7 @@ async fn steal_worker(
             }
         }
     }
+    Ok(())
 }
 
 // orig_dst borrowed from linkerd2-proxy
@@ -168,7 +193,7 @@ mod orig_dst {
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn orig_dst_addr(_: &TcpStream) -> io::Result<OrigDstAddr> {
+    pub fn orig_dst_addr(_: &TcpStream) -> io::Result<SocketAddr> {
         Err(io::Error::new(
             io::ErrorKind::Other,
             "SO_ORIGINAL_DST not supported on this operating system",
