@@ -1,13 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::format,
     net::SocketAddr,
     path::PathBuf,
 };
 
-use iptables;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerStealTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerStealTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionID, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -32,10 +30,7 @@ struct SafeIpTables {
     chain_name: String,
 }
 
-struct PacketData(Vec<u8>);
-
 const IPTABLES_TABLE_NAME: &str = "nat";
-const MIRRORD_CHAIN_NAME: &str = "MIRRORD_REDIRECT";
 
 impl SafeIpTables {
     pub fn new() -> Result<Self> {
@@ -81,16 +76,14 @@ impl SafeIpTables {
 
 impl Drop for SafeIpTables {
     fn drop(&mut self) {
-        let _ = self
-            .inner
+        self.inner
             .delete(
                 IPTABLES_TABLE_NAME,
                 "PREROUTING",
                 &format!("-j {}", self.chain_name),
             )
             .unwrap();
-        let _ = self
-            .inner
+        self.inner
             .delete_chain(IPTABLES_TABLE_NAME, &self.chain_name)
             .unwrap();
     }
@@ -147,7 +140,7 @@ impl StealWorker {
 
             Data(data) => {
                 if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
-                    stream.write(&data.bytes[..]).await?;
+                    stream.write_all(&data.bytes[..]).await?;
                     Ok(())
                 } else {
                     warn!(
@@ -190,12 +183,10 @@ impl StealWorker {
     pub async fn next(&mut self) -> Option<DaemonTcp> {
         let (connection_id, value) = self.read_streams.next().await?;
         match value {
-            Some(Ok(bytes)) => {
-                return Some(DaemonTcp::Data(TcpData {
-                    connection_id,
-                    bytes: bytes.to_vec(),
-                }))
-            }
+            Some(Ok(bytes)) => Some(DaemonTcp::Data(TcpData {
+                connection_id,
+                bytes: bytes.to_vec(),
+            })),
             Some(Err(err)) => {
                 error!("connection id {connection_id:?} read error: {err:?}");
                 None

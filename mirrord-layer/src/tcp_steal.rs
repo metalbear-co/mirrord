@@ -21,7 +21,6 @@ use crate::{
     tcp::{Listen, ListenClose, TcpHandler},
 };
 
-/// Handles traffic mirroring
 #[derive(Default)]
 pub struct TcpStealHandler {
     ports: HashSet<Listen>,
@@ -31,7 +30,6 @@ pub struct TcpStealHandler {
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
-    /// Handle NewConnection messages
     async fn handle_new_connection(
         &mut self,
         tcp_connection: NewTcpConnection,
@@ -49,7 +47,6 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
-    /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
         debug!("handle_new_data -> id {:#?}", data.connection_id);
 
@@ -75,7 +72,6 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
-    /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
         debug!("handle_close -> close {:#?}", close);
 
