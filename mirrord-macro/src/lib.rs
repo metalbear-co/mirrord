@@ -1,47 +1,68 @@
+use proc_macro2::Span;
 use quote::{quote, ToTokens};
-use syn::{ItemFn, Signature, TypeBareFn};
+use syn::{AttributeArgs, Ident, ItemFn, Signature, TypeBareFn};
 
 #[proc_macro_attribute]
-pub fn proc_hook(
+pub fn hook_fn(
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let output: proc_macro2::TokenStream = {
-        let proper = input.clone();
-        let proper_function = syn::parse_macro_input!(proper as ItemFn);
+        let macro_args = syn::parse_macro_input!(args as AttributeArgs);
+        let proper_function = syn::parse_macro_input!(input as ItemFn);
 
         let signature = proper_function.clone().sig;
 
-        let unsafety = signature.unsafety.unwrap();
-        let abi = signature.abi.unwrap();
+        let visibility = proper_function.clone().vis;
+
+        let ident_string = signature.ident.to_string();
+        let type_name = ident_string.split("_").next().and_then(|fn_name| {
+            let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
+            Some(Ident::new(&name, Span::call_site()))
+        });
+
+        let static_name = ident_string.split("_").next().and_then(|fn_name| {
+            let name = format!("FN_{}", fn_name.to_uppercase());
+            Some(Ident::new(&name, Span::call_site()))
+        });
+
+        let unsafety = signature.unsafety;
+        let abi = signature.abi;
 
         let fn_args = signature
             .inputs
             .into_iter()
             .map(|fn_arg| match fn_arg {
-                syn::FnArg::Receiver(_) => panic!("Invalid argument type!"),
+                syn::FnArg::Receiver(_) => panic!("Hooks should not take any form of `self`!"),
                 syn::FnArg::Typed(arg) => arg.ty,
             })
             .collect::<Vec<_>>();
 
-        let variadic = signature.variadic;
-
         let return_type = signature.output;
 
         let bare_fn = quote! {
-            #unsafety #abi fn(#(#fn_args),*, #variadic) #return_type;
+            #unsafety #abi fn(#(#fn_args),*) #return_type
         };
 
-        // panic!("output is \n{:#?}", bare_fn);
+        let type_alias = quote! {
+            #visibility type #type_name = #bare_fn
+        };
+
+        let original_fn = quote! {
+            #visibility static #static_name: std::sync::OnceLock<#type_name> =
+                std::sync::OnceLock::new()
+        };
 
         let output = quote! {
-            type Foo = #bare_fn
+            #type_alias;
+
+            #original_fn;
 
             #proper_function
 
         };
 
-        // panic!("{:#?}", output.to_string());
+        // panic!("{}", output.to_string());
 
         output.into()
     };

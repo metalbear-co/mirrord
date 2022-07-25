@@ -1,8 +1,13 @@
-use std::{any::Any, ffi::CStr, os::unix::io::RawFd, sync::OnceLock};
+use std::{
+    any::Any,
+    ffi::CStr,
+    os::unix::io::RawFd,
+    sync::{LazyLock, OnceLock},
+};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_macro::proc_hook;
+use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use os_socketaddr::OsSocketAddr;
 use tracing::{debug, error, trace};
@@ -10,15 +15,21 @@ use tracing::{debug, error, trace};
 use super::ops::*;
 use crate::{
     error::LayerError,
+    hook2,
     macros::{hook, try_hook},
     socket::AddrInfoHintExt,
 };
 
-#[proc_hook]
-unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int) -> c_int {
+#[hook_fn]
+pub(super) unsafe extern "C" fn socket_detour(
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+) -> c_int {
     socket(domain, type_, protocol)
 }
 
+#[hook_fn]
 unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     addr: *const sockaddr,
@@ -27,10 +38,12 @@ unsafe extern "C" fn bind_detour(
     bind(sockfd, addr, addrlen)
 }
 
+#[hook_fn]
 unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     listen(sockfd, backlog)
 }
 
+#[hook_fn]
 unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -56,6 +69,7 @@ unsafe extern "C" fn connect_detour(
     result
 }
 
+#[hook_fn]
 unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -64,6 +78,7 @@ unsafe extern "C" fn getpeername_detour(
     getpeername(sockfd, address, address_len)
 }
 
+#[hook_fn]
 unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -72,12 +87,15 @@ unsafe extern "C" fn getsockname_detour(
     getsockname(sockfd, address, address_len)
 }
 
+static FOO: OnceLock<i32> = OnceLock::new();
+
+#[hook_fn]
 unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> i32 {
-    let accept_fd = libc::accept(sockfd, address, address_len);
+    let accept_fd = FN_ACCEPT.get().unwrap()(sockfd, address, address_len);
 
     if accept_fd == -1 {
         accept_fd
@@ -86,6 +104,7 @@ unsafe extern "C" fn accept_detour(
     }
 }
 
+#[hook_fn]
 #[cfg(target_os = "linux")]
 unsafe extern "C" fn accept4_detour(
     sockfd: i32,
@@ -102,25 +121,29 @@ unsafe extern "C" fn accept4_detour(
     }
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 /// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
+#[hook_fn]
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
     fcntl(fd, cmd, fcntl_fd)
 }
 
+#[hook_fn]
 #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
     let fcntl_fd = libc::fcntl(fd, cmd, arg);
     fcntl(fd, cmd, fcntl_fd)
 }
 
+#[hook_fn]
 unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     let dup_fd = libc::dup(fd);
     dup(fd, dup_fd)
 }
 
+#[hook_fn]
 unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     if oldfd == newfd {
         return newfd;
@@ -129,6 +152,7 @@ unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     dup(oldfd, dup2_fd)
 }
 
+#[hook_fn]
 #[cfg(target_os = "linux")]
 unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
     let dup3_fd = libc::dup3(oldfd, newfd, flags);
@@ -139,6 +163,7 @@ unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_
 ///
 /// # Warning:
 /// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
+#[hook_fn]
 unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
     raw_service: *const c_char,
@@ -214,6 +239,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 ///
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
+#[hook_fn]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
@@ -227,57 +253,89 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     }
 }
 
-// type FnSocket = unsafe extern "C" fn(c_int, c_int, c_int) -> c_int;
-// type FnBind = unsafe extern "C" fn(c_int, *const sockaddr, socklen_t) -> c_int;
-// type FnListen = unsafe extern "C" fn(RawFd, c_int) -> c_int;
-// type FnConnect = unsafe extern "C" fn(RawFd, *const sockaddr, socklen_t) -> c_int;
-// type FnGetPeerName = unsafe extern "C" fn(RawFd, *mut sockaddr, *mut socklen_t) -> c_int;
-
-// pub(super) static FN_SOCKET: OnceLock<FnSocket> = OnceLock::new();
-// pub(super) static FN_BIND: OnceLock<FnBind> = OnceLock::new();
-// pub(super) static FN_LISTEN: OnceLock<FnConnect> = OnceLock::new();
-// pub(super) static FN_CONNECT: OnceLock<FnConnect> = OnceLock::new();
-// pub(super) static FN_GET_PEER_NAME: OnceLock<FnGetPeerName> = OnceLock::new();
-
-// unsafe fn hook(
-//     interceptor: &mut Interceptor,
-//     symbol_name: &str,
-//     detour: FnSocket,
-// ) -> Result<FnSocket, LayerError> {
-//     let function =
-//         frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(LayerError::DNSNoName)?;
-
-//     let replaced = interceptor.replace(
-//         function,
-//         frida_gum::NativePointer(detour as *mut libc::c_void),
-//         frida_gum::NativePointer(std::ptr::null_mut()),
-//     )?;
-
-//     let t = std::mem::transmute(replaced);
-
-//     Ok(t)
-// }
-
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
-    // FN_SOCKET.set(hook!(interceptor, "socket", socket_detour));
-    // FN_BIND.set(hook!(interceptor, "bind", bind_detour));
-    // FN_LISTEN.set(hook!(interceptor, "listen", listen_detour));
-    // FN_CONNECT.set(hook!(interceptor, "connect", connect_detour));
-    // try_hook!(interceptor, "getpeername", getpeername_detour);
-    hook!(interceptor, "fcntl", fcntl_detour);
-    hook!(interceptor, "dup", dup_detour);
-    hook!(interceptor, "dup2", dup2_detour);
-    try_hook!(interceptor, "getsockname", getsockname_detour);
+    let hooked = hook2!(interceptor, "socket", socket_detour, FnSocket)
+        .and_then(|h| Ok(FN_SOCKET.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked =
+        hook2!(interceptor, "bind", bind_detour, FnBind).and_then(|h| Ok(FN_BIND.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked = hook2!(interceptor, "listen", listen_detour, FnListen)
+        .and_then(|h| Ok(FN_LISTEN.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked = hook2!(interceptor, "connect", connect_detour, FnConnect)
+        .and_then(|h| Ok(FN_CONNECT.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked = hook2!(interceptor, "fcntl", fcntl_detour, FnFcntl)
+        .and_then(|h| Ok(FN_FCNTL.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked =
+        hook2!(interceptor, "dup", dup_detour, FnDup).and_then(|h| Ok(FN_DUP.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked =
+        hook2!(interceptor, "dup2", dup2_detour, FnDup2).and_then(|h| Ok(FN_DUP2.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked = hook2!(
+        interceptor,
+        "getpeername",
+        getpeername_detour,
+        FnGetpeername
+    )
+    .and_then(|h| Ok(FN_GETPEERNAME.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+    let hooked = hook2!(
+        interceptor,
+        "getsockname",
+        getsockname_detour,
+        FnGetsockname
+    )
+    .and_then(|h| Ok(FN_GETSOCKNAME.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
     #[cfg(target_os = "linux")]
     {
-        try_hook!(interceptor, "uv__accept4", accept4_detour);
-        try_hook!(interceptor, "accept4", accept4_detour);
-        try_hook!(interceptor, "dup3", dup3_detour);
+        let hooked = hook2!(interceptor, "uv__accept4", accept4_detour, FnAccept4)
+            .and_then(|h| Ok(FN_ACCEPT4.set(h).unwrap()));
+        trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+        let hooked = hook2!(interceptor, "accept4", accept4_detour, FnAccept4)
+            .and_then(|h| Ok(FN_ACCEPT4.set(h).unwrap()));
+        trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+        let hooked = hook2!(interceptor, "dup3", dup3_detour, FnDup3)
+            .and_then(|h| Ok(FN_DUP3.set(h).unwrap()));
+        trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
     }
-    try_hook!(interceptor, "accept", accept_detour);
+
+    let hooked = hook2!(interceptor, "accept", accept_detour, FnAccept)
+        .and_then(|h| Ok(FN_ACCEPT.set(h).unwrap()));
+    trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
 
     if enabled_remote_dns {
-        hook!(interceptor, "getaddrinfo", getaddrinfo_detour);
-        hook!(interceptor, "freeaddrinfo", freeaddrinfo_detour);
+        let hooked = hook2!(
+            interceptor,
+            "getaddrinfo",
+            getaddrinfo_detour,
+            FnGetaddrinfo
+        )
+        .and_then(|h| Ok(FN_GETADDRINFO.set(h).unwrap()));
+        trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
+
+        let hooked = hook2!(
+            interceptor,
+            "freeaddrinfo",
+            freeaddrinfo_detour,
+            FnFreeaddrinfo
+        )
+        .and_then(|h| Ok(FN_FREEADDRINFO.set(h).unwrap()));
+        trace!("enabled_socket_hooks -> hooked {:#?}", hooked);
     }
 }

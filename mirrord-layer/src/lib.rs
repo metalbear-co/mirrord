@@ -5,7 +5,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    sync::{LazyLock, OnceLock},
+    sync::{Arc, LazyLock, Mutex, OnceLock},
 };
 
 use common::{GetAddrInfoHook, ResponseChannel};
