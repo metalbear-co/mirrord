@@ -1,6 +1,7 @@
 use std::{
     ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+    ops::Deref,
     os::unix::{
         io::RawFd,
         prelude::{FromRawFd, IntoRawFd},

@@ -82,32 +82,8 @@ pub fn hook_fn(
         };
 
         let original_fn = quote! {
-            #visibility static #static_name: std::sync::LazyLock<#type_name> =
-                std::sync::LazyLock::new(|| {
-                    let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
-                                    symbol_name,
-                                    detour: #type_name|
-                    -> Result<#type_name, LayerError> {
-                        let function = frida_gum::Module::find_export_by_name(None, symbol_name)
-                            .ok_or(LayerError::NoExportName(symbol_name.to_string()))?;
-
-                        let replaced = interceptor.replace(
-                            function,
-                            frida_gum::NativePointer(detour as *mut libc::c_void),
-                            frida_gum::NativePointer(std::ptr::null_mut()),
-                        )?;
-
-                        let original_fn: #type_name = unsafe { std::mem::transmute(replaced) };
-
-                        Ok(original_fn)
-                    };
-
-                    let mut interceptor = crate::INTERCEPTOR.lock().unwrap();
-                    let intercepted = intercept(&mut interceptor, #c_function_name, #detour_ident);
-                    trace!("intercepted {:#?}", intercepted);
-
-                    intercepted.unwrap_or(libc::#c_function_ident)
-                })
+            #visibility static #static_name: crate::HookFn<#type_name> =
+                crate::HookFn(std::sync::OnceLock::new())
         };
 
         let output = quote! {
