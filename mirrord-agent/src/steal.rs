@@ -132,7 +132,7 @@ impl StealWorker {
         &mut self,
         mut rx: Receiver<LayerStealTcp>,
         mut listener: TcpListener,
-    ) -> () {
+    ) -> Result<()> {
         loop {
             select! {
                 msg = rx.recv() => {
@@ -266,7 +266,12 @@ pub async fn steal_worker(
     let listen_port = listener.local_addr()?.port();
     let mut worker = StealWorker::new(tx, listen_port)?;
     tokio::spawn(async move {
-        worker.handle_loop(rx, listener).await;
+        worker
+            .handle_loop(rx, listener)
+            .await
+            .unwrap_or_else(|err| {
+                error!("steal worker error: {:?}", err);
+            });
     });
 
     Ok(())
