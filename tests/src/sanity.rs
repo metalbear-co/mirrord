@@ -112,7 +112,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(100));
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(1000));
             }
             panic!("Timeout waiting for line: {}", line);
         }

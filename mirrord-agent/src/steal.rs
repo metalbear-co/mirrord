@@ -257,6 +257,7 @@ pub async fn steal_worker(
             }
         }
     }
+    info!("TCP Stealer exiting");
     Ok(())
 }
 
