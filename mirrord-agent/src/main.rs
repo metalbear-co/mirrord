@@ -202,7 +202,7 @@ impl ClientConnectionHandler {
         tokio::spawn(async move {
             steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid)
                 .await
-                .map_err(|e| error!("steal_worker failed: {}", e));
+                .unwrap_or_else(|e| error!("steal_worker failed: {}", e));
         });
 
         let mut client_handler = ClientConnectionHandler {
