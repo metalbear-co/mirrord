@@ -5,8 +5,8 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    ops::{Deref, DerefMut},
-    sync::{Arc, LazyLock, Mutex, OnceLock},
+    ops::{Deref},
+    sync::{LazyLock, OnceLock},
 };
 
 use common::{GetAddrInfoHook, ResponseChannel};
@@ -45,7 +45,7 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });

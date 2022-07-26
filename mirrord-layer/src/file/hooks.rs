@@ -14,7 +14,6 @@ use crate::{
     error::LayerError,
     file::ops::{lseek, open, read, write},
     hook2,
-    macros::hook,
 };
 
 /// Hook for `libc::open`.

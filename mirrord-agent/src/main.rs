@@ -3,8 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
-    os::unix::prelude::AsRawFd,
+    net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
 };
 
@@ -17,18 +16,17 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, ConnectResponse, DaemonCodec,
+    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec,
     DaemonMessage, GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
-use runtime::set_namespace;
+
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use tcp::outgoing::OutgoingTrafficHandler;
 use tokio::{
-    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncReadExt},
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Receiver, Sender},
-    task,
+    sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};

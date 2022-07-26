@@ -8,21 +8,18 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, ConnectionID,
+    tcp::{NewTcpConnection, TcpClose, TcpData}, ConnectionID,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, warn};
 
 use crate::{
-    common::ResponseDeque,
     error::LayerError,
     tcp::{Listen, TcpHandler},
 };

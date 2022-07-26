@@ -2,13 +2,12 @@ use std::{collections::HashMap, net::SocketAddr, os::unix::prelude::AsRawFd};
 
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::LayerTcp, ClientCodec, ClientMessage, ConnectRequest, ConnectResponse,
+    ClientCodec, ClientMessage, ConnectRequest, ConnectResponse,
     OutgoingTrafficRequest, OutgoingTrafficResponse, ReadResponse, WriteRequest,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    task,
 };
 use tracing::trace;
 

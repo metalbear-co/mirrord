@@ -12,13 +12,12 @@ use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, Port, RemoteResult,
+    ClientCodec, ClientMessage, Port,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpStream};
 use tracing::debug;
 
 use crate::{
-    common::ResponseChannel,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
 };

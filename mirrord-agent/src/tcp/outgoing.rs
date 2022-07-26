@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
-    ConnectRequest, ConnectResponse, OutgoingTrafficRequest, OutgoingTrafficResponse, ReadRequest,
+    ConnectRequest, ConnectResponse, OutgoingTrafficRequest, OutgoingTrafficResponse,
     ReadResponse, RemoteResult, ResponseError, WriteRequest, WriteResponse,
 };
 use tokio::{
@@ -59,10 +59,10 @@ impl OutgoingTrafficHandler {
                         let connect_response: RemoteResult<_> = TcpStream::connect(remote_address)
                             .await
                             .map_err(From::from)
-                            .and_then(|remote_stream| {
+                            .map(|remote_stream| {
                                 agent_remote_streams.insert(1, remote_stream);
 
-                                Ok(ConnectResponse)
+                                ConnectResponse
                             });
 
                         let response = OutgoingTrafficResponse::Connect(connect_response);
@@ -71,14 +71,10 @@ impl OutgoingTrafficHandler {
                     OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
                         if let Some(stream) = agent_remote_streams.get_mut(&id) {
                             let write_response: RemoteResult<_> =
-                                stream.write(&bytes).await.map_err(From::from).and_then(
-                                    |written_amount| {
-                                        Ok(WriteResponse {
+                                stream.write(&bytes).await.map_err(From::from).map(|written_amount| WriteResponse {
                                             id,
                                             amount: written_amount,
-                                        })
-                                    },
-                                );
+                                        });
 
                             let response = OutgoingTrafficResponse::Write(write_response);
                             response_channel_tx.send(response).await.unwrap();
@@ -96,13 +92,10 @@ impl OutgoingTrafficHandler {
                 let read_response: RemoteResult<_> = stream
                     .read(&mut read_buffer)
                     .await
-                    .map_err(From::from)
-                    .and_then(|read_amount| {
-                        Ok(ReadResponse {
+                    .map_err(From::from).map(|read_amount| ReadResponse {
                             id: *id,
                             bytes: read_buffer[..read_amount].to_vec(),
-                        })
-                    });
+                        });
 
                 let response = OutgoingTrafficResponse::Read(read_response);
                 response_channel_tx.send(response).await.unwrap();
@@ -116,10 +109,10 @@ impl OutgoingTrafficHandler {
     ) -> Result<OutgoingTrafficResponse, AgentError> {
         self.request_channel_tx.send(request).await?;
 
-        Ok(self
+        self
             .response_channel_rx
             .recv()
             .await
-            .ok_or(AgentError::ReceiverClosed)?)
+            .ok_or(AgentError::ReceiverClosed)
     }
 }

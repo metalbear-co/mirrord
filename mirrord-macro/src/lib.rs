@@ -1,6 +1,6 @@
 use proc_macro2::Span;
-use quote::{quote, ToTokens};
-use syn::{AttributeArgs, Ident, ItemFn, MetaNameValue, Signature, TypeBareFn};
+use quote::{quote};
+use syn::{AttributeArgs, Ident, ItemFn};
 
 #[proc_macro_attribute]
 pub fn hook_fn(
@@ -16,10 +16,8 @@ pub fn hook_fn(
             match nested {
                 syn::NestedMeta::Meta(meta) => match meta {
                     syn::Meta::NameValue(name_value) => {
-                        let ident = name_value.path.get_ident().expect(&format!(
-                            "Expected ident for path, found {:#?}",
-                            name_value.path
-                        ));
+                        let ident = name_value.path.get_ident().unwrap_or_else(|| panic!("Expected ident for path, found {:#?}",
+                            name_value.path));
 
                         if *ident == Ident::new("alias", Span::call_site()) {
                             hook_alias = Some(ident.clone());
@@ -36,25 +34,25 @@ pub fn hook_fn(
         let proper_function = syn::parse_macro_input!(input as ItemFn);
 
         let signature = proper_function.clone().sig;
-        let detour_ident = signature.clone().ident;
+        let _detour_ident = signature.clone().ident;
 
         let visibility = proper_function.clone().vis;
 
         let ident_string = signature.ident.to_string();
-        let type_name = ident_string.split("_").next().and_then(|fn_name| {
+        let type_name = ident_string.split('_').next().map(|fn_name| {
             let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
-            Some(Ident::new(&name, Span::call_site()))
+            Ident::new(&name, Span::call_site())
         });
 
-        let c_function_name = ident_string.split("_").next();
-        let c_function_ident = ident_string
-            .split("_")
+        let _c_function_name = ident_string.split('_').next();
+        let _c_function_ident = ident_string
+            .split('_')
             .next()
             .map(|n| Ident::new(n, Span::call_site()));
 
-        let static_name = ident_string.split("_").next().and_then(|fn_name| {
+        let static_name = ident_string.split('_').next().map(|fn_name| {
             let name = format!("FN_{}", fn_name.to_uppercase());
-            Some(Ident::new(&name, Span::call_site()))
+            Ident::new(&name, Span::call_site())
         });
 
         let unsafety = signature.unsafety;
@@ -97,7 +95,7 @@ pub fn hook_fn(
 
         // panic!("{}", output.to_string());
 
-        output.into()
+        output
     };
 
     proc_macro::TokenStream::from(output)

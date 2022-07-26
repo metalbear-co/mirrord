@@ -1,8 +1,8 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr};
 
 use bincode::{Decode, Encode};
 
-use crate::{ConnectionID, Port, RemoteResult};
+use crate::{ConnectionID, Port};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {

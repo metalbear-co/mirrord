@@ -1,7 +1,6 @@
 use std::{
     ffi::CString,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
-    ops::Deref,
     os::unix::{
         io::RawFd,
         prelude::{FromRawFd, IntoRawFd},
@@ -15,18 +14,18 @@ use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use os_socketaddr::OsSocketAddr;
 use socket2::{Domain, SockAddr};
-use tokio::{net::TcpStream, runtime::Handle, sync::oneshot, task};
-use tracing::{debug, error, info, trace, warn};
+use tokio::{net::TcpStream, sync::oneshot};
+use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, send_hook_message, GetAddrInfoHook, HookMessage},
+    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
     tcp::{
         outgoing::{Connect, OutgoingTraffic, UserStream},
         HookMessageTcp, Listen,
     },
-    HOOK_SENDER, RUNTIME,
+    HOOK_SENDER,
 };
 
 // TODO(alex) [high] 2022-07-21: Separate sockets into 2 compartments, listen sockets go into a
@@ -308,9 +307,9 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
     } else {
         user_socket
             .connect(&SockAddr::from(remote_address))
-            .and_then(|()| {
+            .map(|()| {
                 user_socket.into_raw_fd();
-                Ok(())
+                
             })
     }?;
 

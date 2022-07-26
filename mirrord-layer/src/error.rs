@@ -1,4 +1,4 @@
-use std::{any::Any, env::VarError, marker, os::unix::io::RawFd, ptr, str::ParseBoolError};
+use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;

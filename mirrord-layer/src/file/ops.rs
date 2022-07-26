@@ -157,7 +157,7 @@ pub(crate) fn fopen(
         path, open_options
     );
 
-    let local_file_fd = open(path.clone(), open_options)?;
+    let local_file_fd = open(path, open_options)?;
     let open_files = OPEN_FILES.lock().unwrap();
 
     open_files

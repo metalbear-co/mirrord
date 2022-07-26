@@ -1,26 +1,14 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    ffi::CStr,
-    os::unix::io::RawFd,
-    sync::{LazyLock, OnceLock},
-};
+use std::{ffi::CStr, os::unix::io::RawFd, sync::LazyLock};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, trace, warn};
+use tracing::{error, trace, warn};
 
 use super::ops::*;
-use crate::{
-    error::LayerError,
-    hook2,
-    macros::{hook, try_hook},
-    socket::AddrInfoHintExt,
-    GUM,
-};
+use crate::{error::LayerError, hook2, socket::AddrInfoHintExt, GUM};
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn socket_detour(
