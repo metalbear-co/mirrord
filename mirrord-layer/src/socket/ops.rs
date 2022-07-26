@@ -17,7 +17,7 @@ use socket2::{Domain, SockAddr};
 use tokio::{net::TcpStream, runtime::Handle, sync::oneshot, task};
 use tracing::{debug, error, info, trace, warn};
 
-use super::{*, hooks::*};
+use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
@@ -37,7 +37,7 @@ use crate::{
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     // let fd = unsafe { libc::socket(domain, type_, protocol) };
-    let fd = unsafe { FN_SOCKET.get().unwrap()(domain, type_, protocol) };
+    let fd = unsafe { FN_SOCKET(domain, type_, protocol) };
     if fd == -1 {
         error!("socket failed");
         return fd;

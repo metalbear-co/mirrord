@@ -1,6 +1,6 @@
 use proc_macro2::Span;
 use quote::{quote, ToTokens};
-use syn::{AttributeArgs, Ident, ItemFn, Signature, TypeBareFn};
+use syn::{AttributeArgs, Ident, ItemFn, MetaNameValue, Signature, TypeBareFn};
 
 #[proc_macro_attribute]
 pub fn hook_fn(
@@ -9,9 +9,34 @@ pub fn hook_fn(
 ) -> proc_macro::TokenStream {
     let output: proc_macro2::TokenStream = {
         let macro_args = syn::parse_macro_input!(args as AttributeArgs);
+
+        let mut hook_alias: Option<Ident> = None;
+
+        for nested in macro_args.into_iter() {
+            match nested {
+                syn::NestedMeta::Meta(meta) => match meta {
+                    syn::Meta::NameValue(name_value) => {
+                        let ident = name_value.path.get_ident().expect(&format!(
+                            "Expected ident for path, found {:#?}",
+                            name_value.path
+                        ));
+
+                        if *ident == Ident::new("alias", Span::call_site()) {
+                            hook_alias = Some(ident.clone());
+                        } else {
+                            panic!("Invalid ident {:#?} for macro!", ident);
+                        }
+                    }
+                    invalid => panic!("Invalid meta arg {:#?} for macro!", invalid),
+                },
+                syn::NestedMeta::Lit(lit) => panic!("Invalid arg {:#?} for macro!", lit),
+            }
+        }
+
         let proper_function = syn::parse_macro_input!(input as ItemFn);
 
         let signature = proper_function.clone().sig;
+        let detour_ident = signature.clone().ident;
 
         let visibility = proper_function.clone().vis;
 
@@ -20,6 +45,12 @@ pub fn hook_fn(
             let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
             Some(Ident::new(&name, Span::call_site()))
         });
+
+        let c_function_name = ident_string.split("_").next();
+        let c_function_ident = ident_string
+            .split("_")
+            .next()
+            .map(|n| Ident::new(n, Span::call_site()));
 
         let static_name = ident_string.split("_").next().and_then(|fn_name| {
             let name = format!("FN_{}", fn_name.to_uppercase());
@@ -40,17 +71,43 @@ pub fn hook_fn(
 
         let return_type = signature.output;
 
+        // `unsafe extern "C" fn(i32) -> i32`
         let bare_fn = quote! {
             #unsafety #abi fn(#(#fn_args),*) #return_type
         };
 
+        // `pub type FnFoo = `
         let type_alias = quote! {
             #visibility type #type_name = #bare_fn
         };
 
         let original_fn = quote! {
-            #visibility static #static_name: std::sync::OnceLock<#type_name> =
-                std::sync::OnceLock::new()
+            #visibility static #static_name: std::sync::LazyLock<#type_name> =
+                std::sync::LazyLock::new(|| {
+                    let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
+                                    symbol_name,
+                                    detour: #type_name|
+                    -> Result<#type_name, LayerError> {
+                        let function = frida_gum::Module::find_export_by_name(None, symbol_name)
+                            .ok_or(LayerError::NoExportName(symbol_name.to_string()))?;
+
+                        let replaced = interceptor.replace(
+                            function,
+                            frida_gum::NativePointer(detour as *mut libc::c_void),
+                            frida_gum::NativePointer(std::ptr::null_mut()),
+                        )?;
+
+                        let original_fn: #type_name = unsafe { std::mem::transmute(replaced) };
+
+                        Ok(original_fn)
+                    };
+
+                    let mut interceptor = crate::INTERCEPTOR.lock().unwrap();
+                    let intercepted = intercept(&mut interceptor, #c_function_name, #detour_ident);
+                    trace!("intercepted {:#?}", intercepted);
+
+                    intercepted.unwrap_or(libc::#c_function_ident)
+                })
         };
 
         let output = quote! {

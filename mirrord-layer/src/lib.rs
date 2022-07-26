@@ -5,6 +5,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
+    ops::{Deref, DerefMut},
     sync::{Arc, LazyLock, Mutex, OnceLock},
 };
 
@@ -45,8 +46,29 @@ mod tcp_mirror;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
 
+pub(crate) struct Inter<'a>(Interceptor<'a>);
+
+unsafe impl<'a> Send for Inter<'a> {}
+unsafe impl<'a> Sync for Inter<'a> {}
+
+impl<'a> Deref for Inter<'a> {
+    type Target = Interceptor<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> DerefMut for Inter<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
+pub(crate) static INTERCEPTOR: LazyLock<Arc<Mutex<Inter>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(Inter(Interceptor::obtain(&GUM)))));
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
@@ -75,7 +97,7 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops, config.remote_dns);
+    // enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
