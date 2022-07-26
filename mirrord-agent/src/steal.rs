@@ -97,6 +97,9 @@ impl Drop for SafeIpTables {
             )
             .unwrap();
         self.inner
+            .flush_chain(IPTABLES_TABLE_NAME, &self.chain_name)
+            .unwrap();
+        self.inner
             .delete_chain(IPTABLES_TABLE_NAME, &self.chain_name)
             .unwrap();
     }
@@ -222,7 +225,7 @@ pub async fn steal_worker(
 
         set_namespace(namespace)?;
     }
-    debug!("preparing sniffer");
+    debug!("preparing steal");
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
     let mut worker = StealWorker::new(tx, listen_port)?;
