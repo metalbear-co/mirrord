@@ -32,6 +32,18 @@ struct SafeIpTables {
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
+fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
+    format!(
+        "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
+        redirected_port, target_port
+    )
+}
+
+/// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
+/// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
+/// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
+/// Connections will go then PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK
+/// -> ORIGINAL_CHAIN
 impl SafeIpTables {
     pub fn new() -> Result<Self> {
         let ipt = iptables::new(false).unwrap();
@@ -54,22 +66,23 @@ impl SafeIpTables {
     }
 
     pub fn add_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
-        let rule = format!(
-            "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
-            redirected_port, target_port
-        );
         self.inner
-            .insert(IPTABLES_TABLE_NAME, &self.chain_name, &rule, 0)
+            .insert(
+                IPTABLES_TABLE_NAME,
+                &self.chain_name,
+                &format_redirect_rule(redirected_port, target_port),
+                0,
+            )
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
     pub fn remove_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
-        let rule = format!(
-            "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
-            redirected_port, target_port
-        );
         self.inner
-            .delete(IPTABLES_TABLE_NAME, &self.chain_name, &rule)
+            .delete(
+                IPTABLES_TABLE_NAME,
+                &self.chain_name,
+                &format_redirect_rule(redirected_port, target_port),
+            )
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 }

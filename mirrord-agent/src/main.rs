@@ -298,7 +298,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
-            ClientMessage::TcpSteal(message) => self.handle_client_steal_tcp(message).await?,
+            ClientMessage::TcpSteal(message) => self.tcp_stealer_sender.send(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }
@@ -318,10 +318,6 @@ impl ClientConnectionHandler {
         }
     }
 
-    async fn handle_client_steal_tcp(&mut self, message: LayerStealTcp) -> Result<(), AgentError> {
-        self.tcp_stealer_sender.send(message).await?;
-        Ok(())
-    }
 }
 
 async fn start_agent() -> Result<(), AgentError> {
