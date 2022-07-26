@@ -128,6 +128,42 @@ impl StealWorker {
         })
     }
 
+    pub async fn handle_loop(
+        &mut self,
+        mut rx: Receiver<LayerStealTcp>,
+        mut listener: TcpListener,
+    ) -> () {
+        loop {
+            select! {
+                msg = rx.recv() => {
+                    if let Some(msg) = msg {
+                        self.handle_client_message(msg).await?;
+                    } else {
+                        debug!("rx closed, breaking");
+                        break;
+                    }
+                },
+                accept = listener.accept() => {
+                    match accept {
+                        Ok((stream, address)) => {
+                            self.handle_incoming_connection(stream, address).await?;
+                        },
+                        Err(err) => {
+                            error!("accept error {err:?}");
+                            break;
+                        }
+                    }
+                },
+                message = self.next() => {
+                    if let Some(message) = message {
+                        self.sender.send(message).await?;
+                    }
+                }
+            }
+        }
+        info!("TCP Stealer exiting");
+    }
+
     pub async fn handle_client_message(&mut self, message: LayerStealTcp) -> Result<()> {
         use LayerStealTcp::*;
         match message {
@@ -229,35 +265,10 @@ pub async fn steal_worker(
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
     let mut worker = StealWorker::new(tx, listen_port)?;
-    loop {
-        select! {
-            msg = rx.recv() => {
-                if let Some(msg) = msg {
-                    worker.handle_client_message(msg).await?;
-                } else {
-                    debug!("rx closed, breaking");
-                    break;
-                }
-            },
-            accept = listener.accept() => {
-                match accept {
-                    Ok((stream, address)) => {
-                        worker.handle_incoming_connection(stream, address).await?;
-                    },
-                    Err(err) => {
-                        error!("accept error {err:?}");
-                        break;
-                    }
-                }
-            },
-            message = worker.next() => {
-                if let Some(message) = message {
-                    worker.sender.send(message).await?;
-                }
-            }
-        }
-    }
-    info!("TCP Stealer exiting");
+    tokio::spawn(async move {
+        worker.handle_loop(rx, listener).await;
+    });
+
     Ok(())
 }
 

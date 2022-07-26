@@ -199,11 +199,8 @@ impl ClientConnectionHandler {
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
-        tokio::spawn(async move {
-            steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid)
-                .await
-                .unwrap_or_else(|e| error!("steal_worker failed: {}", e));
-        });
+
+        steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await?;
 
         let mut client_handler = ClientConnectionHandler {
             id,
