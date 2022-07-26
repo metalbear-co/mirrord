@@ -10,6 +10,11 @@
 
 </div>
 
+[![Discord](https://img.shields.io/discord/933706914808889356)](https://discord.gg/J5YSrStDKD)
+![License](https://img.shields.io/badge/license-MIT-green)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
+[![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
+
 mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both a [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
 
 ## Getting Started
