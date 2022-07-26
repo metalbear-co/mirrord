@@ -32,8 +32,8 @@ impl RuntimeData {
     ) -> Result<Self> {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await?;
-        let node_name = &pod.spec?.node_name;
-        let container_statuses = &pod.status?.container_statuses?;
+        let node_name = &pod.spec.unwrap().node_name;
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
             &container_statuses
                 .iter()
@@ -47,10 +47,14 @@ impl RuntimeData {
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
-            &container_statuses.first()?.container_id
+            &container_statuses.first().unwrap().container_id
         };
 
-        let container_info = container_info.as_ref()?.split("://").collect::<Vec<&str>>();
+        let container_info = container_info
+            .as_ref()
+            .unwrap()
+            .split("://")
+            .collect::<Vec<&str>>();
 
         let (container_runtime, socket_path) = match container_info.first() {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
@@ -58,12 +62,12 @@ impl RuntimeData {
             _ => panic!("unsupported container runtime"),
         };
 
-        let container_id = container_info.last()?;
+        let container_id = container_info.last().unwrap();
 
         Ok(RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
-            node_name: node_name.as_ref()?.to_string(),
+            node_name: node_name.as_ref().unwrap().to_string(),
             socket_path: socket_path.to_string(),
         })
     }
@@ -105,10 +109,17 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
             &impersonated_pod_namespace,
             &impersonated_container_name,
         )
-        .await?;
+        .await;
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
-        create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
+        create_job_pod_agent(
+            &config,
+            agent_image,
+            &pods_api,
+            runtime_data.unwrap(),
+            &jobs_api,
+        )
+        .await?
     };
     pods_api
         .portforward(&pod_name, &[61337])
