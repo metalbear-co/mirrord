@@ -247,6 +247,9 @@ async fn create_job_pod_agent(
                             "imagePullPolicy": config.image_pull_policy,
                             "securityContext": {
                                 "privileged": true,
+                                "capabilities": {
+                                  "add": ["NET_ADMIN", "NET_RAW"]
+                                }
                             },
                             "volumeMounts": [
                                 {
