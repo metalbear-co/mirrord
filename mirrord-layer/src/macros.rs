@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! hook2 {
-    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty) => {{
+    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
         let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
                          symbol_name,
                          detour: $detour_type|
@@ -20,6 +20,7 @@ macro_rules! hook2 {
         };
 
         intercept($interceptor, $detour_name, $detour_function)
+            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
     }};
 }
 

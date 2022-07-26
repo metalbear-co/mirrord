@@ -289,41 +289,37 @@ static FN_SOCKET2: LazyLock<FnSocket> = LazyLock::new(|| {
 });
 
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
-    let _ = hook2!(interceptor, "socket", socket_detour, FnSocket)
-        .and_then(|h| Ok(FN_SOCKET.set(h).unwrap()));
+    let _ = hook2!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+    let _ = hook2!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
+    let _ = hook2!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 
-    let _ =
-        hook2!(interceptor, "bind", bind_detour, FnBind).and_then(|h| Ok(FN_BIND.set(h).unwrap()));
+    let _ = hook2!(
+        interceptor,
+        "connect",
+        connect_detour,
+        FnConnect,
+        FN_CONNECT
+    );
 
-    let _ = hook2!(interceptor, "listen", listen_detour, FnListen)
-        .and_then(|h| Ok(FN_LISTEN.set(h).unwrap()));
-
-    let _ = hook2!(interceptor, "connect", connect_detour, FnConnect)
-        .and_then(|h| Ok(FN_CONNECT.set(h).unwrap()));
-
-    let _ = hook2!(interceptor, "fcntl", fcntl_detour, FnFcntl)
-        .and_then(|h| Ok(FN_FCNTL.set(h).unwrap()));
-
-    let _ = hook2!(interceptor, "dup", dup_detour, FnDup).and_then(|h| Ok(FN_DUP.set(h).unwrap()));
-
-    let _ =
-        hook2!(interceptor, "dup2", dup2_detour, FnDup2).and_then(|h| Ok(FN_DUP2.set(h).unwrap()));
+    let _ = hook2!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
+    let _ = hook2!(interceptor, "dup", dup_detour, FnDup, FN_DUP);
+    let _ = hook2!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2);
 
     let _ = hook2!(
         interceptor,
         "getpeername",
         getpeername_detour,
-        FnGetpeername
-    )
-    .and_then(|h| Ok(FN_GETPEERNAME.set(h).unwrap()));
+        FnGetpeername,
+        FN_GETPEERNAME
+    );
 
     let _ = hook2!(
         interceptor,
         "getsockname",
         getsockname_detour,
-        FnGetsockname
-    )
-    .and_then(|h| Ok(FN_GETSOCKNAME.set(h).unwrap()));
+        FnGetsockname,
+        FN_GETSOCKNAME
+    );
 
     #[cfg(target_os = "linux")]
     {
@@ -343,40 +339,49 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         // initialization. I'm starting to think that maybe we could initialize either to the
         // detour or to the `libc` version, this way we cover both cases (enabled/disabled), these
         // being the left and right sides of this either variant.
-        let _ = hook2!(interceptor, "uv__accept4", accept4_detour, FnAccept4)
-            .or_else(|fail| {
-                warn!(
-                    "enable_socket_hooks -> Failed hooking `uv__accept4` with {:#?}!",
-                    fail
-                );
+        let _ = hook2!(
+            interceptor,
+            "uv__accept4",
+            accept4_detour,
+            FnAccept4,
+            FN_ACCEPT4
+        )
+        .or_else(|fail| {
+            warn!(
+                "enable_socket_hooks -> Failed hooking `uv__accept4` with {:#?}!",
+                fail
+            );
 
-                hook2!(interceptor, "accept4", accept4_detour, FnAccept4)
-            })
-            .and_then(|h| Ok(FN_ACCEPT4.set(h).unwrap()));
+            hook2!(
+                interceptor,
+                "accept4",
+                accept4_detour,
+                FnAccept4,
+                FN_ACCEPT4
+            )
+        });
 
-        let _ = hook2!(interceptor, "dup3", dup3_detour, FnDup3)
-            .and_then(|h| Ok(FN_DUP3.set(h).unwrap()));
+        let _ = hook2!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3);
     }
 
-    let _ = hook2!(interceptor, "accept", accept_detour, FnAccept)
-        .and_then(|h| Ok(FN_ACCEPT.set(h).unwrap()));
+    let _ = hook2!(interceptor, "accept", accept_detour, FnAccept, FN_ACCEPT);
 
     if enabled_remote_dns {
         let _ = hook2!(
             interceptor,
             "getaddrinfo",
             getaddrinfo_detour,
-            FnGetaddrinfo
-        )
-        .and_then(|h| Ok(FN_GETADDRINFO.set(h).unwrap()));
+            FnGetaddrinfo,
+            FN_GETADDRINFO
+        );
 
         let _ = hook2!(
             interceptor,
             "freeaddrinfo",
             freeaddrinfo_detour,
-            FnFreeaddrinfo
-        )
-        .and_then(|h| Ok(FN_FREEADDRINFO.set(h).unwrap()));
+            FnFreeaddrinfo,
+            FN_FREEADDRINFO
+        );
     }
 }
 

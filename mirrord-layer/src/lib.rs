@@ -18,6 +18,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
@@ -320,12 +321,14 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    unsafe { hook!(interceptor, "close", close_detour) };
+    unsafe {
+        let _ = hook2!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+    };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
     if enabled_file_ops {
-        file::hooks::enable_file_hooks(&mut interceptor);
+        unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
 
     interceptor.end_transaction();
@@ -334,6 +337,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
+#[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
