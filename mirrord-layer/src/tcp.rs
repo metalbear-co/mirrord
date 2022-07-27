@@ -10,7 +10,7 @@ use std::{
 
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, TcpClose, TcpData, TcpNewConnection},
     ClientCodec, Port,
 };
 use tokio::net::TcpStream;
@@ -110,13 +110,13 @@ pub trait TcpHandler {
     }
 
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<(), LayerError>;
+    async fn handle_new_connection(&mut self, conn: TcpNewConnection) -> Result<(), LayerError>;
 
     /// Connects to the local listening socket, add it to the queue and return the stream.
     /// Find better name
     async fn create_local_stream(
         &mut self,
-        tcp_connection: &NewTcpConnection,
+        tcp_connection: &TcpNewConnection,
     ) -> Result<TcpStream, LayerError> {
         let destination_port = tcp_connection.destination_port;
 
