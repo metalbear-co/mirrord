@@ -110,6 +110,15 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Failed request to create socket with domain `{0}`!")]
     UnsupportedDomain(i32),
+
+    #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
+    BypassedPort(u16),
+
+    #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
+    SocketInvalidState(RawFd),
+
+    #[error("mirrord-layer: Null pointer found!")]
+    NullPointer,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -165,6 +174,9 @@ impl From<LayerError> for i64 {
             LayerError::Utf8(_) => libc::EINVAL,
             LayerError::AddressConversion => libc::EINVAL,
             LayerError::UnsupportedDomain(_) => libc::EINVAL,
+            LayerError::BypassedPort(_) => libc::EINVAL,
+            LayerError::SocketInvalidState(_) => libc::EINVAL,
+            LayerError::NullPointer => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

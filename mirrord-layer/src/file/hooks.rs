@@ -13,7 +13,7 @@ use super::{
 use crate::{
     error::LayerError,
     file::ops::{lseek, open, read, write},
-    hook2,
+    hook,
 };
 
 /// Hook for `libc::open`.
@@ -304,13 +304,13 @@ pub(crate) unsafe extern "C" fn write_detour(
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
-    let _ = hook2!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
-    let _ = hook2!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    let _ = hook2!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
-    let _ = hook2!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
-    let _ = hook2!(interceptor, "read", read_detour, FnRead, FN_READ);
-    let _ = hook2!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
-    let _ = hook2!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
-    let _ = hook2!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
-    let _ = hook2!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
+    let _ = hook!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
+    let _ = hook!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
+    let _ = hook!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
+    let _ = hook!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    let _ = hook!(interceptor, "read", read_detour, FnRead, FN_READ);
+    let _ = hook!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
+    let _ = hook!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
+    let _ = hook!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+    let _ = hook!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
 }

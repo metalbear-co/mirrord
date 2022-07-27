@@ -1,36 +1,13 @@
 use proc_macro2::Span;
-use quote::{quote};
-use syn::{AttributeArgs, Ident, ItemFn};
+use quote::quote;
+use syn::{Ident, ItemFn};
 
 #[proc_macro_attribute]
 pub fn hook_fn(
-    args: proc_macro::TokenStream,
+    _args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let output: proc_macro2::TokenStream = {
-        let macro_args = syn::parse_macro_input!(args as AttributeArgs);
-
-        let mut hook_alias: Option<Ident> = None;
-
-        for nested in macro_args.into_iter() {
-            match nested {
-                syn::NestedMeta::Meta(meta) => match meta {
-                    syn::Meta::NameValue(name_value) => {
-                        let ident = name_value.path.get_ident().unwrap_or_else(|| panic!("Expected ident for path, found {:#?}",
-                            name_value.path));
-
-                        if *ident == Ident::new("alias", Span::call_site()) {
-                            hook_alias = Some(ident.clone());
-                        } else {
-                            panic!("Invalid ident {:#?} for macro!", ident);
-                        }
-                    }
-                    invalid => panic!("Invalid meta arg {:#?} for macro!", invalid),
-                },
-                syn::NestedMeta::Lit(lit) => panic!("Invalid arg {:#?} for macro!", lit),
-            }
-        }
-
         let proper_function = syn::parse_macro_input!(input as ItemFn);
 
         let signature = proper_function.clone().sig;

@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! hook2 {
+macro_rules! hook {
     ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
         let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
                          symbol_name,
@@ -23,40 +23,3 @@ macro_rules! hook2 {
             .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
     }};
 }
-
-macro_rules! hook {
-    ($interceptor:expr, $func:expr, $detour_name:expr) => {
-        $interceptor
-            .replace(
-                frida_gum::Module::find_export_by_name(None, $func).unwrap(),
-                frida_gum::NativePointer($detour_name as *mut libc::c_void),
-                frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
-            )
-            .unwrap();
-    };
-}
-
-macro_rules! try_hook {
-    ($interceptor:expr, $func:expr, $detour_name:expr) => {
-        if let Some(addr) = frida_gum::Module::find_export_by_name(None, $func) {
-            match $interceptor.replace(
-                addr,
-                frida_gum::NativePointer($detour_name as *mut libc::c_void),
-                frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
-            ) {
-                Err(frida_gum::Error::InterceptorAlreadyReplaced) => {
-                    error!("{} already replaced", $func);
-                }
-                Err(e) => {
-                    error!("{} error: {:?}", $func, e);
-                }
-                Ok(_) => {
-                    debug!("{} hooked", $func);
-                }
-            }
-        }
-    };
-}
-
-
-

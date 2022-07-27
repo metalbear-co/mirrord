@@ -12,8 +12,10 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use os_socketaddr::OsSocketAddr;
 
+use crate::error::LayerError;
+
 pub(super) mod hooks;
-mod ops;
+pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -97,7 +99,7 @@ pub struct MirrorSocket {
 }
 
 #[inline]
-fn is_ignored_port(port: Port) -> bool {
+const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 
@@ -107,21 +109,23 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> c_int {
-    if address.is_null() {
-        return 0;
+) -> Result<(), LayerError> {
+    if address.is_null() || address_len.is_null() {
+        Err(LayerError::NullPointer)
+    } else {
+        let os_address: OsSocketAddr = new_address.into();
+        unsafe {
+            let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
+            std::ptr::copy_nonoverlapping(
+                os_address.as_ptr() as *const u8,
+                address as *mut u8,
+                len,
+            );
+            *address_len = os_address.len();
+        }
+
+        Ok(())
     }
-    if address_len.is_null() {
-        set_errno(Errno(libc::EINVAL));
-        return -1;
-    }
-    let os_address: OsSocketAddr = new_address.into();
-    unsafe {
-        let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-        std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);
-        *address_len = os_address.len();
-    }
-    0
 }
 
 pub(crate) trait AddrInfoHintExt {

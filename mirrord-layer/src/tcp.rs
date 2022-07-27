@@ -6,6 +6,7 @@ use std::{
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::io::RawFd,
+    sync::atomic::Ordering,
 };
 
 use async_trait::async_trait;
@@ -14,12 +15,12 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, ClientMessage, Port,
 };
-use tokio::net::{TcpStream};
-use tracing::debug;
+use tokio::net::TcpStream;
+use tracing::{debug, trace};
 
 use crate::{
     error::LayerError,
-    socket::{SocketInformation, CONNECTION_QUEUE},
+    socket::{ops::IS_INTERNAL_CALL, SocketInformation, CONNECTION_QUEUE},
 };
 
 pub(crate) mod outgoing;
@@ -121,6 +122,10 @@ pub(crate) trait TcpHandler {
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
+        trace!(
+            "create_local_stream -> tcp_connection {:#?}",
+            tcp_connection
+        );
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
@@ -138,7 +143,11 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
-        TcpStream::connect(addr).await.map_err(From::from)
+        IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+        let tcp_stream = TcpStream::connect(addr).await.map_err(From::from);
+        IS_INTERNAL_CALL.swap(false, Ordering::Release);
+
+        tcp_stream
     }
 
     /// Handle New Data messages

@@ -5,7 +5,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    ops::{Deref},
+    ops::Deref,
     sync::{LazyLock, OnceLock},
 };
 
@@ -95,6 +95,8 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
+    // TODO(alex) [mid] 2022-07-27: Maybe if this is not a tokio thingy (std spawn) we could avoid
+    // the whole issue? Basically trying to take out tokio out of the way as much as possible?
     RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
 }
 
@@ -322,7 +324,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.begin_transaction();
 
     unsafe {
-        let _ = hook2!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = hook!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
