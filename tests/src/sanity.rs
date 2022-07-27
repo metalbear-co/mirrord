@@ -76,11 +76,6 @@ mod tests {
         #[cfg(target_os = "macos")]
         GoHTTP,
     }
-    pub enum Agent {
-        #[cfg(target_os = "linux")]
-        Ephemeral,
-        Job,
-    }
 
     struct TestProcess {
         pub child: Child,
@@ -182,16 +177,6 @@ mod tests {
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
-        }
-    }
-
-    impl Agent {
-        fn flag(&self) -> Option<Vec<&str>> {
-            match self {
-                #[cfg(target_os = "linux")]
-                Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
-                Agent::Job => None,
-            }
         }
     }
 
@@ -517,13 +502,12 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.pod_name, Some(&service.namespace), None)
             .await;
         process.wait_for_line(Duration::from_secs(30), "real_port: 80");
         send_requests(&url).await;
@@ -552,13 +536,12 @@ mod tests {
         #[future] service: EchoService,
         #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.pod_name, Some(&service.namespace), None)
             .await;
         process.wait_for_line(Duration::from_secs(30), "real_port: 80");
         send_requests(&url).await;
@@ -572,10 +555,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(
-        #[future] service: EchoService,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-    ) {
+    pub async fn test_file_ops(#[future] service: EchoService) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
@@ -583,10 +563,6 @@ mod tests {
         let shared_lib_path = get_shared_lib_path();
 
         let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
-
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
-        }
 
         let mut process = run(
             python_command,
@@ -603,18 +579,14 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+    pub async fn test_file_ops(#[future] service: EchoService) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
         let shared_lib_path = get_shared_lib_path();
 
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
-
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
-        }
+        let args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
 
         let mut process = run(
             python_command,
