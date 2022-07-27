@@ -130,7 +130,7 @@ impl StealWorker {
 
     pub async fn handle_loop(
         &mut self,
-        rx: Receiver<LayerTcpSteal>,
+        mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
     ) -> Result<()> {
         loop {
