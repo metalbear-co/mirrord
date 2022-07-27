@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Added
+- Refer to filesystem path as `/proc/1/root` when there is no container pid.
+
+## Fixed
+- Fix filesystem tests to only run if the default path exists.
+
 ## 2.5.0
 
 ### Added
