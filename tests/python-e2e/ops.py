@@ -6,6 +6,15 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 
 
 class FileOpsTest(unittest.TestCase):
+    def setUp(self):
+        """
+        Skip and raise an exception if the default file does not exist.
+        """
+        try:
+            self.assertTrue(os.path.exists("/app/test.txt"))
+        except AssertionError:
+            self.skipTest("Default file does not exist")
+
     def test_read_write_family(self):
         """
         Reads data from a file in "/tmp" and verifies the text expected is the same as the text written.
@@ -39,8 +48,7 @@ class FileOpsTest(unittest.TestCase):
         dir = os.open(
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
-        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK |
-                       os.O_CLOEXEC, dir_fd=dir)
+        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
         self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)
