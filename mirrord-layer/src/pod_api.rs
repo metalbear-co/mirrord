@@ -8,8 +8,8 @@ use kube::{
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use serde_json::{json, to_vec};
-use tracing::{debug, error, info, warn};
+use serde_json::json;
+use tracing::{error, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
 
