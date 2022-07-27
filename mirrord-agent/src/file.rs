@@ -76,7 +76,7 @@ impl FileManager {
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = match pid {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
-            None => PathBuf::from("/"),
+            None => PathBuf::from("/proc").join("1").join("root"),
         };
         Self {
             open_files: HashMap::new(),
