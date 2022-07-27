@@ -64,7 +64,12 @@ mirrord exec node app.js --pod-name my-pod
 mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
 
 ## Contributing
-Contributions are welcome via PRs.
+Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
+If you wish to work an issue, please comment so you can be assigned.
+
+
+## Development
+Read our development guide [here](https://mirrord.dev/docs/developer/testing/).
 
 
 ## Help & Community 🎉✉️
