@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerTcp, TcpClose, TcpData, TcpNewConnection},
     ClientCodec, ClientMessage, ConnectionID,
 };
 use tokio::{
@@ -116,7 +116,7 @@ impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
     async fn handle_new_connection(
         &mut self,
-        tcp_connection: NewTcpConnection,
+        tcp_connection: TcpNewConnection,
     ) -> Result<(), LayerError> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 

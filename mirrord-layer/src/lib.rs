@@ -171,7 +171,7 @@ where
             DaemonMessage::Tcp(message) => {
                 self.tcp_mirror_handler.handle_daemon_message(message).await
             }
-            DaemonMessage::StealTcp(message) => {
+            DaemonMessage::TcpSteal(message) => {
                 self.tcp_steal_handler.handle_daemon_message(message).await
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,

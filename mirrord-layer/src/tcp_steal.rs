@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{LayerStealTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerTcpSteal, TcpClose, TcpData, TcpNewConnection},
     ClientCodec, ClientMessage, ConnectionID,
 };
 use streammap_ext::StreamMap;
@@ -32,7 +32,7 @@ pub struct TcpStealHandler {
 impl TcpHandler for TcpStealHandler {
     async fn handle_new_connection(
         &mut self,
-        tcp_connection: NewTcpConnection,
+        tcp_connection: TcpNewConnection,
     ) -> Result<(), LayerError> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
@@ -115,7 +115,7 @@ impl TcpHandler for TcpStealHandler {
             .ok_or(LayerError::ListenAlreadyExists)?;
 
         codec
-            .send(ClientMessage::TcpSteal(LayerStealTcp::PortSubscribe(port)))
+            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
             .await
             .map_err(From::from)
     }
@@ -129,7 +129,7 @@ impl TcpHandler for TcpStealHandler {
         >,
     ) -> Result<(), LayerError> {
         codec
-            .send(ClientMessage::TcpSteal(LayerStealTcp::PortUnsubscribe(
+            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
                 close.port,
             )))
             .await
@@ -141,7 +141,7 @@ impl TcpStealHandler {
     pub async fn next(&mut self) -> Option<ClientMessage> {
         let (connection_id, value) = self.read_streams.next().await?;
         match value {
-            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerStealTcp::Data(TcpData {
+            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                 connection_id,
                 bytes: bytes.to_vec(),
             }))),
@@ -150,7 +150,7 @@ impl TcpStealHandler {
                 None
             }
             None => Some(ClientMessage::TcpSteal(
-                LayerStealTcp::ConnectionUnsubscribe(connection_id),
+                LayerTcpSteal::ConnectionUnsubscribe(connection_id),
             )),
         }
     }

@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use crate::{ConnectionID, Port};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct NewTcpConnection {
+pub struct TcpNewConnection {
     pub connection_id: ConnectionID,
     pub address: IpAddr,
     pub destination_port: Port,
@@ -34,14 +34,14 @@ pub enum LayerTcp {
 /// Messages related to Tcp handler from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonTcp {
-    NewConnection(NewTcpConnection),
+    NewConnection(TcpNewConnection),
     Data(TcpData),
     Close(TcpClose),
 }
 
 /// Messages related to Steal Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum LayerStealTcp {
+pub enum LayerTcpSteal {
     PortSubscribe(Port),
     ConnectionUnsubscribe(ConnectionID),
     PortUnsubscribe(Port),

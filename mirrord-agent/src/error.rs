@@ -1,5 +1,5 @@
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerStealTcp},
+    tcp::{DaemonTcp, LayerTcpSteal},
     FileRequest, FileResponse, Port,
 };
 use thiserror::Error;
@@ -56,8 +56,8 @@ pub enum AgentError {
     #[error("Connection received from unexepcted port `{0}`")]
     UnexpectedConnection(Port),
 
-    #[error("LayerStealTcp sender failed with `{0}`")]
-    SendLayerStealTcp(#[from] tokio::sync::mpsc::error::SendError<LayerStealTcp>),
+    #[error("LayerTcpSteal sender failed with `{0}`")]
+    SendLayerTcpSteal(#[from] tokio::sync::mpsc::error::SendError<LayerTcpSteal>),
 
     #[error("IPTables failed with `{0}`")]
     IPTablesError(String),

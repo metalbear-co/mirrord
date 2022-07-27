@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerStealTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcpSteal, TcpClose, TcpData, TcpNewConnection},
     ConnectionID, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -130,7 +130,7 @@ impl StealWorker {
 
     pub async fn handle_loop(
         &mut self,
-        mut rx: Receiver<LayerStealTcp>,
+        mut rx: Receiver<LayerTcpSteal>,
         mut listener: TcpListener,
     ) -> Result<()> {
         loop {
@@ -162,10 +162,11 @@ impl StealWorker {
             }
         }
         info!("TCP Stealer exiting");
+        Ok(())
     }
 
-    pub async fn handle_client_message(&mut self, message: LayerStealTcp) -> Result<()> {
-        use LayerStealTcp::*;
+    pub async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
+        use LayerTcpSteal::*;
         match message {
             PortSubscribe(port) => {
                 if self.ports.contains(&port) {
@@ -222,7 +223,7 @@ impl StealWorker {
         self.read_streams
             .insert(connection_id, ReaderStream::new(read_half));
 
-        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
+        let new_connection = DaemonTcp::NewConnection(TcpNewConnection {
             connection_id,
             destination_port: real_addr.port(),
             source_port: address.port(),
@@ -249,7 +250,7 @@ impl StealWorker {
 }
 
 pub async fn steal_worker(
-    mut rx: Receiver<LayerStealTcp>,
+    mut rx: Receiver<LayerTcpSteal>,
     tx: Sender<DaemonTcp>,
     pid: Option<u64>,
 ) -> Result<()> {

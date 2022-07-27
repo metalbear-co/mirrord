@@ -15,7 +15,7 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerStealTcp, LayerTcp},
+    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage, GetAddrInfoRequest,
     GetEnvVarsRequest, RemoteResult, ResponseError,
 };
@@ -178,7 +178,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
-    tcp_stealer_sender: Sender<LayerStealTcp>,
+    tcp_stealer_sender: Sender<LayerTcpSteal>,
     tcp_stealer_receiver: Receiver<DaemonTcp>,
 }
 
@@ -239,7 +239,7 @@ impl ClientConnectionHandler {
                 },
                 message = self.tcp_stealer_receiver.recv() => {
                     if let Some(message) = message {
-                        self.stream.send(DaemonMessage::StealTcp(message)).await?;
+                        self.stream.send(DaemonMessage::TcpSteal(message)).await?;
                     } else {
                         error!("tcp stealer stopped?");
                         break;

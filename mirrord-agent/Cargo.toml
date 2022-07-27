@@ -38,7 +38,7 @@ bollard = "0.13"
 tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true
-iptables = "0.5.0"
+iptables = "0.5"
 libc = "0.2"
 
 [dev-dependencies]

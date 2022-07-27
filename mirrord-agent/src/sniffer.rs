@@ -7,7 +7,7 @@ use std::{
 
 use futures::StreamExt;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, TcpClose, TcpData, TcpNewConnection},
     ConnectionID, Port,
 };
 use pcap::{
@@ -471,7 +471,7 @@ impl TCPConnectionSniffer {
 
                 let client_ids = self.port_subscriptions.get_topic_subscribers(dest_port);
 
-                let message = DaemonTcp::NewConnection(NewTcpConnection {
+                let message = DaemonTcp::NewConnection(TcpNewConnection {
                     destination_port: dest_port,
                     source_port,
                     connection_id: id,
