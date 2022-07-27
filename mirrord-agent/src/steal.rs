@@ -161,7 +161,7 @@ impl StealWorker {
                 }
             }
         }
-        info!("TCP Stealer exiting");
+        debug!("TCP Stealer exiting");
         Ok(())
     }
 
@@ -275,6 +275,7 @@ pub async fn steal_worker(
             });
     });
 
+    debug!("finished preparing");
     Ok(())
 }
 
