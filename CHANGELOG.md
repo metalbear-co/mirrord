@@ -7,9 +7,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Removed
-- Removed Ephemeral Containers until they become better supported.
-
 ## 2.5.0
 
 ### Added
