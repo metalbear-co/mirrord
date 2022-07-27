@@ -250,7 +250,7 @@ impl StealWorker {
 }
 
 pub async fn steal_worker(
-    mut rx: Receiver<LayerTcpSteal>,
+    rx: Receiver<LayerTcpSteal>,
     tx: Sender<DaemonTcp>,
     pid: Option<u64>,
 ) -> Result<()> {
