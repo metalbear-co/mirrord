@@ -73,10 +73,16 @@ impl FileManager {
         }
     }
 
-    pub fn new(pid: Option<u64>) -> Self {
+    pub fn new(pid: Option<u64>, ephemeral: bool) -> Self {
         let root_path = match pid {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
-            None => PathBuf::from("/proc").join("1").join("root"),
+            None => {
+                if ephemeral {
+                    PathBuf::from("/proc").join("1").join("root")
+                } else {
+                    PathBuf::from("/")
+                }
+            }
         };
         Self {
             open_files: HashMap::new(),
