@@ -10,10 +10,15 @@ use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use os_socketaddr::OsSocketAddr;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
-use crate::{error::LayerError, hook, socket::AddrInfoHintExt, GUM};
+use crate::{
+    error::LayerError,
+    hook,
+    socket::{AddrInfoHintExt, SocketState, SOCKETS},
+    GUM,
+};
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn socket_detour(
@@ -31,6 +36,7 @@ pub(super) unsafe extern "C" fn socket_detour(
     let socket_result = FN_SOCKET(domain, type_, protocol);
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("socket_detour -> bypassed");
         socket_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -56,6 +62,7 @@ pub(super) unsafe extern "C" fn bind_detour(
     };
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("bind_detour -> bypassed");
         FN_BIND(sockfd, addr, addrlen)
     } else {
         let (Ok(result) | Err(result)) =
@@ -82,6 +89,7 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
     );
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("listen_detour -> bypassed");
         FN_LISTEN(sockfd, backlog)
     } else {
         let (Ok(result) | Err(result)) =
@@ -104,6 +112,19 @@ pub(super) unsafe extern "C" fn connect_detour(
     trace!("connect_detour -> sockfd {:#?}", sockfd);
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("connect_detour -> bypassed");
+        if let Some(socket) = SOCKETS.lock().unwrap().remove(&sockfd) {
+            if let SocketState::Bound(bound) = socket.state {
+                let rawish_address = OsSocketAddr::from(bound.address);
+
+                // TODO(alex) [high] 2022-07-27: This is the idea to solve the loop problem (and go
+                // back to working state), but it's not working yet.
+                if bind_detour(sockfd, rawish_address.as_ptr(), rawish_address.len()) < 0 {
+                    return -1;
+                }
+            }
+        }
+
         FN_CONNECT(sockfd, raw_address, address_length)
     } else {
         let address =
@@ -119,9 +140,7 @@ pub(super) unsafe extern "C" fn connect_detour(
             connect(sockfd, address)
                 .map(|()| 0)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(fd) => {
-                        libc::connect(fd, raw_address, address_length)
-                    }
+                    LayerError::LocalFDNotFound(fd) => FN_CONNECT(fd, raw_address, address_length),
                     other => other.into(),
                 });
 
@@ -138,6 +157,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     trace!("getpeername_detour -> sockfd {:#?}", sockfd);
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("getpeername_detour -> bypassed");
         FN_GETPEERNAME(sockfd, address, address_len)
     } else {
         let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
@@ -159,6 +179,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     trace!("getsockname_detour -> sockfd {:#?}", sockfd);
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("getsockname_detour -> bypassed");
         FN_GETSOCKNAME(sockfd, address, address_len)
     } else {
         let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
@@ -184,6 +205,7 @@ pub(super) unsafe extern "C" fn accept_detour(
     if accept_result == -1 {
         accept_result
     } else if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("accept_detour -> bypassed");
         accept_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -205,6 +227,7 @@ pub(super) unsafe extern "C" fn accept4_detour(
     if accept_result == -1 {
         accept_result
     } else if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("accept4_detour -> bypassed");
         accept_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -218,21 +241,38 @@ pub(super) unsafe extern "C" fn accept4_detour(
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();
-    let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    fcntl(fd, cmd, fcntl_fd)
+    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        fcntl_fd
+    } else {
+        fcntl(fd, cmd, fcntl_fd)
+    }
 }
 
 #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    let fcntl_fd = libc::fcntl(fd, cmd, arg);
-    fcntl(fd, cmd, fcntl_fd)
+    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("fcntl_detour -> bypassed");
+        fcntl_fd
+    } else {
+        fcntl(fd, cmd, fcntl_fd)
+    }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    let dup_fd = libc::dup(fd);
-    dup(fd, dup_fd)
+    let dup_fd = FN_DUP(fd);
+
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("dup_detour -> bypassed");
+        dup_fd
+    } else {
+        dup(fd, dup_fd)
+    }
 }
 
 #[hook_fn]
@@ -240,15 +280,28 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
     if oldfd == newfd {
         return newfd;
     }
-    let dup2_fd = libc::dup2(oldfd, newfd);
-    dup(oldfd, dup2_fd)
+
+    let dup2_fd = FN_DUP2(oldfd, newfd);
+
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("dup2_detour -> bypassed");
+        dup2_fd
+    } else {
+        dup(oldfd, dup2_fd)
+    }
 }
 
 #[cfg(target_os = "linux")]
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = libc::dup3(oldfd, newfd, flags);
-    dup(oldfd, dup3_fd)
+    let dup3_fd = FN_DUP3(oldfd, newfd, flags);
+
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("dup3_detour -> bypassed");
+        dup3_fd
+    } else {
+        dup(oldfd, dup3_fd)
+    }
 }
 
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.

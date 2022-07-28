@@ -173,6 +173,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             .remove(&sockfd)
             .ok_or(LayerError::LocalFDNotFound(sockfd))?
     };
+    debug!("connect -> user_socket_info {:#?}", user_socket_info);
 
     // let user_socket = unsafe { socket2::Socket::from_raw_fd(sockfd) };
     // user_socket.connect(&SockAddr::from(remote_address))?;
@@ -203,9 +204,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         // the original libc function.
         // Actually, this is a more general idea, every hook should perform a similar check.
 
-        // IS_INTERNAL_CALL.store(true, Ordering::Release);
-        let mirror_listener: tokio::net::TcpListener =
-            TcpListener::bind(unbound_mirror_address)?.try_into()?;
+        IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+        let mirror_listener = TcpListener::bind(unbound_mirror_address)?;
 
         let mirror_address = mirror_listener.local_addr()?;
         trace!("connect -> mirror_address {:#?}", mirror_address);
@@ -442,6 +442,13 @@ pub(super) fn getaddrinfo(
     service: Option<String>,
     hints: Option<AddrInfoHint>,
 ) -> Result<*mut libc::addrinfo, LayerError> {
+    trace!(
+        "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
+        node,
+        service,
+        hints
+    );
+
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
@@ -485,8 +492,6 @@ pub(super) fn getaddrinfo(
                 ai_canonname,
                 ai_next: ptr::null_mut(),
             };
-
-            trace!("getaddrinfo -> c_addr_info {:#?}", c_addr_info);
 
             c_addr_info
         })

@@ -16,6 +16,7 @@ use tokio::{
     net::TcpStream,
     select,
     sync::mpsc::{channel, Receiver, Sender},
+    task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, trace, warn};
@@ -128,8 +129,7 @@ impl TcpHandler for TcpMirrorHandler {
         let new_connection = Connection::new(tcp_connection.connection_id, sender);
         self.connections.insert(new_connection);
 
-        // task::spawn(async move { tcp_tunnel(stream, receiver).await });
-        tcp_tunnel(stream, receiver).await;
+        task::spawn(async move { tcp_tunnel(stream, receiver).await });
 
         Ok(())
     }

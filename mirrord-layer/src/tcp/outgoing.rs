@@ -1,9 +1,11 @@
-use std::{collections::HashMap, net::SocketAddr, os::unix::prelude::AsRawFd};
+use std::{
+    collections::HashMap, net::SocketAddr, os::unix::prelude::AsRawFd, sync::atomic::Ordering,
+};
 
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, ConnectRequest, ConnectResponse,
-    OutgoingTrafficRequest, OutgoingTrafficResponse, ReadResponse, WriteRequest,
+    ClientCodec, ClientMessage, ConnectRequest, ConnectResponse, OutgoingTrafficRequest,
+    OutgoingTrafficResponse, ReadResponse, WriteRequest,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,12 +16,13 @@ use tracing::trace;
 use crate::{
     common::{ResponseChannel, ResponseDeque},
     error::LayerError,
+    socket::ops::IS_INTERNAL_CALL,
 };
 
 #[derive(Debug)]
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
-    pub(crate) mirror_listener: TcpListener,
+    pub(crate) mirror_listener: std::net::TcpListener,
     pub(crate) channel_tx: ResponseChannel<ConnectResponse>,
     pub(crate) user_fd: i32,
 }
@@ -109,7 +112,16 @@ impl OutgoingTrafficHandler {
                     mirror_listener
                 );
 
-                let (mirror_stream, _) = mirror_listener.accept().await?;
+                // TODO(alex) [high] 2022-07-28: Move this handling to the response part, there we
+                // should call a bypass version of `connect` on the user socket, and then call
+                // the bypass version of `accept` on our middle socket.
+                //
+                // Some of this stuff is being done in `ops::connect`, so probably requires moving
+                // it around.
+                IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+                let (mirror_stream, _) = TcpListener::try_from(mirror_listener)?.accept().await?;
+                IS_INTERNAL_CALL.swap(true, Ordering::Release);
+
                 self.mirror_streams.insert(user_fd, mirror_stream);
 
                 self.connect_queue.push_back(channel_tx);

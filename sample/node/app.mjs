@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createServer } from "net";
 import { open, readFile } from "fs/promises";
+import https from "https";
 
 async function debug_file_ops() {
   try {
@@ -28,6 +29,29 @@ async function debug_file_ops() {
   }
 }
 
+function make_request() {
+  const options = {
+    hostname: "google.com",
+    port: 443,
+    path: "/",
+    method: "GET",
+  };
+
+  const request = https.request(options, (response) => {
+    console.log(`>>> statusCode: ${response.statusCode}`);
+
+    response.on("data", (d) => {
+      process.stdout.write(d);
+    });
+  });
+
+  request.on("error", (error) => {
+    console.error(error);
+  });
+
+  request.end();
+}
+
 // debug_file_ops();
 
 const server = createServer();
@@ -38,25 +62,30 @@ server.listen(
     port: 80,
   },
   function () {
-    console.log("server listening to %j", server.address());
+    console.log(">>> server listening to %j", server.address());
+
+    make_request();
   }
 );
 
 function handleConnection(conn) {
   var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-  console.log("new client connection from %s", remoteAddress);
+  console.log(">>> new client connection from %s", remoteAddress);
+
   conn.on("data", onConnData);
   conn.once("close", onConnClose);
   conn.on("error", onConnError);
 
   function onConnData(d) {
-    console.log("connection data from %s: %j", remoteAddress, d.toString());
+    console.log(">>> connection data from %s: %j", remoteAddress, d.toString());
     conn.write(d);
   }
+
   function onConnClose() {
-    console.log("connection from %s closed", remoteAddress);
+    console.log(">>> connection from %s closed", remoteAddress);
   }
+
   function onConnError(err) {
-    console.log("Connection %s error: %s", remoteAddress, err.message);
+    console.log(">>> connection %s error: %s", remoteAddress, err.message);
   }
 }
