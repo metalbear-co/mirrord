@@ -86,7 +86,7 @@ impl FileManager {
             }
         };
         debug!("Using root path: {}", root_path.display());
-        let ls = std::fs::read_dir("/").unwrap();
+        let ls = std::fs::read_dir("/proc/1/root").unwrap();
         let _ = ls.map(|x| debug!("dir = {:?}", x.unwrap()));
         Self {
             open_files: HashMap::new(),
