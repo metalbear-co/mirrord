@@ -578,7 +578,7 @@ mod tests {
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "python-e2e/ops.py"];
+        let mut python_command = vec![];
 
         let shared_lib_path = get_shared_lib_path();
 
@@ -586,6 +586,9 @@ mod tests {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
+            python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+        } else {
+            python_command = vec!["python3", "python-e2e/ops.py"]
         }
 
         let mut process = run(
@@ -606,7 +609,7 @@ mod tests {
     pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "python-e2e/ops.py"];
+        let mut python_command = vec![];
 
         let shared_lib_path = get_shared_lib_path();
 
@@ -614,6 +617,9 @@ mod tests {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
+            python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+        } else {
+            python_command = vec!["python3", "python-e2e/ops.py"]
         }
 
         let mut process = run(

@@ -8,12 +8,9 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 class FileOpsTest(unittest.TestCase):
     def setUp(self):
         """
-        Skip and raise an exception if the default file does not exist.
-        """
-        try:
-            self.assertTrue(os.path.exists("/app/test.txt"))
-        except AssertionError:
-            self.skipTest("Default file does not exist")
+        Check if the default file exists.
+        """        
+        self.assertTrue(os.path.exists("/app/test.txt"))        
 
     def test_read_write_family(self):
         """
