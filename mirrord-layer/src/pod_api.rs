@@ -151,6 +151,7 @@ async fn create_ephemeral_container_agent(
             "./mirrord-agent",
             "-t",
             "30",
+            "--ephemeral",
         ],
     }))?;
     debug!("Requesting ephemeral_containers_subresource");

@@ -7,10 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-## Added
-- Refer to filesystem path as `/proc/1/root` when there is no container pid.
 
-## Fixed
+### Added
+- Add a flag for the agent, `--ephemeral`, to correctly refer to the filesystem i.e. refer to filesystem path as `/proc/1/root` when the flag is on, otherwise `/`.
+
+### Fixed
 - Fix filesystem tests to only run if the default path exists.
 
 ## 2.5.0
