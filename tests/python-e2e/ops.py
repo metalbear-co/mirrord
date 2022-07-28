@@ -9,8 +9,7 @@ class FileOpsTest(unittest.TestCase):
     def setUp(self):
         """
         Check if the default file exists.
-        """
-        self.assertTrue(os.path.exists("/app/test.txt"))
+        """        
         with open("/app/test.txt", "r") as f:
             f.seek(0)
             self.assertEqual(f.readline(), TEXT)
