@@ -27,7 +27,7 @@ pub struct Args {
     pub interface: String,
 
     /// Inform agent to use /proc/1/root as rootpath
-    #[clap(short = 'e', long, value_parser)]
+    #[clap(short = 'e', long, value_parser, default_value = "false")]
     pub ephemeral: bool,
 }
 
