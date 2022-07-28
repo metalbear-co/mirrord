@@ -23,7 +23,7 @@ use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
     tcp::{
-        outgoing::{Connect, OutgoingTraffic, UserStream},
+        outgoing::{Connect, CreateMirrorStream, OutgoingTraffic},
         HookMessageTcp, Listen,
     },
 };
@@ -191,27 +191,19 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         // 4. Calls to read on this socket in `agent` will contain data that we log, and then
         // write to `remote_address`;
 
-        // We're creating an interceptor socket that talks with the user socket.
-        let unbound_mirror_address = match Domain::from(user_socket_info.domain) {
-            Domain::IPV4 => Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
-            Domain::IPV6 => Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)),
-            _ => Err(LayerError::UnsupportedDomain(user_socket_info.domain)),
-        }?;
-
         let (channel_tx, channel_rx) = oneshot::channel();
 
         // TODO(alex) [mid] 2022-07-26: Use TLS to make this `bind` call bypass our hook and use
         // the original libc function.
         // Actually, this is a more general idea, every hook should perform a similar check.
 
-        IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
-        let mirror_listener = TcpListener::bind(unbound_mirror_address)?;
+        // IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+        // let mirror_listener = TcpListener::bind(unbound_mirror_address)?;
 
-        let mirror_address = mirror_listener.local_addr()?;
-        trace!("connect -> mirror_address {:#?}", mirror_address);
+        // let mirror_address = mirror_listener.local_addr()?;
+        // trace!("connect -> mirror_address {:#?}", mirror_address);
 
         let connect = Connect {
-            mirror_listener,
             user_fd: sockfd,
             remote_address,
             channel_tx,
@@ -219,9 +211,44 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
         let connect_hook = OutgoingTraffic::Connect(connect);
 
-        // TODO(alex) [high] 2202-07-20: Send this crap as blocking, try to bypass tokio.
         blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
         channel_rx.blocking_recv()??;
+
+        // TODO(alex) [mid] 2022-07-28: Instead of connecting here, I could send the pair of
+        // streams to be handled elsewhere (`OutgoingTrafficHandler` probably).
+
+        // TODO(alex) [high] 2022-07-28: The connection request is being sent to agent, but it stops
+        // there at:
+        /*
+        2022-07-28T20:24:23.548109Z DEBUG mirrord_agent: client_handler -> client sent message OutgoingTraffic(Connect(ConnectRequest { remote_address: 255.127.0.0:443 }))
+                 */
+
+        // We're creating an interceptor socket that talks with the user socket.
+        let unbound_mirror_address = match Domain::from(user_socket_info.domain) {
+            Domain::IPV4 => Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+            Domain::IPV6 => Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)),
+            _ => Err(LayerError::UnsupportedDomain(user_socket_info.domain)),
+        }?;
+
+        IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+        let mirror_listener = TcpListener::bind(unbound_mirror_address)?;
+        let mirror_address = mirror_listener.local_addr()?;
+        IS_INTERNAL_CALL.swap(false, Ordering::Release);
+
+        let hook_message = CreateMirrorStream {
+            user_fd: sockfd,
+            mirror_listener,
+        };
+
+        let hook = OutgoingTraffic::CreateMirrorStream(hook_message);
+
+        blocking_send_hook_message(HookMessage::OutgoingTraffic(hook))?;
+
+        let connect_to = OsSocketAddr::from(mirror_address);
+        let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+        if connect_result == -1 {
+            return Err(todo!());
+        }
 
         let connected = Connected {
             remote_address,
@@ -230,40 +257,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
         trace!("connect -> connected {:#?}", connected);
 
-        // TODO(alex) [high] 2202-07-16:
-        // // 1. We send a hook message to the agent;
-        // 2. agent will create a `TcpListener` waiting for a connection on `intercept_address`;
-        // 3. agent sends back to layer this address;
-        // 4. layer connects to this intercepted address;
-        //
-        // Need a thread that will hold all these intercepted addresses in agent, so we can use
-        // `set_namespace` in there.
-        // let intercept_address = hook_channel_rx.recv()?;
-
-        let raw_mirror_address = SockAddr::from(mirror_address);
-        let result = unsafe {
-            FN_CONNECT(
-                sockfd,
-                raw_mirror_address.as_ptr(),
-                raw_mirror_address.len(),
-            )
-        };
-        if result != 0 {
-            return Err(LayerError::DNSNoName);
-        }
-
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        let user_stream = TcpStream::from_std(unsafe { std::net::TcpStream::from_raw_fd(sockfd) })?;
-
-        let user_stream = UserStream {
-            stream: user_stream,
-        };
-
-        let user_stream_hook = OutgoingTraffic::UserStream(user_stream);
-
-        blocking_send_hook_message(HookMessage::OutgoingTraffic(user_stream_hook))?;
-
-        IS_INTERNAL_CALL.store(false, Ordering::Release);
 
         Ok::<(), LayerError>(())
     } else if let SocketState::Bound(bound) = user_socket_info.state {

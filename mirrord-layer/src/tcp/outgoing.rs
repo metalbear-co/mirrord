@@ -22,29 +22,34 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
-    pub(crate) mirror_listener: std::net::TcpListener,
     pub(crate) channel_tx: ResponseChannel<ConnectResponse>,
     pub(crate) user_fd: i32,
 }
 
 #[derive(Debug)]
-pub(crate) struct UserStream {
-    pub(crate) stream: TcpStream,
+pub(crate) struct CreateMirrorStream {
+    pub(crate) user_fd: i32,
+    pub(crate) mirror_listener: std::net::TcpListener,
 }
 
 #[derive(Debug)]
 pub(crate) enum OutgoingTraffic {
     Connect(Connect),
-    UserStream(UserStream),
+    CreateMirrorStream(CreateMirrorStream),
 }
 
 #[derive(Debug)]
 pub(crate) struct OutgoingTrafficHandler {
     // task: task::JoinHandle<Result<(), LayerError>>,
     read_buffer: Vec<u8>,
-    user_streams: HashMap<i32, TcpStream>,
+    mirrors: HashMap<i32, MirrorStream>,
     mirror_streams: HashMap<i32, TcpStream>,
     connect_queue: ResponseDeque<ConnectResponse>,
+}
+
+#[derive(Debug)]
+pub(crate) struct MirrorStream {
+    mirror: TcpStream,
 }
 
 impl Default for OutgoingTrafficHandler {
@@ -54,7 +59,7 @@ impl Default for OutgoingTrafficHandler {
         Self {
             // task,
             read_buffer: Vec::with_capacity(1500),
-            user_streams: HashMap::with_capacity(4),
+            mirrors: HashMap::with_capacity(4),
             mirror_streams: HashMap::with_capacity(4),
             connect_queue: ResponseDeque::with_capacity(4),
         }
@@ -101,15 +106,13 @@ impl OutgoingTrafficHandler {
         match message {
             OutgoingTraffic::Connect(Connect {
                 remote_address,
-                mirror_listener,
                 channel_tx,
                 // TODO(alex) [mid] 2022-07-20: Has to be socket address, rather than fd?
                 user_fd,
             }) => {
                 trace!(
-                    "OutgoingTraffic::Connect -> remote_address {:#?} | mirror_listener {:#?}",
+                    "OutgoingTraffic::Connect -> remote_address {:#?}",
                     remote_address,
-                    mirror_listener
                 );
 
                 // TODO(alex) [high] 2022-07-28: Move this handling to the response part, there we
@@ -118,11 +121,6 @@ impl OutgoingTrafficHandler {
                 //
                 // Some of this stuff is being done in `ops::connect`, so probably requires moving
                 // it around.
-                IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
-                let (mirror_stream, _) = TcpListener::try_from(mirror_listener)?.accept().await?;
-                IS_INTERNAL_CALL.swap(true, Ordering::Release);
-
-                self.mirror_streams.insert(user_fd, mirror_stream);
 
                 self.connect_queue.push_back(channel_tx);
 
@@ -132,8 +130,22 @@ impl OutgoingTrafficHandler {
                     ))
                     .await?)
             }
-            OutgoingTraffic::UserStream(UserStream { stream }) => {
-                self.user_streams.insert(stream.as_raw_fd(), stream);
+            OutgoingTraffic::CreateMirrorStream(CreateMirrorStream {
+                user_fd,
+                mirror_listener,
+            }) => {
+                IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+
+                let (mirror_stream, _) = TcpListener::from_std(mirror_listener)?.accept().await?;
+
+                IS_INTERNAL_CALL.swap(false, Ordering::Release);
+
+                self.mirrors.insert(
+                    user_fd.as_raw_fd(),
+                    MirrorStream {
+                        mirror: mirror_stream,
+                    },
+                );
 
                 Ok(())
             }
