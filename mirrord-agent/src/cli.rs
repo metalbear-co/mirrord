@@ -25,10 +25,6 @@ pub struct Args {
     /// Interface to use
     #[clap(short = 'i', long, default_value = "eth0", value_parser)]
     pub interface: String,
-
-    /// Inform agent to use /proc/1/root as rootpath
-    #[clap(short = 'e', long, value_parser, default_value = "false")]
-    pub ephemeral: bool,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";

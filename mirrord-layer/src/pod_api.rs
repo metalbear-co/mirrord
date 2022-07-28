@@ -145,13 +145,13 @@ async fn create_ephemeral_container_agent(
         "name": mirrord_agent_name,
         "image": agent_image,
         "imagePullPolicy": config.image_pull_policy,
-        "target_container_name": config.impersonated_container_name,
+        "targetContainerName": config.impersonated_container_name,
+        "workingDir": "/proc/1/root",
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
         "command": [
             "./mirrord-agent",
             "-t",
             "30",
-            "--ephemeral",
         ],
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
