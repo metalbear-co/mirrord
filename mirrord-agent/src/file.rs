@@ -12,7 +12,7 @@ use mirrord_protocol::{
     ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use tracing::{error, trace};
+use tracing::{error, trace, debug};
 
 use crate::{error::AgentError, util::IndexAllocator};
 
@@ -74,6 +74,7 @@ impl FileManager {
     }
 
     pub fn new(pid: Option<u64>, ephemeral: bool) -> Self {
+        debug!("Using ephemeral containers: {}", ephemeral);
         let root_path = match pid {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
             None => {
@@ -84,6 +85,9 @@ impl FileManager {
                 }
             }
         };
+        debug!("Using root path: {}", root_path.display());
+        let ls = std::fs::read_dir("/").unwrap();
+        let _ = ls.map(|x| println!("{:?}", x.unwrap()));
         Self {
             open_files: HashMap::new(),
             root_path,
