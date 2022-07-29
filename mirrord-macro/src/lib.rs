@@ -75,5 +75,3 @@ pub fn hook_fn(
 
     proc_macro::TokenStream::from(output)
 }
-
-
