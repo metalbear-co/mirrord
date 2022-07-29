@@ -25,6 +25,10 @@ pub struct Args {
     /// Interface to use
     #[clap(short = 'i', long, default_value = "eth0", value_parser)]
     pub interface: String,
+
+    /// Inform the agent to use `proc/1/root` as the root directory.
+    #[clap(short = 'e', long, default_value_t = false, value_parser)]
+    pub ephemeral_container: bool,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";
