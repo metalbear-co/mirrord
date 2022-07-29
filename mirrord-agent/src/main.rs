@@ -187,8 +187,7 @@ impl ClientConnectionHandler {
         sniffer_command_sender: Sender<SnifferCommand>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let pid = pid.map(|pid| if ephemeral { 1 } else { pid });
-        let file_manager = FileManager::new(pid);
+        let file_manager = FileManager::new(pid, ephemeral);
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
@@ -307,7 +306,7 @@ async fn start_agent() -> Result<(), AgentError> {
     ))
     .await?;
 
-    let mut pid = match (args.container_id, args.container_runtime) {
+    let pid = match (args.container_id, args.container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
             Some(get_container_pid(&container_id, &container_runtime).await?)
         }
