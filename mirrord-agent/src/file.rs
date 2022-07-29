@@ -78,7 +78,7 @@ impl FileManager {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
             None => {
                 if ephemeral {
-                    PathBuf::from("/proc").join("1".to_string()).join("root")
+                    PathBuf::from("/proc").join("1").join("root")
                 } else {
                     PathBuf::from("/")
                 }
