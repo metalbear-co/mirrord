@@ -73,8 +73,7 @@ impl FileManager {
         }
     }
 
-    pub fn new(pid: Option<u64>, ephemeral: bool) -> Self {
-        let pid = pid.map(|pid| if ephemeral { 1 } else { pid });
+    pub fn new(pid: Option<u64>) -> Self {
         let root_path = match pid {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
             None => PathBuf::from("/"),

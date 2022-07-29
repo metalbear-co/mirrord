@@ -187,7 +187,16 @@ impl ClientConnectionHandler {
         sniffer_command_sender: Sender<SnifferCommand>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let file_manager = FileManager::new(pid, ephemeral);
+        let file_manager = match pid {
+            Some(_) => FileManager::new(pid),
+            None => {
+                if ephemeral {
+                    FileManager::new(Some(1))
+                } else {
+                    FileManager::new(None)
+                }
+            }
+        };
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
