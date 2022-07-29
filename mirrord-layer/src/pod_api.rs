@@ -116,8 +116,17 @@ pub async fn create_agent(
         .await;
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
-        create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
+        create_job_pod_agent(
+            &config,
+            agent_image,
+            &pods_api,
+            runtime_data,
+            &jobs_api,
+            connection_port,
+        )
+        .await?
     };
+    debug!("Creating portforwarder for port {}", connection_port);
     pods_api
         .portforward(&pod_name, &[connection_port])
         .await
@@ -157,7 +166,7 @@ async fn create_ephemeral_container_agent(
             "-t",
             "30",
             "-l",
-            connection_port,
+            format!("{}", connection_port),
         ],
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
@@ -220,6 +229,7 @@ async fn create_job_pod_agent(
     pods_api: &Api<Pod>,
     runtime_data: RuntimeData,
     job_api: &Api<Job>,
+    connection_port: u16,
 ) -> Result<String, LayerError> {
     let mirrord_agent_job_name = get_agent_name();
 
@@ -269,6 +279,8 @@ async fn create_job_pod_agent(
                                 runtime_data.container_runtime,
                                 "-t",
                                 "30",
+                                "-l",
+                                format!("{}", connection_port),
                             ],
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
                         }
