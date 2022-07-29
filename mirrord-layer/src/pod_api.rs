@@ -126,7 +126,6 @@ pub async fn create_agent(
         )
         .await?
     };
-    debug!("Creating portforwarder for port {}", connection_port);
     pods_api
         .portforward(&pod_name, &[connection_port])
         .await

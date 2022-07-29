@@ -63,6 +63,9 @@ fn init() {
 
     let config = LayerConfig::init_from_env().unwrap();
     let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+
+    info!("Using port `{connection_port:?}` for communication");
+
     let port_forwarder = RUNTIME
         .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|e| {

@@ -311,9 +311,9 @@ async fn start_agent() -> Result<(), AgentError> {
         }
         _ => {
             if args.ephemeral_container {
-                None
-            } else {
                 Some(1)
+            } else {
+                None
             }
         }
     };
