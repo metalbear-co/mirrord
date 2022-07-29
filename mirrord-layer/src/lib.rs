@@ -21,6 +21,7 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -51,6 +52,11 @@ pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
+pub static CONNECTION_PORT: LazyLock<u16> = LazyLock::new(|| {
+    let num = rand::thread_rng().gen_range(30000..=65535);
+    num
+});
+
 #[ctor]
 fn init() {
     tracing_subscriber::registry()
@@ -63,7 +69,7 @@ fn init() {
     let config = LayerConfig::init_from_env().unwrap();
 
     let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(config.clone()))
+        .block_on(pod_api::create_agent(config.clone(), *CONNECTION_PORT))
         .unwrap_or_else(|e| {
             panic!("failed to create agent: {}", e);
         });
@@ -228,7 +234,7 @@ async fn start_layer_thread(
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
-    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+    let port = pf.take_stream(*CONNECTION_PORT).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)

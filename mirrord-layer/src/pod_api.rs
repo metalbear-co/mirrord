@@ -74,7 +74,10 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
+pub async fn create_agent(
+    config: LayerConfig,
+    connection_port: u16,
+) -> Result<Portforwarder, LayerError> {
     let LayerConfig {
         agent_image,
         agent_namespace,
@@ -102,7 +105,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
     });
 
     let pod_name = if ephemeral_container {
-        create_ephemeral_container_agent(&config, agent_image, &pods_api).await?
+        create_ephemeral_container_agent(&config, agent_image, &pods_api, connection_port).await?
     } else {
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
@@ -116,7 +119,7 @@ pub async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerErr
         create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
     };
     pods_api
-        .portforward(&pod_name, &[61337])
+        .portforward(&pod_name, &[connection_port])
         .await
         .map_err(LayerError::KubeError)
 }
@@ -135,6 +138,7 @@ async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     agent_image: String,
     pods_api: &Api<Pod>,
+    connection_port: u16,
 ) -> Result<String, LayerError> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
@@ -152,6 +156,8 @@ async fn create_ephemeral_container_agent(
             "./mirrord-agent",
             "-t",
             "30",
+            "-l",
+            connection_port,
         ],
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
