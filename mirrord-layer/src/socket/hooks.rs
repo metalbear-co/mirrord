@@ -166,6 +166,8 @@ pub(super) unsafe extern "C" fn accept4_detour(
     address_len: *mut socklen_t,
     flags: i32,
 ) -> i32 {
+    trace!("accept4_detour -> sockfd {:#?}", sockfd);
+
     let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
 
     if accept_result == -1 {
@@ -180,42 +182,97 @@ pub(super) unsafe extern "C" fn accept4_detour(
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
-    let arg = arg.arg::<usize>();
-    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd);
 
-    fcntl(fd, cmd, fcntl_fd)
+    let arg = arg.arg::<usize>();
+
+    let fcntl_result = FN_FCNTL(fd, cmd, arg);
+
+    if fcntl_result == -1 {
+        fcntl_result
+    } else {
+        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result).map_err(From::from);
+        result
+    }
 }
 
 #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+    trace!(
+        "fcntl_detour -> fd {:#?} | cmd {:#?} | arg {:#?}",
+        fd,
+        cmd,
+        arg
+    );
 
-    fcntl(fd, cmd, fcntl_fd)
+    let fcntl_result = FN_FCNTL(fd, cmd, arg);
+
+    if fcntl_result == -1 {
+        fcntl_result
+    } else {
+        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
+            .map(|()| fcntl_result)
+            .map_err(From::from);
+        result
+    }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    let dup_fd = FN_DUP(fd);
+    trace!("dup_detour -> fd {:#?}", fd);
 
-    dup(fd, dup_fd)
+    let dup_result = FN_DUP(fd);
+
+    if dup_result == -1 {
+        dup_result
+    } else {
+        let (Ok(result) | Err(result)) =
+            dup(fd, dup_result).map(|()| dup_result).map_err(From::from);
+        result
+    }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
+    trace!("dup2_detour -> oldfd {:#?} | newfd {:#?}", oldfd, newfd);
+
     if oldfd == newfd {
         return newfd;
     }
 
-    let dup2_fd = FN_DUP2(oldfd, newfd);
-    dup(oldfd, dup2_fd)
+    let dup2_result = FN_DUP2(oldfd, newfd);
+
+    if dup2_result == -1 {
+        dup2_result
+    } else {
+        let (Ok(result) | Err(result)) = dup(oldfd, dup2_result)
+            .map(|()| dup2_result)
+            .map_err(From::from);
+        result
+    }
 }
 
 #[cfg(target_os = "linux")]
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = FN_DUP3(oldfd, newfd, flags);
-    dup(oldfd, dup3_fd)
+    trace!(
+        "dup3_detour -> oldfd {:#?} | newfd {:#?} | flags {:#?}",
+        oldfd,
+        newfd,
+        flags
+    );
+
+    let dup3_result = FN_DUP3(oldfd, newfd, flags);
+
+    if dup3_result == -1 {
+        dup3_result
+    } else {
+        let (Ok(result) | Err(result)) = dup(oldfd, dup3_result)
+            .map(|()| dup3_result)
+            .map_err(From::from);
+        result
+    }
 }
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
 ///

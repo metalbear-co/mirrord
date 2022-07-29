@@ -295,31 +295,23 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
-    if fcntl_fd == -1 {
-        error!("fcntl failed");
-        return fcntl_fd;
-    }
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
     match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
-            dup(orig_fd, fcntl_fd);
-        }
-        _ => (),
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
+        _ => Ok(()),
     }
-    fcntl_fd
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
-    if dup_fd == -1 {
-        error!("dup failed");
-        return dup_fd;
-    }
-    let mut sockets = SOCKETS.lock().unwrap();
-    if let Some(socket) = sockets.get(&fd) {
-        let dup_socket = socket.clone();
-        sockets.insert(dup_fd as RawFd, dup_socket);
-    }
-    dup_fd
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
+    let dup_socket = SOCKETS
+        .lock()?
+        .get(&fd)
+        .ok_or(LayerError::LocalFDNotFound(fd))?
+        .clone();
+
+    SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
+
+    Ok(())
 }
 
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
