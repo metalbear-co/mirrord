@@ -337,10 +337,10 @@ async fn start_agent() -> Result<(), AgentError> {
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
                     let client = tokio::spawn(async move {
-                    pid = pid.and_then(|pid| if args.ephemeral_container {
-                            Some(1)
+                    pid = pid.map(|pid| if args.ephemeral_container {
+                            1
                         } else {
-                            Some(pid)
+                            pid
                         });
                         match ClientConnectionHandler::start(client_id, stream, pid, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
