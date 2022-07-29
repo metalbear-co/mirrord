@@ -305,17 +305,11 @@ async fn start_agent() -> Result<(), AgentError> {
     ))
     .await?;
 
-    let pid = match (args.container_id, args.container_runtime) {
+    let mut pid = match (args.container_id, args.container_runtime) {
         (Some(container_id), Some(container_runtime)) => {
             Some(get_container_pid(&container_id, &container_runtime).await?)
         }
-        _ => {
-            if args.ephemeral_container {
-                Some(1)
-            } else {
-                None
-            }
-        }
+        _ => None,
     };
 
     let mut state = State::new();
@@ -343,6 +337,11 @@ async fn start_agent() -> Result<(), AgentError> {
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
                     let client = tokio::spawn(async move {
+                    pid = pid.and_then(|pid| if args.ephemeral_container {
+                            Some(1)
+                        } else {
+                            Some(pid)
+                        });
                         match ClientConnectionHandler::start(client_id, stream, pid, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
                                 debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
