@@ -2,6 +2,7 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
+use mirrord_macro::hook_fn;
 use mirrord_protocol::ReadFileResponse;
 use tracing::error;
 
@@ -12,12 +13,13 @@ use super::{
 use crate::{
     error::LayerError,
     file::ops::{lseek, open, read, write},
-    macros::hook,
+    replace,
 };
 
 /// Hook for `libc::open`.
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+#[hook_fn]
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
@@ -43,6 +45,7 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 /// Hook for `libc::fopen`.
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+#[hook_fn]
 pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
@@ -80,6 +83,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 ///
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
+#[hook_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
     let mode = match CStr::from_ptr(raw_mode)
         .to_str()
@@ -109,6 +113,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 /// If `fd == AT_FDCWD`, the current working directory is used, and the behavior is the same as
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
+#[hook_fn]
 pub(super) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
@@ -150,6 +155,7 @@ pub(super) unsafe extern "C" fn openat_detour(
 /// Hook for `libc::read`.
 ///
 /// Reads `count` bytes into `out_buffer`, only for `fd`s that are being managed by mirrord-layer.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn read_detour(
     fd: RawFd,
     out_buffer: *mut c_void,
@@ -186,6 +192,7 @@ pub(crate) unsafe extern "C" fn read_detour(
 ///
 /// Reads `element_size * number_of_elements` bytes into `out_buffer`, only for `*mut FILE`s that
 /// are being managed by mirrord-layer.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn fread_detour(
     out_buffer: *mut c_void,
     element_size: size_t,
@@ -224,6 +231,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 /// Hook for `libc::fileno`.
 ///
 /// Converts a `*mut FILE` stream into an fd.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
 
@@ -237,6 +245,7 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
 /// Hook for `libc::lseek`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
+#[hook_fn]
 pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
 
@@ -266,6 +275,7 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 /// Hook for `libc::write`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
+#[hook_fn]
 pub(crate) unsafe extern "C" fn write_detour(
     fd: RawFd,
     buffer: *const c_void,
@@ -293,14 +303,14 @@ pub(crate) unsafe extern "C" fn write_detour(
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) fn enable_file_hooks(interceptor: &mut Interceptor) {
-    hook!(interceptor, "open", open_detour);
-    hook!(interceptor, "openat", openat_detour);
-    hook!(interceptor, "fopen", fopen_detour);
-    hook!(interceptor, "fdopen", fdopen_detour);
-    hook!(interceptor, "read", read_detour);
-    hook!(interceptor, "fread", fread_detour);
-    hook!(interceptor, "fileno", fileno_detour);
-    hook!(interceptor, "lseek", lseek_detour);
-    hook!(interceptor, "write", write_detour);
+pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
+    let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
+    let _ = replace!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
+    let _ = replace!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
+    let _ = replace!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
+    let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
+    let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
+    let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+    let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
 }

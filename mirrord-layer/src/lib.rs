@@ -5,6 +5,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
+    ops::Deref,
     sync::{LazyLock, OnceLock},
 };
 
@@ -17,6 +18,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
@@ -43,13 +45,29 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+
+pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
+
+impl<T> Deref for HookFn<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get().unwrap()
+    }
+}
+
+impl<T> HookFn<T> {
+    pub(crate) fn set(&self, value: T) -> Result<(), T> {
+        self.0.set(value)
+    }
+}
 
 #[ctor]
 fn init() {
@@ -285,12 +303,14 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    hook!(interceptor, "close", close_detour);
+    unsafe {
+        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+    };
 
-    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
+    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
     if enabled_file_ops {
-        file::hooks::enable_file_hooks(&mut interceptor);
+        unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
 
     interceptor.end_transaction();
@@ -299,6 +319,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
+#[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()

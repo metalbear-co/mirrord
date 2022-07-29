@@ -1,4 +1,4 @@
-use std::{env::VarError, os::unix::io::RawFd, path::PathBuf, ptr, str::ParseBoolError};
+use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;
@@ -11,7 +11,13 @@ use tracing::error;
 use super::HookMessage;
 
 #[derive(Error, Debug)]
-pub enum LayerError {
+pub(crate) enum LayerError {
+    #[error("mirrord-layer: Frida failed with `{0}`!")]
+    Frida(#[from] frida_gum::Error),
+
+    #[error("mirrord-layer: Failed to find export for name `{0}`!")]
+    NoExportName(String),
+
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
 
@@ -26,6 +32,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
     SendErrorLayerTcp(#[from] SendError<LayerTcp>),
+
+    #[error("mirrord-layer: JoinError failed with `{0}`!")]
+    Join(#[from] tokio::task::JoinError),
 
     #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
     SendErrorFileResponse,
@@ -43,7 +52,7 @@ pub enum LayerError {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error("mirrord-layer: Failed to find local fd `{0}`!")]
-    LocalFDNotFound(RawFd, PathBuf),
+    LocalFDNotFound(RawFd),
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
@@ -75,9 +84,6 @@ pub enum LayerError {
     #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] InferConfigError),
 
-    #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
-    PodSpecNotFound(String),
-
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
 
@@ -92,6 +98,21 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
+
+    #[error("mirrord-layer: Failed converting `sockaddr`!")]
+    AddressConversion,
+
+    #[error("mirrord-layer: Failed request to create socket with domain `{0}`!")]
+    UnsupportedDomain(i32),
+
+    #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
+    BypassedPort(u16),
+
+    #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
+    SocketInvalidState(RawFd),
+
+    #[error("mirrord-layer: Null pointer found!")]
+    NullPointer,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -108,10 +129,13 @@ impl From<LayerError> for i64 {
         error!("Error occured in Layer >> {:?}", fail);
 
         let libc_error = match fail {
+            LayerError::Frida(_) => libc::EINVAL,
+            LayerError::NoExportName(_) => libc::EINVAL,
             LayerError::VarError(_) => libc::EINVAL,
             LayerError::ParseBoolError(_) => libc::EINVAL,
             LayerError::SendErrorHookMessage(_) => libc::EBADMSG,
             LayerError::SendErrorConnection(_) => libc::EBADMSG,
+            LayerError::Join(_) => libc::EBADMSG,
             LayerError::SendErrorLayerTcp(_) => libc::EBADMSG,
             LayerError::RecvError(_) => libc::EBADMSG,
             LayerError::Null(_) => libc::EINVAL,
@@ -135,12 +159,16 @@ impl From<LayerError> for i64 {
             },
             LayerError::UnmatchedPong => libc::ETIMEDOUT,
             LayerError::KubeConfigError(_) => libc::EINVAL,
-            LayerError::PodSpecNotFound(_) => libc::EINVAL,
             LayerError::KubeError(_) => libc::EINVAL,
             LayerError::JSONConvertError(_) => libc::EINVAL,
             LayerError::TimeOutError => libc::ETIMEDOUT,
             LayerError::DNSNoName => libc::EFAULT,
             LayerError::Utf8(_) => libc::EINVAL,
+            LayerError::AddressConversion => libc::EINVAL,
+            LayerError::UnsupportedDomain(_) => libc::EINVAL,
+            LayerError::BypassedPort(_) => libc::EINVAL,
+            LayerError::SocketInvalidState(_) => libc::EINVAL,
+            LayerError::NullPointer => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
