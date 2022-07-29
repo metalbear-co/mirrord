@@ -165,7 +165,7 @@ async fn create_ephemeral_container_agent(
             "-t",
             "30",
             "-l",
-            format!("{}", connection_port),
+            connection_port.to_string(),
             "-e",
         ],
     }))?;
@@ -280,7 +280,7 @@ async fn create_job_pod_agent(
                                 "-t",
                                 "30",
                                 "-l",
-                                format!("{}", connection_port),
+                                connection_port.to_string(),
                                 "-e",
                             ],
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
