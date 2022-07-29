@@ -52,10 +52,8 @@ pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
-pub static CONNECTION_PORT: LazyLock<u16> = LazyLock::new(|| {
-    let num = rand::thread_rng().gen_range(30000..=65535);
-    num
-});
+pub static CONNECTION_PORT: LazyLock<u16> =
+    LazyLock::new(|| rand::thread_rng().gen_range(30000..=65535));
 
 #[ctor]
 fn init() {
