@@ -191,7 +191,9 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     if fcntl_result == -1 {
         fcntl_result
     } else {
-        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result).map_err(From::from);
+        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
+            .map(|()| fcntl_result)
+            .map_err(From::from);
         result
     }
 }
