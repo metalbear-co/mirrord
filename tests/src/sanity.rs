@@ -22,10 +22,7 @@ mod tests {
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
     };
-    use rand::{
-        distributions::{Alphanumeric, DistString},
-        Rng,
-    };
+    use rand::{distributions::Alphanumeric, Rng};
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -571,9 +568,7 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let args = vec!["--enable-fs"];
 
         let mut process = run(
             python_command,
