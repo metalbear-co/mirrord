@@ -53,6 +53,9 @@ pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
+/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
+/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+#[derive(Debug)]
 pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
 
 impl<T> Deref for HookFn<T> {
@@ -60,6 +63,12 @@ impl<T> Deref for HookFn<T> {
 
     fn deref(&self) -> &Self::Target {
         self.0.get().unwrap()
+    }
+}
+
+impl<T> const Default for HookFn<T> {
+    fn default() -> Self {
+        Self(std::sync::OnceLock::new())
     }
 }
 
