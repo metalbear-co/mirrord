@@ -518,17 +518,6 @@ mod tests {
         process.assert_stderr();
     }
 
-    fn get_shared_lib_path() -> String {
-        let agent_name = format!(
-            "/tmp/{}",
-            Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
-                .to_lowercase()
-        );
-        std::fs::create_dir(&agent_name).unwrap();
-        agent_name
-    }
-
     #[cfg(target_os = "macos")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -560,9 +549,7 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let args = vec!["--enable-fs"];
 
         let mut process = run(
             python_command,
