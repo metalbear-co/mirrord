@@ -189,13 +189,8 @@ impl ClientConnectionHandler {
     ) -> Result<(), AgentError> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
-            None => {
-                if ephemeral {
-                    FileManager::new(Some(1))
-                } else {
-                    FileManager::new(None)
-                }
-            }
+            None if ephemeral => FileManager::new(Some(1)),
+            None => FileManager::new(None),
         };
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
