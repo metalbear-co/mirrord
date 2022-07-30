@@ -280,7 +280,6 @@ async fn create_job_pod_agent(
                                 "30",
                                 "-l",
                                 connection_port.to_string(),
-                                "-e",
                             ],
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
                         }

@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 
 ### Added
-- Add a flag for the agent, `--ephemeral`, to correctly refer to the filesystem i.e. refer to filesystem path as `/proc/1/root` when the flag is on, otherwise `/`.
+- Add a flag for the agent, `--ephemeral-container`, to correctly refer to the filesystem i.e. refer to root path as `/proc/1/root` when the flag is on, otherwise `/`.
 
 ### Changed
 - Assign a random port number instead of `61337`. (Reason: A forking process creates multiple agents sending traffic on the same port, causing addrinuse error.)
