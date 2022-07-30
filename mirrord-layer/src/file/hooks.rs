@@ -32,7 +32,7 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 
     // Calls with non absolute paths are sent to libc::open.
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
-        libc::open(raw_path, open_flags)
+        FN_OPEN(raw_path, open_flags)
     } else {
         let open_options = OpenOptionsInternalExt::from_flags(open_flags);
         let open_result = open(path, open_options);
@@ -69,7 +69,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
     };
 
     if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
-        libc::fopen(raw_path, raw_mode)
+        FN_FOPEN(raw_path, raw_mode)
     } else {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
         let fopen_result = fopen(path, open_options);
@@ -104,7 +104,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
         let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
         result
     } else {
-        libc::fdopen(fd, raw_mode)
+        FN_FDOPEN(fd, raw_mode)
     }
 }
 
@@ -147,7 +147,7 @@ pub(super) unsafe extern "C" fn openat_detour(
         } else {
             // Nope, it's relative outside of our hands.
 
-            libc::openat(fd, raw_path, open_flags)
+            FN_OPENAT(fd, raw_path, open_flags)
         }
     }
 }
@@ -184,7 +184,7 @@ pub(crate) unsafe extern "C" fn read_detour(
         let (Ok(result) | Err(result)) = read_result.map_err(From::from);
         result
     } else {
-        libc::read(fd, out_buffer, count)
+        FN_READ(fd, out_buffer, count)
     }
 }
 
@@ -224,7 +224,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
         let (Ok(result) | Err(result)) = read_result.map_err(From::from);
         result
     } else {
-        libc::fread(out_buffer, element_size, number_of_elements, file_stream)
+        FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
     }
 }
 
@@ -238,7 +238,7 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
         local_fd
     } else {
-        libc::fileno(file_stream)
+        FN_FILENO(file_stream)
     }
 }
 
@@ -268,7 +268,7 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
         let (Ok(result) | Err(result)) = lseek_result.map_err(From::from);
         result
     } else {
-        libc::lseek(fd, offset, whence)
+        FN_LSEEK(fd, offset, whence)
     }
 }
 
@@ -298,7 +298,7 @@ pub(crate) unsafe extern "C" fn write_detour(
         let (Ok(result) | Err(result)) = write_result.map_err(From::from);
         result
     } else {
-        libc::write(fd, buffer, count)
+        FN_WRITE(fd, buffer, count)
     }
 }
 

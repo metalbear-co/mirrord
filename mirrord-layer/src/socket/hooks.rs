@@ -414,7 +414,7 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         )
         .or_else(|fail| {
             warn!(
-                "enable_socket_replaces -> Failed replaceing `uv__accept4` with {:#?}!",
+                "enable_socket_replaces -> Failed replacing `uv__accept4` with {:#?}!",
                 fail
             );
 

@@ -165,18 +165,19 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
     if let SocketState::Bound(bound) = user_socket_info.state {
         trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-        let os_addr = OsSocketAddr::from(bound.address);
-        let ret = unsafe { FN_BIND(sockfd, os_addr.as_ptr(), os_addr.len()) };
 
-        if ret != 0 {
+        let os_addr = OsSocketAddr::from(bound.address);
+        let bind_result = unsafe { FN_BIND(sockfd, os_addr.as_ptr(), os_addr.len()) };
+
+        if bind_result != 0 {
             error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
+                "connect -> Failed to bind socket result {:?}, addr: {:?}, sockfd: {:?}!",
+                bind_result, os_addr, sockfd
             );
 
-            return Err(LayerError::AddressConversion);
+            Err(io::Error::from_raw_os_error(bind_result))?
         } else {
-            Ok::<(), LayerError>(())
+            Ok::<_, LayerError>(())
         }
     } else {
         let rawish_remote_address = SockAddr::from(remote_address);
@@ -187,11 +188,12 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
                 rawish_remote_address.len(),
             )
         };
-        if result != 0 {
-            return Err(LayerError::DNSNoName);
-        }
 
-        Ok(())
+        if result != 0 {
+            Err(io::Error::from_raw_os_error(result))?
+        } else {
+            Ok(())
+        }
     }?;
 
     Ok(())

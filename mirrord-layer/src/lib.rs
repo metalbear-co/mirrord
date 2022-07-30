@@ -326,7 +326,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .expect("Should be set during initialization!");
 
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        libc::close(fd)
+        FN_CLOSE(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
@@ -340,9 +340,9 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
                 })
                 .unwrap_or_else(|fail| fail)
         } else {
-            libc::close(fd)
+            FN_CLOSE(fd)
         }
     } else {
-        libc::close(fd)
+        FN_CLOSE(fd)
     }
 }
