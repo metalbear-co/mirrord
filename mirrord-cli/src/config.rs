@@ -81,4 +81,8 @@ pub(super) struct ExecArgs {
     /// Use an Ephemeral Container to mirror traffic.
     #[clap(short, long, value_parser)]
     pub ephemeral_container: bool,
+
+    /// Steal TCP instead of mirroring
+    #[clap(long, value_parser)]
+    pub tcp_steal: bool,
 }

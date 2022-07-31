@@ -138,6 +138,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
     };
 
+    if args.tcp_steal {
+        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
+    };
+
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 

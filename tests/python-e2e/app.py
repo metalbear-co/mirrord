@@ -21,14 +21,15 @@ PATH = getcwd() + str(uuid.uuid4())
 @app.route("/", methods=["GET"])
 def get():
     print("GET: Request completed")
-    return "OK"
+    return "GET"
 
 
 @app.route("/", methods=["POST"])
 def post():
     if str(request.data, "utf-8") == TEXT:
         print("POST: Request completed")
-    return "OK"
+        return "POST"
+    return "!"
 
 
 @app.route("/", methods=["PUT"])
@@ -36,7 +37,7 @@ def put():
     with open(PATH, "w") as f:
         f.write(TEXT)    
     print("PUT: Request completed")
-    return "OK"
+    return "PUT"
 
 
 @app.route("/", methods=["DELETE"])
@@ -45,7 +46,7 @@ def delete():
     print("DELETE: Request completed")
     # killing Flask is the hardest thing I've done in my life - A.H
     kill(getpid(), SIGTERM)
-    return "OK"
+    return "DELETE"
 
 
 if __name__ == "__main__":

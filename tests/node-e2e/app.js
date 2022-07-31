@@ -11,13 +11,14 @@ var path = process.cwd() + crypto.randomBytes(16).toString("hex");
 
 app.get("/", (req, res) => {
   console.log("GET: Request completed");
-  res.send("Request received"); // Todo: validate responses
+  res.send("GET"); // Todo: validate responses
 });
 
 app.post("/", (req, res) => {
   req.on("data", (data) => {
     if (data.toString() == TEXT) {
       console.log("POST: Request completed");
+      req.send("POST");
     }
   });
 });
@@ -28,6 +29,7 @@ app.put("/", (req, res) => {
       if (err) {
         throw err;
       }
+      req.send("DELETE");
     });    
   });
   console.log("PUT: Request completed");
@@ -40,6 +42,7 @@ app.delete("/", (req, res) => {
         console.err("app.js failed with ", err);
         throw err;
       }
+      req.send("DELETE");
     });
   });
   console.log("DELETE: Request completed");
