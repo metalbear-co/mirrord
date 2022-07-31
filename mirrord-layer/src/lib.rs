@@ -21,6 +21,7 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -63,9 +64,12 @@ fn init() {
     info!("Initializing mirrord-layer!");
 
     let config = LayerConfig::init_from_env().unwrap();
+    let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+
+    info!("Using port `{connection_port:?}` for communication");
 
     let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(config.clone()))
+        .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|e| {
             panic!("failed to create agent: {}", e);
         });
@@ -78,7 +82,12 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
-    RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
+    RUNTIME.block_on(start_layer_thread(
+        port_forwarder,
+        receiver,
+        config,
+        connection_port,
+    ));
 }
 
 struct Layer<T>
@@ -249,8 +258,9 @@ async fn start_layer_thread(
     mut pf: Portforwarder,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
+    connection_port: u16,
 ) {
-    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+    let port = pf.take_stream(connection_port).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)

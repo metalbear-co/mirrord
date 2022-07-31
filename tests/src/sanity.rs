@@ -41,6 +41,17 @@ mod tests {
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 
+    fn get_shared_lib_path() -> String {
+        let agent_name = format!(
+            "/tmp/{}",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+        std::fs::create_dir(&agent_name).unwrap();
+        agent_name
+    }
+
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
         name: &str,
@@ -534,17 +545,6 @@ mod tests {
         process.assert_stderr();
     }
 
-    fn get_shared_lib_path() -> String {
-        let agent_name = format!(
-            "/tmp/{}",
-            Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
-                .to_lowercase()
-        );
-        std::fs::create_dir(&agent_name).unwrap();
-        agent_name
-    }
-
     #[cfg(target_os = "macos")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -578,7 +578,7 @@ mod tests {
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "python-e2e/ops.py"];
+        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
         let shared_lib_path = get_shared_lib_path();
 
@@ -606,7 +606,7 @@ mod tests {
     pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "python-e2e/ops.py"];
+        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
         let shared_lib_path = get_shared_lib_path();
 
@@ -666,9 +666,9 @@ mod tests {
         let service = service.await;
         let node_command = vec![
             "node",
-            "node-e2e/remote_dns/test_remote_dns_eneabled_works.mjs",
+            "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mirrord_args = vec!["-d", "true"];
+        let mirrord_args = vec!["-d"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
