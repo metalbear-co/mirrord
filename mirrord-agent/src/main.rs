@@ -183,10 +183,15 @@ impl ClientConnectionHandler {
         id: ClientID,
         stream: TcpStream,
         pid: Option<u64>,
+        ephemeral: bool,
         sniffer_command_sender: Sender<SnifferCommand>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let file_manager = FileManager::new(pid);
+        let file_manager = match pid {
+            Some(_) => FileManager::new(pid),
+            None if ephemeral => FileManager::new(Some(1)),
+            None => FileManager::new(None),
+        };
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
@@ -337,7 +342,7 @@ async fn start_agent() -> Result<(), AgentError> {
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
                     let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::start(client_id, stream, pid, sniffer_command_tx, cancellation_token).await {
+                        match ClientConnectionHandler::start(client_id, stream, pid, args.ephemeral_container, sniffer_command_tx, cancellation_token).await {
                             Ok(_) => {
                                 debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
                             }
