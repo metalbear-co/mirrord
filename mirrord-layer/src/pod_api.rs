@@ -156,6 +156,12 @@ async fn create_ephemeral_container_agent(
     let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
         "name": mirrord_agent_name,
         "image": agent_image,
+        "securityContext": {
+            "capabilities": {
+                "add": ["NET_RAW", "NET_ADMIN"],
+            },
+            "privileged": true,
+        },
         "imagePullPolicy": config.image_pull_policy,
         "targetContainerName": config.impersonated_container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
