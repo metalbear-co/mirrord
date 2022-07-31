@@ -71,7 +71,7 @@ impl SafeIpTables {
                 IPTABLES_TABLE_NAME,
                 &self.chain_name,
                 &format_redirect_rule(redirected_port, target_port),
-                0,
+                1,
             )
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
@@ -170,9 +170,11 @@ impl StealWorker {
         match message {
             PortSubscribe(port) => {
                 if self.ports.contains(&port) {
-                    self.iptables.add_redirect(port, self.listen_port)
-                } else {
                     warn!("Port {port:?} is already subscribed");
+                    Ok(())
+                } else {
+                    self.iptables.add_redirect(port, self.listen_port)?;
+                    self.ports.insert(port);
                     Ok(())
                 }
             }
