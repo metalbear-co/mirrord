@@ -13,7 +13,7 @@ use mirrord_protocol::{AddrInfoHint, Port};
 use os_socketaddr::OsSocketAddr;
 
 pub(super) mod hooks;
-mod ops;
+pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));

@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
+pub(crate) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
     if fd == -1 {

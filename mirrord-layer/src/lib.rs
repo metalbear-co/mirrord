@@ -2,6 +2,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(naked_functions)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -38,6 +39,7 @@ mod common;
 mod config;
 mod error;
 mod file;
+mod go;
 mod macros;
 mod pod_api;
 mod socket;
@@ -304,7 +306,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_go_hoo
     }
 
     if enabled_go_hooks {
-        todo!()
+        let binary = "go-e2e";
+        go::hooks::enable_socket_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();
