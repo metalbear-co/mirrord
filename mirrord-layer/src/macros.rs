@@ -48,7 +48,6 @@ macro_rules! hook_symbol {
     };
 }
 
-
 pub(crate) use hook;
-pub(crate) use try_hook;
 pub(crate) use hook_symbol;
+pub(crate) use try_hook;

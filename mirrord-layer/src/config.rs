@@ -46,4 +46,8 @@ pub struct LayerConfig {
     /// Enables resolving a remote DNS.
     #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
     pub remote_dns: bool,
+
+    /// Enable hooks for golang
+    #[envconfig(from = "MIRRORD_GO_HOOKS", default = "false")]
+    pub enable_go_hooks: bool,
 }

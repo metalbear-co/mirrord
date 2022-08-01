@@ -138,6 +138,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
     };
 
+    if args.enable_go_hooks {
+        std::env::set_var("MIRRORD_GO_HOOKS", true.to_string());
+    }
+
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
