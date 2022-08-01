@@ -1,10 +1,11 @@
 use std::arch::asm;
 
 use frida_gum::interceptor::Interceptor;
-
-use crate::{socket::ops::socket, macros::hook_symbol};
 use tracing::debug;
 
+use crate::{macros::hook_symbol, socket::hooks::*};
+
+// TODO: Add docs from before
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
 #[naked]
@@ -81,6 +82,53 @@ unsafe extern "C" fn go_rawsyscall_detour() {
         "ret",
         options(noreturn)
     );
+}
+
+/// Syscall handler: socket calls go to the socket detour, while rest are passed to libc::syscall.
+#[no_mangle]
+#[cfg(target_os = "linux")]
+#[cfg(target_arch = "x86_64")]
+unsafe extern "C" fn c_abi_syscall_handler(
+    syscall: i64,
+    param1: i64,
+    param2: i64,
+    param3: i64,
+) -> i64 {
+    debug!("C ABI handler received `Syscall - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}",syscall, param1, param2, param3);
+    let res = match syscall {
+        libc::SYS_socket => socket_detour(param1 as i32, param2 as i32, param3 as i32) as i64,
+        libc::SYS_bind => bind_detour(
+            param1 as i32,
+            param2 as *const libc::sockaddr,
+            param3 as u32,
+        ) as i64, //TODO: check if this argument passing is right?
+        libc::SYS_listen => listen_detour(param1 as i32, param2 as i32) as i64,
+        libc::SYS_accept4 => accept_detour(
+            param1 as i32,
+            param2 as *mut libc::sockaddr,
+            param3 as *mut u32,
+        ) as i64,
+        //10000 => 1, // Ask Aviram what is this for?
+        _ => syscall_3(syscall, param1, param2, param3),
+    };
+    debug!("return -> {res:?}");
+    return res;
+}
+
+/// libc's syscall doesn't return the value that go expects (it does translation)
+#[cfg(target_os = "linux")]
+#[cfg(target_arch = "x86_64")]
+#[naked]
+unsafe extern "C" fn syscall_3(syscall: i64, arg1: i64, arg2: i64, arg3: i64) -> i64 {
+    asm!(
+        "mov    rax, rdi",
+        "mov    rdi, rsi",
+        "mov    rsi, rdx",
+        "mov    rdx, rcx",
+        "syscall",
+        "ret",
+        options(noreturn)
+    )
 }
 
 pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {

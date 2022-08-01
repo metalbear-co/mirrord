@@ -12,11 +12,15 @@ use crate::{
     socket::AddrInfoHintExt,
 };
 
-unsafe extern "C" fn socket_detour(domain: c_int, type_: c_int, protocol: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn socket_detour(
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+) -> c_int {
     socket(domain, type_, protocol)
 }
 
-unsafe extern "C" fn bind_detour(
+pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     addr: *const sockaddr,
     addrlen: socklen_t,
@@ -24,7 +28,7 @@ unsafe extern "C" fn bind_detour(
     bind(sockfd, addr, addrlen)
 }
 
-unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     listen(sockfd, backlog)
 }
 
@@ -52,7 +56,7 @@ unsafe extern "C" fn getsockname_detour(
     getsockname(sockfd, address, address_len)
 }
 
-unsafe extern "C" fn accept_detour(
+pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,

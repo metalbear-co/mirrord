@@ -306,8 +306,16 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_go_hoo
     }
 
     if enabled_go_hooks {
-        let binary = "go-e2e";
-        go::hooks::enable_socket_hooks(&mut interceptor, binary);
+        // TODO: convert this into LayerError
+        let binary = match std::env::var("MIRRORD_DEBUG_BINARY") {
+            Ok(binary) => binary,
+            Err(_) => {
+                unreachable!("Cannot run mirrord without a binary.")
+            }
+        };
+        // TODO: inspect the binary for Elf64 magic (read the header) and infer if it's a Go binary
+        // & dynamically linked.
+        go::hooks::enable_socket_hooks(&mut interceptor, &binary);
     }
 
     interceptor.end_transaction();
