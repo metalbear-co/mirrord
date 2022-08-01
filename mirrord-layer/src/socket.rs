@@ -109,7 +109,9 @@ fn fill_address(
     address_len: *mut socklen_t,
     new_address: SocketAddr,
 ) -> Result<(), LayerError> {
-    if address.is_null() || address_len.is_null() {
+    if address.is_null() {
+        Ok(())
+    } else if address_len.is_null() {
         Err(LayerError::NullPointer)
     } else {
         let os_address: OsSocketAddr = new_address.into();

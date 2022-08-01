@@ -177,23 +177,23 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
             Err(io::Error::from_raw_os_error(bind_result))?
         } else {
-            Ok::<_, LayerError>(())
+            let rawish_remote_address = SockAddr::from(remote_address);
+            let result = unsafe {
+                FN_CONNECT(
+                    sockfd,
+                    rawish_remote_address.as_ptr(),
+                    rawish_remote_address.len(),
+                )
+            };
+
+            if result != 0 {
+                Err(io::Error::from_raw_os_error(result))?
+            } else {
+                Ok::<_, LayerError>(())
+            }
         }
     } else {
-        let rawish_remote_address = SockAddr::from(remote_address);
-        let result = unsafe {
-            FN_CONNECT(
-                sockfd,
-                rawish_remote_address.as_ptr(),
-                rawish_remote_address.len(),
-            )
-        };
-
-        if result != 0 {
-            Err(io::Error::from_raw_os_error(result))?
-        } else {
-            Ok(())
-        }
+        Err(LayerError::SocketInvalidState(sockfd))
     }?;
 
     Ok(())

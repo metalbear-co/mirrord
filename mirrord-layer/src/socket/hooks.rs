@@ -98,7 +98,9 @@ pub(super) unsafe extern "C" fn connect_detour(
         connect(sockfd, address)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(fd) => FN_CONNECT(fd, raw_address, address_length),
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_CONNECT(sockfd, raw_address, address_length)
+                }
                 other => other.into(),
             });
 
@@ -152,8 +154,14 @@ pub(super) unsafe extern "C" fn accept_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        let (Ok(result) | Err(result)) =
-            accept(sockfd, address, address_len, accept_result).map_err(From::from);
+        let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
+            .map_err(|fail| match fail {
+                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                other => {
+                    error!("accept error is {:#?}", other);
+                    other.into()
+                }
+            });
         result
     }
 }
@@ -173,8 +181,14 @@ pub(super) unsafe extern "C" fn accept4_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        let (Ok(result) | Err(result)) =
-            accept(sockfd, address, address_len, accept_result).map_err(From::from);
+        let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
+            .map_err(|fail| match fail {
+                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                other => {
+                    error!("accept4 error is {:#?}", other);
+                    other.into()
+                }
+            });
         result
     }
 }
