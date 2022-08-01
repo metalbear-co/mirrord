@@ -1,6 +1,6 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
-pub(crate) mod go_hooks {
+pub(crate) mod go_socket_hooks {
     use std::arch::asm;
 
     use frida_gum::interceptor::Interceptor;
@@ -314,8 +314,7 @@ pub(crate) mod go_hooks {
         param6: i64,
     ) -> i64 {
         debug!("C ABI handler received `Syscall6 - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}, arg4 -> {:?}, arg5 -> {:?}, arg6 -> {:?}", syscall, param1, param2, param3, param4, param5, param6);
-        let res = match syscall {
-            10000 => 1,
+        let res = match syscall {            
             _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
         };
         debug!("return -> {res:?}");

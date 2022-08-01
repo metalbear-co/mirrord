@@ -33,7 +33,6 @@ tokio.workspace = true
 serde_json.workspace = true
 
 nanoid = "0.4"
-object = "0.29.0"
 mirrord-protocol = { path = "../mirrord-protocol"}
 actix-codec.workspace = true
 bytes.workspace = true

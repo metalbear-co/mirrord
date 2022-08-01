@@ -32,6 +32,7 @@ macro_rules! try_hook {
     };
 }
 
+#[cfg(target_os = "linux")]
 macro_rules! hook_symbol {
     ($interceptor:expr, $func:expr, $detour_name:expr, $binary:expr) => {
         if let Some(symbol) = frida_gum::Module::find_symbol_by_name(Some($binary), $func) {
@@ -52,5 +53,6 @@ macro_rules! hook_symbol {
 }
 
 pub(crate) use hook;
+#[cfg(target_os = "linux")]
 pub(crate) use hook_symbol;
 pub(crate) use try_hook;
