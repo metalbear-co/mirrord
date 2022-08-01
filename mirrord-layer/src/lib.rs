@@ -304,11 +304,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);
     }
-    let modules = frida_gum::Module::enumerate_modules();
-    let binary = &modules.first().unwrap().name;
-
-    go::hooks::enable_socket_hooks(&mut interceptor, &binary);
-
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "x86_64")]
+    {
+        let modules = frida_gum::Module::enumerate_modules();
+        let binary = &modules.first().unwrap().name;
+        go::hooks::enable_socket_hooks(&mut interceptor, &binary);
+    }
     interceptor.end_transaction();
 }
 
