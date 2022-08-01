@@ -230,7 +230,13 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
         dup_result
     } else {
         let (Ok(result) | Err(result)) =
-            dup(fd, dup_result).map(|()| dup_result).map_err(From::from);
+            dup(fd, dup_result)
+                .map(|()| dup_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup_result,
+                    _ => fail.into(),
+                });
+
         result
     }
 }
@@ -248,9 +254,14 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
     if dup2_result == -1 {
         dup2_result
     } else {
-        let (Ok(result) | Err(result)) = dup(oldfd, dup2_result)
-            .map(|()| dup2_result)
-            .map_err(From::from);
+        let (Ok(result) | Err(result)) =
+            dup(oldfd, dup2_result)
+                .map(|()| dup2_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup2_result,
+                    _ => fail.into(),
+                });
+
         result
     }
 }
@@ -270,9 +281,13 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
     if dup3_result == -1 {
         dup3_result
     } else {
-        let (Ok(result) | Err(result)) = dup(oldfd, dup3_result)
-            .map(|()| dup3_result)
-            .map_err(From::from);
+        let (Ok(result) | Err(result)) =
+            dup(oldfd, dup3_result)
+                .map(|()| dup3_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup3_result,
+                    _ => fail.into(),
+                });
         result
     }
 }

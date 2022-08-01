@@ -163,14 +163,14 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: RUST_LOG="warn,mirrord=trace" cargo test -p tests
+        run: cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
           minikube start --container-runtime=docker
           minikube image load /tmp/test.tar
       - name: test with docker runtime
-        run: RUST_LOG="warn,mirrord=trace" cargo test -p tests
+        run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
         run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
@@ -217,7 +217,7 @@ jobs:
       - name: load image
         run: docker load --input /tmp/test.tar
       - name: cargo test
-        run: RUST_LOG="warn,mirrord=trace" cargo test -p tests
+        run: cargo test -p tests
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do docker logs $CONTAINER; done
