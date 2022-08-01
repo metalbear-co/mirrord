@@ -75,7 +75,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
-    std::env::set_var("MIRRORD_DEBUG_BINARY", args.binary.clone());
     std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.pod_name.clone());
 
     if let Some(namespace) = &args.pod_namespace {
@@ -137,10 +136,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if args.ephemeral_container {
         std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
     };
-
-    if args.enable_go_hooks {
-        std::env::set_var("MIRRORD_GO_HOOKS", true.to_string());
-    }
 
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();

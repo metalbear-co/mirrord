@@ -81,7 +81,4 @@ pub(super) struct ExecArgs {
     /// Use an Ephemeral Container to mirror traffic.
     #[clap(short, long, value_parser)]
     pub ephemeral_container: bool,
-
-    #[clap(short, long, value_parser)]
-    pub enable_go_hooks: bool,
 }

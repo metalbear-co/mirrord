@@ -80,7 +80,7 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops, config.remote_dns, config.enable_go_hooks);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -293,7 +293,7 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_go_hooks: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
@@ -304,19 +304,10 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_go_hoo
     if enabled_file_ops {
         file::hooks::enable_file_hooks(&mut interceptor);
     }
+    let modules = frida_gum::Module::enumerate_modules();
+    let binary = &modules.first().unwrap().name;
 
-    if enabled_go_hooks {
-        // TODO: convert this into LayerError
-        let binary = match std::env::var("MIRRORD_DEBUG_BINARY") {
-            Ok(binary) => binary,
-            Err(_) => {
-                unreachable!("Cannot run mirrord without a binary.")
-            }
-        };
-        // TODO: inspect the binary for Elf64 magic (read the header) and infer if it's a Go binary
-        // & dynamically linked.
-        go::hooks::enable_socket_hooks(&mut interceptor, &binary);
-    }
+    go::hooks::enable_socket_hooks(&mut interceptor, &binary);
 
     interceptor.end_transaction();
 }
