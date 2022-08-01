@@ -84,6 +84,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] InferConfigError),
 
+    #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
+    PodSpecNotFound(String),
+
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
 
@@ -159,6 +162,7 @@ impl From<LayerError> for i64 {
             },
             LayerError::UnmatchedPong => libc::ETIMEDOUT,
             LayerError::KubeConfigError(_) => libc::EINVAL,
+            LayerError::PodSpecNotFound(_) => libc::EINVAL,
             LayerError::KubeError(_) => libc::EINVAL,
             LayerError::JSONConvertError(_) => libc::EINVAL,
             LayerError::TimeOutError => libc::ETIMEDOUT,
