@@ -163,7 +163,7 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests
+        run: RUST_LOG="warn,mirrord=trace" cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
