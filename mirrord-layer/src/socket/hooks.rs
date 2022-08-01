@@ -5,7 +5,7 @@ use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use os_socketaddr::OsSocketAddr;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
 use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
@@ -61,17 +61,18 @@ pub(super) unsafe extern "C" fn bind_detour(
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    trace!(
+    debug!(
         "listen_detour -> sockfd {:#?} | backlog {:#?}",
-        sockfd,
-        backlog
+        sockfd, backlog
     );
 
     let (Ok(result) | Err(result)) =
         listen(sockfd, backlog)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) => FN_LISTEN(sockfd, backlog),
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_LISTEN(sockfd, backlog)
+                }
                 other => other.into(),
             });
     result

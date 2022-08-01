@@ -84,7 +84,7 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
-    trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
+    debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
         SOCKETS
@@ -113,6 +113,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
             if bind_result != 0 {
+                error!(
+                    "listen -> Failed `bind` sockfd {:#?} to address {:#?}",
+                    sockfd, address
+                );
                 return Err(io::Error::from_raw_os_error(bind_result).into());
             }
 
@@ -121,6 +125,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
             let getsockname_result =
                 unsafe { FN_GETSOCKNAME(sockfd, address.as_mut_ptr(), &mut address.len()) };
             if getsockname_result != 0 {
+                error!("listen -> Failed `getsockname` sockfd {:#?}", sockfd);
+
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
@@ -128,6 +134,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
+                error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
+
                 return Err(io::Error::from_raw_os_error(listen_result).into());
             }
 
