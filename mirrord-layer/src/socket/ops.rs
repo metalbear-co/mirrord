@@ -9,7 +9,6 @@ use std::{
 
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
-use os_socketaddr::OsSocketAddr;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
@@ -99,12 +98,12 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
 
-            let mut address = match socket.domain {
-                libc::AF_INET => Ok(OsSocketAddr::from(SocketAddr::new(
+            let address = match socket.domain {
+                libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::LOCALHOST),
                     0,
                 ))),
-                libc::AF_INET6 => Ok(OsSocketAddr::from(SocketAddr::new(
+                libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
                     IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                     0,
                 ))),
@@ -125,14 +124,14 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
             // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
             // connect to.
             let getsockname_result =
-                unsafe { FN_GETSOCKNAME(sockfd, address.as_mut_ptr(), &mut address.len()) };
+                unsafe { FN_GETSOCKNAME(sockfd, address.as_ptr() as *mut _, &mut address.len()) };
             if getsockname_result != 0 {
                 error!("listen -> Failed `getsockname` sockfd {:#?}", sockfd);
 
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
-            let address = address.into_addr().ok_or(LayerError::AddressConversion)?;
+            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
@@ -176,13 +175,13 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
     if let SocketState::Bound(bound) = user_socket_info.state {
         trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
-        let os_addr = OsSocketAddr::from(bound.address);
-        let bind_result = unsafe { FN_BIND(sockfd, os_addr.as_ptr(), os_addr.len()) };
+        let address = SockAddr::from(bound.address);
+        let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
 
         if bind_result != 0 {
             error!(
-                "connect -> Failed to bind socket result {:?}, addr: {:?}, sockfd: {:?}!",
-                bind_result, os_addr, sockfd
+                "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
+                bind_result, address, sockfd
             );
 
             Err(io::Error::from_raw_os_error(bind_result))?

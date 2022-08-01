@@ -9,7 +9,7 @@ use std::{
 
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
-use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 
 use crate::error::LayerError;
 
@@ -114,7 +114,7 @@ fn fill_address(
     } else if address_len.is_null() {
         Err(LayerError::NullPointer)
     } else {
-        let os_address: OsSocketAddr = new_address.into();
+        let os_address = SockAddr::from(new_address);
 
         unsafe {
             let len = std::cmp::min(*address_len as usize, os_address.len() as usize);

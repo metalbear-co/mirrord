@@ -23,10 +23,9 @@ mirrord-macro = { path = "../mirrord-macro"}
 ctor = "0.1"
 libc = "0.2"
 nix.workspace = true
-os_socketaddr = "0.2"
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { git = "https://github.com/frida/frida-rust", branch = "master", features = ["auto-download"] }
+frida-gum = { version = "0.7", features = ["auto-download"] }
 futures.workspace = true
 clap.workspace = true
 k8s-openapi.workspace = true

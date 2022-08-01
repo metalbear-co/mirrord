@@ -1,10 +1,14 @@
-use std::{ffi::CStr, os::unix::io::RawFd};
+use std::{
+    ffi::CStr,
+    net::{SocketAddr, SocketAddrV4},
+    os::unix::io::RawFd,
+};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
-use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
@@ -33,14 +37,17 @@ pub(super) unsafe extern "C" fn socket_detour(
 #[hook_fn]
 pub(super) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
-    addr: *const sockaddr,
-    addrlen: socklen_t,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
 ) -> c_int {
     trace!("bind_detour -> sockfd {:#?}", sockfd);
 
-    let address = match OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
-        .into_addr()
-        .ok_or(LayerError::AddressConversion)
+    let address = match SockAddr::new(
+        *(raw_address as *const libc::sockaddr_storage),
+        address_length,
+    )
+    .as_socket()
+    .ok_or(LayerError::AddressConversion)
     {
         Ok(address) => address,
         Err(fail) => return fail.into(),
@@ -49,10 +56,10 @@ pub(super) unsafe extern "C" fn bind_detour(
     let (Ok(result) | Err(result)) = bind(sockfd, address)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) => FN_BIND(sockfd, addr, addrlen),
+            LayerError::LocalFDNotFound(_) => FN_BIND(sockfd, raw_address, address_length),
             LayerError::BypassedPort(_) => {
                 warn!("bind_detour -> bypass port");
-                FN_BIND(sockfd, addr, addrlen)
+                FN_BIND(sockfd, raw_address, address_length)
             }
             other => other.into(),
         });
@@ -86,14 +93,18 @@ pub(super) unsafe extern "C" fn connect_detour(
 ) -> c_int {
     trace!("connect_detour -> sockfd {:#?}", sockfd);
 
-    let address =
-        match OsSocketAddr::from_raw_parts(raw_address as *const _, address_length as usize)
-            .into_addr()
-            .ok_or(LayerError::AddressConversion)
-        {
-            Ok(address) => address,
-            Err(fail) => return fail.into(),
-        };
+    // TODO(alex) [high] 2022-08-01: Convert this pointer address to `SocketAddr`?
+
+    let address = match SockAddr::new(
+        *(raw_address as *const libc::sockaddr_storage),
+        address_length,
+    )
+    .as_socket()
+    .ok_or(LayerError::AddressConversion)
+    {
+        Ok(address) => address,
+        Err(fail) => return fail.into(),
+    };
 
     let (Ok(result) | Err(result)) =
         connect(sockfd, address)
