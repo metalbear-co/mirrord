@@ -2,7 +2,8 @@ use std::arch::asm;
 
 use frida_gum::interceptor::Interceptor;
 
-use crate::socket::ops::socket;
+use crate::{socket::ops::socket, macros::hook_symbol};
+use tracing::debug;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -83,5 +84,11 @@ unsafe extern "C" fn go_rawsyscall_detour() {
 }
 
 pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
+    hook_symbol!(
+        interceptor,
+        "syscall.RawSyscall.abi0",
+        go_rawsyscall_detour,
+        binary
+    );
     todo!();
 }
