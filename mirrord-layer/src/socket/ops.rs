@@ -114,8 +114,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
             let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
             if bind_result != 0 {
                 error!(
-                    "listen -> Failed `bind` sockfd {:#?} to address {:#?}",
-                    sockfd, address
+                    "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
+                    sockfd,
+                    address,
+                    errno::errno()
                 );
                 return Err(io::Error::from_raw_os_error(bind_result).into());
             }
