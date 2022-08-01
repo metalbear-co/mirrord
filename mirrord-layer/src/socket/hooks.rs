@@ -1,8 +1,4 @@
-use std::{
-    ffi::CStr,
-    net::{SocketAddr, SocketAddrV4},
-    os::unix::io::RawFd,
-};
+use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
@@ -42,6 +38,7 @@ pub(super) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     trace!("bind_detour -> sockfd {:#?}", sockfd);
 
+    // TODO: Is this conversion safe?
     let address = match SockAddr::new(
         *(raw_address as *const libc::sockaddr_storage),
         address_length,
@@ -93,8 +90,7 @@ pub(super) unsafe extern "C" fn connect_detour(
 ) -> c_int {
     trace!("connect_detour -> sockfd {:#?}", sockfd);
 
-    // TODO(alex) [high] 2022-08-01: Convert this pointer address to `SocketAddr`?
-
+    // TODO: Is this conversion safe?
     let address = match SockAddr::new(
         *(raw_address as *const libc::sockaddr_storage),
         address_length,
