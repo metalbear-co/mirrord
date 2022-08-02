@@ -270,7 +270,7 @@ pub(crate) mod go_socket_hooks {
     #[no_mangle]
     #[naked]
     unsafe extern "C" fn go_systemstack_switch() {
-        asm!(            
+        asm!(
             "lea    r9, [rip+0xdd9]",
             "mov    QWORD PTR [r14+0x40],r9",
             "lea    r9, [rsp+0x8]",
