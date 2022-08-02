@@ -126,7 +126,9 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) => FN_GETPEERNAME(sockfd, address, address_len),
+            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                FN_GETPEERNAME(sockfd, address, address_len)
+            }
             other => other.into(),
         });
     result
@@ -143,7 +145,9 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) => FN_GETSOCKNAME(sockfd, address, address_len),
+            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                FN_GETSOCKNAME(sockfd, address, address_len)
+            }
             other => other.into(),
         });
     result

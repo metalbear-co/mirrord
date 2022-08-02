@@ -6,7 +6,7 @@ use libc::FILE;
 use mirrord_protocol::{tcp::LayerTcp, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::error;
+use tracing::{error, warn};
 
 use super::HookMessage;
 
@@ -129,7 +129,12 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for Layer
 
 impl From<LayerError> for i64 {
     fn from(fail: LayerError) -> Self {
-        error!("Error occured in Layer >> {:?}", fail);
+        match fail {
+            LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => {
+                warn!("Recoverable issue >> {:#?}", fail)
+            }
+            _ => error!("Error occured in Layer >> {:?}", fail),
+        };
 
         let libc_error = match fail {
             LayerError::Frida(_) => libc::EINVAL,
