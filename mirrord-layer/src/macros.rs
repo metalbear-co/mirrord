@@ -5,6 +5,8 @@ macro_rules! replace {
                          symbol_name,
                          detour: $detour_type|
          -> Result<$detour_type, LayerError> {
+            tracing::info!("replace -> hooking {:#?}", $detour_name);
+
             let function = frida_gum::Module::find_export_by_name(None, symbol_name)
                 .ok_or(LayerError::NoExportName(symbol_name.to_string()))?;
 
@@ -12,9 +14,15 @@ macro_rules! replace {
                 function,
                 frida_gum::NativePointer(detour as *mut libc::c_void),
                 frida_gum::NativePointer(std::ptr::null_mut()),
-            )?;
+            );
 
-            let original_fn: $detour_type = std::mem::transmute(replaced);
+            tracing::info!(
+                "replace -> hooked {:#?} {:#?}",
+                $detour_name,
+                replaced.is_ok()
+            );
+
+            let original_fn: $detour_type = std::mem::transmute(replaced?);
 
             Ok(original_fn)
         };

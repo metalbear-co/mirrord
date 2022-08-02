@@ -461,8 +461,6 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
 
     #[cfg(target_os = "linux")]
     {
-        // TODO(alex) [high] 2022-08-02: Gotta hook both, have an enum:
-        // `HookFn(OnceLock(UvOrNormal))`?
         let _ = replace!(
             interceptor,
             "uv__accept4",
