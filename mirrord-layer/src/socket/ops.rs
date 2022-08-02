@@ -9,7 +9,7 @@ use std::{
 use dns_lookup::AddrInfo;
 use errno::{errno, set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
-use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace, warn};
 
@@ -69,14 +69,17 @@ pub(super) fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> 
         }
     };
 
-    let raw_addr = unsafe { OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize) };
-    let parsed_addr = match raw_addr.into_addr() {
-        Some(addr) => addr,
-        None => {
-            error!("bind: failed to parse addr");
-            return libc::EINVAL;
-        }
-    };
+    let parsed_addr =
+        match unsafe { SockAddr::new(*(addr as *const libc::sockaddr_storage), addrlen) }
+            .as_socket()
+            .ok_or(LayerError::AddressConversion)
+        {
+            Ok(parsed_addr) => parsed_addr,
+            Err(_) => {
+                error!("bind: failed to parse addr");
+                return libc::EINVAL;
+            }
+        };
 
     debug!("bind:port: {}", parsed_addr.port());
     if is_ignored_port(parsed_addr.port()) {
@@ -112,12 +115,12 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
         SocketState::Bound(bound) => {
             let real_port = bound.address.port();
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
-            let mut os_addr = match socket.domain {
+            let os_addr = match socket.domain {
                 libc::AF_INET => {
-                    OsSocketAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                    SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
                 }
                 libc::AF_INET6 => {
-                    OsSocketAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                    SockAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
                 }
                 _ => {
                     // shouldn't happen
@@ -137,7 +140,8 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
             let mut addr_len = os_addr.len();
             // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
             // connect to.
-            let ret = unsafe { libc::getsockname(sockfd, os_addr.as_mut_ptr(), &mut addr_len) };
+            let ret =
+                unsafe { libc::getsockname(sockfd, os_addr.as_ptr() as *mut _, &mut addr_len) };
             if ret != 0 {
                 error!(
                     "listen: failed to get sockname ret: {:?}, addr: {:?}, sockfd: {:?}",
@@ -145,9 +149,9 @@ pub(super) fn listen(sockfd: RawFd, _backlog: c_int) -> c_int {
                 );
                 return ret;
             }
-            let result_addr = match os_addr.into_addr() {
-                Some(addr) => addr,
-                None => {
+            let result_addr = match os_addr.as_socket().ok_or(LayerError::AddressConversion) {
+                Ok(addr) => addr,
+                Err(_) => {
                     error!("listen: failed to parse addr");
                     return libc::EINVAL;
                 }
@@ -207,7 +211,7 @@ pub(super) fn connect(sockfd: RawFd, address: *const sockaddr, len: socklen_t) -
 
     // We don't handle this socket, so restore state if there was any. (delay execute bind)
     if let SocketState::Bound(bound) = &socket.state {
-        let os_addr = OsSocketAddr::from(bound.address);
+        let os_addr = SockAddr::from(bound.address);
         let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
         if ret != 0 {
             error!(
