@@ -33,12 +33,12 @@ pub fn hook_fn(
         let visibility = proper_function.clone().vis;
 
         let ident_string = signature.ident.to_string();
-        let type_name = ident_string.split('_').next().map(|fn_name| {
+        let type_name = ident_string.split("_detour").next().map(|fn_name| {
             let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
             Ident::new(&name, Span::call_site())
         });
 
-        let static_name = ident_string.split('_').next().map(|fn_name| {
+        let static_name = ident_string.split("_detour").next().map(|fn_name| {
             let name = format!("FN_{}", fn_name.to_uppercase());
             Ident::new(&name, Span::call_site())
         });

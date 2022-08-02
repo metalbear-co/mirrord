@@ -204,6 +204,21 @@ pub(super) unsafe extern "C" fn accept4_detour(
         result
     }
 }
+
+#[cfg(target_os = "linux")]
+#[hook_fn]
+#[allow(non_snake_case)]
+pub(super) unsafe extern "C" fn uv__accept4_detour(
+    sockfd: i32,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: i32,
+) -> i32 {
+    trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
+
+    accept4_detour(sockfd, address, address_len, flags)
+}
+
 /// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[hook_fn]
@@ -446,27 +461,23 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
 
     #[cfg(target_os = "linux")]
     {
+        // TODO(alex) [high] 2022-08-02: Gotta hook both, have an enum:
+        // `HookFn(OnceLock(UvOrNormal))`?
         let _ = replace!(
             interceptor,
             "uv__accept4",
+            uv__accept4_detour,
+            FnUv__accept4,
+            FN_UV__ACCEPT4
+        );
+
+        let _ = replace!(
+            interceptor,
+            "accept4",
             accept4_detour,
             FnAccept4,
             FN_ACCEPT4
-        )
-        .or_else(|fail| {
-            warn!(
-                "enable_socket_replaces -> Failed replacing `uv__accept4` with {:#?}!",
-                fail
-            );
-
-            replace!(
-                interceptor,
-                "accept4",
-                accept4_detour,
-                FnAccept4,
-                FN_ACCEPT4
-            )
-        });
+        );
 
         let _ = replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3);
     }

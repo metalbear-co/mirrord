@@ -18,6 +18,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Fix filesystem tests to only run if the default path exists.
 
 
+### Changed
+- `mirrord-layer/socket` now uses `socket2::SockAddr` to comply with Rust's new IP format.
+
 ## 2.5.0
 
 ### Added
