@@ -3,10 +3,11 @@
 pub(crate) mod go_socket_hooks {
     use std::arch::asm;
 
+    use errno::errno;
     use frida_gum::interceptor::Interceptor;
     use tracing::debug;
 
-    use crate::{macros::hook_symbol, socket::hooks::*};
+    use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
 
     /*
     This detour is taken from `runtime.asmcgocall.abi0`
@@ -36,19 +37,19 @@ pub(crate) mod go_socket_hooks {
             "je     2f",
             "mov    r8, QWORD PTR [rdi+0x30]",
             "mov    rsi, QWORD PTR [r8+0x50]",
-            "cmp    rdi,rsi",
+            "cmp    rdi, rsi",
             "je     2f",
-            "mov    rsi,QWORD PTR [r8]",
-            "cmp    rdi,rsi",
+            "mov    rsi, QWORD PTR [r8]",
+            "cmp    rdi, rsi",
             "je     2f",
             "call   go_systemstack_switch",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
-            "mov    rsp,QWORD PTR [rsi+0x38]",
-            "sub    rsp,0x40",
-            "and    rsp,0xfffffffffffffff0",
+            "mov    rsp, QWORD PTR [rsi+0x38]",
+            "sub    rsp, 0x40",
+            "and    rsp, 0xfffffffffffffff0",
             "mov    QWORD PTR [rsp+0x30],rdi",
-            "mov    rdi,QWORD PTR [rdi+0x8]",
-            "sub    rdi,rdx",
+            "mov    rdi, QWORD PTR [rdi+0x8]",
+            "sub    rdi, rdx",
             "mov    QWORD PTR [rsp+0x28],rdi",
             "mov    rsi, rbx",
             "mov    rdx, r10",
@@ -58,29 +59,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi,QWORD PTR [rdi+0x8]",
             "sub    rsi,QWORD PTR [rsp+0x28]",
             "mov    QWORD PTR fs:0xfffffff8, rdi",
-            "mov    rsp,rsi",
-            "cmp    rax, -0xfff",
-            "jbe    3f",
-            "mov    QWORD PTR [rsp+0x28], -0x1",
-            "mov    QWORD PTR [rsp+0x30], 0x0",
-            "neg    rax",
-            "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15,xmm15",
-            "mov    r14, qword ptr FS:[0xfffffff8]",
-            "ret",
-            // same as `nosave` in the asmcgocall.
-            // runs when we have no g, after the comparison happens with rdi.
-            "2:",
-            "sub    rsp,0x40",
-            "and    rsp, -0x10",
-            "mov    QWORD PTR [rsp+0x30],0x0",
-            "mov    QWORD PTR [rsp+0x28],rdx",
-            "mov    rsi, rbx",
-            "mov    rdx, r10",
-            "mov    rdi, rax",
-            "call   c_abi_syscall_handler",
-            "mov    rsi,QWORD PTR [rsp+0x28]",
-            "mov    rsp,rsi",
+            "mov    rsp, rsi",
             "cmp    rax, -0xfff",
             "jbe    3f",
             "mov    QWORD PTR [rsp+0x28], -0x1",
@@ -90,13 +69,36 @@ pub(crate) mod go_socket_hooks {
             "xorps  xmm15, xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
-            // Not exactly sure why were are doing this here..?
+            // same as `nosave` in the asmcgocall.
+            // calls the abi handler, when we have no g
+            "2:",
+            "sub    rsp, 0x40",
+            "and    rsp, -0x10",
+            "mov    QWORD PTR [rsp+0x30], 0x0",
+            "mov    QWORD PTR [rsp+0x28], rdx",
+            "mov    rsi, rbx",
+            "mov    rdx, r10",
+            "mov    rdi, rax",
+            "call   c_abi_syscall_handler",
+            "mov    rsi, QWORD PTR [rsp+0x28]",
+            "mov    rsp, rsi",
+            "cmp    rax, -0xfff",
+            "jbe    3f",
+            // Success: Setup the return values and restore the tls.
+            "mov    QWORD PTR [rsp+0x28], -0x1",
+            "mov    QWORD PTR [rsp+0x30], 0x0",
+            "neg    rax",
+            "mov    QWORD PTR [rsp+0x38], rax",
+            "xorps  xmm15, xmm15",
+            "mov    r14, qword ptr FS:[0xfffffff8]",
+            "ret",
+            // Failure: Setup the return values and restore the tls.
             "3:",
             "mov    QWORD PTR [rsp+0x28], rax",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "mov    QWORD PTR [rsp+0x38], 0x0",
             "xorps  xmm15, xmm15",
-            "mov    r14, qword ptr FS:[0xfffffff8]",
+            "mov    r14, QWORD PTR FS:[0xfffffff8]",
             "ret",
             options(noreturn)
         );
@@ -252,7 +254,7 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15,xmm15",
+            "xorps  xmm15, xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
             "3:",
@@ -292,8 +294,9 @@ pub(crate) mod go_socket_hooks {
         asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
     }
 
-    /// Syscall handler: socket calls go to the socket detour, while rest are passed to
-    /// libc::syscall.
+    /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket, bind, listen, and
+    /// accept
+    /// Note: Depending on success/failure Syscall may or may not call this handler
     #[no_mangle]
     unsafe extern "C" fn c_abi_syscall_handler(
         syscall: i64,
@@ -303,24 +306,25 @@ pub(crate) mod go_socket_hooks {
     ) -> i64 {
         debug!("C ABI handler received `Syscall - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}",syscall, param1, param2, param3);
         let res = match syscall {
-            libc::SYS_socket => socket_detour(param1 as i32, param2 as i32, param3 as i32) as i64,
-            libc::SYS_bind => bind_detour(
-                param1 as i32,
-                param2 as *const libc::sockaddr,
-                param3 as u32,
-            ) as i64, //TODO: check if this argument passing is right?
-            libc::SYS_listen => listen_detour(param1 as i32, param2 as i32) as i64,
-            libc::SYS_accept4 => accept_detour(
-                param1 as i32,
-                param2 as *mut libc::sockaddr,
-                param3 as *mut u32,
-            ) as i64,
+            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_close => close_detour(param1 as _) as i64,
             _ => syscall_3(syscall, param1, param2, param3),
         };
-        debug!("c_abi_syscall_handler >> return -> {res:?}");
-        res
+        debug!(
+            "c_abi_syscall_handler >> result -> {res:?}, errorno -> {:?}",
+            errno().0
+        );
+        match res {
+            -1 => -errno().0 as i64,
+            _ => res as i64,
+        }
     }
 
+    /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for accept4
+    /// Note: Depending on success/failure Syscall may or may not call this handler
     #[no_mangle]
     unsafe extern "C" fn c_abi_syscall6_handler(
         syscall: i64,
@@ -333,19 +337,23 @@ pub(crate) mod go_socket_hooks {
     ) -> i64 {
         debug!("C ABI handler received `Syscall6 - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}, arg4 -> {:?}, arg5 -> {:?}, arg6 -> {:?}", syscall, param1, param2, param3, param4, param5, param6);
         let res = match syscall {
-            // TODO: accept4 errors out
-            // libc::SYS_accept4 => accept_detour(
-            //     param1 as i32,
-            //     param2 as *mut libc::sockaddr,
-            //     param3 as *mut socklen_t,
-            // ) as i64,
+            libc::SYS_accept4 => {
+                accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+            }
             _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
         };
-        debug!("c_abi_syscall6_handler >> return -> {res:?}");
-        res
+        debug!(
+            "c_abi_syscall_handler >> result -> {res:?}, errorno -> {:?}",
+            errno().0
+        );
+        match res {
+            -1 => -errno().0 as i64,
+            _ => res as i64,
+        }
     }
 
-    /// libc's syscall doesn't return the value that go expects (it does translation)    
+    /// 3 param version (Syscall6) for making the syscall, libc's syscall is not used here as it
+    /// doesn't return the value that go expects (it does translation)
     #[naked]
     unsafe extern "C" fn syscall_3(syscall: i64, arg1: i64, arg2: i64, arg3: i64) -> i64 {
         asm!(
@@ -359,6 +367,7 @@ pub(crate) mod go_socket_hooks {
         )
     }
 
+    /// 6 param version, used by Rawsyscall & Syscall
     #[naked]
     unsafe extern "C" fn syscall_6(
         syscall: i64,
@@ -383,14 +392,12 @@ pub(crate) mod go_socket_hooks {
         )
     }
 
+    /// Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
+    /// when testing with "Gin", only these symbols were used to make syscalls.
+    /// Refer:
+    ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
+    ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
     pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
-        /*
-        Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
-        when testing with "Gin", only these symbols were used to make syscalls.
-        Refer:
-            - File zsyscall_linux_amd64.go generated using mksyscall.pl.
-            - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-        */
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",

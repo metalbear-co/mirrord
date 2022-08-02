@@ -295,6 +295,7 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> RawFd {
+    trace!("accept called");
     let (local_address, domain, protocol, type_) = {
         if let Some(socket) = SOCKETS.lock().unwrap().get(&sockfd) {
             if let SocketState::Listening(bound) = &socket.state {

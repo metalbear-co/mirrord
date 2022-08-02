@@ -71,14 +71,13 @@ pub(crate) unsafe extern "C" fn accept_detour(
 }
 
 #[cfg(target_os = "linux")]
-unsafe extern "C" fn accept4_detour(
+pub(crate) unsafe extern "C" fn accept4_detour(
     sockfd: i32,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     flags: i32,
 ) -> i32 {
     let accept_fd = libc::accept4(sockfd, address, address_len, flags);
-
     if accept_fd == -1 {
         accept_fd
     } else {
