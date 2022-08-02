@@ -4,6 +4,7 @@ pub(crate) mod go_socket_hooks {
     use std::arch::asm;
 
     use frida_gum::interceptor::Interceptor;
+    use libc::socklen_t;
     use tracing::debug;
 
     use crate::{macros::hook_symbol, socket::hooks::*};
@@ -25,12 +26,11 @@ pub(crate) mod go_socket_hooks {
             "mov r10, QWORD PTR [rsp+0x18]",
             "mov rcx, QWORD PTR [rsp+0x20]",
             "mov rax, QWORD PTR [rsp+0x8]",
-            // modified detour using asmcgocall.abi0 -
+            // modified detour using asmcgocall.abi0 -            
             "mov    rdx, rsp",
             // following instruction is the expansion of the get_tls() macro in go asm
             // TLS = Thread Local Storage
-            // FS is a segment register used by go to save the current goroutine in TLS, in this
-            // case `g`.
+            // FS is a segment register used by go to save the current goroutine in TLS, in this case `g`.
             "mov    rdi, QWORD PTR fs:[0xfffffff8]",
             "cmp    rdi, 0x0",
             "je     2f",
@@ -68,6 +68,7 @@ pub(crate) mod go_socket_hooks {
             "xorps  xmm15,xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
+
             // same as `nosave` in the asmcgocall.
             // runs when we have no g, after the comparison happens with rdi.
             "2:",
@@ -90,6 +91,7 @@ pub(crate) mod go_socket_hooks {
             "xorps  xmm15, xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
+
             // Not exactly sure why were are doing this here..?
             "3:",
             "mov    QWORD PTR [rsp+0x28], rax",
@@ -291,6 +293,7 @@ pub(crate) mod go_socket_hooks {
     unsafe extern "C" fn go_runtime_abort() {
         asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
     }
+    
 
     /// Syscall handler: socket calls go to the socket detour, while rest are passed to
     /// libc::syscall.
@@ -317,7 +320,7 @@ pub(crate) mod go_socket_hooks {
             ) as i64,
             _ => syscall_3(syscall, param1, param2, param3),
         };
-        debug!("return -> {res:?}");
+        debug!("c_abi_syscall_handler >> return -> {res:?}");
         res
     }
 
@@ -332,10 +335,16 @@ pub(crate) mod go_socket_hooks {
         param6: i64,
     ) -> i64 {
         debug!("C ABI handler received `Syscall6 - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}, arg4 -> {:?}, arg5 -> {:?}, arg6 -> {:?}", syscall, param1, param2, param3, param4, param5, param6);
-        let res = match syscall {
+        let res = match syscall { 
+            // TODO: accept4 errors out
+            // libc::SYS_accept4 => accept_detour(
+            //     param1 as i32,
+            //     param2 as *mut libc::sockaddr,
+            //     param3 as *mut socklen_t,
+            // ) as i64,           
             _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
         };
-        debug!("return -> {res:?}");
+        debug!("c_abi_syscall6_handler >> return -> {res:?}");
         res
     }
 
@@ -376,12 +385,12 @@ pub(crate) mod go_socket_hooks {
             options(noreturn)
         )
     }
-
+    
     pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
         /*
-        Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
+        Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase, 
         when testing with "Gin", only these symbols were used to make syscalls.
-        Refer:
+        Refer: 
             - File zsyscall_linux_amd64.go generated using mksyscall.pl.
             - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
         */
