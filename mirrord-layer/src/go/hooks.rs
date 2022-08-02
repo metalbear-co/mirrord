@@ -8,14 +8,29 @@ pub(crate) mod go_socket_hooks {
 
     use crate::{macros::hook_symbol, socket::hooks::*};
 
+    /*
+    This detour is taken from `runtime.asmcgocall.abi0`
+    Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
+
+    Golang's assembler - https://go.dev/doc/asm
+
+    We cannot provide any stack guarantees when our detour executes(whether it will exceed the go's stack limit),
+    so we need to switch to system stack.
+    */
     #[naked]
     unsafe extern "C" fn go_rawsyscall_detour() {
         asm!(
+            // push the arguments of Rawsyscall from the stack to preserved registers
             "mov rbx, QWORD PTR [rsp+0x10]",
             "mov r10, QWORD PTR [rsp+0x18]",
             "mov rcx, QWORD PTR [rsp+0x20]",
             "mov rax, QWORD PTR [rsp+0x8]",
+            // modified detour using asmcgocall.abi0 -
             "mov    rdx, rsp",
+            // following instruction is the expansion of the get_tls() macro in go asm
+            // TLS = Thread Local Storage
+            // FS is a segment register used by go to save the current goroutine in TLS, in this
+            // case `g`.
             "mov    rdi, QWORD PTR fs:[0xfffffff8]",
             "cmp    rdi, 0x0",
             "je     2f",
@@ -26,7 +41,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi,QWORD PTR [r8]",
             "cmp    rdi,rsi",
             "je     2f",
-            "call   mirrord_go_systemstack_switch",
+            "call   go_systemstack_switch",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp,QWORD PTR [rsi+0x38]",
             "sub    rsp,0x40",
@@ -53,9 +68,11 @@ pub(crate) mod go_socket_hooks {
             "xorps  xmm15,xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
+            // same as `nosave` in the asmcgocall.
+            // runs when we have no g, after the comparison happens with rdi.
             "2:",
             "sub    rsp,0x40",
-            "and    rsp,0xfffffffffffffff0",
+            "and    rsp, -0x10",
             "mov    QWORD PTR [rsp+0x30],0x0",
             "mov    QWORD PTR [rsp+0x28],rdx",
             "mov    rsi, rbx",
@@ -70,14 +87,15 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15,xmm15",
+            "xorps  xmm15, xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
+            // Not exactly sure why were are doing this here..?
             "3:",
             "mov    QWORD PTR [rsp+0x28], rax",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "mov    QWORD PTR [rsp+0x38], 0x0",
-            "xorps  xmm15,xmm15",
+            "xorps  xmm15, xmm15",
             "mov    r14, qword ptr FS:[0xfffffff8]",
             "ret",
             options(noreturn)
@@ -105,7 +123,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi,QWORD PTR [r8]",
             "cmp    rdi,rsi",
             "je     2f",
-            "call   mirrord_go_systemstack_switch",
+            "call   go_systemstack_switch",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp,QWORD PTR [rsi+0x38]",
             "sub    rsp,0x40",
@@ -187,7 +205,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi,QWORD PTR [r8]",
             "cmp    rdi,rsi",
             "je     2f",
-            "call   mirrord_go_systemstack_switch",
+            "call   go_systemstack_switch",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp,QWORD PTR [rsi+0x38]",
             "sub    rsp,0x40",
@@ -250,18 +268,18 @@ pub(crate) mod go_socket_hooks {
 
     #[no_mangle]
     #[naked]
-    unsafe extern "C" fn mirrord_go_systemstack_switch() {
+    unsafe extern "C" fn go_systemstack_switch() {
         asm!(
-            "lea    r9,[rip+0xdd9]",
+            "lea    r9, [rip+0xdd9]",
             "mov    QWORD PTR [r14+0x40],r9",
-            "lea    r9,[rsp+0x8]",
+            "lea    r9, [rsp+0x8]",
             "mov    QWORD PTR [r14+0x38],r9",
-            "mov    QWORD PTR [R14 + 0x58],0x0",
+            "mov    QWORD PTR [r14+0x58],0x0",
             "mov    QWORD PTR [r14+0x68],rbp",
-            "mov    r9,QWORD PTR [r14+0x50]",
-            "test   r9,r9",
+            "mov    r9, QWORD PTR [r14+0x50]",
+            "test   r9, r9",
             "jz     4f",
-            "call   mirrord_go_runtime_abort",
+            "call   go_runtime_abort",
             "4:",
             "ret",
             options(noreturn)
@@ -270,8 +288,8 @@ pub(crate) mod go_socket_hooks {
 
     #[no_mangle]
     #[naked]
-    unsafe extern "C" fn mirrord_go_runtime_abort() {
-        asm!("int 0x3", "jmp mirrord_go_runtime_abort", options(noreturn));
+    unsafe extern "C" fn go_runtime_abort() {
+        asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
     }
 
     /// Syscall handler: socket calls go to the socket detour, while rest are passed to
@@ -314,7 +332,7 @@ pub(crate) mod go_socket_hooks {
         param6: i64,
     ) -> i64 {
         debug!("C ABI handler received `Syscall6 - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}, arg4 -> {:?}, arg5 -> {:?}, arg6 -> {:?}", syscall, param1, param2, param3, param4, param5, param6);
-        let res = match syscall {            
+        let res = match syscall {
             _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
         };
         debug!("return -> {res:?}");
@@ -360,6 +378,13 @@ pub(crate) mod go_socket_hooks {
     }
 
     pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
+        /*
+        Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
+        when testing with "Gin", only these symbols were used to make syscalls.
+        Refer:
+            - File zsyscall_linux_amd64.go generated using mksyscall.pl.
+            - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
+        */
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",

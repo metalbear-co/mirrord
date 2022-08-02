@@ -527,30 +527,6 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-    ) {
-        let service = service.await;
-        let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
-        let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
-            .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
-        send_requests(&url).await;
-        timeout(Duration::from_secs(40), process.child.wait())
-            .await
-            .unwrap()
-            .unwrap();
-        process.assert_stderr();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
