@@ -235,29 +235,7 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
     accept4_detour(sockfd, address, address_len, flags)
 }
 
-/// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-#[hook_fn]
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
-    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd);
-
-    let arg = arg.arg::<usize>();
-
-    let fcntl_result = FN_FCNTL(fd, cmd, arg);
-
-    if fcntl_result == -1 {
-        fcntl_result
-    } else {
-        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
-            .map(|()| fcntl_result)
-            .map_err(From::from);
-
-        trace!("fcntl_detour -> result {:#?}", result);
-        result
-    }
-}
-
-#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+/// https://github.com/metalbear-co/mirrord/issues/184
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd);
