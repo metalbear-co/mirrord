@@ -39,7 +39,7 @@ mod common;
 mod config;
 mod error;
 mod file;
-mod go;
+mod go_hooks;
 mod macros;
 mod pod_api;
 mod socket;
@@ -309,7 +309,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     {
         let modules = frida_gum::Module::enumerate_modules();
         let binary = &modules.first().unwrap().name;
-        go::hooks::go_socket_hooks::enable_socket_hooks(&mut interceptor, binary);
+        go_hooks::go_socket_hooks::enable_socket_hooks(&mut interceptor, binary);
     }
     interceptor.end_transaction();
 }

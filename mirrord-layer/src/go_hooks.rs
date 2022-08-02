@@ -9,7 +9,7 @@ pub(crate) mod go_socket_hooks {
 
     use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
 
-    /// This detour is taken from `runtime.asmcgocall.abi0`
+    /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
     /// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
     /// Golang's assembler - https://go.dev/doc/asm
     /// We cannot provide any stack guarantees when our detour executes(whether it will exceed the
@@ -270,10 +270,7 @@ pub(crate) mod go_socket_hooks {
     #[no_mangle]
     #[naked]
     unsafe extern "C" fn go_systemstack_switch() {
-        asm!(
-            // 0xdd9 - is the value taken from objdump, ghidra maps it to
-            // `runtime.systemstack_switch.abi0`, which just returns.
-            // TODO: fix the address so the symbol is loaded correctly
+        asm!(            
             "lea    r9, [rip+0xdd9]",
             "mov    QWORD PTR [r14+0x40],r9",
             "lea    r9, [rsp+0x8]",
@@ -297,7 +294,7 @@ pub(crate) mod go_socket_hooks {
         asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
     }
 
-    /// [Naked function] Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
+    /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
     /// bind, listen, and accept
     /// Note: Depending on success/failure Syscall may or may not call this handler
     #[no_mangle]
@@ -314,10 +311,14 @@ pub(crate) mod go_socket_hooks {
             libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
             libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_close => close_detour(param1 as _) as i64,
-            _ => syscall_3(syscall, param1, param2, param3),
+            _ => {
+                let syscall_res = syscall_3(syscall, param1, param2, param3);
+                debug!("c_abi_syscall_handler (syscall_3) >> result -> {syscall_res:?}");
+                return syscall_res;
+            }
         };
         debug!(
-            "c_abi_syscall_handler >> result -> {res:?}, errorno -> {:?}",
+            "c_abi_syscall6_handler (detour) >> result -> {res:?}, errorno -> {:?}",
             errno().0
         );
         match res {
@@ -326,7 +327,7 @@ pub(crate) mod go_socket_hooks {
         }
     }
 
-    /// [Naked function] Syscall & Syscall6 handler - supports upto 6 params, mainly used for
+    /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
     /// accept4 Note: Depending on success/failure Syscall may or may not call this handler
     #[no_mangle]
     unsafe extern "C" fn c_abi_syscall6_handler(
@@ -343,10 +344,15 @@ pub(crate) mod go_socket_hooks {
             libc::SYS_accept4 => {
                 accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
             }
-            _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
+            _ => {
+                let syscall_res =
+                    syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                debug!("c_abi_syscall6_handler (syscall_6) >> result -> {syscall_res:?}");
+                return syscall_res;
+            }
         };
         debug!(
-            "c_abi_syscall_handler >> result -> {res:?}, errorno -> {:?}",
+            "c_abi_syscall6_handler (detour) >> result -> {res:?}, errorno -> {:?}",
             errno().0
         );
         match res {
@@ -355,10 +361,10 @@ pub(crate) mod go_socket_hooks {
         }
     }
 
-    /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
+    /// 3 param version (Syscall6) for making the syscall, libc's syscall is not
     /// used here as it doesn't return the value that go expects (it does translation)
     #[naked]
-    unsafe extern "C" fn syscall_3(syscall: i64, arg1: i64, arg2: i64, arg3: i64) -> i64 {
+    unsafe extern "C" fn syscall_3(syscall: i64, param1: i64, param2: i64, param3: i64) -> i64 {
         asm!(
             "mov    rax, rdi",
             "mov    rdi, rsi",
@@ -374,12 +380,12 @@ pub(crate) mod go_socket_hooks {
     #[naked]
     unsafe extern "C" fn syscall_6(
         syscall: i64,
-        arg1: i64,
-        arg2: i64,
-        arg3: i64,
-        arg4: i64,
-        arg5: i64,
-        arg6: i64,
+        param1: i64,
+        param2: i64,
+        param3: i64,
+        param4: i64,
+        param5: i64,
+        param6: i64,
     ) -> i64 {
         asm!(
             "mov    rax, rdi",
