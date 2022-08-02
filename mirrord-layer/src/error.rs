@@ -92,6 +92,9 @@ pub enum LayerError {
 
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
+
+    #[error("mirrord-layer: Failed converting `sockaddr`!")]
+    AddressConversion,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -141,6 +144,7 @@ impl From<LayerError> for i64 {
             LayerError::TimeOutError => libc::ETIMEDOUT,
             LayerError::DNSNoName => libc::EFAULT,
             LayerError::Utf8(_) => libc::EINVAL,
+            LayerError::AddressConversion => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
