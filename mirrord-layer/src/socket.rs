@@ -10,7 +10,7 @@ use std::{
 use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
-use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 
 pub(super) mod hooks;
 mod ops;
@@ -115,7 +115,7 @@ fn fill_address(
         set_errno(Errno(libc::EINVAL));
         return -1;
     }
-    let os_address: OsSocketAddr = new_address.into();
+    let os_address = SockAddr::from(new_address);
     unsafe {
         let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
         std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);

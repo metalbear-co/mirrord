@@ -1423,7 +1423,6 @@ dependencies = [
  "multi-map",
  "nanoid",
  "nix",
- "os_socketaddr",
  "queues",
  "rand 0.8.5",
  "regex",
@@ -1669,16 +1668,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "os_socketaddr"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2090877fe9aa15a914d863207ea6d2062d94c1178a854b1571374f9be1a045fb"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
