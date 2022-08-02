@@ -259,9 +259,10 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 
 #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 #[hook_fn]
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd,);
+pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd);
 
+    let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
 
     if fcntl_result == -1 {
