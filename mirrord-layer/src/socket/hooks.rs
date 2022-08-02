@@ -27,6 +27,8 @@ pub(super) unsafe extern "C" fn socket_detour(
     let (Ok(result) | Err(result)) =
         socket(socket_result, domain, type_, protocol).map_err(From::from);
 
+    trace!("socket_detour -> result {:#?}", result);
+
     result
 }
 
@@ -60,6 +62,9 @@ pub(super) unsafe extern "C" fn bind_detour(
             }
             other => other.into(),
         });
+
+    trace!("bind_detour -> result {:#?}", result);
+
     result
 }
 
@@ -79,6 +84,8 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
                 }
                 other => other.into(),
             });
+
+    trace!("listen_detour -> result {:#?}", result);
     result
 }
 
@@ -112,6 +119,7 @@ pub(super) unsafe extern "C" fn connect_detour(
                 other => other.into(),
             });
 
+    trace!("connect_detour -> result {:#?}", result);
     result
 }
 
@@ -131,6 +139,8 @@ pub(super) unsafe extern "C" fn getpeername_detour(
             }
             other => other.into(),
         });
+
+    trace!("getpeername_detour -> result {:#?}", result);
     result
 }
 
@@ -150,6 +160,8 @@ pub(super) unsafe extern "C" fn getsockname_detour(
             }
             other => other.into(),
         });
+
+    trace!("getsockname_detour -> result {:#?}", result);
     result
 }
 
@@ -174,6 +186,8 @@ pub(super) unsafe extern "C" fn accept_detour(
                     other.into()
                 }
             });
+
+        trace!("accept_detour -> result {:#?}", result);
         result
     }
 }
@@ -201,6 +215,8 @@ pub(super) unsafe extern "C" fn accept4_detour(
                     other.into()
                 }
             });
+
+        trace!("accept4_detour -> result {:#?}", result);
         result
     }
 }
@@ -235,6 +251,8 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
             .map_err(From::from);
+
+        trace!("fcntl_detour -> result {:#?}", result);
         result
     }
 }
@@ -242,12 +260,7 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    trace!(
-        "fcntl_detour -> fd {:#?} | cmd {:#?} | arg {:#?}",
-        fd,
-        cmd,
-        arg
-    );
+    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd,);
 
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
 
@@ -257,6 +270,8 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) ->
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
             .map_err(From::from);
+
+        trace!("fcntl_detour -> result {:#?}", result);
         result
     }
 }
@@ -278,6 +293,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
                     _ => fail.into(),
                 });
 
+        trace!("dup_detour -> result {:#?}", result);
         result
     }
 }
@@ -303,6 +319,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
                     _ => fail.into(),
                 });
 
+        trace!("dup2_detour -> result {:#?}", result);
         result
     }
 }
@@ -329,6 +346,8 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
                     LayerError::LocalFDNotFound(_) => dup3_result,
                     _ => fail.into(),
                 });
+
+        trace!("dup3_detour -> result {:#?}", result);
         result
     }
 }
