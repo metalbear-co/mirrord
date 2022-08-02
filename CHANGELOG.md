@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Removed
 - Removed Ephemeral Containers until they become better supported.
 
+### Changed
+- `mirrord-layer/socket` now uses `socket2::SockAddr` to comply with Rust's new IP format.
+
 ## 2.5.0
 
 ### Added
