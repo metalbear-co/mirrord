@@ -66,7 +66,4 @@ pub enum AgentError {
 
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
-
-    #[error("`send` operation on channel failed!")]
-    SenderFailed,
 }

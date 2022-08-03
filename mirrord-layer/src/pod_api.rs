@@ -74,7 +74,10 @@ impl RuntimeData {
     }
 }
 
-pub(crate) async fn create_agent(config: LayerConfig) -> Result<Portforwarder, LayerError> {
+pub(crate) async fn create_agent(
+    config: LayerConfig,
+    connection_port: u16,
+) -> Result<Portforwarder, LayerError> {
     let LayerConfig {
         agent_image,
         agent_namespace,
@@ -102,7 +105,7 @@ pub(crate) async fn create_agent(config: LayerConfig) -> Result<Portforwarder, L
     });
 
     let pod_name = if ephemeral_container {
-        create_ephemeral_container_agent(&config, agent_image, &pods_api).await?
+        create_ephemeral_container_agent(&config, agent_image, &pods_api, connection_port).await?
     } else {
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
@@ -113,10 +116,18 @@ pub(crate) async fn create_agent(config: LayerConfig) -> Result<Portforwarder, L
         .await;
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
-        create_job_pod_agent(&config, agent_image, &pods_api, runtime_data, &jobs_api).await?
+        create_job_pod_agent(
+            &config,
+            agent_image,
+            &pods_api,
+            runtime_data,
+            &jobs_api,
+            connection_port,
+        )
+        .await?
     };
     pods_api
-        .portforward(&pod_name, &[61337])
+        .portforward(&pod_name, &[connection_port])
         .await
         .map_err(LayerError::KubeError)
 }
@@ -135,6 +146,7 @@ async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     agent_image: String,
     pods_api: &Api<Pod>,
+    connection_port: u16,
 ) -> Result<String, LayerError> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
@@ -145,12 +157,15 @@ async fn create_ephemeral_container_agent(
         "name": mirrord_agent_name,
         "image": agent_image,
         "imagePullPolicy": config.image_pull_policy,
-        "target_container_name": config.impersonated_container_name,
+        "targetContainerName": config.impersonated_container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
         "command": [
             "./mirrord-agent",
             "-t",
             "30",
+            "-l",
+            connection_port.to_string(),
+            "-e",
         ],
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
@@ -213,6 +228,7 @@ async fn create_job_pod_agent(
     pods_api: &Api<Pod>,
     runtime_data: RuntimeData,
     job_api: &Api<Job>,
+    connection_port: u16,
 ) -> Result<String, LayerError> {
     let mirrord_agent_job_name = get_agent_name();
 
@@ -262,6 +278,8 @@ async fn create_job_pod_agent(
                                 runtime_data.container_runtime,
                                 "-t",
                                 "30",
+                                "-l",
+                                connection_port.to_string(),
                             ],
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
                         }

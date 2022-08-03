@@ -10,6 +10,11 @@
 
 </div>
 
+[![Discord](https://img.shields.io/discord/933706914808889356)](https://discord.gg/J5YSrStDKD)
+![License](https://img.shields.io/badge/license-MIT-green)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
+[![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
+
 mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both a [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
 
 ## Getting Started
@@ -59,7 +64,12 @@ mirrord exec node app.js --pod-name my-pod
 mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
 
 ## Contributing
-Contributions are welcome via PRs.
+Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
+If you wish to work an issue, please comment so you can be assigned.
+
+
+## Development
+Read our development guide [here](https://mirrord.dev/docs/developer/testing/).
 
 
 ## Help & Community 🎉✉️

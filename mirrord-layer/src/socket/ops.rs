@@ -2,7 +2,7 @@ use std::{
     ffi::CString,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
-    os::unix::{io::RawFd, prelude::FromRawFd},
+    os::unix::io::RawFd,
     ptr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,11 +11,9 @@ use std::{
 };
 
 use dns_lookup::AddrInfo;
-use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
-use os_socketaddr::OsSocketAddr;
 use socket2::{Domain, SockAddr};
-use tokio::{net::TcpStream, sync::oneshot};
+use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
@@ -93,10 +91,11 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 
     Ok(())
 }
+
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
-    trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
+    debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
         SOCKETS
@@ -111,12 +110,12 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
 
-            let mut address = match socket.domain {
-                libc::AF_INET => Ok(OsSocketAddr::from(SocketAddr::new(
+            let address = match socket.domain {
+                libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::LOCALHOST),
                     0,
                 ))),
-                libc::AF_INET6 => Ok(OsSocketAddr::from(SocketAddr::new(
+                libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
                     IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                     0,
                 ))),
@@ -125,21 +124,31 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
             if bind_result != 0 {
+                error!(
+                    "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
+                    sockfd,
+                    address,
+                    errno::errno()
+                );
                 return Err(io::Error::from_raw_os_error(bind_result).into());
             }
 
             // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
             // connect to.
             let getsockname_result =
-                unsafe { FN_GETSOCKNAME(sockfd, address.as_mut_ptr(), &mut address.len()) };
+                unsafe { FN_GETSOCKNAME(sockfd, address.as_ptr() as *mut _, &mut address.len()) };
             if getsockname_result != 0 {
+                error!("listen -> Failed `getsockname` sockfd {:#?}", sockfd);
+
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
-            let address = address.into_addr().ok_or(LayerError::AddressConversion)?;
+            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
+                error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
+
                 return Err(io::Error::from_raw_os_error(listen_result).into());
             }
 
@@ -244,7 +253,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
         blocking_send_hook_message(HookMessage::OutgoingTraffic(hook))?;
 
-        let connect_to = OsSocketAddr::from(mirror_address);
+        let connect_to = SockAddr::from(mirror_address);
         let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
         if connect_result == -1 {
             return Err(todo!());
@@ -262,41 +271,42 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         Ok::<(), LayerError>(())
     } else if let SocketState::Bound(bound) = user_socket_info.state {
         trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-        let os_addr = OsSocketAddr::from(bound.address);
-        let ret = unsafe { libc::bind(sockfd, os_addr.as_ptr(), os_addr.len()) };
 
-        if ret != 0 {
+        let address = SockAddr::from(bound.address);
+        let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+
+        if bind_result != 0 {
             error!(
-                "connect: failed to bind socket ret: {:?}, addr: {:?}, sockfd: {:?}",
-                ret, os_addr, sockfd
+                "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
+                bind_result, address, sockfd
             );
 
-            return Err(LayerError::AddressConversion);
+            Err(io::Error::from_raw_os_error(bind_result))?
         } else {
-            Ok(())
+            let rawish_remote_address = SockAddr::from(remote_address);
+            let result = unsafe {
+                FN_CONNECT(
+                    sockfd,
+                    rawish_remote_address.as_ptr(),
+                    rawish_remote_address.len(),
+                )
+            };
+
+            if result != 0 {
+                Err(io::Error::from_raw_os_error(result))?
+            } else {
+                Ok::<_, LayerError>(())
+            }
         }
     } else {
-        let rawish_remote_address = SockAddr::from(remote_address);
-        let result = unsafe {
-            libc::connect(
-                sockfd,
-                rawish_remote_address.as_ptr(),
-                rawish_remote_address.len(),
-            )
-        };
-        if result != 0 {
-            return Err(LayerError::DNSNoName);
-        }
-
-        Ok(())
+        Err(LayerError::SocketInvalidState(sockfd))
     }?;
 
     Ok(())
 }
+
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -311,7 +321,7 @@ pub(super) fn getpeername(
             .ok_or(LayerError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Ok(connected.remote_address),
-                invalid => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(LayerError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -338,7 +348,7 @@ pub(super) fn getsockname(
                 SocketState::Connected(connected) => Ok(connected.mirror_address),
                 SocketState::Bound(bound) => Ok(bound.address),
                 SocketState::Listening(bound) => Ok(bound.address),
-                invalid => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(LayerError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -365,7 +375,7 @@ pub(super) fn accept(
                 SocketState::Listening(bound) => {
                     Ok((bound.address, socket.domain, socket.protocol, socket.type_))
                 }
-                invalid => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(LayerError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -374,7 +384,7 @@ pub(super) fn accept(
             .lock()?
             .get(&sockfd)
             .ok_or(LayerError::LocalFDNotFound(sockfd))
-            .and_then(|socket| Ok(socket.address))?
+            .map(|socket| socket.address)?
     };
 
     let new_socket = MirrorSocket {
@@ -386,38 +396,30 @@ pub(super) fn accept(
             mirror_address: local_address,
         }),
     };
-    fill_address(address, address_len, remote_address);
+    fill_address(address, address_len, remote_address)?;
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> c_int {
-    if fcntl_fd == -1 {
-        error!("fcntl failed");
-        return fcntl_fd;
-    }
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
     match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => {
-            dup(orig_fd, fcntl_fd);
-        }
-        _ => (),
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
+        _ => Ok(()),
     }
-    fcntl_fd
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> c_int {
-    if dup_fd == -1 {
-        error!("dup failed");
-        return dup_fd;
-    }
-    let mut sockets = SOCKETS.lock().unwrap();
-    if let Some(socket) = sockets.get(&fd) {
-        let dup_socket = socket.clone();
-        sockets.insert(dup_fd as RawFd, dup_socket);
-    }
-    dup_fd
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
+    let dup_socket = SOCKETS
+        .lock()?
+        .get(&fd)
+        .ok_or(LayerError::LocalFDNotFound(fd))?
+        .clone();
+
+    SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
+
+    Ok(())
 }
 
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
@@ -476,7 +478,7 @@ pub(super) fn getaddrinfo(
                 c_str.as_ptr()
             }) as *mut _;
 
-            let c_addr_info = libc::addrinfo {
+            libc::addrinfo {
                 ai_flags: flags,
                 ai_family: address,
                 ai_socktype: socktype,
@@ -485,9 +487,7 @@ pub(super) fn getaddrinfo(
                 ai_addr: sockaddr.as_ptr() as *mut _,
                 ai_canonname,
                 ai_next: ptr::null_mut(),
-            };
-
-            c_addr_info
+            }
         })
         .rev()
         .map(Box::new)

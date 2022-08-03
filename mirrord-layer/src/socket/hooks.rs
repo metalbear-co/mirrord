@@ -1,23 +1,17 @@
-use std::{
-    ffi::CStr,
-    net::SocketAddr,
-    os::unix::io::RawFd,
-    sync::{atomic::Ordering, LazyLock},
-};
+use std::{ffi::CStr, os::unix::io::RawFd, sync::atomic::Ordering};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
-use os_socketaddr::OsSocketAddr;
-use tracing::{debug, error, trace, warn};
+use socket2::SockAddr;
+use tracing::{debug, error, trace};
 
 use super::ops::*;
 use crate::{
     error::LayerError,
-    hook,
+    replace,
     socket::{AddrInfoHintExt, SocketState, SOCKETS},
-    GUM,
 };
 
 #[hook_fn]
@@ -48,14 +42,18 @@ pub(super) unsafe extern "C" fn socket_detour(
 #[hook_fn]
 pub(super) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
-    addr: *const sockaddr,
-    addrlen: socklen_t,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
 ) -> c_int {
     trace!("bind_detour -> sockfd {:#?}", sockfd);
 
-    let address = match OsSocketAddr::from_raw_parts(addr as *const u8, addrlen as usize)
-        .into_addr()
-        .ok_or(LayerError::AddressConversion)
+    // TODO: Is this conversion safe?
+    let address = match SockAddr::new(
+        *(raw_address as *const libc::sockaddr_storage),
+        address_length,
+    )
+    .as_socket()
+    .ok_or(LayerError::AddressConversion)
     {
         Ok(address) => address,
         Err(fail) => return fail.into(),
@@ -63,16 +61,14 @@ pub(super) unsafe extern "C" fn bind_detour(
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("bind_detour -> bypassed");
-        FN_BIND(sockfd, addr, addrlen)
+        FN_BIND(sockfd, raw_address, address_length)
     } else {
         let (Ok(result) | Err(result)) =
             bind(sockfd, address)
                 .map(|()| 0)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) => FN_BIND(sockfd, addr, addrlen),
-                    LayerError::BypassedPort(_) => {
-                        warn!("bind_detour -> bypass port");
-                        FN_BIND(sockfd, addr, addrlen)
+                    LayerError::LocalFDNotFound(_) | LayerError::BypassedPort(_) => {
+                        FN_BIND(sockfd, raw_address, address_length)
                     }
                     other => other.into(),
                 });
@@ -96,7 +92,9 @@ pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
             listen(sockfd, backlog)
                 .map(|()| 0)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) => FN_LISTEN(sockfd, backlog),
+                    LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                        FN_LISTEN(sockfd, backlog)
+                    }
                     other => other.into(),
                 });
         result
@@ -115,7 +113,7 @@ pub(super) unsafe extern "C" fn connect_detour(
         debug!("connect_detour -> bypassed");
         if let Some(socket) = SOCKETS.lock().unwrap().remove(&sockfd) {
             if let SocketState::Bound(bound) = socket.state {
-                let rawish_address = OsSocketAddr::from(bound.address);
+                let rawish_address = SockAddr::from(bound.address);
 
                 // TODO(alex) [high] 2022-07-27: This is the idea to solve the loop problem (and go
                 // back to working state), but it's not working yet.
@@ -127,20 +125,25 @@ pub(super) unsafe extern "C" fn connect_detour(
 
         FN_CONNECT(sockfd, raw_address, address_length)
     } else {
-        let address =
-            match OsSocketAddr::from_raw_parts(raw_address as *const _, address_length as usize)
-                .into_addr()
-                .ok_or(LayerError::AddressConversion)
-            {
-                Ok(address) => address,
-                Err(fail) => return fail.into(),
-            };
+        // TODO: Is this conversion safe?
+        let address = match SockAddr::new(
+            *(raw_address as *const libc::sockaddr_storage),
+            address_length,
+        )
+        .as_socket()
+        .ok_or(LayerError::AddressConversion)
+        {
+            Ok(address) => address,
+            Err(fail) => return fail.into(),
+        };
 
         let (Ok(result) | Err(result)) =
             connect(sockfd, address)
                 .map(|()| 0)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(fd) => FN_CONNECT(fd, raw_address, address_length),
+                    LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                        FN_CONNECT(sockfd, raw_address, address_length)
+                    }
                     other => other.into(),
                 });
 
@@ -163,7 +166,9 @@ pub(super) unsafe extern "C" fn getpeername_detour(
         let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) => FN_GETPEERNAME(sockfd, address, address_len),
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_GETPEERNAME(sockfd, address, address_len)
+                }
                 other => other.into(),
             });
         result
@@ -185,7 +190,9 @@ pub(super) unsafe extern "C" fn getsockname_detour(
         let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) => FN_GETSOCKNAME(sockfd, address, address_len),
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_GETSOCKNAME(sockfd, address, address_len)
+                }
                 other => other.into(),
             });
         result
@@ -202,108 +209,159 @@ pub(super) unsafe extern "C" fn accept_detour(
 
     let accept_result = FN_ACCEPT(sockfd, address, address_len);
 
-    if accept_result == -1 {
-        accept_result
-    } else if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("accept_detour -> bypassed");
+    if accept_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         accept_result
     } else {
-        let (Ok(result) | Err(result)) =
-            accept(sockfd, address, address_len, accept_result).map_err(From::from);
+        let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
+            .map_err(|fail| match fail {
+                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                other => {
+                    error!("accept error is {:#?}", other);
+                    other.into()
+                }
+            });
+
         result
     }
 }
 
 #[cfg(target_os = "linux")]
-#[hook_fn(alias = "uv__accept4")]
+#[hook_fn]
 pub(super) unsafe extern "C" fn accept4_detour(
     sockfd: i32,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     flags: i32,
 ) -> i32 {
+    trace!("accept4_detour -> sockfd {:#?}", sockfd);
+
     let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
 
-    if accept_result == -1 {
-        accept_result
-    } else if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("accept4_detour -> bypassed");
+    if accept_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         accept_result
     } else {
-        let (Ok(result) | Err(result)) =
-            accept(sockfd, address, address_len, accept_result).map_err(From::from);
+        let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
+            .map_err(|fail| match fail {
+                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                other => {
+                    error!("accept4 error is {:#?}", other);
+                    other.into()
+                }
+            });
+
         result
     }
 }
 
-/// We have a different version for macOS as a workaround for https://github.com/metalbear-co/mirrord/issues/184
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[hook_fn]
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
-    let arg = arg.arg::<usize>();
-    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+#[allow(non_snake_case)]
+pub(super) unsafe extern "C" fn uv__accept4_detour(
+    sockfd: i32,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: i32,
+) -> i32 {
+    trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
 
-    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        fcntl_fd
-    } else {
-        fcntl(fd, cmd, fcntl_fd)
-    }
+    accept4_detour(sockfd, address, address_len, flags)
 }
 
-#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+/// https://github.com/metalbear-co/mirrord/issues/184
 #[hook_fn]
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, arg: ...) -> c_int {
-    let fcntl_fd = FN_FCNTL(fd, cmd, arg);
+pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+    trace!("fcntl_detour -> fd {:#?} | cmd {:#?}", fd, cmd);
 
-    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("fcntl_detour -> bypassed");
-        fcntl_fd
+    let arg = arg.arg::<usize>();
+    let fcntl_result = FN_FCNTL(fd, cmd, arg);
+
+    if fcntl_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        fcntl_result
     } else {
-        fcntl(fd, cmd, fcntl_fd)
+        let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
+            .map(|()| fcntl_result)
+            .map_err(From::from);
+
+        trace!("fcntl_detour -> result {:#?}", result);
+        result
     }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
-    let dup_fd = FN_DUP(fd);
+    trace!("dup_detour -> fd {:#?}", fd);
 
-    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("dup_detour -> bypassed");
-        dup_fd
+    let dup_result = FN_DUP(fd);
+
+    if dup_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        dup_result
     } else {
-        dup(fd, dup_fd)
+        let (Ok(result) | Err(result)) =
+            dup(fd, dup_result)
+                .map(|()| dup_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup_result,
+                    _ => fail.into(),
+                });
+
+        trace!("dup_detour -> result {:#?}", result);
+        result
     }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
+    trace!("dup2_detour -> oldfd {:#?} | newfd {:#?}", oldfd, newfd);
+
     if oldfd == newfd {
         return newfd;
     }
 
-    let dup2_fd = FN_DUP2(oldfd, newfd);
+    let dup2_result = FN_DUP2(oldfd, newfd);
 
-    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("dup2_detour -> bypassed");
-        dup2_fd
+    if dup2_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        dup2_result
     } else {
-        dup(oldfd, dup2_fd)
+        let (Ok(result) | Err(result)) =
+            dup(oldfd, dup2_result)
+                .map(|()| dup2_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup2_result,
+                    _ => fail.into(),
+                });
+
+        trace!("dup2_detour -> result {:#?}", result);
+        result
     }
 }
 
 #[cfg(target_os = "linux")]
 #[hook_fn]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
-    let dup3_fd = FN_DUP3(oldfd, newfd, flags);
+    trace!(
+        "dup3_detour -> oldfd {:#?} | newfd {:#?} | flags {:#?}",
+        oldfd,
+        newfd,
+        flags
+    );
 
-    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
-        debug!("dup3_detour -> bypassed");
-        dup3_fd
+    let dup3_result = FN_DUP3(oldfd, newfd, flags);
+
+    if dup3_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        dup3_result
     } else {
-        dup(oldfd, dup3_fd)
+        let (Ok(result) | Err(result)) =
+            dup(oldfd, dup3_result)
+                .map(|()| dup3_result)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) => dup3_result,
+                    _ => fail.into(),
+                });
+
+        trace!("dup3_detour -> result {:#?}", result);
+        result
     }
 }
-
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
 ///
 /// # Warning:
@@ -399,11 +457,11 @@ pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinf
 }
 
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
-    let _ = hook!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
-    let _ = hook!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
-    let _ = hook!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
+    let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+    let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
+    let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 
-    let _ = hook!(
+    let _ = replace!(
         interceptor,
         "connect",
         connect_detour,
@@ -411,11 +469,11 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         FN_CONNECT
     );
 
-    let _ = hook!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
-    let _ = hook!(interceptor, "dup", dup_detour, FnDup, FN_DUP);
-    let _ = hook!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2);
+    let _ = replace!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
+    let _ = replace!(interceptor, "dup", dup_detour, FnDup, FN_DUP);
+    let _ = replace!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2);
 
-    let _ = hook!(
+    let _ = replace!(
         interceptor,
         "getpeername",
         getpeername_detour,
@@ -423,7 +481,7 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         FN_GETPEERNAME
     );
 
-    let _ = hook!(
+    let _ = replace!(
         interceptor,
         "getsockname",
         getsockname_detour,
@@ -433,51 +491,29 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
 
     #[cfg(target_os = "linux")]
     {
-        // TODO(alex) [low] 2022-07-25: Most of these are pretty much the same thing, with a few
-        // exceptions:
-        //
-        // 1. detour function has a different name: `uv__accept4` to `accept4`;
-        // 2. enabled by flags;
-        //
-        // To solve (1), the macro just has to take an argument `detour`, so it'll try to use the
-        // normal function name, and the argument version as well. Has to be both for cases where
-        // we have many different functions pointing to the same fn.
-        //
-        // Solving (2) requires some sort of `Option` + `bool` deal. As things should be enabled by
-        // default, meaning lack of `enabled =` flags is the same as `enabled = true`. But we don't
-        // have access to the true value in `hook_fn`, so it has to be a check in the middle of
-        // initialization. I'm starting to think that maybe we could initialize either to the
-        // detour or to the `libc` version, this way we cover both cases (enabled/disabled), these
-        // being the left and right sides of this either variant.
-        let _ = hook!(
+        let _ = replace!(
             interceptor,
             "uv__accept4",
+            uv__accept4_detour,
+            FnUv__accept4,
+            FN_UV__ACCEPT4
+        );
+
+        let _ = replace!(
+            interceptor,
+            "accept4",
             accept4_detour,
             FnAccept4,
             FN_ACCEPT4
-        )
-        .or_else(|fail| {
-            warn!(
-                "enable_socket_hooks -> Failed hooking `uv__accept4` with {:#?}!",
-                fail
-            );
+        );
 
-            hook!(
-                interceptor,
-                "accept4",
-                accept4_detour,
-                FnAccept4,
-                FN_ACCEPT4
-            )
-        });
-
-        let _ = hook!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3);
+        let _ = replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3);
     }
 
-    let _ = hook!(interceptor, "accept", accept_detour, FnAccept, FN_ACCEPT);
+    let _ = replace!(interceptor, "accept", accept_detour, FnAccept, FN_ACCEPT);
 
     if enabled_remote_dns {
-        let _ = hook!(
+        let _ = replace!(
             interceptor,
             "getaddrinfo",
             getaddrinfo_detour,
@@ -485,7 +521,7 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
             FN_GETADDRINFO
         );
 
-        let _ = hook!(
+        let _ = replace!(
             interceptor,
             "freeaddrinfo",
             freeaddrinfo_detour,
@@ -494,27 +530,3 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         );
     }
 }
-
-/*
-   let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
-                    symbol_name,
-                    detour: FnSocket|
-    -> Result<FnSocket, LayerError> {
-       let function = frida_gum::Module::find_export_by_name(None, symbol_name)
-           .ok_or(LayerError::NoExportName(symbol_name.to_string()))?;
-
-       let replaced = interceptor.replace(
-           function,
-           frida_gum::NativePointer(detour as *mut libc::c_void),
-           frida_gum::NativePointer(std::ptr::null_mut()),
-       )?;
-
-       let original_fn: FnSocket = unsafe { std::mem::transmute(replaced) };
-
-       Ok(original_fn)
-   };
-
-   let mut interceptor = frida_gum::interceptor::Interceptor::obtain(&GUM);
-   intercept(&mut interceptor, "socket", socket_detour)
-
-*/

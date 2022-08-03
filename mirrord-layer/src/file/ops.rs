@@ -6,7 +6,7 @@ use mirrord_protocol::{
     WriteFileResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::{
     common::blocking_send_hook_message,
@@ -32,6 +32,12 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<(), LayerError
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
 pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd, LayerError> {
+    trace!(
+        "open -> path {:#?} | open_options {:#?}",
+        path,
+        open_options
+    );
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let requesting_file = Open {
@@ -95,10 +101,13 @@ pub(crate) fn openat(
     open_flags: c_int,
     relative_fd: usize,
 ) -> Result<RawFd, LayerError> {
-    debug!(
-        "openat -> trying to open valid file {:?} with relative dir {:?}.",
-        path, relative_fd
+    trace!(
+        "openat -> path {:?} | open_flags {:?} | relative_dir {:#?}",
+        path,
+        open_flags,
+        relative_fd
     );
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -152,9 +161,10 @@ pub(crate) fn fopen(
     path: PathBuf,
     open_options: OpenOptionsInternal,
 ) -> Result<*mut FILE, LayerError> {
-    debug!(
-        "fopen -> trying to fopen valid file {:?} with options {:#?}",
-        path, open_options
+    trace!(
+        "fopen -> path {:#?} | open_options {:#?}",
+        path,
+        open_options
     );
 
     let local_file_fd = open(path, open_options)?;
@@ -172,7 +182,12 @@ pub(crate) fn fdopen(
     remote_fd: usize,
     _open_options: OpenOptionsInternal,
 ) -> Result<*mut FILE, LayerError> {
-    debug!("fdopen -> trying to fdopen valid file {:#?}", remote_fd);
+    trace!(
+        "fdopen -> local_fd {:#?} | remoet_fd {:#?} | _open_options {:#?}",
+        local_fd,
+        remote_fd,
+        _open_options
+    );
 
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
@@ -184,7 +199,7 @@ pub(crate) fn fdopen(
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
 pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, LayerError> {
-    debug!("read -> trying to read valid file {:?}.", fd);
+    trace!("read -> fd {:#?} | read_amount {:#?}", fd, read_amount);
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -201,7 +216,8 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse, La
 }
 
 pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
-    debug!("lseek -> trying to seek valid file {:?}.", fd);
+    trace!("lseek -> fd {:?} | seek_from {:#?}", fd, seek_from);
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let seeking_file = Seek {
@@ -217,7 +233,12 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64, LayerError> {
 }
 
 pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError> {
-    debug!("write -> trying to write valid file {:?}.", fd);
+    trace!(
+        "write -> fd {:?} | write_bytes (length) {:#?}",
+        fd,
+        write_bytes.len()
+    );
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let writing_file = Write {
@@ -233,7 +254,8 @@ pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize, LayerError
 }
 
 pub(crate) fn close(fd: usize) -> Result<c_int, LayerError> {
-    debug!("close -> trying to close valid file {:?}.", fd);
+    trace!("close -> fd {:#?}", fd);
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let closing_file = Close {

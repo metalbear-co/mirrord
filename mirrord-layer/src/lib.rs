@@ -23,6 +23,7 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use rand::Rng;
 use socket::SOCKETS;
 use tcp::{outgoing::OutgoingTrafficHandler, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
@@ -46,7 +47,6 @@ mod tcp;
 mod tcp_mirror;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
-
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
@@ -54,6 +54,9 @@ pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
+/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
+/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+#[derive(Debug)]
 pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
 
 impl<T> Deref for HookFn<T> {
@@ -61,6 +64,12 @@ impl<T> Deref for HookFn<T> {
 
     fn deref(&self) -> &Self::Target {
         self.0.get().unwrap()
+    }
+}
+
+impl<T> const Default for HookFn<T> {
+    fn default() -> Self {
+        Self(std::sync::OnceLock::new())
     }
 }
 
@@ -80,9 +89,12 @@ fn init() {
     info!("Initializing mirrord-layer!");
 
     let config = LayerConfig::init_from_env().unwrap();
+    let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+
+    info!("Using port `{connection_port:?}` for communication");
 
     let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(config.clone()))
+        .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|e| {
             panic!("failed to create agent: {}", e);
         });
@@ -95,9 +107,12 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
-    // TODO(alex) [mid] 2022-07-27: Maybe if this is not a tokio thingy (std spawn) we could avoid
-    // the whole issue? Basically trying to take out tokio out of the way as much as possible?
-    RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
+    RUNTIME.block_on(start_layer_thread(
+        port_forwarder,
+        receiver,
+        config,
+        connection_port,
+    ));
 }
 
 struct Layer<T>
@@ -265,8 +280,9 @@ async fn start_layer_thread(
     mut pf: Portforwarder,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
+    connection_port: u16,
 ) {
-    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+    let port = pf.take_stream(connection_port).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)
@@ -324,7 +340,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.begin_transaction();
 
     unsafe {
-        let _ = hook!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -346,7 +362,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .expect("Should be set during initialization!");
 
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        libc::close(fd)
+        FN_CLOSE(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
@@ -360,9 +376,9 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
                 })
                 .unwrap_or_else(|fail| fail)
         } else {
-            libc::close(fd)
+            FN_CLOSE(fd)
         }
     } else {
-        libc::close(fd)
+        FN_CLOSE(fd)
     }
 }

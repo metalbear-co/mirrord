@@ -6,7 +6,6 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose, TcpData},
     ConnectionID,

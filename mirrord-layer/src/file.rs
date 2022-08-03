@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,

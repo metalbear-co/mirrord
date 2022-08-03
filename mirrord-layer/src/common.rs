@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
-use tracing::trace;
 
 use crate::{
     error::LayerError,
@@ -20,14 +19,6 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), Lay
             .ok_or(LayerError::EmptyHookSender)
             .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
     }
-}
-
-pub(crate) async fn send_hook_message(message: HookMessage) -> Result<(), LayerError> {
-    trace!("send_hook_message -> message {:#?}", message);
-
-    let hook_sender = unsafe { HOOK_SENDER.as_ref().ok_or(LayerError::EmptyHookSender)? };
-
-    Ok(hook_sender.send(message).await?)
 }
 
 pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;

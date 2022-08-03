@@ -7,10 +7,9 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
-use os_socketaddr::OsSocketAddr;
+use socket2::SockAddr;
 
 use crate::error::LayerError;
 
@@ -110,12 +109,16 @@ fn fill_address(
     address_len: *mut socklen_t,
     new_address: SocketAddr,
 ) -> Result<(), LayerError> {
-    if address.is_null() || address_len.is_null() {
+    if address.is_null() {
+        Ok(())
+    } else if address_len.is_null() {
         Err(LayerError::NullPointer)
     } else {
-        let os_address: OsSocketAddr = new_address.into();
+        let os_address = SockAddr::from(new_address);
+
         unsafe {
             let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
+
             std::ptr::copy_nonoverlapping(
                 os_address.as_ptr() as *const u8,
                 address as *mut u8,
