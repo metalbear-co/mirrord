@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "clap 3.2.8",
@@ -1377,7 +1377,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "actix-codec",
  "bincode",

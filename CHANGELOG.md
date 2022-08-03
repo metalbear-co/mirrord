@@ -7,19 +7,18 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.6.0
 
 ### Added
 - Add a flag for the agent, `--ephemeral-container`, to correctly refer to the filesystem i.e. refer to root path as `/proc/1/root` when the flag is on, otherwise `/`.
 
 ### Changed
 - Assign a random port number instead of `61337`. (Reason: A forking process creates multiple agents sending traffic on the same port, causing addrinuse error.)
+- `mirrord-layer/socket` now uses `socket2::SockAddr` to comply with Rust's new IP format.
 
 ### Fixed
 - Fix filesystem tests to only run if the default path exists.
-
-
-### Changed
-- `mirrord-layer/socket` now uses `socket2::SockAddr` to comply with Rust's new IP format.
+- Fix extension not running due to the node_modules directory not being packaged.
 
 ## 2.5.0
 
