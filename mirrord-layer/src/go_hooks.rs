@@ -10,9 +10,9 @@ pub(crate) mod go_socket_hooks {
 
     use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
 
-    static mut GO_ENTER_SYSCALL: *mut c_void = null_mut();
-    static mut GO_EXIT_SYSCALL: *mut c_void = null_mut();
-    static mut GO_SAVE_SYSTEMSTACK: *mut c_void = null_mut();
+    pub static mut GO_ENTER_SYSCALL: *mut c_void = null_mut();
+    pub static mut GO_EXIT_SYSCALL: *mut c_void = null_mut();
+    pub static mut GO_SAVE_SYSTEMSTACK: *mut c_void = null_mut();
     /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
     /// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
     /// Golang's assembler - https://go.dev/doc/asm
