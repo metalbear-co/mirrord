@@ -195,10 +195,6 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: macos-latest
-          cache-on-failure: true
       - uses: actions/setup-node@v3
         with:
           node-version: 14

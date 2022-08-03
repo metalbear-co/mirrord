@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Fix flakiness on macos E2E tests by removing the use of rust cache.
+
 ## 2.6.0
 
 ### Added
