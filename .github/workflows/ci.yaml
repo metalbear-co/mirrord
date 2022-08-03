@@ -157,7 +157,7 @@ jobs:
           go-version: "1.18.0"
       - run: |
           cd tests/go-e2e
-          go build 
+          go build
           cd ../..
       - name: start minikube
         uses: medyagh/setup-minikube@master
@@ -195,10 +195,6 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: macos-latest
-          cache-on-failure: true
       - uses: actions/setup-node@v3
         with:
           node-version: 14
