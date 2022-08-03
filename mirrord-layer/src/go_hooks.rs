@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod go_socket_hooks {
-    use std::{arch::asm, ptr::{null_mut}};
+    use std::{arch::asm, ptr::null_mut};
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
@@ -262,8 +262,6 @@ pub(crate) mod go_socket_hooks {
         );
     }
 
-
-
     /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
     /// bind, listen, and accept
     /// Note: Depending on success/failure Syscall may or may not call this handler
@@ -377,17 +375,23 @@ pub(crate) mod go_socket_hooks {
     ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
     ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
     pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
-        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.exitsyscall.abi0") {
+        if let Some(address) =
+            frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.exitsyscall.abi0")
+        {
             unsafe {
                 GO_EXIT_SYSCALL = address.0;
             }
         };
-        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.entersyscall.abi0") {
+        if let Some(address) =
+            frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.entersyscall.abi0")
+        {
             unsafe {
                 GO_ENTER_SYSCALL = address.0;
             }
         };
-        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "gosave_systemstack_switch") {
+        if let Some(address) =
+            frida_gum::Module::find_symbol_by_name(Some(binary), "gosave_systemstack_switch")
+        {
             unsafe {
                 GO_SAVE_SYSTEMSTACK = address.0;
             }
