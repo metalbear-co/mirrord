@@ -361,7 +361,7 @@ pub(crate) mod go_socket_hooks {
         }
     }
 
-    /// 3 param version (Syscall6) for making the syscall, libc's syscall is not
+    /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
     /// used here as it doesn't return the value that go expects (it does translation)
     #[naked]
     unsafe extern "C" fn syscall_3(syscall: i64, param1: i64, param2: i64, param3: i64) -> i64 {

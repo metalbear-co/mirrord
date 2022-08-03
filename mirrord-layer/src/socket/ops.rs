@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(crate) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> RawFd {
     debug!("socket called domain:{:?}, type:{:?}", domain, type_);
     let fd = unsafe { libc::socket(domain, type_, protocol) };
     if fd == -1 {
@@ -299,7 +299,6 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> RawFd {
-    trace!("accept called");
     let (local_address, domain, protocol, type_) = {
         if let Some(socket) = SOCKETS.lock().unwrap().get(&sockfd) {
             if let SocketState::Listening(bound) = &socket.state {
