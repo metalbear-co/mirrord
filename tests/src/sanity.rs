@@ -7,8 +7,6 @@ mod tests {
         fmt::Debug,
         net::Ipv4Addr,
         process::Stdio,
-        str::FromStr,
-        string::ParseError,
         sync::{Arc, Mutex},
         time::Duration,
     };
@@ -83,39 +81,18 @@ mod tests {
         rand_str
     }
 
+    #[derive(Debug)]
     enum Application {
         PythonHTTP,
         NodeHTTP,
         GoHTTP,
     }
 
-    impl FromStr for Application {
-        type Err = String;
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match s {
-                "python" => Ok(Application::PythonHTTP),
-                "node" => Ok(Application::NodeHTTP),
-                "go" => Ok(Application::GoHTTP),
-                _ => Err(String::from("Unexpected application")),
-            }
-        }
-    }
+    #[derive(Debug)]
     pub enum Agent {
         #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
-    }
-
-    impl FromStr for Agent {
-        type Err = String;
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match s {
-                #[cfg(target_os = "linux")]
-                "ephemeral" => Ok(Agent::Ephemeral),
-                "job" => Ok(Agent::Job),
-                _ => Err(String::from("Unexpected agent type")),
-            }
-        }
     }
 
     struct TestProcess {
@@ -547,12 +524,17 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
-        #[values("python", "node", "go")] application: Application,
-        #[values("ephemeral", "job")] agent: Agent,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
+        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -571,12 +553,17 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
-        #[values("python", "node", "go")] application: Application,
-        #[values("job")] agent: Agent,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
+        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -595,10 +582,13 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_file_ops(
-        #[future] service: EchoService,
-        #[values("ephemeral", "job")] agent: Agent,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -626,8 +616,14 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+    pub async fn test_file_ops(
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
