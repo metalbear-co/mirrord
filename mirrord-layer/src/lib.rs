@@ -2,6 +2,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(naked_functions)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -40,6 +41,7 @@ mod common;
 mod config;
 mod error;
 mod file;
+mod go_hooks;
 mod macros;
 mod pod_api;
 mod socket;
@@ -331,7 +333,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
-
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "x86_64")]
+    {
+        let modules = frida_gum::Module::enumerate_modules();
+        let binary = &modules.first().unwrap().name;
+        go_hooks::go_socket_hooks::enable_socket_hooks(&mut interceptor, binary);
+    }
     interceptor.end_transaction();
 }
 

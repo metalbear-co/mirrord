@@ -11,7 +11,7 @@ use super::ops::*;
 use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
 
 #[hook_fn]
-pub(super) unsafe extern "C" fn socket_detour(
+pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -33,7 +33,7 @@ pub(super) unsafe extern "C" fn socket_detour(
 }
 
 #[hook_fn]
-pub(super) unsafe extern "C" fn bind_detour(
+pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     raw_address: *const sockaddr,
     address_length: socklen_t,
@@ -69,7 +69,7 @@ pub(super) unsafe extern "C" fn bind_detour(
 }
 
 #[hook_fn]
-pub(super) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     debug!(
         "listen_detour -> sockfd {:#?} | backlog {:#?}",
         sockfd, backlog
@@ -166,7 +166,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
 }
 
 #[hook_fn]
-pub(super) unsafe extern "C" fn accept_detour(
+pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
@@ -194,7 +194,7 @@ pub(super) unsafe extern "C" fn accept_detour(
 
 #[cfg(target_os = "linux")]
 #[hook_fn]
-pub(super) unsafe extern "C" fn accept4_detour(
+pub(crate) unsafe extern "C" fn accept4_detour(
     sockfd: i32,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
