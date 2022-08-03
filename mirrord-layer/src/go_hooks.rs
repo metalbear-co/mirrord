@@ -1,14 +1,18 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod go_socket_hooks {
-    use std::arch::asm;
+    use std::{arch::asm, ptr::{null_mut}};
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
+    use libc::c_void;
     use tracing::debug;
 
     use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
 
+    static mut GO_ENTER_SYSCALL: *mut c_void = null_mut();
+    static mut GO_EXIT_SYSCALL: *mut c_void = null_mut();
+    static mut GO_SAVE_SYSTEMSTACK: *mut c_void = null_mut();
     /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
     /// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
     /// Golang's assembler - https://go.dev/doc/asm
@@ -17,6 +21,7 @@ pub(crate) mod go_socket_hooks {
     #[naked]
     unsafe extern "C" fn go_rawsyscall_detour() {
         asm!(
+            "call GO_ENTER_SYSCALL",
             // push the arguments of Rawsyscall from the stack to preserved registers
             "mov rbx, QWORD PTR [rsp+0x10]",
             "mov r10, QWORD PTR [rsp+0x18]",
@@ -38,7 +43,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi, QWORD PTR [r8]",
             "cmp    rdi, rsi",
             "je     2f",
-            "call   go_systemstack_switch",
+            "call   GO_SAVE_SYSTEMSTACK",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp, QWORD PTR [rsi+0x38]",
             "sub    rsp, 0x40",
@@ -61,9 +66,7 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x28], -0x1",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
-            "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             // same as `nosave` in the asmcgocall.
             // calls the abi handler, when we have no g
@@ -85,16 +88,14 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             // Failure: Setup the return values and restore the tls.
             "3:",
             "mov    QWORD PTR [rsp+0x28], rax",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "mov    QWORD PTR [rsp+0x38], 0x0",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             options(noreturn)
         );
@@ -104,6 +105,7 @@ pub(crate) mod go_socket_hooks {
     #[naked]
     unsafe extern "C" fn go_syscall6_detour() {
         asm!(
+            "call GO_ENTER_SYSCALL",
             "mov rax, QWORD PTR [rsp+0x8]",
             "mov rbx, QWORD PTR [rsp+0x10]",
             "mov r10, QWORD PTR [rsp+0x18]",
@@ -122,7 +124,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi, QWORD PTR [r8]",
             "cmp    rdi, rsi",
             "je     2f",
-            "call   go_systemstack_switch",
+            "call   GO_SAVE_SYSTEMSTACK",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp, QWORD PTR [rsi+0x38]",
             "sub    rsp, 0x40",
@@ -149,8 +151,7 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x48], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x50], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             "2:",
             "sub    rsp, 0x40",
@@ -172,15 +173,13 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x48], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x50], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             "3:",
             "mov    QWORD PTR [rsp+0x40], rax",
             "mov    QWORD PTR [rsp+0x48], 0x0",
             "mov    QWORD PTR [rsp+0x50], 0x0",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             options(noreturn)
         );
@@ -190,6 +189,7 @@ pub(crate) mod go_socket_hooks {
     #[naked]
     unsafe extern "C" fn go_syscall_detour() {
         asm!(
+            "call GO_ENTER_SYSCALL",
             "mov rax, QWORD PTR [rsp+0x8]",
             "mov rbx, QWORD PTR [rsp+0x10]",
             "mov r10, QWORD PTR [rsp+0x18]",
@@ -205,7 +205,7 @@ pub(crate) mod go_socket_hooks {
             "mov    rsi, QWORD PTR [r8]",
             "cmp    rdi, rsi",
             "je     2f",
-            "call   go_systemstack_switch",
+            "call   GO_SAVE_SYSTEMSTACK",
             "mov    QWORD PTR fs:[0xfffffff8], rsi",
             "mov    rsp, QWORD PTR [rsi+0x38]",
             "sub    rsp, 0x40",
@@ -229,8 +229,7 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
             "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             "2:",
             "sub    rsp, 0x40",
@@ -251,48 +250,19 @@ pub(crate) mod go_socket_hooks {
             "mov    QWORD PTR [rsp+0x28], -0x1",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "neg    rax",
-            "mov    QWORD PTR [rsp+0x38], rax",
-            "xorps  xmm15, xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             "3:",
             "mov    QWORD PTR [rsp+0x28], rax",
             "mov    QWORD PTR [rsp+0x30], 0x0",
             "mov    QWORD PTR [rsp+0x38], 0x0",
-            "xorps  xmm15,xmm15",
-            "mov    r14, QWORD PTR FS:[0xfffffff8]",
+            "call GO_EXIT_SYSCALL",
             "ret",
             options(noreturn)
         );
     }
 
-    /// [Naked function] maps to gasave_systemstack_switch, called by asmcgocall.abi0
-    #[no_mangle]
-    #[naked]
-    unsafe extern "C" fn go_systemstack_switch() {
-        asm!(
-            "lea    r9, [rip+0xdd9]",
-            "mov    QWORD PTR [r14+0x40],r9",
-            "lea    r9, [rsp+0x8]",
-            "mov    QWORD PTR [r14+0x38],r9",
-            "mov    QWORD PTR [r14+0x58],0x0",
-            "mov    QWORD PTR [r14+0x68],rbp",
-            "mov    r9, QWORD PTR [r14+0x50]",
-            "test   r9, r9",
-            "jz     4f",
-            "call   go_runtime_abort",
-            "4:",
-            "ret",
-            options(noreturn)
-        );
-    }
 
-    /// [Naked function] maps to runtime.abort.abi0, called by `go_systemstack_switch`
-    #[no_mangle]
-    #[naked]
-    unsafe extern "C" fn go_runtime_abort() {
-        asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
-    }
 
     /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
     /// bind, listen, and accept
@@ -407,6 +377,21 @@ pub(crate) mod go_socket_hooks {
     ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
     ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
     pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
+        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.exitsyscall.abi0") {
+            unsafe {
+                GO_EXIT_SYSCALL = address.0;
+            }
+        };
+        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "runtime.entersyscall.abi0") {
+            unsafe {
+                GO_ENTER_SYSCALL = address.0;
+            }
+        };
+        if let Some(address) = frida_gum::Module::find_symbol_by_name(Some(binary), "gosave_systemstack_switch") {
+            unsafe {
+                GO_SAVE_SYSTEMSTACK = address.0;
+            }
+        };
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",
