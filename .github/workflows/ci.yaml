@@ -152,6 +152,13 @@ jobs:
           sudo apt-get install -y libpcap-dev cmake
       - uses: actions/setup-python@v3
       - run: pip3 install flask
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.0"
+      - run: |
+          cd tests/go-e2e
+          go build 
+          cd ../..
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:

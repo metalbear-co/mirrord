@@ -31,3 +31,26 @@ macro_rules! replace {
             .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
     }};
 }
+
+#[cfg(target_os = "linux")]
+macro_rules! hook_symbol {
+    ($interceptor:expr, $func:expr, $detour_name:expr, $binary:expr) => {
+        if let Some(symbol) = frida_gum::Module::find_symbol_by_name($binary, $func) {
+            match $interceptor.replace(
+                symbol,
+                frida_gum::NativePointer($detour_name as *mut libc::c_void),
+                frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
+            ) {
+                Err(e) => {
+                    debug!("{} error: {:?}", $func, e);
+                }
+                Ok(_) => {
+                    debug!("{} hooked", $func);
+                }
+            }
+        };
+    };
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) use hook_symbol;

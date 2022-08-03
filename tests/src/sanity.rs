@@ -84,7 +84,6 @@ mod tests {
     enum Application {
         PythonHTTP,
         NodeHTTP,
-        #[cfg(target_os = "macos")]
         GoHTTP,
     }
     pub enum Agent {
@@ -189,7 +188,6 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
-                #[cfg(target_os = "macos")]
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
@@ -527,7 +525,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
