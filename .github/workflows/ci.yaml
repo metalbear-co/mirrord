@@ -223,6 +223,8 @@ jobs:
           path: /tmp
       - name: load image
         run: docker load --input /tmp/test.tar
+      - name: sleep for some time
+        run: sleep 100
       - name: cargo test
         run: cargo test -p tests
       - name: Collect container logs
