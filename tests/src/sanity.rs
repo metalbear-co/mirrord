@@ -195,6 +195,15 @@ mod tests {
             };
             run(process_cmd, pod_name, namespace, args).await
         }
+
+        /// General timeout is set to 40 seconds, but from CI runs it can be noted 40 is not enough
+        /// for Go.
+        fn get_timeout(&self) -> Duration {
+            match self {
+                Application::GoHTTP => Duration::from_secs(60),
+                _ => Duration::from_secs(40),
+            }
+        }
     }
 
     impl Agent {
@@ -544,7 +553,8 @@ mod tests {
             .await;
         process.wait_for_line(Duration::from_secs(30), "real_port: 80");
         send_requests(&url).await;
-        timeout(Duration::from_secs(40), process.child.wait())
+        let application_timeout = application.get_timeout();
+        timeout(application_timeout, process.child.wait())
             .await
             .unwrap()
             .unwrap();
