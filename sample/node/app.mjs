@@ -40,6 +40,8 @@ function debugRequest(listening) {
     method: "GET",
   };
 
+  console.log(">> options ", options);
+
   const req = https.request(options, (res) => {
     console.log(`statusCode: ${res.statusCode}`);
 
@@ -50,6 +52,18 @@ function debugRequest(listening) {
     });
   });
 
+  req.on("socket", (socket) => {
+    console.log(">> socket ");
+  });
+
+  req.on("connect", (incoming, socket, head) => {
+    console.log(">> connect ", incoming, " ", socket, " ", head);
+  });
+
+  req.on("information", (info) => {
+    console.log(">> information ", info);
+  });
+
   req.on("error", (error) => {
     console.error(error);
   });
@@ -57,35 +71,39 @@ function debugRequest(listening) {
   req.end();
 }
 
-const server = createServer();
-server.on("connection", handleConnection);
-server.listen(
-  {
-    host: "localhost",
-    port: 80,
-  },
-  function () {
-    console.log("server listening to %j", server.address());
+debugRequest(null);
 
-    debugRequest(server.address());
-  }
-);
+function debugListen() {
+  const server = createServer();
+  server.on("connection", handleConnection);
+  server.listen(
+    {
+      host: "localhost",
+      port: 80,
+    },
+    function () {
+      console.log("server listening to %j", server.address());
 
-function handleConnection(conn) {
-  var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-  console.log("new client connection from %s", remoteAddress);
-  conn.on("data", onConnData);
-  conn.once("close", onConnClose);
-  conn.on("error", onConnError);
+      debugRequest(server.address());
+    }
+  );
 
-  function onConnData(d) {
-    console.log("connection data from %s: %j", remoteAddress, d.toString());
-    conn.write(d);
-  }
-  function onConnClose() {
-    console.log("connection from %s closed", remoteAddress);
-  }
-  function onConnError(err) {
-    console.log("Connection %s error: %s", remoteAddress, err.message);
+  function handleConnection(conn) {
+    var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
+    console.log("new client connection from %s", remoteAddress);
+    conn.on("data", onConnData);
+    conn.once("close", onConnClose);
+    conn.on("error", onConnError);
+
+    function onConnData(d) {
+      console.log("connection data from %s: %j", remoteAddress, d.toString());
+      conn.write(d);
+    }
+    function onConnClose() {
+      console.log("connection from %s closed", remoteAddress);
+    }
+    function onConnError(err) {
+      console.log("Connection %s error: %s", remoteAddress, err.message);
+    }
   }
 }

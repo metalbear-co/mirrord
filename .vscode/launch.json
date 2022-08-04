@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "Launch index.ts",
-      "type": "pwa-node",
+      "type": "node",
       "request": "launch",
       "runtimeArgs": ["-r", "ts-node/register"],
       "args": [
@@ -20,7 +20,7 @@
       "name": "Launch Extension",
       "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
       "request": "launch",
-      "type": "pwa-extensionHost"
+      "type": "extensionHost"
     },
     {
       "type": "lldb",
@@ -63,8 +63,8 @@
         // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
-        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         // "MIRRORD_OVERRIDE_ENV_VARS": "true",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         // "MIRRORD_FILE_OPS": "true",

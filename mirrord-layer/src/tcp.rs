@@ -151,9 +151,9 @@ pub(crate) trait TcpHandler {
         // TODO(alex) [high] 2022-07-27: Entering in a loop here. The socket is deferred bound, so
         // by the time we call the proper connect, it still isn't bound.
         // Must change the way this bypass is being handled, to call `bind` when this is true.
-        IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+        IS_INTERNAL_CALL.store(true, Ordering::Release);
         let tcp_stream = TcpStream::connect(addr).await.map_err(From::from);
-        IS_INTERNAL_CALL.swap(false, Ordering::Release);
+        IS_INTERNAL_CALL.store(false, Ordering::Release);
 
         tcp_stream
     }

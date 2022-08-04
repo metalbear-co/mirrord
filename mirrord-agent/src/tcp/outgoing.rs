@@ -58,14 +58,17 @@ impl OutgoingTrafficHandler {
                 trace!("OutgoingTrafficHandler::run -> request {:#?}", request);
 
                 match request {
-                    OutgoingTrafficRequest::Connect(ConnectRequest { remote_address }) => {
+                    OutgoingTrafficRequest::Connect(ConnectRequest {
+                        user_fd,
+                        remote_address,
+                    }) => {
                         let connect_response: RemoteResult<_> = TcpStream::connect(remote_address)
                             .await
                             .map_err(From::from)
                             .map(|remote_stream| {
                                 agent_remote_streams.insert(1, remote_stream);
 
-                                ConnectResponse
+                                ConnectResponse { user_fd }
                             });
 
                         trace!(

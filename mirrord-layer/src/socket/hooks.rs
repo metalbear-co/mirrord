@@ -1,17 +1,23 @@
-use std::{ffi::CStr, os::unix::io::RawFd, sync::atomic::Ordering};
+use std::{
+    ffi::CStr,
+    mem,
+    os::unix::io::RawFd,
+    slice,
+    sync::{atomic::Ordering, Arc},
+};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
 use crate::{
     error::LayerError,
     replace,
-    socket::{AddrInfoHintExt, SocketState, SOCKETS},
+    socket::{AddrInfoHintExt, MirrorSocket, SocketState, SOCKETS},
 };
 
 #[hook_fn]
@@ -40,6 +46,35 @@ pub(crate) unsafe extern "C" fn socket_detour(
 }
 
 #[hook_fn]
+pub(crate) unsafe extern "C" fn socketpair_detour(
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+    sv: *mut c_int,
+) -> c_int {
+    trace!(
+        "socketpair_detour -> domain {:#?} | type:{:#?} | protocol {:#?} | sv {:#?}",
+        domain,
+        type_,
+        protocol,
+        sv.is_null()
+    );
+
+    let socketpair_result = FN_SOCKETPAIR(domain, type_, protocol, sv);
+    if socketpair_result == -1 {
+        return socketpair_result;
+    }
+
+    let new_sockets = slice::from_raw_parts_mut(sv, 2);
+    // TODO(alex) [high] 2022-08-04: Pairs of socket probably the culprit, I think we might be using
+    // the wrong socket fd to try and connect??? Doesn't make much sense, as we lose the remote
+    // address in favor of some local address, this might be why.
+    debug!("socketpair_detour -> sockets {:#?}", new_sockets);
+
+    socketpair_result
+}
+
+#[hook_fn]
 pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -47,34 +82,37 @@ pub(crate) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     trace!("bind_detour -> sockfd {:#?}", sockfd);
 
-    // TODO: Is this conversion safe?
-    let address = match SockAddr::new(
-        *(raw_address as *const libc::sockaddr_storage),
-        address_length,
-    )
-    .as_socket()
-    .ok_or(LayerError::AddressConversion)
-    {
-        Ok(address) => address,
-        Err(fail) => return fail.into(),
-    };
-
-    debug!("bind_detour -> address {:#?}", address);
-
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("bind_detour -> bypassed");
         FN_BIND(sockfd, raw_address, address_length)
     } else {
-        let (Ok(result) | Err(result)) =
-            bind(sockfd, address)
-                .map(|()| 0)
-                .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) | LayerError::BypassedPort(_) => {
-                        FN_BIND(sockfd, raw_address, address_length)
-                    }
-                    other => other.into(),
-                });
-        result
+        // TODO: Is this conversion safe?
+        let address = SockAddr::new(
+            *(raw_address as *const libc::sockaddr_storage),
+            address_length,
+        )
+        .as_socket()
+        .ok_or(LayerError::AddressConversion);
+
+        match address {
+            Ok(address) => {
+                let (Ok(result) | Err(result)) =
+                    bind(sockfd, address)
+                        .map(|()| 0)
+                        .map_err(|fail| match fail {
+                            LayerError::LocalFDNotFound(_) | LayerError::BypassedPort(_) => {
+                                FN_BIND(sockfd, raw_address, address_length)
+                            }
+                            other => other.into(),
+                        });
+                result
+            }
+            Err(_) => {
+                warn!("bind_detour -> Could not convert address, bypassing!");
+
+                FN_BIND(sockfd, raw_address, address_length)
+            }
+        }
     }
 }
 
@@ -114,45 +152,38 @@ pub(super) unsafe extern "C" fn connect_detour(
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("connect_detour -> bypassed");
-        if let Some(socket) = SOCKETS.lock().unwrap().remove(&sockfd) {
-            if let SocketState::Bound(bound) = socket.state {
-                let rawish_address = SockAddr::from(bound.address);
-
-                // TODO(alex) [high] 2022-07-27: This is the idea to solve the loop problem (and go
-                // back to working state), but it's not working yet.
-                if bind_detour(sockfd, rawish_address.as_ptr(), rawish_address.len()) < 0 {
-                    return -1;
-                }
-            }
-        }
 
         FN_CONNECT(sockfd, raw_address, address_length)
     } else {
         // TODO: Is this conversion safe?
-        let address = match SockAddr::new(
+        let address = SockAddr::new(
             *(raw_address as *const libc::sockaddr_storage),
             address_length,
-        )
-        .as_socket()
-        .ok_or(LayerError::AddressConversion)
-        {
-            Ok(address) => address,
-            Err(fail) => return fail.into(),
-        };
-
+        );
         debug!("connect_detour -> address {:#?}", address);
 
-        let (Ok(result) | Err(result)) =
-            connect(sockfd, address)
-                .map(|()| 0)
-                .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
-                        FN_CONNECT(sockfd, raw_address, address_length)
-                    }
-                    other => other.into(),
-                });
+        let address = address.as_socket().ok_or(LayerError::AddressConversion);
 
-        result
+        match address {
+            Ok(address) => {
+                let (Ok(result) | Err(result)) =
+                    connect(sockfd, address)
+                        .map(|()| 0)
+                        .map_err(|fail| match fail {
+                            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                                FN_CONNECT(sockfd, raw_address, address_length)
+                            }
+                            other => other.into(),
+                        });
+
+                result
+            }
+            Err(_) => {
+                warn!("connect_detour -> Could not convert address, bypassing!");
+
+                FN_CONNECT(sockfd, raw_address, address_length)
+            }
+        }
     }
 }
 
@@ -285,7 +316,10 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     } else {
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
-            .map_err(From::from);
+            .map_err(|fail| match fail {
+                LayerError::LocalFDNotFound(_) => fcntl_result,
+                other => other.into(),
+            });
 
         trace!("fcntl_detour -> result {:#?}", result);
         result
@@ -463,6 +497,13 @@ pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinf
 
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+    let _ = replace!(
+        interceptor,
+        "socketpair",
+        socketpair_detour,
+        FnSocketpair,
+        FN_SOCKETPAIR
+    );
     let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
     let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 

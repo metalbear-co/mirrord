@@ -156,6 +156,7 @@ pub struct GetAddrInfoRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ConnectRequest {
+    pub user_fd: i32,
     pub remote_address: SocketAddr,
 }
 
@@ -225,7 +226,9 @@ pub enum FileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ConnectResponse;
+pub struct ConnectResponse {
+    pub user_fd: i32,
+}
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadResponse {

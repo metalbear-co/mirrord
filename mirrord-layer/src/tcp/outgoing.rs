@@ -1,5 +1,8 @@
 use std::{
-    collections::HashMap, net::SocketAddr, os::unix::prelude::AsRawFd, sync::atomic::Ordering,
+    collections::HashMap,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    os::unix::prelude::AsRawFd,
+    sync::atomic::Ordering,
 };
 
 use futures::SinkExt;
@@ -20,9 +23,14 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub(crate) struct MirrorConnect {
+    pub(crate) mirror_address: SocketAddr,
+}
+
+#[derive(Debug)]
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
-    pub(crate) channel_tx: ResponseChannel<ConnectResponse>,
+    pub(crate) channel_tx: ResponseChannel<MirrorConnect>,
     pub(crate) user_fd: i32,
 }
 
@@ -44,7 +52,7 @@ pub(crate) struct OutgoingTrafficHandler {
     read_buffer: Vec<u8>,
     mirrors: HashMap<i32, MirrorStream>,
     mirror_streams: HashMap<i32, TcpStream>,
-    connect_queue: ResponseDeque<ConnectResponse>,
+    connect_queue: ResponseDeque<MirrorConnect>,
 }
 
 #[derive(Debug)]
@@ -126,7 +134,10 @@ impl OutgoingTrafficHandler {
 
                 Ok(codec
                     .send(ClientMessage::OutgoingTraffic(
-                        OutgoingTrafficRequest::Connect(ConnectRequest { remote_address }),
+                        OutgoingTrafficRequest::Connect(ConnectRequest {
+                            user_fd,
+                            remote_address,
+                        }),
                     ))
                     .await?)
             }
@@ -154,20 +165,44 @@ impl OutgoingTrafficHandler {
 
     pub(crate) async fn handle_daemon_message(
         &mut self,
-        message: OutgoingTrafficResponse,
+        response: OutgoingTrafficResponse,
     ) -> Result<(), LayerError> {
         trace!(
             "OutgoingTraffic::handle_daemon_message -> message {:?}",
-            message
+            response
         );
 
-        match message {
-            OutgoingTrafficResponse::Connect(connect) => self
-                .connect_queue
-                .pop_front()
-                .ok_or(LayerError::SendErrorTcpResponse)?
-                .send(connect)
-                .map_err(|_| LayerError::SendErrorTcpResponse),
+        match response {
+            OutgoingTrafficResponse::Connect(connect) => {
+                let ConnectResponse { user_fd } = connect?;
+
+                IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
+
+                let mirror_listener =
+                    TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                        .await?;
+                let (mirror_stream, user_address) = mirror_listener.accept().await?;
+                let mirror_address = mirror_stream.local_addr()?;
+
+                IS_INTERNAL_CALL.swap(false, Ordering::Release);
+
+                let mirror_connect = MirrorConnect { mirror_address };
+                self.mirrors.insert(
+                    user_fd,
+                    MirrorStream {
+                        mirror: mirror_stream,
+                    },
+                );
+
+                let _ = self
+                    .connect_queue
+                    .pop_front()
+                    .ok_or(LayerError::SendErrorTcpResponse)?
+                    .send(Ok(mirror_connect))
+                    .map_err(|_| LayerError::SendErrorTcpResponse)?;
+
+                Ok(())
+            }
             OutgoingTrafficResponse::Read(read) => {
                 // This means that `agent` read something from remote, so we write it to the `user`.
                 let ReadResponse { id, bytes } = read?;
