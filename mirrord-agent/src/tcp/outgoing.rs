@@ -10,6 +10,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task,
 };
+use tracing::trace;
 
 use crate::{error::AgentError, runtime::set_namespace};
 
@@ -54,6 +55,8 @@ impl OutgoingTrafficHandler {
 
         loop {
             if let Some(request) = request_channel_rx.recv().await {
+                trace!("OutgoingTrafficHandler::run -> request {:#?}", request);
+
                 match request {
                     OutgoingTrafficRequest::Connect(ConnectRequest { remote_address }) => {
                         let connect_response: RemoteResult<_> = TcpStream::connect(remote_address)
@@ -64,6 +67,11 @@ impl OutgoingTrafficHandler {
 
                                 ConnectResponse
                             });
+
+                        trace!(
+                            "OutgoingTrafficRequest::Connect -> connect_response {:#?}",
+                            connect_response
+                        );
 
                         let response = OutgoingTrafficResponse::Connect(connect_response);
                         response_channel_tx.send(response).await.unwrap();

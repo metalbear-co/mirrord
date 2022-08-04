@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "Launch index.ts",
-      "type": "node",
+      "type": "pwa-node",
       "request": "launch",
       "runtimeArgs": ["-r", "ts-node/register"],
       "args": [
@@ -20,7 +20,7 @@
       "name": "Launch Extension",
       "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
       "request": "launch",
-      "type": "extensionHost"
+      "type": "pwa-extensionHost"
     },
     {
       "type": "lldb",
@@ -41,7 +41,7 @@
         // "MIRRORD_OVERRIDE_ENV_VARS": "true",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         // "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_REMOTE_DNS": "false",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -61,7 +61,29 @@
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=trace",
         // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-2pz76",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
+        "RUST_BACKTRACE": "short"
+      }
+    },
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "app.py: Debug mirrord-layer",
+      "program": "${workspaceFolder}/tests/python-e2e/app.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
+        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        "RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
