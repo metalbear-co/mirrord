@@ -13,7 +13,7 @@ pub(crate) mod go_socket_hooks {
     /// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
     /// Golang's assembler - https://go.dev/doc/asm
     /// We cannot provide any stack guarantees when our detour executes(whether it will exceed the
-    /// go's stack limit), so we need to switch to system stack.    
+    /// go's stack limit), so we need to switch to system stack.
     #[naked]
     unsafe extern "C" fn go_rawsyscall_detour() {
         asm!(

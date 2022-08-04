@@ -74,7 +74,7 @@ impl RuntimeData {
     }
 }
 
-pub async fn create_agent(
+pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
 ) -> Result<Portforwarder, LayerError> {

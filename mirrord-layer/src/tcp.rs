@@ -75,7 +75,7 @@ impl From<&Listen> for SocketAddr {
 }
 
 #[async_trait]
-pub trait TcpHandler {
+pub(crate) trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 

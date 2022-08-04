@@ -138,7 +138,10 @@ fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(
 }
 
 impl FileHandler {
-    pub async fn handle_daemon_message(&mut self, message: FileResponse) -> Result<(), LayerError> {
+    pub(crate) async fn handle_daemon_message(
+        &mut self,
+        message: FileResponse,
+    ) -> Result<(), LayerError> {
         use FileResponse::*;
         match message {
             Open(open) => {
@@ -170,7 +173,7 @@ impl FileHandler {
         }
     }
 
-    pub async fn handle_hook_message(
+    pub(crate) async fn handle_hook_message(
         &mut self,
         message: HookMessageFile,
         codec: &mut actix_codec::Framed<

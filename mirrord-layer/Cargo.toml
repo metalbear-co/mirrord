@@ -1,5 +1,3 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
 name = "mirrord-layer"
 version.workspace = true
@@ -17,12 +15,15 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+mirrord-protocol = { path = "../mirrord-protocol"}
+mirrord-macro = { path = "../mirrord-macro"}
+
 ctor = "0.1"
 libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = {version = "0.6", features = ["auto-download"]}
+frida-gum = { version = "0.7", features = ["auto-download"] }
 futures.workspace = true
 clap.workspace = true
 k8s-openapi.workspace = true
@@ -32,7 +33,6 @@ tokio.workspace = true
 serde_json.workspace = true
 
 nanoid = "0.4"
-mirrord-protocol = { path = "../mirrord-protocol"}
 actix-codec.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true

@@ -157,7 +157,7 @@ jobs:
           go-version: "1.18.0"
       - run: |
           cd tests/go-e2e
-          go build 
+          go build
           cd ../..
       - name: start minikube
         uses: medyagh/setup-minikube@master
@@ -210,7 +210,7 @@ jobs:
           go-version: "1.18.0"
       - run: |
           cd tests/go-e2e
-          go build 
+          go build
           cd ../..
       - name: setup cluster requirements
         run: brew install docker colima kubectl
