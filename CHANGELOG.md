@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
+
 ## 2.6.0
 
 ### Added

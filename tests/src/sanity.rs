@@ -118,11 +118,8 @@ mod tests {
             while now.elapsed() < timeout {
                 let stdout = self.get_stdout();
                 if stdout.contains(line) {
-                    // for race conditions
-                    std::thread::sleep(Duration::from_millis(100));
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(100));
             }
             panic!("Timeout waiting for line: {}", line);
         }
@@ -534,7 +531,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
+        process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
         send_requests(&url).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
@@ -558,7 +555,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
+        process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
         send_requests(&url).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
