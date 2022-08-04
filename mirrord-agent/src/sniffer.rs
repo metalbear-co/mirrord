@@ -343,9 +343,15 @@ impl TCPConnectionSniffer {
         self.client_senders.insert(client_id, sender);
     }
 
-    fn handle_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
+    async fn handle_subscribe(
+        &mut self,
+        client_id: ClientID,
+        port: Port,
+    ) -> Result<(), AgentError> {
         self.port_subscriptions.subscribe(client_id, port);
-        self.update_sniffer()
+        self.update_sniffer()?;
+        self.send_message_to_client(&client_id, DaemonTcp::Subscribed)
+            .await
     }
 
     fn handle_client_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
@@ -388,7 +394,7 @@ impl TCPConnectionSniffer {
                 client_id,
                 command: SnifferCommands::Subscribe(port),
             } => {
-                self.handle_subscribe(client_id, port)?;
+                self.handle_subscribe(client_id, port).await?;
             }
             SnifferCommand {
                 client_id,
@@ -430,13 +436,23 @@ impl TCPConnectionSniffer {
         );
 
         for client_id in clients {
-            if let Some(sender) = self.client_senders.get(client_id) {
-                sender.send(message.clone()).await.map_err(|err| {
-                    warn!("failed to send message to client {}", client_id);
-                    let _ = self.handle_client_closed(*client_id);
-                    err
-                })?;
-            }
+            self.send_message_to_client(client_id, message.clone())
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn send_message_to_client(
+        &mut self,
+        client_id: &ClientID,
+        message: DaemonTcp,
+    ) -> Result<(), AgentError> {
+        if let Some(sender) = self.client_senders.get(client_id) {
+            sender.send(message).await.map_err(|err| {
+                warn!("failed to send message to client {}", client_id);
+                let _ = self.handle_client_closed(*client_id);
+                err
+            })?;
         }
         Ok(())
     }
