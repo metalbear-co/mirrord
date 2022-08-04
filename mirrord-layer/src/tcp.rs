@@ -89,6 +89,10 @@ pub trait TcpHandler {
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
+            DaemonTcp::Subscribed => {
+                debug!("daemon subscribed");
+                Ok(())
+            }
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);

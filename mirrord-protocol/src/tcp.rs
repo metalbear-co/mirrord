@@ -37,4 +37,6 @@ pub enum DaemonTcp {
     NewConnection(NewTcpConnection),
     Data(TcpData),
     Close(TcpClose),
+    /// Used to notify the subscription occured
+    Subscribed,
 }
