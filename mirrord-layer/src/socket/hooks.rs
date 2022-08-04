@@ -59,6 +59,8 @@ pub(crate) unsafe extern "C" fn bind_detour(
         Err(fail) => return fail.into(),
     };
 
+    debug!("bind_detour -> address {:#?}", address);
+
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("bind_detour -> bypassed");
         FN_BIND(sockfd, raw_address, address_length)
@@ -103,6 +105,8 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 #[hook_fn]
 pub(super) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
+    // TODO(alex) [high] 2022-08-03: We're trying to connect to 255.127.0.0, why? Looks like the
+    // DNS stuff is returning correct values (this address appears nowhere).
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
@@ -135,6 +139,8 @@ pub(super) unsafe extern "C" fn connect_detour(
             Ok(address) => address,
             Err(fail) => return fail.into(),
         };
+
+        debug!("connect_detour -> address {:#?}", address);
 
         let (Ok(result) | Err(result)) =
             connect(sockfd, address)

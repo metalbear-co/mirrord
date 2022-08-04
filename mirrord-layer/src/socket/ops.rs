@@ -40,7 +40,7 @@ pub(super) fn socket(
     type_: c_int,
     protocol: c_int,
 ) -> Result<RawFd, LayerError> {
-    trace!("socket -> domain {:#?} | type:{:#?}", domain, type_);
+    trace!("socket -> domain {:#?} | type {:#x?}", domain, type_);
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
     {
@@ -143,7 +143,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
-            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
+            let address = address.as_socket().ok_or(LayerError::AddressConversion);
+            debug!("listen -> address {:#?}", address);
+
+            let address = address?;
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
@@ -218,6 +221,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             channel_tx,
         };
 
+        debug!("connect -> connect {:#?}", connect);
+
         let connect_hook = OutgoingTraffic::Connect(connect);
 
         blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
@@ -244,6 +249,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         let mirror_address = mirror_listener.local_addr()?;
         IS_INTERNAL_CALL.swap(false, Ordering::Release);
 
+        trace!("connect -> mirror_listener {:#?}", mirror_listener);
+
         let hook_message = CreateMirrorStream {
             user_fd: sockfd,
             mirror_listener,
@@ -254,6 +261,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         blocking_send_hook_message(HookMessage::OutgoingTraffic(hook))?;
 
         let connect_to = SockAddr::from(mirror_address);
+        trace!("connect -> connect_to {:#?}", connect_to);
+
         let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
         if connect_result == -1 {
             return Err(todo!());
