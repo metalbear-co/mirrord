@@ -224,7 +224,7 @@ jobs:
       - name: load image
         run: docker load --input /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests
+        run: cargo test -p tests -- --test-threads=2
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do docker logs $CONTAINER; done
