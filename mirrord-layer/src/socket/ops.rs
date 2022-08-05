@@ -173,6 +173,14 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     Ok(())
 }
 
+// TODO(alex) [high] 2022-08-05: So the flow for a `socket.connect` call in node is:
+// `socket_detour` -> `socket` -> `bind_detour` -> `bind` -> `getsockname_detour` ->
+// `getsockname` (0.0.0.0:8888, local) -> `connect_detour` -> `connect` (20.81.111.66:80, remote)
+// -> crash.
+//
+// This means that there is some handling to be done in `bind` that must happen, and currently we're
+// not doing it (probably the true `bind` call). Basically, this local socket is "fakely" created,
+// but we need it truly bound and ready.
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
     trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",

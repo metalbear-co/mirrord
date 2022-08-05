@@ -164,6 +164,9 @@ pub(super) unsafe extern "C" fn connect_detour(
 
         let address = address.as_socket().ok_or(LayerError::AddressConversion);
 
+        // TODO(alex) [high] 2022-08-03: Drilling down, maybe we need to bypass a bunch of stuff
+        // when connect is being called, then release the bypass?
+        IS_INTERNAL_CALL.store(true, Ordering::Release);
         match address {
             Ok(address) => {
                 let (Ok(result) | Err(result)) =

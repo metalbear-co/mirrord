@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { createServer } from "net";
+import { createServer, Socket } from "net";
 import { open, readFile } from "fs/promises";
 import https from "node:https";
 import { exit } from "node:process";
@@ -31,6 +31,24 @@ async function debug_file_ops() {
 }
 
 // debug_file_ops();
+// debugRequest(null);
+debugConnect();
+
+function debugConnect() {
+  let options = { readable: true, writable: true };
+  let socket = new Socket(options);
+
+  socket.connect({ port: 80, host: "20.81.111.66", localPort: 8888 });
+
+  socket.on("connect", () => {
+    console.log(">> connected!");
+    exit(0);
+  });
+
+  socket.on("error", (fail) => {
+    console.error(">> failed connect ", fail);
+  });
+}
 
 function debugRequest(listening) {
   const options = {
@@ -70,8 +88,6 @@ function debugRequest(listening) {
 
   req.end();
 }
-
-debugRequest(null);
 
 function debugListen() {
   const server = createServer();
