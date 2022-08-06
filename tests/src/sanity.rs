@@ -533,6 +533,10 @@ mod tests {
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
         send_requests(&url).await;
+        process.wait_for_line(Duration::from_secs(10), "GET");
+        process.wait_for_line(Duration::from_secs(10), "POST");
+        process.wait_for_line(Duration::from_secs(10), "PUT");
+        process.wait_for_line(Duration::from_secs(10), "DELETE");
         timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -557,6 +561,10 @@ mod tests {
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
         send_requests(&url).await;
+        process.wait_for_line(Duration::from_secs(10), "GET");
+        process.wait_for_line(Duration::from_secs(10), "POST");
+        process.wait_for_line(Duration::from_secs(10), "PUT");
+        process.wait_for_line(Duration::from_secs(10), "DELETE");
         timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()

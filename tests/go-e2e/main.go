@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"os"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -44,19 +43,11 @@ func main() {
 	})
 
 	r.PUT("/", func(c *gin.Context) {
-		path, err := os.Getwd()
-		if err != nil {
-			fmt.Printf("PUT: Error getting current directory: %v\n", err)
-		}
-		fileName := RandStringRunes(10)
-		postPATH = fmt.Sprintf("%s/%s", path, fileName)
-		os.WriteFile(postPATH, []byte(TEXT), 0644)
 		fmt.Println("POST: Request completed")
 		c.String(http.StatusOK, "OK")
 	})
 
 	r.DELETE("/", func(c *gin.Context) {
-		os.Remove(postPATH)
 		fmt.Println("DELETE: Request completed")
 		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		c.String(http.StatusOK, "OK")
