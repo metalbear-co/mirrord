@@ -19,11 +19,13 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 
 @app.route("/", methods=["GET"])
 def get():
+    print("GET: Request completed")
     return "OK"
 
 
 @app.route("/", methods=["POST"])
 def post():
+    print("POST: Request completed")
     return "OK"
 
 

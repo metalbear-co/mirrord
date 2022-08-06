@@ -12,24 +12,16 @@ app.get("/", (req, res) => {
 });
 
 app.post("/", (req, res) => {
-  req.on("data", (data) => {
-    if (data.toString() == TEXT) {
-      console.log("POST: Request completed");
-    }
-  });
+  console.log("POST: Request completed");
 });
 
 app.put("/", (req, res) => {
-  req.on("data", (data) => {
-    console.log("PUT: Request completed");
-  });
+  console.log("PUT: Request completed");
 });
 
 app.delete("/", (req, res) => {
-  req.on("data", (data) => {
-    console.log("DELETE: Request completed");
-    server.close();
-  });
+  console.log("DELETE: Request completed");
+  server.close();
 });
 
 var server = app.listen(PORT, () => {

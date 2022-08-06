@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
-    core::v1::{ContainerState, EphemeralContainer, Pod},
+    core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
@@ -11,7 +11,7 @@ use kube::{
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use serde_json::{json, to_vec};
+use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
