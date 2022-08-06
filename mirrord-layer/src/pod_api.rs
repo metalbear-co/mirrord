@@ -198,27 +198,16 @@ async fn create_ephemeral_container_agent(
         .await
         .map_err(LayerError::KubeError)?;
 
-    let params = ListParams::default()
-        .fields(&format!("metadata.name={}", "mirrord_agent"))
-        .timeout(60);
-
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
-
     debug!("waiting for container to be ready");
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Added(_) => break,
-            WatchEvent::Error(s) => {
-                error!("Error watching pod: {:?}", s);
-                break;
-            }
-            _ => {}
-        }
-    }
+    let running = await_condition(
+        pods_api.clone(),
+        &config.impersonated_pod_name,
+        is_pod_running(),
+    );
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), running)
+        .await
+        .map_err(|_| LayerError::TimeOutError)?;
     debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
 }

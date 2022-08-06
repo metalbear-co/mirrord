@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
+
 ### Changed
 - reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
 - reduce e2e flakiness - increase timeout time
