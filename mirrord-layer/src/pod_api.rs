@@ -208,7 +208,7 @@ async fn create_ephemeral_container_agent(
 
     let params = ListParams::default()
         .fields(&format!("metadata.name={}", "mirrord_agent"))
-        .timeout(10);
+        .timeout(60);
 
     let mut stream = pods_api
         .watch(&params, "0")
@@ -230,7 +230,9 @@ async fn create_ephemeral_container_agent(
                 error!("Error watching pod: {:?}", s);
                 break;
             }
-            _ => {}
+            _ => {
+                debug!("other");
+            }
         }
     }
     debug!("container is ready");
