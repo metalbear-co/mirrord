@@ -208,6 +208,7 @@ async fn create_ephemeral_container_agent(
         .map_err(LayerError::KubeError)?
         .boxed();
 
+    debug!("waiting for container to be ready");
     while let Some(status) = stream.try_next().await? {
         match status {
             WatchEvent::Added(_) => break,
@@ -218,7 +219,7 @@ async fn create_ephemeral_container_agent(
             _ => {}
         }
     }
-
+    debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
 }
 
