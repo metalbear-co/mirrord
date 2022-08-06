@@ -43,7 +43,7 @@ func main() {
 	})
 
 	r.PUT("/", func(c *gin.Context) {
-		fmt.Println("POST: Request completed")
+		fmt.Println("PUT: Request completed")
 		c.String(http.StatusOK, "OK")
 	})
 
