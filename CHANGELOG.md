@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
 - reduce e2e flakiness - increase timeout time
+- mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
 
 ## 2.6.0
 

@@ -200,7 +200,7 @@ async fn create_ephemeral_container_agent(
 
     let params = ListParams::default()
         .fields(&format!("metadata.name={}", "mirrord_agent"))
-        .timeout(10);
+        .timeout(60);
 
     let mut stream = pods_api
         .watch(&params, "0")
@@ -296,7 +296,7 @@ async fn create_job_pod_agent(
 
     let params = ListParams::default()
         .labels(&format!("job-name={}", mirrord_agent_job_name))
-        .timeout(10);
+        .timeout(60);
 
     let mut stream = pods_api
         .watch(&params, "0")
@@ -324,7 +324,7 @@ async fn create_job_pod_agent(
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), running)
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), running)
         .await
         .map_err(|_| LayerError::TimeOutError)?; // TODO: convert the elapsed error to string?
     Ok(pod_name)
