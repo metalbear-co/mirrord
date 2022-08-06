@@ -149,12 +149,7 @@ fn is_container_running(pod: Pod, container_name: &String) -> bool {
                 container_statuses
                     .iter()
                     .find(|&status| &status.name == container_name)
-                    .and_then(|status| {
-                        status
-                            .state
-                            .as_ref()
-                            .and_then(|state| Some(state.running.is_some()))
-                    })
+                    .and_then(|status| status.state.as_ref().map(|state| state.running.is_some()))
             })
         })
         .unwrap_or(false)
@@ -207,7 +202,7 @@ async fn create_ephemeral_container_agent(
     };
 
     let params = ListParams::default()
-        .fields(&format!("metadata.name={}", "mirrord_agent"))
+        .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
         .timeout(60);
 
     let mut stream = pods_api
