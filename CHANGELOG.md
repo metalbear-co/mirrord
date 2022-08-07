@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - reduce e2e flakiness - increase timeout time
 - mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
 - E2E - Don't do file stuff on http traffic to reduce flakiness (doesn't add any coverage value..)
+- mirrord-layer - Change tcp mirror tunnel `select` to be biased so it flushes all data before closing it (better testing, reduces e2e flakiness)
 
 ## 2.6.0
 
