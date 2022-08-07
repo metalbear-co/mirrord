@@ -9,9 +9,7 @@ use k8s_openapi::api::{
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
-    runtime::{
-        wait::{await_condition, conditions::is_pod_running},
-    },
+    runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
