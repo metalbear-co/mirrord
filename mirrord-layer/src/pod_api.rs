@@ -1,7 +1,5 @@
-use std::time::Duration;
-
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt};
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
@@ -9,12 +7,14 @@ use k8s_openapi::api::{
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
-    runtime::wait::{await_condition, conditions::is_pod_running},
+    runtime::{
+        wait::{await_condition, conditions::is_pod_running},
+        watcher, WatchStreamExt,
+    },
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use serde_json::json;
-use tokio::time::Instant;
+use serde_json::{json, to_vec};
 use tracing::{debug, error, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
@@ -145,21 +145,15 @@ fn get_agent_name() -> String {
     agent_name
 }
 
-fn is_container_running(pod: &Pod, container_name: &String) -> bool {
+fn is_container_running(pod: Pod, container_name: &String) -> bool {
     pod.status
-        .as_ref()
         .and_then(|status| {
-            status
-                .container_statuses
-                .as_ref()
-                .and_then(|container_statuses| {
-                    container_statuses
-                        .iter()
-                        .find(|&status| &status.name == container_name)
-                        .and_then(|status| {
-                            status.state.as_ref().map(|state| state.running.is_some())
-                        })
-                })
+            status.container_statuses.and_then(|container_statuses| {
+                container_statuses
+                    .iter()
+                    .find(|&status| &status.name == container_name)
+                    .and_then(|status| status.state.as_ref().map(|state| state.running.is_some()))
+            })
         })
         .unwrap_or(false)
 }
@@ -209,16 +203,33 @@ async fn create_ephemeral_container_agent(
         }
         None => Some(vec![ephemeral_container]),
     };
-    let start_time = Instant::now();
-    while start_time.elapsed() < Duration::from_secs(60) {
-        let pod = pods_api.get(&config.impersonated_pod_name).await?;
-        if is_container_running(&pod, &mirrord_agent_name) {
+
+    pods_api
+        .replace_subresource(
+            "ephemeralcontainers",
+            &config.impersonated_pod_name,
+            &PostParams::default(),
+            to_vec(&ephemeral_containers_subresource).unwrap(),
+        )
+        .await
+        .map_err(LayerError::KubeError)?;
+
+    let params = ListParams::default()
+        .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
+        .timeout(60);
+
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+
+    pin_mut!(stream);
+    while let Some(Ok(pod)) = stream.next().await {
+        if is_container_running(pod, &mirrord_agent_name) {
             debug!("container ready");
             break;
+        } else {
+            debug!("container not ready yet :?", pod);
         }
-        debug!("container not ready yet {pod:?}");
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
+    debug!("returning container");
     Ok(config.impersonated_pod_name.clone())
 }
 
