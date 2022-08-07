@@ -354,7 +354,7 @@ async fn create_job_pod_agent(
     let pod_name = pod.metadata.name.clone().unwrap();
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), running)
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(120), running)
         .await
         .map_err(|_| LayerError::TimeOutError)?; // TODO: convert the elapsed error to string?
     Ok(pod_name)
