@@ -32,13 +32,11 @@ func main() {
 	})
 
 	r.POST("/", func(c *gin.Context) {
-		res, err := c.GetRawData()
+		_, err := c.GetRawData()
 		if err != nil {
 			fmt.Printf("POST: Error getting raw data: %v\n", err)
 		}
-		if string(res) == TEXT {
-			fmt.Println("POST: Request completed")
-		}
+		fmt.Println("POST: Request completed")
 		c.String(http.StatusOK, "OK")
 	})
 
