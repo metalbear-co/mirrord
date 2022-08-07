@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -15,6 +17,7 @@ use kube::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
@@ -209,27 +212,16 @@ async fn create_ephemeral_container_agent(
         }
         None => Some(vec![ephemeral_container]),
     };
-
-    let params = ListParams::default()
-        .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
-        .timeout(60);
-
-    let stream = watcher(pods_api.clone(), params).applied_objects();
-    // let mut stream = pods_api
-    //     .watch(&params, "0")
-    //     .await
-    //     .map_err(LayerError::KubeError)?
-    //     .boxed();
-    pin_mut!(stream);
-    while let Some(Ok(pod)) = stream.next().await {
+    let start_time = Instant::now();
+    while start_time.elapsed() < Duration::from_secs(60) {
+        let pod = pods_api.get(&config.impersonated_pod_name).await?;
         if is_container_running(&pod, &mirrord_agent_name) {
             debug!("container ready");
             break;
-        } else {
-            debug!("container not ready yet {:?}", &pod);
         }
+        debug!("container not ready yet {pod:?}");
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    debug!("returning container");
     Ok(config.impersonated_pod_name.clone())
 }
 
