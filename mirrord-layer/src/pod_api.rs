@@ -145,7 +145,7 @@ fn get_agent_name() -> String {
     agent_name
 }
 
-fn is_container_running(pod: Pod, container_name: &String) -> bool {
+fn is_container_running(pod: &Pod, container_name: &String) -> bool {
     pod.status
         .and_then(|status| {
             status.container_statuses.and_then(|container_statuses| {
@@ -222,11 +222,11 @@ async fn create_ephemeral_container_agent(
 
     pin_mut!(stream);
     while let Some(Ok(pod)) = stream.next().await {
-        if is_container_running(pod, &mirrord_agent_name) {
+        if is_container_running(&pod, &mirrord_agent_name) {
             debug!("container ready");
             break;
         } else {
-            debug!("container not ready yet :?", pod);
+            debug!("container not ready yet {:?}", &pod);
         }
     }
     debug!("returning container");
