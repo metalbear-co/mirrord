@@ -240,16 +240,7 @@ async fn create_ephemeral_container_agent(
                 error!("Error watching pod: {:?}", s);
                 break;
             }
-            WatchEvent::Bookmark(_) => {
-                debug!("Bookmark");
-            }
-            WatchEvent::Deleted(pod) => {
-                error!("Pod deleted: {:?}", pod);
-            }
-
-            _ => {
-                debug!("other");
-            }
+            _ => {}
         }
     }
     debug!("container is ready");
