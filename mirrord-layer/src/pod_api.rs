@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt};
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
@@ -7,7 +7,10 @@ use k8s_openapi::api::{
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
-    runtime::wait::{await_condition, conditions::is_pod_running},
+    runtime::{
+        wait::{await_condition, conditions::is_pod_running},
+        watcher, WatchStreamExt,
+    },
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -142,15 +145,21 @@ fn get_agent_name() -> String {
     agent_name
 }
 
-fn is_container_running(pod: Pod, container_name: &String) -> bool {
+fn is_container_running(pod: &Pod, container_name: &String) -> bool {
     pod.status
+        .as_ref()
         .and_then(|status| {
-            status.container_statuses.and_then(|container_statuses| {
-                container_statuses
-                    .iter()
-                    .find(|&status| &status.name == container_name)
-                    .and_then(|status| status.state.as_ref().map(|state| state.running.is_some()))
-            })
+            status
+                .container_statuses
+                .as_ref()
+                .and_then(|container_statuses| {
+                    container_statuses
+                        .iter()
+                        .find(|&status| &status.name == container_name)
+                        .and_then(|status| {
+                            status.state.as_ref().map(|state| state.running.is_some())
+                        })
+                })
         })
         .unwrap_or(false)
 }
@@ -205,32 +214,22 @@ async fn create_ephemeral_container_agent(
         .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
         .timeout(60);
 
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
-
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Modified(pod) | WatchEvent::Added(pod) => {
-                if is_container_running(pod, &mirrord_agent_name) {
-                    debug!("container ready");
-                    break;
-                } else {
-                    debug!("container not ready yet");
-                }
-            }
-            WatchEvent::Error(s) => {
-                error!("Error watching pod: {:?}", s);
-                break;
-            }
-            _ => {
-                debug!("other");
-            }
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+    // let mut stream = pods_api
+    //     .watch(&params, "0")
+    //     .await
+    //     .map_err(LayerError::KubeError)?
+    //     .boxed();
+    pin_mut!(stream);
+    while let Some(Ok(pod)) = stream.next().await {
+        if is_container_running(&pod, &mirrord_agent_name) {
+            debug!("container ready");
+            break;
+        } else {
+            debug!("container not ready yet {:?}", &pod);
         }
     }
-    debug!("container is ready");
+    debug!("returning container");
     Ok(config.impersonated_pod_name.clone())
 }
 
