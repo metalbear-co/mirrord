@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
@@ -11,7 +11,6 @@ use kube::{
     core::WatchEvent,
     runtime::{
         wait::{await_condition, conditions::is_pod_running},
-        watcher, WatchStreamExt,
     },
     Client, Config,
 };
