@@ -143,6 +143,7 @@ fn get_agent_name() -> String {
 }
 
 fn is_container_running(pod: Pod, container_name: &String) -> bool {
+    debug!("pod status: {:?}", &pod.status);
     pod.status
         .and_then(|status| {
             status.container_statuses.and_then(|container_statuses| {
