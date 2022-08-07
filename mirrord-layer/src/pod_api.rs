@@ -147,13 +147,19 @@ fn get_agent_name() -> String {
 
 fn is_container_running(pod: &Pod, container_name: &String) -> bool {
     pod.status
+        .as_ref()
         .and_then(|status| {
-            status.container_statuses.and_then(|container_statuses| {
-                container_statuses
-                    .iter()
-                    .find(|&status| &status.name == container_name)
-                    .and_then(|status| status.state.as_ref().map(|state| state.running.is_some()))
-            })
+            status
+                .container_statuses
+                .as_ref()
+                .and_then(|container_statuses| {
+                    container_statuses
+                        .iter()
+                        .find(|&status| &status.name == container_name)
+                        .and_then(|status| {
+                            status.state.as_ref().map(|state| state.running.is_some())
+                        })
+                })
         })
         .unwrap_or(false)
 }
