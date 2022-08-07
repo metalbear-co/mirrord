@@ -142,16 +142,20 @@ fn get_agent_name() -> String {
     agent_name
 }
 
-fn is_container_running(pod: Pod, container_name: &String) -> bool {
+fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
     debug!("pod status: {:?}", &pod.status);
     pod.status
         .and_then(|status| {
-            status.container_statuses.and_then(|container_statuses| {
-                container_statuses
-                    .iter()
-                    .find(|&status| &status.name == container_name)
-                    .and_then(|status| status.state.as_ref().map(|state| state.running.is_some()))
-            })
+            status
+                .ephemeral_container_statuses
+                .and_then(|container_statuses| {
+                    container_statuses
+                        .iter()
+                        .find(|&status| &status.name == container_name)
+                        .and_then(|status| {
+                            status.state.as_ref().map(|state| state.running.is_some())
+                        })
+                })
         })
         .unwrap_or(false)
 }
