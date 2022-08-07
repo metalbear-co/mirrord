@@ -213,7 +213,7 @@ async fn create_ephemeral_container_agent(
 
     while let Some(status) = stream.try_next().await? {
         match status {
-            WatchEvent::Modified(pod) => {
+            WatchEvent::Modified(pod) | WatchEvent::Added(pod) => {
                 if is_container_running(pod, &mirrord_agent_name) {
                     debug!("container ready");
                     break;
