@@ -33,7 +33,7 @@ async function debug_file_ops() {
 // debug_file_ops();
 debugRequest(null);
 // debugConnect();
-debugListen();
+// debugListen();
 
 function debugConnect() {
   let options = { readable: true, writable: true };
@@ -88,6 +88,30 @@ function debugRequest(listening) {
     );
   });
 
+  req.on("close", () => {
+    console.log(">> close");
+  });
+
+  req.on("continue", () => {
+    console.log(">> continue");
+  });
+
+  req.on("finish", () => {
+    console.log(">> finish");
+  });
+
+  req.on("response", () => {
+    console.log(">> response");
+  });
+
+  req.on("timeout", () => {
+    console.log(">> timeout");
+  });
+
+  req.on("upgrade", () => {
+    console.log(">> upgrade");
+  });
+
   req.on("connect", (incoming, socket, head) => {
     console.log(">> connect ", incoming, " ", socket, " ", head);
   });
@@ -113,8 +137,6 @@ function debugListen() {
     },
     function () {
       console.log("server listening to %j", server.address());
-
-      debugRequest(server.address());
     }
   );
 

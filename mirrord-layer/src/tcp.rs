@@ -38,15 +38,15 @@ pub(crate) enum HookMessageTcp {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Listen {
-    pub fake_port: Port,
-    pub real_port: Port,
+    pub mirror_port: Port,
+    pub requested_port: Port,
     pub ipv6: bool,
     pub fd: RawFd,
 }
 
 impl PartialEq for Listen {
     fn eq(&self, other: &Self) -> bool {
-        self.real_port == other.real_port
+        self.requested_port == other.requested_port
     }
 }
 
@@ -54,25 +54,25 @@ impl Eq for Listen {}
 
 impl Hash for Listen {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.real_port.hash(state);
+        self.requested_port.hash(state);
     }
 }
 
 impl Borrow<Port> for Listen {
     fn borrow(&self) -> &Port {
-        &self.real_port
+        &self.requested_port
     }
 }
 
 impl From<&Listen> for SocketAddr {
     fn from(listen: &Listen) -> Self {
         let address = if listen.ipv6 {
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.fake_port)
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.mirror_port)
         } else {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.fake_port)
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.mirror_port)
         };
 
-        debug_assert_eq!(address.port(), listen.fake_port);
+        debug_assert_eq!(address.port(), listen.mirror_port);
         address
     }
 }
@@ -148,9 +148,6 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
-        // TODO(alex) [high] 2022-07-27: Entering in a loop here. The socket is deferred bound, so
-        // by the time we call the proper connect, it still isn't bound.
-        // Must change the way this bypass is being handled, to call `bind` when this is true.
         IS_INTERNAL_CALL.store(true, Ordering::Release);
         let tcp_stream = TcpStream::connect(addr).await.map_err(From::from);
         IS_INTERNAL_CALL.store(false, Ordering::Release);
@@ -175,7 +172,7 @@ pub(crate) trait TcpHandler {
     ) -> Result<(), LayerError> {
         debug!("handle_listen -> listen {:#?}", listen);
 
-        let port = listen.real_port;
+        let port = listen.requested_port;
 
         self.ports_mut()
             .insert(listen)

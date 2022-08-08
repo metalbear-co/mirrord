@@ -71,6 +71,7 @@ pub struct Connected {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
+    requested_port: Port,
     address: SocketAddr,
 }
 

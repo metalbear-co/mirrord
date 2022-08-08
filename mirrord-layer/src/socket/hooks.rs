@@ -30,12 +30,44 @@ pub(crate) unsafe extern "C" fn socket_detour(
     );
 
     let socket_result = FN_SOCKET(domain, type_, protocol);
-    let (Ok(result) | Err(result)) =
-        socket(socket_result, domain, type_, protocol).map_err(From::from);
 
-    trace!("socket_detour -> result {:#?}", result);
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("socket_detour -> bypassed");
+        socket_result
+    } else {
+        let (Ok(result) | Err(result)) =
+            socket(socket_result, domain, type_, protocol).map_err(From::from);
+        result
+    }
+}
 
-    result
+#[hook_fn]
+pub(crate) unsafe extern "C" fn socketpair_detour(
+    domain: c_int,
+    type_: c_int,
+    protocol: c_int,
+    sv: *mut c_int,
+) -> c_int {
+    trace!(
+        "socketpair_detour -> domain {:#?} | type:{:#?} | protocol {:#?} | sv {:#?}",
+        domain,
+        type_,
+        protocol,
+        sv.is_null()
+    );
+
+    let socketpair_result = FN_SOCKETPAIR(domain, type_, protocol, sv);
+    if socketpair_result == -1 {
+        return socketpair_result;
+    }
+
+    let new_sockets = slice::from_raw_parts_mut(sv, 2);
+    // TODO(alex) [high] 2022-08-04: Pairs of socket probably the culprit, I think we might be using
+    // the wrong socket fd to try and connect??? Doesn't make much sense, as we lose the remote
+    // address in favor of some local address, this might be why.
+    debug!("socketpair_detour -> sockets {:#?}", new_sockets);
+
+    socketpair_result
 }
 
 #[hook_fn]
@@ -46,32 +78,35 @@ pub(crate) unsafe extern "C" fn bind_detour(
 ) -> c_int {
     trace!("bind_detour -> sockfd {:#?}", sockfd);
 
-    // TODO: Is this conversion safe?
-    let address = match SockAddr::new(
-        *(raw_address as *const libc::sockaddr_storage),
-        address_length,
-    )
-    .as_socket()
-    .ok_or(LayerError::AddressConversion)
-    {
-        Ok(address) => address,
-        Err(fail) => return fail.into(),
-    };
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("bind_detour -> bypassed");
+        FN_BIND(sockfd, raw_address, address_length)
+    } else {
+        // TODO: Is this conversion safe?
+        let address = SockAddr::new(*(raw_address as *const _), address_length)
+            .as_socket()
+            .ok_or(LayerError::AddressConversion);
 
-    let (Ok(result) | Err(result)) = bind(sockfd, address)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) => FN_BIND(sockfd, raw_address, address_length),
-            LayerError::BypassedPort(_) => {
-                warn!("bind_detour -> bypass port");
+        match address {
+            Ok(address) => {
+                let (Ok(result) | Err(result)) =
+                    bind(sockfd, address)
+                        .map(|()| 0)
+                        .map_err(|fail| match fail {
+                            LayerError::LocalFDNotFound(_) | LayerError::BypassedPort(_) => {
+                                FN_BIND(sockfd, raw_address, address_length)
+                            }
+                            other => other.into(),
+                        });
+                result
+            }
+            Err(_) => {
+                warn!("bind_detour -> Could not convert address, bypassing!");
+
                 FN_BIND(sockfd, raw_address, address_length)
             }
-            other => other.into(),
-        });
-
-    trace!("bind_detour -> result {:#?}", result);
-
-    result
+        }
+    }
 }
 
 #[hook_fn]
@@ -81,52 +116,67 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
         sockfd, backlog
     );
 
-    let (Ok(result) | Err(result)) =
-        listen(sockfd, backlog)
-            .map(|()| 0)
-            .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
-                    FN_LISTEN(sockfd, backlog)
-                }
-                other => other.into(),
-            });
-
-    trace!("listen_detour -> result {:#?}", result);
-    result
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("listen_detour -> bypassed");
+        FN_LISTEN(sockfd, backlog)
+    } else {
+        let (Ok(result) | Err(result)) =
+            listen(sockfd, backlog)
+                .map(|()| 0)
+                .map_err(|fail| match fail {
+                    LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                        FN_LISTEN(sockfd, backlog)
+                    }
+                    other => other.into(),
+                });
+        result
+    }
 }
 
 #[hook_fn]
 pub(super) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
+    // TODO(alex) [high] 2022-08-03: We're trying to connect to 255.127.0.0, why? Looks like the
+    // DNS stuff is returning correct values (this address appears nowhere).
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
     trace!("connect_detour -> sockfd {:#?}", sockfd);
 
-    // TODO: Is this conversion safe?
-    let address = match SockAddr::new(
-        *(raw_address as *const libc::sockaddr_storage),
-        address_length,
-    )
-    .as_socket()
-    .ok_or(LayerError::AddressConversion)
-    {
-        Ok(address) => address,
-        Err(fail) => return fail.into(),
-    };
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("connect_detour -> bypassed");
 
-    let (Ok(result) | Err(result)) =
-        connect(sockfd, address)
-            .map(|()| 0)
-            .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
-                    FN_CONNECT(sockfd, raw_address, address_length)
-                }
-                other => other.into(),
-            });
+        FN_CONNECT(sockfd, raw_address, address_length)
+    } else {
+        // TODO: Is this conversion safe?
+        let address = SockAddr::new(*(raw_address as *const _), address_length);
+        debug!("connect_detour -> address {:#?}", address);
 
-    trace!("connect_detour -> result {:#?}", result);
-    result
+        let address = address.as_socket().ok_or(LayerError::AddressConversion);
+
+        // TODO(alex) [high] 2022-08-03: Drilling down, maybe we need to bypass a bunch of stuff
+        // when connect is being called, then release the bypass?
+        match address {
+            Ok(address) => {
+                let (Ok(result) | Err(result)) =
+                    connect(sockfd, address)
+                        .map(|()| 0)
+                        .map_err(|fail| match fail {
+                            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                                FN_CONNECT(sockfd, raw_address, address_length)
+                            }
+                            other => other.into(),
+                        });
+
+                result
+            }
+            Err(_) => {
+                warn!("connect_detour -> Could not convert address, bypassing!");
+
+                FN_CONNECT(sockfd, raw_address, address_length)
+            }
+        }
+    }
 }
 
 #[hook_fn]
@@ -137,17 +187,20 @@ pub(super) unsafe extern "C" fn getpeername_detour(
 ) -> c_int {
     trace!("getpeername_detour -> sockfd {:#?}", sockfd);
 
-    let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
-                FN_GETPEERNAME(sockfd, address, address_len)
-            }
-            other => other.into(),
-        });
-
-    trace!("getpeername_detour -> result {:#?}", result);
-    result
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("getpeername_detour -> bypassed");
+        FN_GETPEERNAME(sockfd, address, address_len)
+    } else {
+        let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
+            .map(|()| 0)
+            .map_err(|fail| match fail {
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_GETPEERNAME(sockfd, address, address_len)
+                }
+                other => other.into(),
+            });
+        result
+    }
 }
 
 #[hook_fn]
@@ -158,17 +211,20 @@ pub(super) unsafe extern "C" fn getsockname_detour(
 ) -> i32 {
     trace!("getsockname_detour -> sockfd {:#?}", sockfd);
 
-    let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
-                FN_GETSOCKNAME(sockfd, address, address_len)
-            }
-            other => other.into(),
-        });
-
-    trace!("getsockname_detour -> result {:#?}", result);
-    result
+    if IS_INTERNAL_CALL.load(Ordering::Acquire) {
+        debug!("getsockname_detour -> bypassed");
+        FN_GETSOCKNAME(sockfd, address, address_len)
+    } else {
+        let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
+            .map(|()| 0)
+            .map_err(|fail| match fail {
+                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                    FN_GETSOCKNAME(sockfd, address, address_len)
+                }
+                other => other.into(),
+            });
+        result
+    }
 }
 
 #[hook_fn]
@@ -181,7 +237,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
 
     let accept_result = FN_ACCEPT(sockfd, address, address_len);
 
-    if accept_result == -1 {
+    if accept_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         accept_result
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
@@ -193,7 +249,6 @@ pub(crate) unsafe extern "C" fn accept_detour(
                 }
             });
 
-        trace!("accept_detour -> result {:#?}", result);
         result
     }
 }
@@ -210,7 +265,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
 
     let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
 
-    if accept_result == -1 {
+    if accept_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         accept_result
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
@@ -222,7 +277,6 @@ pub(crate) unsafe extern "C" fn accept4_detour(
                 }
             });
 
-        trace!("accept4_detour -> result {:#?}", result);
         result
     }
 }
@@ -249,12 +303,15 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
 
-    if fcntl_result == -1 {
+    if fcntl_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         fcntl_result
     } else {
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
-            .map_err(From::from);
+            .map_err(|fail| match fail {
+                LayerError::LocalFDNotFound(_) => fcntl_result,
+                other => other.into(),
+            });
 
         trace!("fcntl_detour -> result {:#?}", result);
         result
@@ -267,7 +324,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
 
     let dup_result = FN_DUP(fd);
 
-    if dup_result == -1 {
+    if dup_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         dup_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -293,7 +350,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
 
     let dup2_result = FN_DUP2(oldfd, newfd);
 
-    if dup2_result == -1 {
+    if dup2_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         dup2_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -321,7 +378,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
 
     let dup3_result = FN_DUP3(oldfd, newfd, flags);
 
-    if dup3_result == -1 {
+    if dup3_result == -1 || IS_INTERNAL_CALL.load(Ordering::Acquire) {
         dup3_result
     } else {
         let (Ok(result) | Err(result)) =
@@ -341,7 +398,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
 /// # Warning:
 /// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
 #[hook_fn]
-unsafe extern "C" fn getaddrinfo_detour(
+pub(super) unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
     raw_service: *const c_char,
     raw_hints: *const libc::addrinfo,
@@ -417,7 +474,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
 #[hook_fn]
-unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
+pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
     // Iterate over `addrinfo` linked list dropping it.
@@ -432,6 +489,13 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+    let _ = replace!(
+        interceptor,
+        "socketpair",
+        socketpair_detour,
+        FnSocketpair,
+        FN_SOCKETPAIR
+    );
     let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
     let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 

@@ -1,6 +1,6 @@
 use std::{
     ffi::CString,
-    io,
+    io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
@@ -21,7 +21,10 @@ use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
-    tcp::{HookMessageTcp, Listen},
+    tcp::{
+        outgoing::{Connect, MirrorConnect, OutgoingTraffic},
+        HookMessageTcp, Listen,
+    },
 };
 
 // TODO(alex) [high] 2022-07-21: Separate sockets into 2 compartments, listen sockets go into a
@@ -62,8 +65,12 @@ pub(super) fn socket(
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
-    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+pub(super) fn bind(sockfd: c_int, requested_address: SocketAddr) -> Result<(), LayerError> {
+    trace!(
+        "bind -> sockfd {:#?} | address {:#?}",
+        sockfd,
+        requested_address
+    );
 
     let mut socket = {
         SOCKETS
@@ -79,11 +86,57 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
             })?
     };
 
-    (!is_ignored_port(address.port()))
+    (!is_ignored_port(requested_address.port()))
         .then_some(())
-        .ok_or_else(|| LayerError::BypassedPort(address.port()))?;
+        .ok_or_else(|| LayerError::BypassedPort(requested_address.port()))?;
 
-    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound { address });
+    let requested_port = requested_address.port();
+
+    let unbound_address = match socket.domain {
+        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            0,
+        ))),
+        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            0,
+        ))),
+        invalid => Err(LayerError::UnsupportedDomain(invalid)),
+    }?;
+
+    debug!("bind -> unbound_address {:#?}", unbound_address);
+
+    let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+    if bind_result != 0 {
+        error!(
+            "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
+            sockfd,
+            unbound_address,
+            errno::errno()
+        );
+        return Err(io::Error::from_raw_os_error(bind_result).into());
+    }
+
+    // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
+    // connect to.
+    let address = unsafe {
+        SockAddr::init(|storage, len| {
+            if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
+                error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
+
+                Err(io::Error::from_raw_os_error(-1).into())
+            } else {
+                Ok(())
+            }
+        })
+    }
+    .map(|(_, address)| address.as_socket())?
+    .ok_or(LayerError::AddressConversion)?;
+
+    Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
+        requested_port,
+        address,
+    });
 
     SOCKETS.lock()?.insert(sockfd, socket);
 
@@ -102,47 +155,11 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
             .ok_or(LayerError::LocalFDNotFound(sockfd))?
     };
 
-    match &socket.state {
-        SocketState::Bound(bound) => {
-            let real_port = bound.address.port();
-
-            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(*bound);
-
-            let address = match socket.domain {
-                libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    0,
-                ))),
-                libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                    0,
-                ))),
-                invalid => Err(LayerError::UnsupportedDomain(invalid)),
-            }?;
-
-            let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-            if bind_result != 0 {
-                error!(
-                    "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
-                    sockfd,
-                    address,
-                    errno::errno()
-                );
-                return Err(io::Error::from_raw_os_error(bind_result).into());
-            }
-
-            // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
-            // connect to.
-            let getsockname_result =
-                unsafe { FN_GETSOCKNAME(sockfd, address.as_ptr() as *mut _, &mut address.len()) };
-            if getsockname_result != 0 {
-                error!("listen -> Failed `getsockname` sockfd {:#?}", sockfd);
-
-                return Err(io::Error::from_raw_os_error(getsockname_result).into());
-            }
-
-            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
-
+    match socket.state {
+        SocketState::Bound(Bound {
+            requested_port,
+            address,
+        }) => {
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
@@ -151,11 +168,16 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
             }
 
             blocking_send_hook_message(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
-                fake_port: address.port(),
-                real_port,
+                mirror_port: address.port(),
+                requested_port,
                 ipv6: address.is_ipv6(),
                 fd: sockfd,
             })))?;
+
+            Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
+                requested_port,
+                address,
+            });
 
             Ok(())
         }
@@ -174,7 +196,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         remote_address
     );
 
-    let user_socket_info = {
+    let mut user_socket_info = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
@@ -182,37 +204,93 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
     };
     debug!("connect -> user_socket_info {:#?}", user_socket_info);
 
-    if let SocketState::Bound(bound) = user_socket_info.state {
-        trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-
-        let address = SockAddr::from(bound.address);
-        let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-
-        if bind_result != 0 {
-            error!(
-                "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
-                bind_result, address, sockfd
+    match user_socket_info.state {
+        SocketState::Initialized => {
+            debug!(
+                "connect -> SocketState::Initialized {:#?}",
+                user_socket_info
             );
+            // TODO(alex) [high] 2022-07-15: Implementation plan
+            // 4. Calls to read on this socket in `agent` will contain data that we log, and then
+            // write to `remote_address`;
 
-            Err(io::Error::from_raw_os_error(bind_result))?
-        } else {
-            let rawish_remote_address = SockAddr::from(remote_address);
-            let result = unsafe {
-                FN_CONNECT(
-                    sockfd,
-                    rawish_remote_address.as_ptr(),
-                    rawish_remote_address.len(),
-                )
+            let (mirror_tx, mirror_rx) = oneshot::channel();
+
+            let connect = Connect {
+                user_fd: sockfd,
+                remote_address,
+                channel_tx: mirror_tx,
             };
 
-            if result != 0 {
-                Err(io::Error::from_raw_os_error(result))?
+            debug!("connect -> connect {:#?}", connect);
+
+            let connect_hook = OutgoingTraffic::Connect(connect);
+
+            blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
+            let MirrorConnect { mirror_address } = mirror_rx.blocking_recv()??;
+
+            let connect_to = SockAddr::from(mirror_address);
+            debug!(
+                "connect -> connect_to {:#?} | mirror_address {:#?}",
+                connect_to, mirror_address
+            );
+
+            // TODO(alex) [high] 2022-08-08: Connection between 2 local sockets is created, it just
+            // doesn't do anything.
+            let connect_result =
+                unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+            let err_code = errno::errno().0;
+            if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+                error!(
+                    "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+                    connect_result,
+                    errno::errno()
+                );
+                return Err(io::Error::from_raw_os_error(connect_result).into());
+            }
+
+            let connected = Connected {
+                remote_address,
+                mirror_address,
+            };
+
+            debug!("connect -> connected {:#?}", connected);
+
+            Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+
+            Ok::<(), LayerError>(())
+        }
+        SocketState::Bound(Bound { address, .. }) => {
+            trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
+
+            let address = SockAddr::from(address);
+            let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+
+            if bind_result != 0 {
+                error!(
+                    "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
+                    bind_result, address, sockfd
+                );
+
+                Err(io::Error::from_raw_os_error(bind_result))?
             } else {
-                Ok::<_, LayerError>(())
+                let rawish_remote_address = SockAddr::from(remote_address);
+                let result = unsafe {
+                    FN_CONNECT(
+                        sockfd,
+                        rawish_remote_address.as_ptr(),
+                        rawish_remote_address.len(),
+                    )
+                };
+
+                if result != 0 {
+                    Err(io::Error::from_raw_os_error(result))?
+                } else {
+                    Ok::<_, LayerError>(())
+                }
             }
         }
-    } else {
-        Err(LayerError::SocketInvalidState(sockfd))
+        _ => Err(LayerError::SocketInvalidState(sockfd)),
     }?;
 
     Ok(())
@@ -243,8 +321,6 @@ pub(super) fn getpeername(
     fill_address(address, address_len, remote_address)
 }
 /// Resolve the fake local address to the real local address.
-#[allow(clippy::significant_drop_in_scrutinee)]
-/// See https://github.com/rust-lang/rust-clippy/issues/8963
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
