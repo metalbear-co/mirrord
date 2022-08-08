@@ -119,7 +119,7 @@ pub(crate) async fn create_agent(
             &config,
             agent_image,
             &pods_api,
-            runtime_data,
+            runtime_data.unwrap(),
             &jobs_api,
             connection_port,
         )
