@@ -31,20 +31,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
 
     loop {
         select! {
-            bytes = remote_stream.next() => {
-                match bytes {
-                    Some(bytes) => {
-                        if let Err(fail) = local_stream.write_all(&bytes).await {
-                            error!("Failed writing to local_stream with {:#?}!", fail);
-                            break;
-                        }
-                    },
-                    None => {
-                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
-                        break;
-                    }
-                }
-            },
+            biased; // To allow local socket to be read before being closed
             // Read the application's response from the socket and discard the data, so that the socket doesn't fill up.
             read = local_stream.read(&mut buffer) => {
                 match read {
@@ -61,8 +48,21 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                     },
                     Ok(_) => {}
                 }
-
-            }
+            },
+            bytes = remote_stream.next() => {
+                match bytes {
+                    Some(bytes) => {
+                        if let Err(fail) = local_stream.write_all(&bytes).await {
+                            error!("Failed writing to local_stream with {:#?}!", fail);
+                            break;
+                        }
+                    },
+                    None => {
+                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                        break;
+                    }
+                }
+            },
         }
     }
     debug!("tcp_tunnel -> exiting");
