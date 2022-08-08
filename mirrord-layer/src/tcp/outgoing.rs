@@ -178,6 +178,7 @@ impl OutgoingTrafficHandler {
 
                 IS_INTERNAL_CALL.swap(true, Ordering::Acquire);
 
+                // TODO(alex) [high] 2022-08-05: Kinda works, be we get stuck here.
                 let mirror_listener =
                     TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
                         .await?;

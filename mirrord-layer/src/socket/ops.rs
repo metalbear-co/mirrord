@@ -196,13 +196,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
     };
     debug!("connect -> user_socket_info {:#?}", user_socket_info);
 
-    // let user_socket = unsafe { socket2::Socket::from_raw_fd(sockfd) };
-    // user_socket.connect(&SockAddr::from(remote_address))?;
-    // user_socket.into_raw_fd();
-    // TODO(alex) [high] 2022-07-27: Try it out by having a request in js, so our own app sends a
-    // get request, instead of the curl. Think the main issue is that we're dealing with listen
-    // rather than the actual connect part.
-
     if let SocketState::Initialized = user_socket_info.state {
         trace!(
             "connect -> SocketState::Initialized {:#?}",
@@ -213,10 +206,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         // write to `remote_address`;
 
         let (mirror_tx, mirror_rx) = oneshot::channel();
-
-        // TODO(alex) [mid] 2022-07-26: Use TLS to make this `bind` call bypass our hook and use
-        // the original libc function.
-        // Actually, this is a more general idea, every hook should perform a similar check.
 
         let connect = Connect {
             user_fd: sockfd,
@@ -250,34 +239,83 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
         Ok::<(), LayerError>(())
     } else if let SocketState::Bound(bound) = user_socket_info.state {
-        trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
+        {
+            trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
-        let address = SockAddr::from(bound.address);
-        let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+            let (mirror_tx, mirror_rx) = oneshot::channel();
 
-        if bind_result != 0 {
-            error!(
-                "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
-                bind_result, address, sockfd
-            );
-
-            Err(io::Error::from_raw_os_error(bind_result))?
-        } else {
-            let rawish_remote_address = SockAddr::from(remote_address);
-            let result = unsafe {
-                FN_CONNECT(
-                    sockfd,
-                    rawish_remote_address.as_ptr(),
-                    rawish_remote_address.len(),
-                )
+            let connect = Connect {
+                user_fd: sockfd,
+                remote_address,
+                channel_tx: mirror_tx,
             };
 
-            if result != 0 {
-                Err(io::Error::from_raw_os_error(result))?
-            } else {
-                Ok::<_, LayerError>(())
+            debug!("connect -> connect {:#?}", connect);
+
+            let connect_hook = OutgoingTraffic::Connect(connect);
+
+            blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
+            let MirrorConnect { mirror_address } = mirror_rx.blocking_recv()??;
+
+            let connect_to = SockAddr::from(mirror_address);
+            trace!("connect -> connect_to {:#?}", connect_to);
+
+            let connect_result =
+                unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+            if connect_result == -1 {
+                return Err(todo!());
             }
+
+            let connected = Connected {
+                remote_address,
+                mirror_address,
+            };
+
+            trace!("connect -> connected {:#?}", connected);
+
+            Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+
+            Ok::<(), LayerError>(())
         }
+
+        // trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
+
+        // let address = SockAddr::from(bound.address);
+        // let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+
+        // debug!("connect -> bind_result {:#?}", bind_result);
+
+        // if bind_result != 0 {
+        //     error!(
+        //         "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
+        //         bind_result, address, sockfd
+        //     );
+
+        //     Err(io::Error::from_raw_os_error(bind_result))?
+        // } else {
+        //     let rawish_remote_address = SockAddr::from(remote_address);
+        //     let result = unsafe {
+        //         FN_CONNECT(
+        //             sockfd,
+        //             rawish_remote_address.as_ptr(),
+        //             rawish_remote_address.len(),
+        //         )
+        //     };
+
+        //     // TODO(alex) [high] 2022-08-05: Alright, here is the problem.
+        //     // There is a `bind` call on the new local socket that'll connect to the remote
+        // address,     // so we end up entering here, and not on the proper "connect
+        // intercept" path.     if result != 0 {
+        //         error!(
+        //             "connect -> Failed to connect socket result {:?}, address: {:?}, sockfd:
+        // {:?}!",             result, address, sockfd
+        //         );
+
+        //         Err(io::Error::from_raw_os_error(result))?
+        //     } else {
+        //         Ok::<_, LayerError>(())
+        //     }
+        // }
     } else {
         Err(LayerError::SocketInvalidState(sockfd))
     }?;

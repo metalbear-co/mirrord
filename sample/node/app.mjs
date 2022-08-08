@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createServer, Socket } from "net";
 import { open, readFile } from "fs/promises";
-import https from "node:https";
+import http from "node:https";
 import { exit } from "node:process";
 
 async function debug_file_ops() {
@@ -31,8 +31,9 @@ async function debug_file_ops() {
 }
 
 // debug_file_ops();
-// debugRequest(null);
-debugConnect();
+debugRequest(null);
+// debugConnect();
+debugListen();
 
 function debugConnect() {
   let options = { readable: true, writable: true };
@@ -52,15 +53,19 @@ function debugConnect() {
 
 function debugRequest(listening) {
   const options = {
-    hostname: "google.com",
-    port: 443,
+    // TODO(alex) [mid] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
+    // the correct IP, but when using a name ("google.com") it becomes a local address (that
+    // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
+    // set to `true`).
+    hostname: "20.81.111.66",
+    port: 80,
     path: "/",
     method: "GET",
   };
 
   console.log(">> options ", options);
 
-  const req = https.request(options, (res) => {
+  const req = http.request(options, (res) => {
     console.log(`statusCode: ${res.statusCode}`);
 
     res.on("data", (d) => {
@@ -71,7 +76,16 @@ function debugRequest(listening) {
   });
 
   req.on("socket", (socket) => {
-    console.log(">> socket ");
+    console.log(
+      ">> socket local: addr ",
+      socket.localAddress,
+      ":",
+      socket.localPort,
+      " remote: ",
+      socket.remoteAddress,
+      ":",
+      socket.remotePort
+    );
   });
 
   req.on("connect", (incoming, socket, head) => {
