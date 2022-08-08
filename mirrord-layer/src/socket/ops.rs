@@ -4,12 +4,16 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
-use socket2::SockAddr;
+use mirrord_protocol::ConnectResponse;
+use socket2::{Domain, SockAddr};
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
@@ -19,6 +23,13 @@ use crate::{
     error::LayerError,
     tcp::{HookMessageTcp, Listen},
 };
+
+// TODO(alex) [high] 2022-07-21: Separate sockets into 2 compartments, listen sockets go into a
+// thread for listening, connect sockets into another thread. Try to get rid of the overall global
+// theme around sockets.
+// Worth it?
+
+pub(crate) static IS_INTERNAL_CALL: AtomicBool = AtomicBool::new(false);
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 pub(super) fn socket(
@@ -34,7 +45,6 @@ pub(super) fn socket(
         debug!("non Tcp socket domain:{:?}, type:{:?}", domain, type_);
     } else {
         let mut sockets = SOCKETS.lock()?;
-
         sockets.insert(
             sockfd,
             Arc::new(MirrorSocket {
@@ -248,7 +258,7 @@ pub(super) fn getsockname(
             .get(&sockfd)
             .ok_or(LayerError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Ok(connected.local_address),
+                SocketState::Connected(connected) => Ok(connected.mirror_address),
                 SocketState::Bound(bound) => Ok(bound.address),
                 SocketState::Listening(bound) => Ok(bound.address),
                 _ => Err(LayerError::SocketInvalidState(sockfd)),
@@ -296,7 +306,7 @@ pub(super) fn accept(
         type_,
         state: SocketState::Connected(Connected {
             remote_address,
-            local_address,
+            mirror_address: local_address,
         }),
     };
     fill_address(address, address_len, remote_address)?;

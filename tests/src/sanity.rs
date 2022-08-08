@@ -272,7 +272,7 @@ mod tests {
             name: String,
             data: &K,
         ) -> ResourceGuard {
-            api.create(&PostParams::default(), &data).await.unwrap();
+            api.create(&PostParams::default(), data).await.unwrap();
             let cancel_token = CancellationToken::new();
             let resource_token = cancel_token.clone();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -401,10 +401,10 @@ mod tests {
         let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
         watch_resource_exists(&service_api, "default").await;
 
-        let pod_name = get_pod_instance(&kube_client, &name, &namespace)
+        let pod_name = get_pod_instance(&kube_client, &name, namespace)
             .await
             .unwrap();
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
         await_condition(pod_api, &pod_name, is_pod_running())
             .await
             .unwrap();

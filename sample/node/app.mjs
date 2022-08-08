@@ -1,6 +1,8 @@
 import { Buffer } from "node:buffer";
-import { createServer } from "net";
+import { createServer, Socket } from "net";
 import { open, readFile } from "fs/promises";
+import http from "node:https";
+import { exit } from "node:process";
 
 async function debug_file_ops() {
   try {
@@ -29,34 +31,109 @@ async function debug_file_ops() {
 }
 
 // debug_file_ops();
+debugRequest(null);
+// debugConnect();
+debugListen();
 
-const server = createServer();
-server.on("connection", handleConnection);
-server.listen(
-  {
-    host: "localhost",
+function debugConnect() {
+  let options = { readable: true, writable: true };
+  let socket = new Socket(options);
+
+  socket.connect({ port: 80, host: "20.81.111.66", localPort: 8888 });
+
+  socket.on("connect", () => {
+    console.log(">> connected!");
+    exit(0);
+  });
+
+  socket.on("error", (fail) => {
+    console.error(">> failed connect ", fail);
+  });
+}
+
+function debugRequest(listening) {
+  const options = {
+    // TODO(alex) [mid] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
+    // the correct IP, but when using a name ("google.com") it becomes a local address (that
+    // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
+    // set to `true`).
+    hostname: "20.81.111.66",
     port: 80,
-  },
-  function () {
-    console.log("server listening to %j", server.address());
-  }
-);
+    path: "/",
+    method: "GET",
+  };
 
-function handleConnection(conn) {
-  var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-  console.log("new client connection from %s", remoteAddress);
-  conn.on("data", onConnData);
-  conn.once("close", onConnClose);
-  conn.on("error", onConnError);
+  console.log(">> options ", options);
 
-  function onConnData(d) {
-    console.log("connection data from %s: %j", remoteAddress, d.toString());
-    conn.write(d);
-  }
-  function onConnClose() {
-    console.log("connection from %s closed", remoteAddress);
-  }
-  function onConnError(err) {
-    console.log("Connection %s error: %s", remoteAddress, err.message);
+  const req = http.request(options, (res) => {
+    console.log(`statusCode: ${res.statusCode}`);
+
+    res.on("data", (d) => {
+      process.stdout.write(d);
+
+      exit(0);
+    });
+  });
+
+  req.on("socket", (socket) => {
+    console.log(
+      ">> socket local: addr ",
+      socket.localAddress,
+      ":",
+      socket.localPort,
+      " remote: ",
+      socket.remoteAddress,
+      ":",
+      socket.remotePort
+    );
+  });
+
+  req.on("connect", (incoming, socket, head) => {
+    console.log(">> connect ", incoming, " ", socket, " ", head);
+  });
+
+  req.on("information", (info) => {
+    console.log(">> information ", info);
+  });
+
+  req.on("error", (error) => {
+    console.error(error);
+  });
+
+  req.end();
+}
+
+function debugListen() {
+  const server = createServer();
+  server.on("connection", handleConnection);
+  server.listen(
+    {
+      host: "localhost",
+      port: 80,
+    },
+    function () {
+      console.log("server listening to %j", server.address());
+
+      debugRequest(server.address());
+    }
+  );
+
+  function handleConnection(conn) {
+    var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
+    console.log("new client connection from %s", remoteAddress);
+    conn.on("data", onConnData);
+    conn.once("close", onConnClose);
+    conn.on("error", onConnError);
+
+    function onConnData(d) {
+      console.log("connection data from %s: %j", remoteAddress, d.toString());
+      conn.write(d);
+    }
+    function onConnClose() {
+      console.log("connection from %s closed", remoteAddress);
+    }
+    function onConnError(err) {
+      console.log("Connection %s error: %s", remoteAddress, err.message);
+    }
   }
 }

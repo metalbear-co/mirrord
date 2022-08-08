@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 
@@ -12,10 +12,19 @@ pub struct NewTcpConnection {
     pub source_port: Port,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct TcpData {
     pub connection_id: ConnectionID,
     pub bytes: Vec<u8>,
+}
+
+impl fmt::Debug for TcpData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TcpData")
+            .field("connection_id", &self.connection_id)
+            .field("bytes (length)", &self.bytes.len())
+            .finish()
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

@@ -39,6 +39,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
     SendErrorFileResponse,
 
+    #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
+    SendErrorTcpResponse,
+
     #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
     SendErrorGetAddrInfoResponse,
 
@@ -156,6 +159,7 @@ impl From<LayerError> for i64 {
             LayerError::ConnectionIdNotFound(_) => libc::EADDRNOTAVAIL,
             LayerError::ListenAlreadyExists => libc::EEXIST,
             LayerError::SendErrorFileResponse => libc::EINVAL,
+            LayerError::SendErrorTcpResponse => libc::EINVAL,
             LayerError::SendErrorGetAddrInfoResponse => libc::EINVAL,
             LayerError::LockError => libc::EINVAL,
             LayerError::ResponseError(response_fail) => match response_fail {

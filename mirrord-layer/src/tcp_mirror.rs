@@ -18,7 +18,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::LayerError,
@@ -26,6 +26,8 @@ use crate::{
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
+    trace!("tcp_tunnel -> local_stream {:#?}", local_stream);
+
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
 
@@ -117,7 +119,7 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self,
         tcp_connection: NewTcpConnection,
     ) -> Result<(), LayerError> {
-        debug!("handle_new_connection -> {:#?}", tcp_connection);
+        trace!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
 
@@ -133,7 +135,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        debug!("handle_new_data -> id {:#?}", data.connection_id);
+        trace!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
@@ -159,7 +161,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
-        debug!("handle_close -> close {:#?}", close);
+        trace!("handle_close -> close {:#?}", close);
 
         let TcpClose { connection_id } = close;
 

@@ -8,6 +8,7 @@ use std::{
 };
 
 use actix_codec::Framed;
+use cli::parse_args;
 use error::AgentError;
 use file::FileManager;
 use futures::{
@@ -18,6 +19,8 @@ use mirrord_protocol::{
     tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
     GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
+use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
+use tcp::outgoing::OutgoingTrafficHandler;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
@@ -27,19 +30,17 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
+use util::{ClientID, IndexAllocator};
+
+use crate::runtime::get_container_pid;
 
 mod cli;
 mod error;
 mod file;
 mod runtime;
 mod sniffer;
+mod tcp;
 mod util;
-
-use cli::parse_args;
-use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use util::{ClientID, IndexAllocator};
-
-use crate::runtime::get_container_pid;
 
 trait AddrInfoHintExt {
     fn into_lookup(self) -> dns_lookup::AddrInfoHints;
@@ -175,10 +176,11 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
+    outgoing_traffic_handler: OutgoingTrafficHandler,
 }
 
 impl ClientConnectionHandler {
-    /// A loop that handles client connection and state. Brekas upon receiver/sender drop.
+    /// A loop that handles client connection and state. Breaks upon receiver/sender drop.
     pub async fn start(
         id: ClientID,
         stream: TcpStream,
@@ -198,12 +200,15 @@ impl ClientConnectionHandler {
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
+        let outgoing_traffic_handler = OutgoingTrafficHandler::new(pid);
+
         let mut client_handler = ClientConnectionHandler {
             id,
             file_manager,
             stream,
             pid,
             tcp_sniffer_api,
+            outgoing_traffic_handler,
         };
 
         client_handler.handle_loop(cancel_token).await?;
@@ -247,6 +252,16 @@ impl ClientConnectionHandler {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
                 self.stream.send(DaemonMessage::File(response)).await?
+            }
+            ClientMessage::OutgoingTraffic(request) => {
+                let response = self
+                    .outgoing_traffic_handler
+                    .handle_request(request)
+                    .await?;
+
+                self.stream
+                    .send(DaemonMessage::OutgoingTraffic(response))
+                    .await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,

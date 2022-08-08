@@ -14,7 +14,7 @@ use socket2::SockAddr;
 use crate::error::LayerError;
 
 pub(super) mod hooks;
-mod ops;
+pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -66,7 +66,7 @@ pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
     /// Local address it's connected from
-    local_address: SocketAddr,
+    mirror_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -124,7 +124,6 @@ fn fill_address(
                 address as *mut u8,
                 len,
             );
-
             *address_len = os_address.len();
         }
 

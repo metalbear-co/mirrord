@@ -6,6 +6,7 @@ use std::{
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::io::RawFd,
+    sync::atomic::Ordering,
 };
 
 use async_trait::async_trait;
@@ -15,26 +16,28 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, Port,
 };
 use tokio::net::TcpStream;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
     error::LayerError,
-    socket::{SocketInformation, CONNECTION_QUEUE},
+    socket::{ops::IS_INTERNAL_CALL, SocketInformation, CONNECTION_QUEUE},
 };
 
+pub(crate) mod outgoing;
+
 #[derive(Debug, Clone)]
-pub struct ListenClose {
+pub(crate) struct ListenClose {
     pub port: Port,
 }
 
-#[derive(Debug, Clone)]
-pub enum HookMessageTcp {
+#[derive(Debug)]
+pub(crate) enum HookMessageTcp {
     Listen(Listen),
     Close(ListenClose),
 }
 
 #[derive(Debug, Clone)]
-pub struct Listen {
+pub(crate) struct Listen {
     pub fake_port: Port,
     pub real_port: Port,
     pub ipv6: bool,
@@ -124,6 +127,10 @@ pub(crate) trait TcpHandler {
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
+        trace!(
+            "create_local_stream -> tcp_connection {:#?}",
+            tcp_connection
+        );
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
@@ -141,7 +148,14 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
-        TcpStream::connect(addr).await.map_err(From::from)
+        // TODO(alex) [high] 2022-07-27: Entering in a loop here. The socket is deferred bound, so
+        // by the time we call the proper connect, it still isn't bound.
+        // Must change the way this bypass is being handled, to call `bind` when this is true.
+        IS_INTERNAL_CALL.store(true, Ordering::Release);
+        let tcp_stream = TcpStream::connect(addr).await.map_err(From::from);
+        IS_INTERNAL_CALL.store(false, Ordering::Release);
+
+        tcp_stream
     }
 
     /// Handle New Data messages

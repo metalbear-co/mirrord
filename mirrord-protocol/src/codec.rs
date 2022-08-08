@@ -154,11 +154,35 @@ pub struct GetAddrInfoRequest {
     pub hints: Option<AddrInfoHint>,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectRequest {
+    pub user_fd: i32,
+    pub remote_address: SocketAddr,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadRequest {
+    pub id: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteRequest {
+    pub id: i32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum OutgoingTrafficRequest {
+    Connect(ConnectRequest),
+    Write(WriteRequest),
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
+    OutgoingTraffic(OutgoingTrafficRequest),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -199,6 +223,30 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ConnectResponse {
+    pub user_fd: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadResponse {
+    pub id: i32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteResponse {
+    pub id: i32,
+    pub amount: usize,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum OutgoingTrafficResponse {
+    Connect(RemoteResult<ConnectResponse>),
+    Read(RemoteResult<ReadResponse>),
+    Write(RemoteResult<WriteResponse>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -260,6 +308,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
+    OutgoingTraffic(OutgoingTrafficResponse),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

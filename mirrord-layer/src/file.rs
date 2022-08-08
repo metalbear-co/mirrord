@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
@@ -18,7 +18,10 @@ use mirrord_protocol::{
 use regex::RegexSet;
 use tracing::{debug, error, warn};
 
-use crate::{common::ResponseChannel, error::LayerError};
+use crate::{
+    common::{ResponseChannel, ResponseDeque},
+    error::LayerError,
+};
 
 pub(crate) mod hooks;
 pub(crate) mod ops;
@@ -56,7 +59,6 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
-type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -129,7 +131,10 @@ pub struct FileHandler {
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
-fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(), LayerError> {
+pub(crate) fn pop_send<T>(
+    deque: &mut ResponseDeque<T>,
+    value: RemoteResult<T>,
+) -> Result<(), LayerError> {
     deque
         .pop_front()
         .ok_or(LayerError::SendErrorFileResponse)?
