@@ -331,12 +331,17 @@ async fn create_job_pod_agent(
 
     while let Some(status) = stream.try_next().await? {
         match status {
-            WatchEvent::Added(_) => break,
+            WatchEvent::Added(_) => {
+                debug!("found");
+                break;
+            }
             WatchEvent::Error(s) => {
                 error!("Error watching pods: {:?}", s);
                 break;
             }
-            _ => {}
+            _ => {
+                debug!("other")
+            }
         }
     }
 
