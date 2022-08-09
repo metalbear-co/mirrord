@@ -8,7 +8,7 @@ use std::{
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, ConnectRequest, ConnectResponse, OutgoingTrafficRequest,
-    OutgoingTrafficResponse, ReadResponse, WriteRequest,
+    OutgoingTrafficResponse, ReadResponse, WriteRequest, WriteResponse,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -21,9 +21,10 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
-    common::{ResponseChannel, ResponseDeque},
+    common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
     error::LayerError,
     socket::ops::IS_INTERNAL_CALL,
+    HOOK_SENDER,
 };
 
 #[derive(Debug)]
@@ -39,6 +40,12 @@ pub(crate) struct Connect {
 }
 
 #[derive(Debug)]
+pub(crate) struct Write {
+    pub(crate) id: i32,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
 pub(crate) struct CreateMirrorStream {
     pub(crate) user_fd: i32,
     pub(crate) mirror_listener: std::net::TcpListener,
@@ -47,6 +54,7 @@ pub(crate) struct CreateMirrorStream {
 #[derive(Debug)]
 pub(crate) enum OutgoingTraffic {
     Connect(Connect),
+    Write(Write),
 }
 
 #[derive(Debug)]
@@ -85,13 +93,12 @@ impl Default for OutgoingTrafficHandler {
 // - (remote) write [out] -> daemon response -> (mirror) read -> (mirror) write ->
 // (local) read [user]
 impl OutgoingTrafficHandler {
-    async fn run(mut mirror_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
-        // TODO(alex) [high] 2022-07-20:
-        // 1. Take ownership of streams;
-        // 2. Loop forever;
-        // 3. Handle hook messages;
-        // 4. Call `recv` on `mirror_streams`;
-        // 5. Send data received as `ClientMessage::Write`;
+    /// TODO(alex) [low] 2022-08-09: Document this function.
+    async fn interceptor_task(
+        id: i32,
+        mut mirror_stream: TcpStream,
+        remote_stream: Receiver<Vec<u8>>,
+    ) {
         let mut remote_stream = ReceiverStream::new(remote_stream);
         let mut buffer = vec![0; 1024];
 
@@ -114,9 +121,23 @@ impl OutgoingTrafficHandler {
                             warn!("tcp_tunnel -> exiting due to local stream closed!");
                             break;
                         },
-                        Ok(_) => {
-                            // TODO(alex) [high] 2022-08-08: Send the data we received here to
-                            // `agent`.
+                        Ok(read_amount) => {
+                            // TODO(alex) [mid] 2022-08-09: Use hook channel or create some other
+                            // new channel just to handle these types of messages?
+
+                            // Sends the message that the user wrote to our interceptor socket to
+                            // be handled on the `agent`, where it'll be forwarded to the remote.
+                            let write = Write { id, bytes: buffer[..read_amount].to_vec() };
+                            let outgoing_data = OutgoingTraffic::Write(write);
+
+                            // TODO(alex) [mid] 2022-08-09: Must handle a response from `agent`
+                            // mostly for the case where `send` failed sending data to remote.
+                            // Need a `written_amount` or error type of response to mimick how
+                            // proper `io` works.
+                            if let Err(fail) = send_hook_message(HookMessage::OutgoingTraffic(outgoing_data)).await {
+                                error!("Failed sending write message with {:#?}!", fail);
+                                break;
+                            }
                         }
                     }
                 },
@@ -150,22 +171,9 @@ impl OutgoingTrafficHandler {
         >,
     ) -> Result<(), LayerError> {
         trace!(
-            "OutgoingTrafficHandler::handle_hook_message -> message {:#?}",
+            "OutgoingTrafficHandler::handle_hook_message -> message {:?}",
             message
         );
-
-        for (id, mirror) in self.mirror_streams.iter_mut() {
-            let read_amount = mirror.read(&mut self.read_buffer).await?;
-
-            codec
-                .send(ClientMessage::OutgoingTraffic(
-                    OutgoingTrafficRequest::Write(WriteRequest {
-                        id: *id,
-                        bytes: self.read_buffer[..read_amount].to_vec(),
-                    }),
-                ))
-                .await?;
-        }
 
         match message {
             OutgoingTraffic::Connect(Connect {
@@ -187,6 +195,19 @@ impl OutgoingTrafficHandler {
                             user_fd,
                             remote_address,
                         }),
+                    ))
+                    .await?)
+            }
+            OutgoingTraffic::Write(Write { id, bytes }) => {
+                trace!(
+                    "OutgoingTraffic::Write -> id {:#?} | bytes (len) {:#?}",
+                    id,
+                    bytes.len(),
+                );
+
+                Ok(codec
+                    .send(ClientMessage::OutgoingTraffic(
+                        OutgoingTrafficRequest::Write(WriteRequest { id, bytes }),
                     ))
                     .await?)
             }
@@ -249,26 +270,34 @@ impl OutgoingTrafficHandler {
                 // TODO(alex) [high] 2022-08-08: Should be very similar to `handle_new_connection`.
                 self.mirrors.insert(user_fd, ConnectionMirror { sender });
 
-                task::spawn(OutgoingTrafficHandler::run(mirror_stream, receiver));
+                task::spawn(OutgoingTrafficHandler::interceptor_task(
+                    user_fd,
+                    mirror_stream,
+                    receiver,
+                ));
 
                 Ok(())
             }
             OutgoingTrafficResponse::Read(read) => {
-                // This means that `agent` read something from remote, so we write it to the `user`.
+                // `agent` read something from remote, so we write it to the `user`.
                 let ReadResponse { id, bytes } = read?;
 
-                let mirror_stream = self
-                    .mirror_streams
+                let sender = self
+                    .mirrors
                     .get_mut(&id)
-                    .ok_or(LayerError::LocalFDNotFound(id))?;
+                    .ok_or(LayerError::LocalFDNotFound(id))
+                    .map(|mirror| &mut mirror.sender)?;
 
-                mirror_stream.write(&bytes).await?;
+                Ok(sender.send(bytes).await?)
+            }
+            OutgoingTrafficResponse::Write(write) => {
+                let WriteResponse { id, amount } = write?;
+                // TODO(alex) [mid] 2022-07-20: Receive message from agent.
+                // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works
+                // with `Vec<u8>`, so maybe wrapping it in a `Result<Vec<u8>, Error>` would make
+                // more sense, and enable this idea.
 
                 Ok(())
-            }
-            OutgoingTrafficResponse::Write(_) => {
-                // TODO(alex) [high] 2022-07-20: Receive message from agent.
-                todo!();
             }
         }
     }

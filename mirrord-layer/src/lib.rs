@@ -155,7 +155,7 @@ where
 
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         trace!(
-            "Layer::handle_hook_message -> hook_message {:#?}",
+            "Layer::handle_hook_message -> hook_message {:?}",
             hook_message
         );
 

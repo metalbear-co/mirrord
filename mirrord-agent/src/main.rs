@@ -225,7 +225,7 @@ impl ClientConnectionHandler {
                         running = self.handle_client_message(message?).await?;
                     } else {
                         debug!("Client {} disconnected", self.id);
-                            break;
+                        break;
                     }
                 },
                 message = self.tcp_sniffer_api.recv() => {
