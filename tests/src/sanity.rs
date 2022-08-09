@@ -70,11 +70,14 @@ mod tests {
         rand_str
     }
 
+    #[derive(Debug)]
     enum Application {
         PythonHTTP,
         NodeHTTP,
         GoHTTP,
     }
+
+    #[derive(Debug)]
     pub enum Agent {
         #[cfg(target_os = "linux")]
         Ephemeral,
@@ -507,10 +510,15 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
@@ -535,10 +543,15 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
@@ -563,9 +576,12 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_file_ops(
-        #[future] service: EchoService,
+        #[future]
+        #[notrace]
+        service: EchoService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -592,8 +608,14 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+    pub async fn test_file_ops(
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
