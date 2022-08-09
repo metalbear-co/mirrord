@@ -16,6 +16,7 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, warn};
@@ -58,6 +59,8 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         }
                     },
                     None => {
+                        /// The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
+                        sleep(Duration::from_secs(1)).await;
                         warn!("tcp_tunnel -> exiting due to remote stream closed!");
                         break;
                     }
