@@ -160,10 +160,6 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
         .unwrap_or(false)
 }
 
-fn is_job_pod_running(_pod: Pod) -> bool {
-    true
-}
-
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     agent_image: String,
@@ -335,20 +331,17 @@ async fn create_job_pod_agent(
 
     while let Some(status) = stream.try_next().await? {
         match status {
-            WatchEvent::Modified(pod) | WatchEvent::Added(pod) => {
-                debug!("pod : {:?}", pod);
-                if is_job_pod_running(pod) {
-                    debug!("container ready");
-                    break;
-                } else {
-                    debug!("container not ready yet");
-                }
-            }
-            WatchEvent::Error(s) => {
-                error!("Error watching pod: {:?}", s);
+            WatchEvent::Added(_) => {
+                debug!("found");
                 break;
             }
-            _ => {}
+            WatchEvent::Error(s) => {
+                error!("Error watching pods: {:?}", s);
+                break;
+            }
+            _ => {
+                debug!("other")
+            }
         }
     }
 
