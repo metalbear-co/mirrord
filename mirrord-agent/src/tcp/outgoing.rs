@@ -11,7 +11,8 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task,
 };
-use tracing::{trace, warn};
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{error, trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace};
 
@@ -22,6 +23,12 @@ pub(crate) struct OutgoingTrafficHandler {
     task: task::JoinHandle<Result<(), AgentError>>,
     request_channel_tx: Sender<Request>,
     response_channel_rx: Receiver<Response>,
+}
+
+#[derive(Debug)]
+pub struct Data {
+    id: i32,
+    bytes: Vec<u8>,
 }
 
 impl OutgoingTrafficHandler {
@@ -38,10 +45,50 @@ impl OutgoingTrafficHandler {
         }
     }
 
+    async fn interceptor_task(connection_id: i32, read_tx: Sender<Data>, mut stream: TcpStream) {
+        trace!("OutgoingTrafficHandler::intercept_task -> ");
+
+        let mut buffer = vec![0; 1500];
+
+        loop {
+            select! {
+                biased;
+
+                // Reads from the remote connection, then sends the data back to `layer` as a
+                // `DaemonMessage`.
+                read = stream.read(&mut buffer) => {
+                    match read {
+                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                            continue;
+                        },
+                        Err(fail) => {
+                            error!("Failed reading stream with {:#?}", fail);
+                            break;
+                        }
+                        Ok(read_amount) if read_amount == 0 => {
+                            warn!("Local stream closed!");
+                            break;
+                        },
+                        Ok(read_amount) => {
+                            let bytes = buffer[..read_amount].to_vec();
+                            let read = Data { id: connection_id, bytes };
+
+                            if let Err(fail) = read_tx.send(read).await {
+                                error!("Failed sending read message with {:#?}!", fail);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     async fn inner_request_handler(
+        read_tx: Sender<Data>,
+        write_tx: Sender<Data>,
         request: Request,
         response_tx: Sender<Response>,
-        remote_streams: &mut HashMap<i32, TcpStream>,
     ) -> Result<(), AgentError> {
         trace!(
             "OutgoingTrafficHandler::inner_request_handler -> request {:?}",
@@ -57,7 +104,7 @@ impl OutgoingTrafficHandler {
                     .await
                     .map_err(From::from)
                     .map(|remote_stream| {
-                        remote_streams.insert(user_fd, remote_stream);
+                        task::spawn(Self::interceptor_task(user_fd, read_tx, remote_stream));
 
                         ConnectResponse { user_fd }
                     });
@@ -71,23 +118,10 @@ impl OutgoingTrafficHandler {
                 Ok(response_tx.send(response).await?)
             }
             OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
-                if let Some(stream) = remote_streams.get_mut(&id) {
-                    let write_response: RemoteResult<_> = stream
-                        .write(&bytes)
-                        .await
-                        .map_err(From::from)
-                        .map(|written_amount| WriteResponse {
-                            id,
-                            amount: written_amount,
-                        });
-
-                    let response = OutgoingTrafficResponse::Write(write_response);
-                    Ok(response_tx.send(response).await?)
-                } else {
-                    let response =
-                        OutgoingTrafficResponse::Write(Err(ResponseError::NotFound(id as usize)));
-                    Ok(response_tx.send(response).await?)
-                }
+                // TODO(alex) [high] 2022-08-09: Now that we have a task per connection, this
+                // doesn't work anymore. Must send a `Write` message + a `write_tx` channel to the
+                // `intercept_task`, while we `recv` on `write_rx` here.
+                Ok(write_tx.send(Data { id, bytes }).await?)
             }
         }
     }
@@ -97,8 +131,8 @@ impl OutgoingTrafficHandler {
     // `read` for the `TcpStream`.
     async fn run(
         pid: Option<u64>,
-        mut request_channel_rx: Receiver<Request>,
-        response_channel_tx: Sender<Response>,
+        mut request_rx: Receiver<Request>,
+        response_tx: Sender<Response>,
     ) -> Result<(), AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
@@ -108,32 +142,48 @@ impl OutgoingTrafficHandler {
             set_namespace(namespace).unwrap();
         }
 
-        let mut agent_remote_streams: HashMap<i32, TcpStream> = HashMap::with_capacity(4);
-        let mut read_buffer = vec![0; 1500];
+        let (read_tx, mut read_rx) = mpsc::channel(1000);
+        let (write_tx, mut write_rx) = mpsc::channel(1000);
 
         loop {
             select! {
-                request = request_channel_rx.recv() => {
+                // [layer] -> [agent]
+                request = request_rx.recv() => {
                     match request {
-                        Some(request) => OutgoingTrafficHandler::inner_request_handler(request, response_channel_tx.clone(), &mut agent_remote_streams).await?,
+                        Some(request) => {
+                            OutgoingTrafficHandler::inner_request_handler(
+                                read_tx.clone(),
+                                write_tx.clone(),
+                                request,
+                                response_tx.clone(),
+                            )
+                            .await?
+                        }
                         None => {
                             warn!("OutgoingTrafficHandler::run -> Disconnected!");
                             break;
                         }
                     }
-                } else => {
-                    for (id, stream) in agent_remote_streams.iter_mut() {
-                        let read_response: RemoteResult<_> = stream
-                            .read(&mut read_buffer)
-                            .await
-                            .map_err(From::from)
-                            .map(|read_amount| ReadResponse {
-                                id: *id,
-                                bytes: read_buffer[..read_amount].to_vec(),
-                            });
+                }
+                // [remote] -> [layer]
+                read = read_rx.recv() => {
+                    if let Some(Data { id, bytes }) = read {
+                        let read = ReadResponse { id, bytes };
 
-                        let response = OutgoingTrafficResponse::Read(read_response);
-                        response_channel_tx.send(response).await.unwrap();
+                        let response = OutgoingTrafficResponse::Read(Ok(read));
+
+                        response_tx.send(response).await?
+                    }
+                }
+
+                // [?] -> [?]
+                write = write_rx.recv() => {
+                    if let Some(Data { id, bytes }) = write {
+                        let write = WriteResponse {id, amount: todo!() };
+
+                        let response = OutgoingTrafficResponse::Write(Ok(write));
+
+                        response_tx.send(response).await?
                     }
                 }
             }

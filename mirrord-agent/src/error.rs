@@ -4,7 +4,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-use crate::sniffer::SnifferCommand;
+use crate::{sniffer::SnifferCommand, tcp::outgoing::Data};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -19,6 +19,9 @@ pub enum AgentError {
 
     #[error("FileResponse sender failed with `{0}`")]
     SendFileResponse(#[from] tokio::sync::mpsc::error::SendError<(u32, FileResponse)>),
+
+    #[error("FileResponse sender failed with `{0}`")]
+    SendData(#[from] tokio::sync::mpsc::error::SendError<Data>),
 
     #[error("DaemonTcp sender failed with `{0}`")]
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
