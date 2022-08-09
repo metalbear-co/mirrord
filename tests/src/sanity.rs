@@ -583,9 +583,7 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let mut args = vec!["--enable-fs"];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
@@ -611,9 +609,7 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let mut args = vec!["--enable-fs"];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
