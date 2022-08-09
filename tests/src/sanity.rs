@@ -22,10 +22,7 @@ mod tests {
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
     };
-    use rand::{
-        distributions::{Alphanumeric, DistString},
-        Rng,
-    };
+    use rand::{distributions::Alphanumeric, Rng};
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
