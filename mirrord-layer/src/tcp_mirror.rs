@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -59,7 +60,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         }
                     },
                     None => {
-                        /// The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
+                        // The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
                         sleep(Duration::from_secs(1)).await;
                         warn!("tcp_tunnel -> exiting due to remote stream closed!");
                         break;
