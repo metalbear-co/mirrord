@@ -518,7 +518,6 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
@@ -547,7 +546,6 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
         #[future] service: EchoService,
@@ -576,7 +574,6 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_file_ops(
         #[future] service: EchoService,
@@ -608,7 +605,6 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
         let service = service.await;
@@ -636,7 +632,6 @@ mod tests {
     }
 
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
@@ -653,7 +648,6 @@ mod tests {
     }
 
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
@@ -670,7 +664,6 @@ mod tests {
     }
 
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_remote_dns_enabled_works(#[future] service: EchoService) {
         let service = service.await;
@@ -687,7 +680,6 @@ mod tests {
     }
 
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_remote_dns_lookup_google(#[future] service: EchoService) {
         let service = service.await;
@@ -704,7 +696,6 @@ mod tests {
     }
 
     #[rstest]
-    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_remote_dns_lookup_pod_service(#[future] service: EchoService) {
         let service = service.await;
