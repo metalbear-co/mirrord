@@ -320,10 +320,10 @@ async fn create_job_pod_agent(
         .map_err(LayerError::KubeError)?;
 
     let params = ListParams::default()
-        .labels(&format!("job-name={}", mirrord_agent_job_name))
+        .labels(&format!("metadata.name={}", mirrord_agent_job_name))
         .timeout(60);
 
-    let mut stream = pods_api
+    let mut stream = job_api
         .watch(&params, "0")
         .await
         .map_err(LayerError::KubeError)?
@@ -331,8 +331,12 @@ async fn create_job_pod_agent(
 
     while let Some(status) = stream.try_next().await? {
         match status {
-            WatchEvent::Added(_) => {
-                debug!("found");
+            WatchEvent::Added(job) => {
+                debug!("found add = {:?}", job.status);
+                break;
+            }
+            WatchEvent::Modified(job) => {
+                debug!("found mod = {:?}", job.status);
                 break;
             }
             WatchEvent::Error(s) => {
@@ -351,7 +355,9 @@ async fn create_job_pod_agent(
         .map_err(LayerError::KubeError)?;
 
     let pod = pods.items.first().unwrap();
+    debug!("pod found =  {:?}", pod);
     let pod_name = pod.metadata.name.clone().unwrap();
+    debug!("pod_name =  {:?}", pod_name);
     let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(120), running)
