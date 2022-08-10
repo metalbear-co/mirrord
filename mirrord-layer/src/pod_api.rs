@@ -343,6 +343,10 @@ async fn create_job_pod_agent(
                 error!("Error watching pods: {:?}", s);
                 break;
             }
+            WatchEvent::Bookmark(bookmark) => {
+                debug!("found bookmark = {:?}", bookmark.metadata.resource_version);
+                break;
+            }
             _ => {
                 debug!("other")
             }
