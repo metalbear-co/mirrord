@@ -7,7 +7,6 @@ use k8s_openapi::api::{
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
-    runtime::wait::{await_condition, conditions::is_pod_running},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -332,8 +331,12 @@ async fn create_job_pod_agent(
     while let Some(status) = stream.try_next().await? {
         match status {
             WatchEvent::Added(pod) | WatchEvent::Modified(pod) => {
-                debug!("found add = {:?}", pod.clone().status.unwrap().phase);
-                if pod.status.unwrap().phase.unwrap() == "Running" {
+                let pod_status = &pod
+                    .status
+                    .and_then(|status| status.phase)
+                    .ok_or(LayerError::PodStatusNotFound(pod.metadata.name))?;
+                debug!("Pod Status = {pod_status:?}");
+                if pod_status == "Running" {
                     break;
                 }
             }
@@ -342,7 +345,7 @@ async fn create_job_pod_agent(
                 break;
             }
             _ => {
-                debug!("other")
+                debug!("Unexpected Watch Event");
             }
         }
     }
@@ -352,14 +355,11 @@ async fn create_job_pod_agent(
         .await
         .map_err(LayerError::KubeError)?;
 
-    let pod = pods.items.first().unwrap();
-    debug!("pod found =  {:?}", pod);
-    let pod_name = pod.metadata.name.clone().unwrap();
-    debug!("pod_name =  {:?}", pod_name);
-    let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
+    let pod_name = pods
+        .items
+        .first()
+        .and_then(|pod| pod.metadata.name.clone())
+        .ok_or(LayerError::PodNotFound(mirrord_agent_job_name))?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(120), running)
-        .await
-        .map_err(|_| LayerError::TimeOutError)?; // TODO: convert the elapsed error to string?
     Ok(pod_name)
 }
