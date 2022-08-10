@@ -320,10 +320,10 @@ async fn create_job_pod_agent(
         .map_err(LayerError::KubeError)?;
 
     let params = ListParams::default()
-        .labels(&format!("metadata.name={}", mirrord_agent_job_name))
+        .labels(&format!("job-name={}", mirrord_agent_job_name))
         .timeout(60);
 
-    let mut stream = job_api
+    let mut stream = pods_api
         .watch(&params, "0")
         .await
         .map_err(LayerError::KubeError)?
@@ -331,20 +331,14 @@ async fn create_job_pod_agent(
 
     while let Some(status) = stream.try_next().await? {
         match status {
-            WatchEvent::Added(job) => {
-                debug!("found add = {:?}", job.status);
-                break;
-            }
-            WatchEvent::Modified(job) => {
-                debug!("found mod = {:?}", job.status);
-                break;
+            WatchEvent::Added(pod) | WatchEvent::Modified(pod) => {
+                debug!("found add = {:?}", pod.clone().status.unwrap().phase);
+                if pod.status.unwrap().phase.unwrap() == "Running" {
+                    break;
+                }
             }
             WatchEvent::Error(s) => {
                 error!("Error watching pods: {:?}", s);
-                break;
-            }
-            WatchEvent::Bookmark(bookmark) => {
-                debug!("found bookmark = {:?}", bookmark.metadata.resource_version);
                 break;
             }
             _ => {
