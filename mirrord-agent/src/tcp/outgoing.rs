@@ -62,6 +62,8 @@ impl OutgoingTrafficHandler {
         let (mut read_stream, mut write_stream) = stream.into_split();
 
         let read_task = tokio::spawn(async move {
+            debug!("interceptor_task -> started!");
+
             let read = read_stream.read(&mut buffer).await;
             trace!("interceptor_task -> read {:#?}", read);
 
@@ -74,6 +76,10 @@ impl OutgoingTrafficHandler {
                     panic!("Local stream closed!");
                 }
                 Ok(read_amount) => {
+                    // TODO(alex) [high] 2022-08-10: The problem of not getting a response for read
+                    // is probably something not being handled in `layer`, as the code here makes
+                    // sense.
+                    debug!("intercept_task -> read_amount {:#?}", read_amount);
                     let bytes = buffer[..read_amount].to_vec();
                     let read = ReadResponse {
                         id: connection_id,
