@@ -12,7 +12,7 @@ use tokio::{
     task,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace};
 
@@ -45,48 +45,150 @@ impl OutgoingTrafficHandler {
         }
     }
 
-    async fn interceptor_task(connection_id: i32, read_tx: Sender<Data>, mut stream: TcpStream) {
-        trace!("OutgoingTrafficHandler::intercept_task -> ");
+    async fn interceptor_task(
+        connection_id: i32,
+        response_tx: Sender<Response>,
+        mut write_rx: Receiver<Data>,
+        stream: TcpStream,
+    ) {
+        trace!(
+            "OutgoingTrafficHandler::intercept_task -> id {:#?}",
+            connection_id
+        );
 
         let mut buffer = vec![0; 1500];
 
-        loop {
-            select! {
-                biased;
+        let read_response_tx = response_tx.clone();
+        let (mut read_stream, mut write_stream) = stream.into_split();
 
-                // Reads from the remote connection, then sends the data back to `layer` as a
-                // `DaemonMessage`.
-                read = stream.read(&mut buffer) => {
-                    match read {
+        let read_task = tokio::spawn(async move {
+            let read = read_stream.read(&mut buffer).await;
+            trace!("interceptor_task -> read {:#?}", read);
+
+            match read {
+                Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(fail) => {
+                    panic!("Failed reading stream with {:#?}", fail);
+                }
+                Ok(read_amount) if read_amount == 0 => {
+                    panic!("Local stream closed!");
+                }
+                Ok(read_amount) => {
+                    let bytes = buffer[..read_amount].to_vec();
+                    let read = ReadResponse {
+                        id: connection_id,
+                        bytes,
+                    };
+                    let response = OutgoingTrafficResponse::Read(Ok(read));
+
+                    if let Err(fail) = read_response_tx.send(response).await {
+                        panic!("Failed sending read message with {:#?}!", fail);
+                    }
+                }
+            }
+        });
+
+        loop {
+            match write_rx.recv().await {
+                Some(data) => {
+                    trace!("interceptor_task -> write has data {:?}", data.id);
+                    let written = write_stream.write_all(&data.bytes).await;
+                    match written {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
-                        },
+                        }
                         Err(fail) => {
-                            error!("Failed reading stream with {:#?}", fail);
+                            error!("Failed writing stream with {:#?}", fail);
                             break;
                         }
-                        Ok(read_amount) if read_amount == 0 => {
-                            warn!("Local stream closed!");
-                            break;
-                        },
-                        Ok(read_amount) => {
-                            let bytes = buffer[..read_amount].to_vec();
-                            let read = Data { id: connection_id, bytes };
+                        Ok(()) => {
+                            debug!("interceptor_task -> write ok!");
+                            let write = WriteResponse {
+                                id: connection_id,
+                                amount: 1,
+                            };
+                            let response = OutgoingTrafficResponse::Write(Ok(write));
 
-                            if let Err(fail) = read_tx.send(read).await {
+                            if let Err(fail) = response_tx.send(response).await {
                                 error!("Failed sending read message with {:#?}!", fail);
                                 break;
                             }
                         }
                     }
                 }
+                None => {
+                    error!("Write channel closed {:#?}!", connection_id);
+                    break;
+                }
             }
+
+            // select! {
+            //     // [layer] -> [remote]
+            //     write = write_rx.recv() => {
+            //         match write {
+            //             Some(data) => {
+            //                 // TODO(alex) [high] 2022-08-10: Why don't we get here?
+            //                 trace!("interceptor_task -> write has data {:?}", data.id);
+            //                 let written = write_stream.write_all(&data.bytes).await;
+            //                 match written {
+            //                     Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+            //                         continue;
+            //                     },
+            //                     Err(fail) => {
+            //                         error!("Failed writing stream with {:#?}", fail);
+            //                         break;
+            //                     }
+            //                     Ok(()) => {
+            //                         debug!("interceptor_task -> write ok!");
+            //                         let write = WriteResponse { id: connection_id, amount: 1 };
+            //                         let response = OutgoingTrafficResponse::Write(Ok(write));
+
+            //                         if let Err(fail) = response_tx.send(response).await {
+            //                             error!("Failed sending read message with {:#?}!", fail);
+            //                             break;
+            //                         }
+            //                     }
+            //                 }
+            //             }
+            //             None => continue,
+            //         }
+            //     }
+
+            //     // Reads from the remote connection, then sends the data back to `layer` as a
+            //     // `DaemonMessage`.
+            //     // [remote] -> [layer]
+            //     // read = stream.read(&mut buffer) => {
+            //     //     trace!("interceptor_task -> read {:#?}", read);
+
+            //     //     match read {
+            //     //         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+            //     //             continue;
+            //     //         },
+            //     //         Err(fail) => {
+            //     //             error!("Failed reading stream with {:#?}", fail);
+            //     //             break;
+            //     //         }
+            //     //         Ok(read_amount) if read_amount == 0 => {
+            //     //             warn!("Local stream closed!");
+            //     //             break;
+            //     //         },
+            //     //         Ok(read_amount) => {
+            //     //             let bytes = buffer[..read_amount].to_vec();
+            //     //             let read = ReadResponse { id: connection_id, bytes };
+            //     //             let response = OutgoingTrafficResponse::Read(Ok(read));
+
+            //     //             if let Err(fail) = response_tx.send(response).await {
+            //     //                 error!("Failed sending read message with {:#?}!", fail);
+            //     //                 break;
+            //     //             }
+            //     //         }
+            //     //     }
+            //     // }
+            // }
         }
     }
 
     async fn inner_request_handler(
-        read_tx: Sender<Data>,
-        write_tx: Sender<Data>,
         request: Request,
         response_tx: Sender<Response>,
     ) -> Result<(), AgentError> {
@@ -94,6 +196,8 @@ impl OutgoingTrafficHandler {
             "OutgoingTrafficHandler::inner_request_handler -> request {:?}",
             request
         );
+
+        let (write_tx, write_rx) = mpsc::channel(1000);
 
         match request {
             OutgoingTrafficRequest::Connect(ConnectRequest {
@@ -104,7 +208,12 @@ impl OutgoingTrafficHandler {
                     .await
                     .map_err(From::from)
                     .map(|remote_stream| {
-                        task::spawn(Self::interceptor_task(user_fd, read_tx, remote_stream));
+                        task::spawn(Self::interceptor_task(
+                            user_fd,
+                            response_tx.clone(),
+                            write_rx,
+                            remote_stream,
+                        ));
 
                         ConnectResponse { user_fd }
                     });
@@ -118,17 +227,20 @@ impl OutgoingTrafficHandler {
                 Ok(response_tx.send(response).await?)
             }
             OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
+                trace!("OutgoingTrafficRequest::Write -> write_request {:#?}", id);
                 // TODO(alex) [high] 2022-08-09: Now that we have a task per connection, this
                 // doesn't work anymore. Must send a `Write` message + a `write_tx` channel to the
                 // `intercept_task`, while we `recv` on `write_rx` here.
-                Ok(write_tx.send(Data { id, bytes }).await?)
+                let write = Data { id, bytes };
+                debug!("before write!");
+                let write_debug = write_tx.send(write).await?;
+                debug!("after write!");
+
+                Ok(write_debug)
             }
         }
     }
 
-    // TODO(alex) [high] 2022-08-09: Instead of holding a bunch of `TcpStream`s, just start a new
-    // task per connection, similar to how it's being done in -layer. Then we can use `select!` on
-    // `read` for the `TcpStream`.
     async fn run(
         pid: Option<u64>,
         mut request_rx: Receiver<Request>,
@@ -142,49 +254,63 @@ impl OutgoingTrafficHandler {
             set_namespace(namespace).unwrap();
         }
 
-        let (read_tx, mut read_rx) = mpsc::channel(1000);
-        let (write_tx, mut write_rx) = mpsc::channel(1000);
+        let mut senders: HashMap<i32, Sender<Data>> = HashMap::with_capacity(4);
 
         loop {
-            select! {
-                // [layer] -> [agent]
-                request = request_rx.recv() => {
+            // [layer] -> [agent]
+            match request_rx.recv().await {
+                Some(request) => {
+                    // OutgoingTrafficHandler::inner_request_handler(request, response_tx.clone())
+                    //     .await?
+
+                    trace!(
+                        "OutgoingTrafficHandler::inner_request_handler -> request {:?}",
+                        request
+                    );
+
                     match request {
-                        Some(request) => {
-                            OutgoingTrafficHandler::inner_request_handler(
-                                read_tx.clone(),
-                                write_tx.clone(),
-                                request,
-                                response_tx.clone(),
-                            )
-                            .await?
+                        OutgoingTrafficRequest::Connect(ConnectRequest {
+                            user_fd,
+                            remote_address,
+                        }) => {
+                            let connect_response: RemoteResult<_> =
+                                TcpStream::connect(remote_address)
+                                    .await
+                                    .map_err(From::from)
+                                    .map(|remote_stream| {
+                                        let (write_tx, write_rx) = mpsc::channel(1000);
+
+                                        senders.insert(user_fd, write_tx.clone());
+
+                                        task::spawn(Self::interceptor_task(
+                                            user_fd,
+                                            response_tx.clone(),
+                                            write_rx,
+                                            remote_stream,
+                                        ));
+
+                                        ConnectResponse { user_fd }
+                                    });
+
+                            trace!(
+                                "OutgoingTrafficRequest::Connect -> connect_response {:#?}",
+                                connect_response
+                            );
+
+                            let response = OutgoingTrafficResponse::Connect(connect_response);
+                            response_tx.send(response).await?
                         }
-                        None => {
-                            warn!("OutgoingTrafficHandler::run -> Disconnected!");
-                            break;
+                        OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
+                            trace!("OutgoingTrafficRequest::Write -> write_request {:#?}", id);
+
+                            let write = Data { id, bytes };
+                            senders.get(&id).unwrap().send(write).await?
                         }
                     }
                 }
-                // [remote] -> [layer]
-                read = read_rx.recv() => {
-                    if let Some(Data { id, bytes }) = read {
-                        let read = ReadResponse { id, bytes };
-
-                        let response = OutgoingTrafficResponse::Read(Ok(read));
-
-                        response_tx.send(response).await?
-                    }
-                }
-
-                // [?] -> [?]
-                write = write_rx.recv() => {
-                    if let Some(Data { id, bytes }) = write {
-                        let write = WriteResponse {id, amount: todo!() };
-
-                        let response = OutgoingTrafficResponse::Write(Ok(write));
-
-                        response_tx.send(response).await?
-                    }
+                None => {
+                    warn!("OutgoingTrafficHandler::run -> Disconnected!");
+                    break;
                 }
             }
         }
