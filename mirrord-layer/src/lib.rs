@@ -26,7 +26,7 @@ use mirrord_protocol::{
 };
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{outgoing::OutgoingTrafficHandler, TcpHandler};
+use tcp::{outgoing::TcpOutgoingApi, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
@@ -124,7 +124,7 @@ where
     pub codec: actix_codec::Framed<T, ClientCodec>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
-    outgoing_traffic_handler: OutgoingTrafficHandler,
+    outgoing_traffic_handler: TcpOutgoingApi,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -147,7 +147,7 @@ where
             codec,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
-            outgoing_traffic_handler: OutgoingTrafficHandler::default(),
+            outgoing_traffic_handler: TcpOutgoingApi::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
         }

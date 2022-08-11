@@ -20,7 +20,7 @@ use mirrord_protocol::{
     GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use tcp::outgoing::OutgoingTrafficHandler;
+use tcp::outgoing::TcpOutgoingApi;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
@@ -176,7 +176,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
-    tcp_outgoing_api: OutgoingTrafficHandler,
+    tcp_outgoing_api: TcpOutgoingApi,
 }
 
 impl ClientConnectionHandler {
@@ -201,7 +201,7 @@ impl ClientConnectionHandler {
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
         //here hold channel!
-        let tcp_outgoing_api = OutgoingTrafficHandler::new(pid);
+        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
             id,

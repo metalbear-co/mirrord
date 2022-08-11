@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
@@ -21,19 +22,27 @@ use crate::{error::AgentError, runtime::set_namespace};
 type Request = TcpOutgoingRequest;
 type Response = TcpOutgoingResponse;
 
-pub(crate) struct OutgoingTrafficHandler {
+pub(crate) struct TcpOutgoingApi {
     task: task::JoinHandle<Result<(), AgentError>>,
     request_channel_tx: Sender<Request>,
     response_channel_rx: Receiver<Response>,
 }
 
-#[derive(Debug)]
 pub struct Data {
     id: i32,
     bytes: Vec<u8>,
 }
 
-impl OutgoingTrafficHandler {
+impl fmt::Debug for Data {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Data")
+            .field("id", &self.id)
+            .field("bytes (length)", &self.bytes.len())
+            .finish()
+    }
+}
+
+impl TcpOutgoingApi {
     pub(crate) fn new(pid: Option<u64>) -> Self {
         let (request_channel_tx, request_channel_rx) = mpsc::channel(1000);
         let (response_channel_tx, response_channel_rx) = mpsc::channel(1000);
@@ -147,13 +156,7 @@ impl OutgoingTrafficHandler {
             // [layer] -> [agent]
             match request_rx.recv().await {
                 Some(request) => {
-                    // OutgoingTrafficHandler::inner_request_handler(request, response_tx.clone())
-                    //     .await?
-
-                    trace!(
-                        "OutgoingTrafficHandler::inner_request_handler -> request {:?}",
-                        request
-                    );
+                    trace!("inner_request_handler -> request {:?}", request);
 
                     match request {
                         TcpOutgoingRequest::Connect(ConnectRequest {
@@ -179,16 +182,13 @@ impl OutgoingTrafficHandler {
                                         ConnectResponse { user_fd }
                                     });
 
-                            trace!(
-                                "OutgoingTrafficRequest::Connect -> connect_response {:#?}",
-                                connect_response
-                            );
+                            trace!("Connect -> response {:#?}", connect_response);
 
                             let response = TcpOutgoingResponse::Connect(connect_response);
                             response_tx.send(response).await?
                         }
                         TcpOutgoingRequest::Write(WriteRequest { id, bytes }) => {
-                            trace!("OutgoingTrafficRequest::Write -> write_request {:#?}", id);
+                            trace!("Write -> request {:#?}", id);
 
                             let write = Data { id, bytes };
                             senders.get(&id).unwrap().send(write).await?
@@ -196,7 +196,7 @@ impl OutgoingTrafficHandler {
                     }
                 }
                 None => {
-                    warn!("OutgoingTrafficHandler::run -> Disconnected!");
+                    warn!("run -> Disconnected!");
                     break;
                 }
             }

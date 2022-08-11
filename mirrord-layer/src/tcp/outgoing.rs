@@ -53,7 +53,7 @@ pub(crate) enum OutgoingTraffic {
 }
 
 #[derive(Debug)]
-pub(crate) struct OutgoingTrafficHandler {
+pub(crate) struct TcpOutgoingApi {
     mirrors: HashMap<i32, ConnectionMirror>,
     connect_queue: ResponseDeque<MirrorConnect>,
 }
@@ -63,7 +63,7 @@ pub(crate) struct ConnectionMirror {
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
 
-impl Default for OutgoingTrafficHandler {
+impl Default for TcpOutgoingApi {
     fn default() -> Self {
         Self {
             mirrors: HashMap::with_capacity(4),
@@ -82,7 +82,7 @@ impl Default for OutgoingTrafficHandler {
 //
 // - (remote) write [out] -> daemon response -> (mirror) read -> (mirror) write ->
 // (local) read [user]
-impl OutgoingTrafficHandler {
+impl TcpOutgoingApi {
     /// TODO(alex) [low] 2022-08-09: Document this function.
     async fn interceptor_task(
         id: i32,
@@ -160,10 +160,7 @@ impl OutgoingTrafficHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        trace!(
-            "OutgoingTrafficHandler::handle_hook_message -> message {:?}",
-            message
-        );
+        trace!("handle_hook_message -> message {:?}", message);
 
         match message {
             OutgoingTraffic::Connect(Connect {
@@ -260,7 +257,7 @@ impl OutgoingTrafficHandler {
                 // TODO(alex) [high] 2022-08-08: Should be very similar to `handle_new_connection`.
                 self.mirrors.insert(user_fd, ConnectionMirror { sender });
 
-                task::spawn(OutgoingTrafficHandler::interceptor_task(
+                task::spawn(TcpOutgoingApi::interceptor_task(
                     user_fd,
                     mirror_stream,
                     receiver,
