@@ -1,10 +1,4 @@
-use std::{
-    ffi::CStr,
-    mem,
-    os::unix::io::RawFd,
-    slice,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{ffi::CStr, os::unix::io::RawFd, slice, sync::atomic::Ordering};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};

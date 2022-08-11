@@ -1,19 +1,15 @@
 use std::{
     ffi::CString,
-    io, mem,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::ConnectResponse;
-use socket2::{Domain, SockAddr};
+use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 

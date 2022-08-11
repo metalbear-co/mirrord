@@ -4,6 +4,8 @@ use bincode::{Decode, Encode};
 
 use crate::{ConnectionID, Port};
 
+pub mod outgoing;
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
     pub connection_id: ConnectionID,

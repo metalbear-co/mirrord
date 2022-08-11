@@ -1,14 +1,16 @@
 use std::{
     collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::prelude::AsRawFd,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::atomic::Ordering,
 };
 
 use futures::SinkExt;
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, ConnectRequest, ConnectResponse, OutgoingTrafficRequest,
-    ReadResponse, TcpOutgoingResponse, WriteRequest, WriteResponse,
+    tcp::outgoing::{
+        ConnectRequest, ConnectResponse, ReadResponse, TcpOutgoingRequest, TcpOutgoingResponse,
+        WriteRequest, WriteResponse,
+    },
+    ClientCodec, ClientMessage,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -24,7 +26,6 @@ use crate::{
     common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
     error::LayerError,
     socket::ops::IS_INTERNAL_CALL,
-    HOOK_SENDER,
 };
 
 #[derive(Debug)]
@@ -46,12 +47,6 @@ pub(crate) struct Write {
 }
 
 #[derive(Debug)]
-pub(crate) struct CreateMirrorStream {
-    pub(crate) user_fd: i32,
-    pub(crate) mirror_listener: std::net::TcpListener,
-}
-
-#[derive(Debug)]
 pub(crate) enum OutgoingTraffic {
     Connect(Connect),
     Write(Write),
@@ -59,10 +54,7 @@ pub(crate) enum OutgoingTraffic {
 
 #[derive(Debug)]
 pub(crate) struct OutgoingTrafficHandler {
-    // task: task::JoinHandle<Result<(), LayerError>>,
-    read_buffer: Vec<u8>,
     mirrors: HashMap<i32, ConnectionMirror>,
-    mirror_streams: HashMap<i32, TcpStream>,
     connect_queue: ResponseDeque<MirrorConnect>,
 }
 
@@ -74,9 +66,7 @@ pub(crate) struct ConnectionMirror {
 impl Default for OutgoingTrafficHandler {
     fn default() -> Self {
         Self {
-            read_buffer: Vec::with_capacity(1500),
             mirrors: HashMap::with_capacity(4),
-            mirror_streams: HashMap::with_capacity(4),
             connect_queue: ResponseDeque::with_capacity(4),
         }
     }
@@ -190,7 +180,7 @@ impl OutgoingTrafficHandler {
                 self.connect_queue.push_back(channel_tx);
 
                 Ok(codec
-                    .send(ClientMessage::TcpOutgoing(OutgoingTrafficRequest::Connect(
+                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Connect(
                         ConnectRequest {
                             user_fd,
                             remote_address,
@@ -206,7 +196,7 @@ impl OutgoingTrafficHandler {
                 );
 
                 Ok(codec
-                    .send(ClientMessage::TcpOutgoing(OutgoingTrafficRequest::Write(
+                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Write(
                         WriteRequest { id, bytes },
                     )))
                     .await?)
@@ -292,7 +282,7 @@ impl OutgoingTrafficHandler {
                 Ok(sender.send(bytes).await?)
             }
             TcpOutgoingResponse::Write(write) => {
-                let WriteResponse { id, amount } = write?;
+                let WriteResponse { id } = write?;
                 // TODO(alex) [mid] 2022-07-20: Receive message from agent.
                 // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works
                 // with `Vec<u8>`, so maybe wrapping it in a `Result<Vec<u8>, Error>` would make

@@ -1,8 +1,11 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
-    ConnectRequest, ConnectResponse, OutgoingTrafficRequest, ReadResponse, RemoteResult,
-    ResponseError, TcpOutgoingResponse, WriteRequest, WriteResponse,
+    tcp::outgoing::{
+        ConnectRequest, ConnectResponse, ReadResponse, TcpOutgoingRequest, TcpOutgoingResponse,
+        WriteRequest, WriteResponse,
+    },
+    RemoteResult,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -11,12 +14,11 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task,
 };
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace};
 
-type Request = OutgoingTrafficRequest;
+type Request = TcpOutgoingRequest;
 type Response = TcpOutgoingResponse;
 
 pub(crate) struct OutgoingTrafficHandler {
@@ -57,79 +59,70 @@ impl OutgoingTrafficHandler {
 
         let (mut read_stream, mut write_stream) = stream.into_split();
 
-        let read_task = |response_tx: Sender<Response>| async move {
-            debug!("interceptor_task -> started!");
-
-            let read = read_stream.read(&mut buffer).await;
-            trace!("interceptor_task -> read {:#?}", read);
-
-            match read {
-                Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(fail) => {
-                    panic!("Failed reading stream with {:#?}", fail);
-                }
-                Ok(read_amount) if read_amount == 0 => {
-                    panic!("Local stream closed!");
-                }
-                Ok(read_amount) => {
-                    // TODO(alex) [high] 2022-08-10: The problem of not getting a response for read
-                    // is probably something not being handled in `layer`, as the code here makes
-                    // sense.
-                    debug!("intercept_task -> read_amount {:#?}", read_amount);
-                    let bytes = buffer[..read_amount].to_vec();
-                    let read = ReadResponse {
-                        id: connection_id,
-                        bytes,
-                    };
-                    let response = TcpOutgoingResponse::Read(Ok(read));
-
-                    // reading from remote. Must return some sort of response from here directly
-                    // to `layer`.
-                    // I need a channel here that is being constantly read, similar to how sniffer
-                    // works.
-                    match response_tx.send(response).await {
-                        Ok(()) => debug!("intercept_task -> sent read response!"),
-                        Err(fail) => {
-                            error!("intercept_task -> Failed sending response with {:#?}", fail);
-                        }
-                    }
-                }
-            }
-        };
-
-        let _ = tokio::spawn(read_task(response_tx.clone()));
-
         loop {
-            match write_rx.recv().await {
-                Some(data) => {
-                    trace!("interceptor_task -> write has data {:?}", data.id);
-                    let written = write_stream.write_all(&data.bytes).await;
-                    match written {
-                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
-                            continue;
-                        }
+            select! {
+                biased;
+
+                read = read_stream.read(&mut buffer) => {
+                    match read {
+                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
                         Err(fail) => {
-                            error!("Failed writing stream with {:#?}", fail);
+                            error!("Failed reading stream with {:#?}", fail);
                             break;
                         }
-                        Ok(()) => {
-                            debug!("interceptor_task -> write ok!");
-                            let write = WriteResponse {
+                        Ok(read_amount) if read_amount == 0 => {
+                            error!("Local stream closed!");
+                            break;
+                        }
+                        Ok(read_amount) => {
+                            let bytes = buffer[..read_amount].to_vec();
+                            let read = ReadResponse {
                                 id: connection_id,
-                                amount: 1,
+                                bytes,
                             };
-                            let response = TcpOutgoingResponse::Write(Ok(write));
+                            let response = TcpOutgoingResponse::Read(Ok(read));
 
-                            if let Err(fail) = response_tx.send(response).await {
-                                error!("Failed sending read message with {:#?}!", fail);
-                                break;
+                            match response_tx.send(response).await {
+                                Ok(()) => debug!("intercept_task -> sent read response!"),
+                                Err(fail) => {
+                                    error!("intercept_task -> Failed sending response with {:#?}", fail);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-                None => {
-                    error!("Write channel closed {:#?}!", connection_id);
-                    break;
+
+                write = write_rx.recv() => {
+                    match write {
+                        Some(data) => {
+                            let result = write_stream.write_all(&data.bytes).await;
+
+                            match result {
+                                Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
+                                Err(fail) => {
+                                    error!("Failed writing stream with {:#?}", fail);
+                                    break;
+                                }
+                                Ok(()) => {
+                                    debug!("interceptor_task -> write ok!");
+                                    let write = WriteResponse {
+                                        id: connection_id,
+                                    };
+                                    let response = TcpOutgoingResponse::Write(Ok(write));
+
+                                    if let Err(fail) = response_tx.send(response).await {
+                                        error!("Failed sending read message with {:#?}!", fail);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            error!("Write channel closed {:#?}!", connection_id);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -163,7 +156,7 @@ impl OutgoingTrafficHandler {
                     );
 
                     match request {
-                        OutgoingTrafficRequest::Connect(ConnectRequest {
+                        TcpOutgoingRequest::Connect(ConnectRequest {
                             user_fd,
                             remote_address,
                         }) => {
@@ -194,7 +187,7 @@ impl OutgoingTrafficHandler {
                             let response = TcpOutgoingResponse::Connect(connect_response);
                             response_tx.send(response).await?
                         }
-                        OutgoingTrafficRequest::Write(WriteRequest { id, bytes }) => {
+                        TcpOutgoingRequest::Write(WriteRequest { id, bytes }) => {
                             trace!("OutgoingTrafficRequest::Write -> write_request {:#?}", id);
 
                             let write = Data { id, bytes };
@@ -212,10 +205,7 @@ impl OutgoingTrafficHandler {
         Ok(())
     }
 
-    pub(crate) async fn request(
-        &mut self,
-        request: OutgoingTrafficRequest,
-    ) -> Result<(), AgentError> {
+    pub(crate) async fn request(&mut self, request: TcpOutgoingRequest) -> Result<(), AgentError> {
         Ok(self.request_channel_tx.send(request).await?)
     }
 
