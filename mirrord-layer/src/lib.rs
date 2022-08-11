@@ -207,7 +207,7 @@ where
                 self.tcp_mirror_handler.handle_daemon_message(message).await
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
-            DaemonMessage::OutgoingTraffic(message) => {
+            DaemonMessage::TcpOutgoing(message) => {
                 self.outgoing_traffic_handler
                     .handle_daemon_message(message)
                     .await

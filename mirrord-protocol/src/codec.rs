@@ -182,7 +182,7 @@ pub enum OutgoingTrafficRequest {
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
-    OutgoingTraffic(OutgoingTrafficRequest),
+    TcpOutgoing(OutgoingTrafficRequest),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -243,7 +243,7 @@ pub struct WriteResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum OutgoingTrafficResponse {
+pub enum TcpOutgoingResponse {
     Connect(RemoteResult<ConnectResponse>),
     Read(RemoteResult<ReadResponse>),
     Write(RemoteResult<WriteResponse>),
@@ -308,7 +308,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
-    OutgoingTraffic(OutgoingTrafficResponse),
+    TcpOutgoing(TcpOutgoingResponse),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

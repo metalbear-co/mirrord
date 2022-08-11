@@ -8,7 +8,7 @@ use std::{
 use futures::SinkExt;
 use mirrord_protocol::{
     ClientCodec, ClientMessage, ConnectRequest, ConnectResponse, OutgoingTrafficRequest,
-    OutgoingTrafficResponse, ReadResponse, WriteRequest, WriteResponse,
+    ReadResponse, TcpOutgoingResponse, WriteRequest, WriteResponse,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -190,12 +190,12 @@ impl OutgoingTrafficHandler {
                 self.connect_queue.push_back(channel_tx);
 
                 Ok(codec
-                    .send(ClientMessage::OutgoingTraffic(
-                        OutgoingTrafficRequest::Connect(ConnectRequest {
+                    .send(ClientMessage::TcpOutgoing(OutgoingTrafficRequest::Connect(
+                        ConnectRequest {
                             user_fd,
                             remote_address,
-                        }),
-                    ))
+                        },
+                    )))
                     .await?)
             }
             OutgoingTraffic::Write(Write { id, bytes }) => {
@@ -206,9 +206,9 @@ impl OutgoingTrafficHandler {
                 );
 
                 Ok(codec
-                    .send(ClientMessage::OutgoingTraffic(
-                        OutgoingTrafficRequest::Write(WriteRequest { id, bytes }),
-                    ))
+                    .send(ClientMessage::TcpOutgoing(OutgoingTrafficRequest::Write(
+                        WriteRequest { id, bytes },
+                    )))
                     .await?)
             }
         }
@@ -216,7 +216,7 @@ impl OutgoingTrafficHandler {
 
     pub(crate) async fn handle_daemon_message(
         &mut self,
-        response: OutgoingTrafficResponse,
+        response: TcpOutgoingResponse,
     ) -> Result<(), LayerError> {
         trace!(
             "OutgoingTraffic::handle_daemon_message -> message {:?}",
@@ -224,7 +224,7 @@ impl OutgoingTrafficHandler {
         );
 
         match response {
-            OutgoingTrafficResponse::Connect(connect) => {
+            TcpOutgoingResponse::Connect(connect) => {
                 let ConnectResponse { user_fd } = connect?;
 
                 debug!(
@@ -278,7 +278,8 @@ impl OutgoingTrafficHandler {
 
                 Ok(())
             }
-            OutgoingTrafficResponse::Read(read) => {
+            TcpOutgoingResponse::Read(read) => {
+                trace!("OutgoingTrafficResponse::Read -> read {:?}", read);
                 // `agent` read something from remote, so we write it to the `user`.
                 let ReadResponse { id, bytes } = read?;
 
@@ -290,7 +291,7 @@ impl OutgoingTrafficHandler {
 
                 Ok(sender.send(bytes).await?)
             }
-            OutgoingTrafficResponse::Write(write) => {
+            TcpOutgoingResponse::Write(write) => {
                 let WriteResponse { id, amount } = write?;
                 // TODO(alex) [mid] 2022-07-20: Receive message from agent.
                 // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works

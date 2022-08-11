@@ -176,7 +176,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
-    outgoing_traffic_handler: OutgoingTrafficHandler,
+    tcp_outgoing_api: OutgoingTrafficHandler,
 }
 
 impl ClientConnectionHandler {
@@ -200,7 +200,8 @@ impl ClientConnectionHandler {
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
-        let outgoing_traffic_handler = OutgoingTrafficHandler::new(pid);
+        //here hold channel!
+        let tcp_outgoing_api = OutgoingTrafficHandler::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
             id,
@@ -208,7 +209,7 @@ impl ClientConnectionHandler {
             stream,
             pid,
             tcp_sniffer_api,
-            outgoing_traffic_handler,
+            tcp_outgoing_api,
         };
 
         client_handler.handle_loop(cancel_token).await?;
@@ -236,6 +237,15 @@ impl ClientConnectionHandler {
                         break;
                     }
                 }
+                outgoing_response = self.tcp_outgoing_api.response() => {
+                    match outgoing_response {
+                        Ok(response) => self.stream.send(DaemonMessage::TcpOutgoing(response)).await?,
+                        Err(fail) => {
+                            error!("ClientConnectionHandler::handle_loop -> Failed with {:#?}", fail);
+                            break;
+                        }
+                    }
+                }
                 _ = token.cancelled() => {
                     break;
                 }
@@ -253,16 +263,7 @@ impl ClientConnectionHandler {
                 let response = self.file_manager.handle_message(req)?;
                 self.stream.send(DaemonMessage::File(response)).await?
             }
-            ClientMessage::OutgoingTraffic(request) => {
-                let response = self
-                    .outgoing_traffic_handler
-                    .handle_request(request)
-                    .await?;
-
-                self.stream
-                    .send(DaemonMessage::OutgoingTraffic(response))
-                    .await?
-            }
+            ClientMessage::TcpOutgoing(request) => self.tcp_outgoing_api.request(request).await?,
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,

@@ -1,6 +1,6 @@
 use mirrord_protocol::{
     tcp::DaemonTcp, ConnectRequest, FileRequest, FileResponse, OutgoingTrafficRequest,
-    OutgoingTrafficResponse,
+    TcpOutgoingResponse,
 };
 use thiserror::Error;
 
@@ -36,9 +36,7 @@ pub enum AgentError {
     ReceiverClosed,
 
     #[error("ConnectRequest sender failed with `{0}`")]
-    SendOutgoingTrafficResponse(
-        #[from] tokio::sync::mpsc::error::SendError<OutgoingTrafficResponse>,
-    ),
+    SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<TcpOutgoingResponse>),
 
     #[error("task::Join failed with `{0}`")]
     Join(#[from] tokio::task::JoinError),
