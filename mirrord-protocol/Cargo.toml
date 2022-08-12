@@ -1,4 +1,3 @@
-cargo-features = ["workspace-inheritance"]
 [package]
 name = "mirrord-protocol"
 version.workspace = true

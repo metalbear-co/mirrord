@@ -1,4 +1,3 @@
-cargo-features = ["workspace-inheritance"]
 [package]
 name = "mirrord-macro"
 version.workspace = true
