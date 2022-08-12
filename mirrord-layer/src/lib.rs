@@ -26,7 +26,7 @@ use mirrord_protocol::{
 };
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{outgoing::TcpOutgoingApi, TcpHandler};
+use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
@@ -124,7 +124,7 @@ where
     pub codec: actix_codec::Framed<T, ClientCodec>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
-    outgoing_traffic_handler: TcpOutgoingApi,
+    tcp_outgoing_handler: TcpOutgoingHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -147,7 +147,7 @@ where
             codec,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
-            outgoing_traffic_handler: TcpOutgoingApi::default(),
+            tcp_outgoing_handler: TcpOutgoingHandler::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
         }
@@ -190,8 +190,8 @@ where
 
                 self.codec.send(request).await.unwrap();
             }
-            HookMessage::OutgoingTraffic(message) => self
-                .outgoing_traffic_handler
+            HookMessage::TcpOutgoing(message) => self
+                .tcp_outgoing_handler
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
@@ -208,7 +208,7 @@ where
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::TcpOutgoing(message) => {
-                self.outgoing_traffic_handler
+                self.tcp_outgoing_handler
                     .handle_daemon_message(message)
                     .await
             }

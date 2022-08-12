@@ -47,7 +47,11 @@ impl TcpOutgoingApi {
         let (request_channel_tx, request_channel_rx) = mpsc::channel(1000);
         let (response_channel_tx, response_channel_rx) = mpsc::channel(1000);
 
-        let task = task::spawn(Self::run(pid, request_channel_rx, response_channel_tx));
+        let task = task::spawn(Self::request_task(
+            pid,
+            request_channel_rx,
+            response_channel_tx,
+        ));
 
         Self {
             task,
@@ -65,39 +69,43 @@ impl TcpOutgoingApi {
         trace!("intercept_task -> id {:#?}", connection_id);
 
         let mut buffer = vec![0; 1500];
-
-        let (mut read_stream, mut write_stream) = stream.into_split();
+        let (remote_reader, mut remote_writer) = stream.into_split();
 
         loop {
             select! {
                 biased;
 
-                read = read_stream.read(&mut buffer) => {
-                    match read {
-                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
-                        Err(fail) => {
-                            error!("Failed reading stream with {:#?}", fail);
-                            break;
-                        }
-                        Ok(read_amount) if read_amount == 0 => {
-                            error!("Local stream closed!");
-                            break;
-                        }
-                        Ok(read_amount) => {
-                            let bytes = buffer[..read_amount].to_vec();
-                            let read = ReadResponse {
-                                id: connection_id,
-                                bytes,
-                            };
-                            let response = TcpOutgoingResponse::Read(Ok(read));
+                readable = remote_reader.readable() => {
+                    match readable {
+                        Ok(_) => {
+                            match remote_reader.try_read(&mut buffer) {
+                                Ok(read_amount) if read_amount == 0 => {
+                                    warn!("intercept_task -> Read stream is closed!");
+                                    break;
+                                }
+                                Ok(read_amount) => {
+                                    let bytes = buffer[..read_amount].to_vec();
+                                    let read = ReadResponse {
+                                        id: connection_id,
+                                        bytes,
+                                    };
+                                    let response = TcpOutgoingResponse::Read(Ok(read));
 
-                            match response_tx.send(response).await {
-                                Ok(()) => debug!("intercept_task -> sent read response!"),
+                                    if let Err(fail) = response_tx.send(response).await {
+                                        error!("intercept_task -> Failed sending response with {:#?}", fail);
+                                        break;
+                                    }
+                                }
+                                Err(ref fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
                                 Err(fail) => {
-                                    error!("intercept_task -> Failed sending response with {:#?}", fail);
+                                    error!("Failed reading stream with {:#?}", fail);
                                     break;
                                 }
                             }
+                        }
+                        Err(fail) => {
+                            error!("Failed remote_reader readable() with {:#?}", fail);
+                            break;
                         }
                     }
                 }
@@ -105,7 +113,7 @@ impl TcpOutgoingApi {
                 write = write_rx.recv() => {
                     match write {
                         Some(data) => {
-                            let result = write_stream.write_all(&data.bytes).await;
+                            let result = remote_writer.write_all(&data.bytes).await;
 
                             match result {
                                 Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
@@ -128,16 +136,18 @@ impl TcpOutgoingApi {
                             }
                         }
                         None => {
-                            error!("Write channel closed {:#?}!", connection_id);
+                            warn!("intercept_task-> write_rx closed {:#?}!", connection_id);
                             break;
                         }
                     }
                 }
             }
         }
+
+        trace!("intercept_task -> Finished id {:#?}", connection_id);
     }
 
-    async fn run(
+    async fn request_task(
         pid: Option<u64>,
         mut request_rx: Receiver<Request>,
         response_tx: Sender<Response>,

@@ -1,7 +1,8 @@
 import { Buffer } from "node:buffer";
 import { createServer, Socket } from "net";
 import { open, readFile } from "fs/promises";
-import http from "node:https";
+import https from "node:https";
+import http from "node:http";
 import { exit } from "node:process";
 
 async function debug_file_ops() {
@@ -64,6 +65,16 @@ function debugRequest(listening) {
   };
 
   console.log(">> options ", options);
+
+  // http.get("20.81.111.66", (res) => {
+  //   console.log(`statusCode: ${res.statusCode}`);
+
+  //   res.on("data", (d) => {
+  //     process.stdout.write(d);
+
+  //     exit(0);
+  //   });
+  // });
 
   const req = http.request(options, (res) => {
     console.log(`statusCode: ${res.statusCode}`);

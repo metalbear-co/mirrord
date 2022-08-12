@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use crate::{
     error::LayerError,
     file::HookMessageFile,
-    tcp::{outgoing::OutgoingTraffic, HookMessageTcp},
+    tcp::{outgoing::TcpOutgoing, HookMessageTcp},
     HOOK_SENDER,
 };
 
@@ -41,7 +41,7 @@ pub struct GetAddrInfoHook {
 #[derive(Debug)]
 pub(crate) enum HookMessage {
     Tcp(HookMessageTcp),
-    OutgoingTraffic(OutgoingTraffic),
+    TcpOutgoing(TcpOutgoing),
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
 }

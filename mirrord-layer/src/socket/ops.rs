@@ -18,7 +18,7 @@ use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::LayerError,
     tcp::{
-        outgoing::{Connect, MirrorConnect, OutgoingTraffic},
+        outgoing::{Connect, MirrorConnect, TcpOutgoing},
         HookMessageTcp, Listen,
     },
 };
@@ -220,9 +220,9 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
             debug!("connect -> connect {:#?}", connect);
 
-            let connect_hook = OutgoingTraffic::Connect(connect);
+            let connect_hook = TcpOutgoing::Connect(connect);
 
-            blocking_send_hook_message(HookMessage::OutgoingTraffic(connect_hook))?;
+            blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
             let MirrorConnect { mirror_address } = mirror_rx.blocking_recv()??;
 
             let connect_to = SockAddr::from(mirror_address);

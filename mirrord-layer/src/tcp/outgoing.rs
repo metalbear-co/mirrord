@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -40,20 +41,28 @@ pub(crate) struct Connect {
     pub(crate) user_fd: i32,
 }
 
-#[derive(Debug)]
 pub(crate) struct Write {
     pub(crate) id: i32,
     pub(crate) bytes: Vec<u8>,
 }
 
+impl fmt::Debug for Write {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Write")
+            .field("id", &self.id)
+            .field("bytes (length)", &self.bytes.len())
+            .finish()
+    }
+}
+
 #[derive(Debug)]
-pub(crate) enum OutgoingTraffic {
+pub(crate) enum TcpOutgoing {
     Connect(Connect),
     Write(Write),
 }
 
 #[derive(Debug)]
-pub(crate) struct TcpOutgoingApi {
+pub(crate) struct TcpOutgoingHandler {
     mirrors: HashMap<i32, ConnectionMirror>,
     connect_queue: ResponseDeque<MirrorConnect>,
 }
@@ -63,7 +72,7 @@ pub(crate) struct ConnectionMirror {
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
 
-impl Default for TcpOutgoingApi {
+impl Default for TcpOutgoingHandler {
     fn default() -> Self {
         Self {
             mirrors: HashMap::with_capacity(4),
@@ -82,7 +91,7 @@ impl Default for TcpOutgoingApi {
 //
 // - (remote) write [out] -> daemon response -> (mirror) read -> (mirror) write ->
 // (local) read [user]
-impl TcpOutgoingApi {
+impl TcpOutgoingHandler {
     /// TODO(alex) [low] 2022-08-09: Document this function.
     async fn interceptor_task(
         id: i32,
@@ -118,13 +127,13 @@ impl TcpOutgoingApi {
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
                             let write = Write { id, bytes: buffer[..read_amount].to_vec() };
-                            let outgoing_data = OutgoingTraffic::Write(write);
+                            let outgoing_data = TcpOutgoing::Write(write);
 
                             // TODO(alex) [mid] 2022-08-09: Must handle a response from `agent`
                             // mostly for the case where `send` failed sending data to remote.
                             // Need a `written_amount` or error type of response to mimick how
                             // proper `io` works.
-                            if let Err(fail) = send_hook_message(HookMessage::OutgoingTraffic(outgoing_data)).await {
+                            if let Err(fail) = send_hook_message(HookMessage::TcpOutgoing(outgoing_data)).await {
                                 error!("Failed sending write message with {:#?}!", fail);
                                 break;
                             }
@@ -154,7 +163,7 @@ impl TcpOutgoingApi {
 
     pub(crate) async fn handle_hook_message(
         &mut self,
-        message: OutgoingTraffic,
+        message: TcpOutgoing,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
@@ -163,16 +172,13 @@ impl TcpOutgoingApi {
         trace!("handle_hook_message -> message {:?}", message);
 
         match message {
-            OutgoingTraffic::Connect(Connect {
+            TcpOutgoing::Connect(Connect {
                 remote_address,
                 channel_tx,
                 // TODO(alex) [mid] 2022-07-20: Has to be socket address, rather than fd?
                 user_fd,
             }) => {
-                trace!(
-                    "OutgoingTraffic::Connect -> remote_address {:#?}",
-                    remote_address,
-                );
+                trace!("Connect -> remote_address {:#?}", remote_address,);
 
                 self.connect_queue.push_back(channel_tx);
 
@@ -185,12 +191,8 @@ impl TcpOutgoingApi {
                     )))
                     .await?)
             }
-            OutgoingTraffic::Write(Write { id, bytes }) => {
-                trace!(
-                    "OutgoingTraffic::Write -> id {:#?} | bytes (len) {:#?}",
-                    id,
-                    bytes.len(),
-                );
+            TcpOutgoing::Write(Write { id, bytes }) => {
+                trace!("Write -> id {:#?} | bytes (len) {:#?}", id, bytes.len(),);
 
                 Ok(codec
                     .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Write(
@@ -205,30 +207,26 @@ impl TcpOutgoingApi {
         &mut self,
         response: TcpOutgoingResponse,
     ) -> Result<(), LayerError> {
-        trace!(
-            "OutgoingTraffic::handle_daemon_message -> message {:?}",
-            response
-        );
+        trace!("handle_daemon_message -> message {:?}", response);
 
         match response {
             TcpOutgoingResponse::Connect(connect) => {
+                trace!("Connect -> connect {:#?}", connect);
+
                 let ConnectResponse { user_fd } = connect?;
 
-                debug!(
-                    "OutgoingTraffic::handle_daemon_message -> usef_fd {:#?}",
-                    user_fd
-                );
+                debug!("handle_daemon_message -> usef_fd {:#?}", user_fd);
 
                 IS_INTERNAL_CALL.store(true, Ordering::Release);
 
-                debug!("OutgoingTraffic::handle_daemon_message -> before binding");
+                debug!("handle_daemon_message -> before binding");
                 // TODO(alex) [mid] 2022-08-08: This must match the `family` of the original
                 // request, meaning that, if the user tried to connect with Ipv4, this should be
                 // an Ipv4 (same for Ipv6).
                 let mirror_listener =
                     TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).await?;
                 debug!(
-                    "OutgoingTraffic::handle_daemon_message -> mirror_listener {:#?}",
+                    "handle_daemon_message -> mirror_listener {:#?}",
                     mirror_listener
                 );
 
@@ -246,7 +244,7 @@ impl TcpOutgoingApi {
 
                 let (mirror_stream, user_address) = mirror_listener.accept().await?;
                 debug!(
-                    "OutgoingTraffic::handle_daemon_message -> mirror_stream {:#?}",
+                    "handle_daemon_message -> mirror_stream {:#?}",
                     mirror_stream
                 );
 
@@ -257,7 +255,7 @@ impl TcpOutgoingApi {
                 // TODO(alex) [high] 2022-08-08: Should be very similar to `handle_new_connection`.
                 self.mirrors.insert(user_fd, ConnectionMirror { sender });
 
-                task::spawn(TcpOutgoingApi::interceptor_task(
+                task::spawn(TcpOutgoingHandler::interceptor_task(
                     user_fd,
                     mirror_stream,
                     receiver,
@@ -266,9 +264,18 @@ impl TcpOutgoingApi {
                 Ok(())
             }
             TcpOutgoingResponse::Read(read) => {
-                trace!("OutgoingTrafficResponse::Read -> read {:?}", read);
+                trace!("Read -> read {:?}", read);
                 // `agent` read something from remote, so we write it to the `user`.
                 let ReadResponse { id, bytes } = read?;
+
+                // TODO(alex) [high] 2022-08-12: We're getting this back, so it looks like
+                // everything is working? Just gotta not crash after the request is done, and figure
+                // out the `syscall` write error.
+                /*
+                "HTTP/1.1 400 Bad Request\r\nDate: Fri, 12 Aug 2022 18:56:35 GMT\r\nContent-Type: text/html\r\nContent-Length: 150\r\nConnection: close\r\n\r\n<html>\r\n<head><title>400 Bad Request</title></head>\r\n<body>\r\n<center><h1>400 Bad Request</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+                                 */
+                let message = std::str::from_utf8(&bytes);
+                debug!("handle_daemon_message -> message {:#?}", message);
 
                 let sender = self
                     .mirrors
@@ -279,6 +286,8 @@ impl TcpOutgoingApi {
                 Ok(sender.send(bytes).await?)
             }
             TcpOutgoingResponse::Write(write) => {
+                trace!("Write -> write {:?}", write);
+
                 let WriteResponse { id } = write?;
                 // TODO(alex) [mid] 2022-07-20: Receive message from agent.
                 // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works
