@@ -1,3 +1,4 @@
+cargo-features = ["workspace-inheritance"]
 [package]
 name = "mirrord-layer"
 version.workspace = true
@@ -20,27 +21,27 @@ mirrord-macro = { path = "../mirrord-macro"}
 
 ctor = "0.1"
 libc = "0.2"
-nix.workspace = true
+#nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 frida-gum = { version = "0.7", features = ["auto-download"] }
 futures.workspace = true
-clap.workspace = true
+#clap.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 
 tokio.workspace = true
 serde_json.workspace = true
 
-nanoid = "0.4"
+#nanoid = "0.4"
 actix-codec.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
-queues = "1"
+#queues = "1"
 rand = "0.8"
-multi-map = "1"
+#multi-map = "1"
 envconfig = "0.10"
 regex = "1"
 errno = "0.2"

@@ -1,3 +1,4 @@
+cargo-features = ["workspace-inheritance"]
 [package]
 name = "tests"
 version = "0.1.0"
