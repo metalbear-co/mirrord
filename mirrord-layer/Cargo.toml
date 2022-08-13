@@ -20,7 +20,7 @@ mirrord-macro = { path = "../mirrord-macro"}
 
 ctor = "0.1"
 libc = "0.2"
-#nix.workspace = true
+nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 frida-gum = { version = "0.7", features = ["auto-download"] }
