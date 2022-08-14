@@ -331,13 +331,11 @@ async fn create_job_pod_agent(
     while let Some(status) = stream.try_next().await? {
         match status {
             WatchEvent::Added(pod) | WatchEvent::Modified(pod) => {
-                let pod_status = &pod
-                    .status
-                    .and_then(|status| status.phase)
-                    .ok_or(LayerError::PodStatusNotFound(pod.metadata.name))?;
-                debug!("Pod Status = {pod_status:?}");
-                if pod_status == "Running" {
+                if let Some(status) = &pod.status && let Some(phase) = &status.phase {
+                    debug!("Pod Phase = {phase:?}");
+                if phase == "Running" {
                     break;
+                }
                 }
             }
             WatchEvent::Error(s) => {
