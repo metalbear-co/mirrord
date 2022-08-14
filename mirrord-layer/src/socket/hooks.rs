@@ -375,10 +375,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         Ok(service) => service.map(String::from),
         Err(fail) => return fail,
     };
-
     let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
-
-	 
     getaddrinfo(node, service, hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
