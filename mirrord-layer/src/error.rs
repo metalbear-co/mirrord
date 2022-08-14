@@ -87,9 +87,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
     PodSpecNotFound(String),
 
-    #[error("mirrord-layer: Failed to get `Status` for Pod `{0:?}`!")]
-    PodStatusNotFound(Option<String>),
-
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
     PodNotFound(String),
 
@@ -180,7 +177,6 @@ impl From<LayerError> for i64 {
             LayerError::BypassedPort(_) => libc::EINVAL,
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
-            LayerError::PodStatusNotFound(_) => libc::EINVAL,
             LayerError::PodNotFound(_) => libc::EINVAL,
         };
 
