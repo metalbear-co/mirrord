@@ -7,7 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 - Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220) 
 
 ### Fixed
