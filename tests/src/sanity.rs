@@ -418,22 +418,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    fn resolve_node_host() -> String {
-        if std::env::var("USE_MINIKUBE").is_ok() {
-            let output = std::process::Command::new("minikube")
-                .arg("ip")
-                .output()
-                .unwrap()
-                .stdout;
-            String::from_utf8_lossy(&output).to_string()
-        } else {
-            // We assume it's Docker for Mac
-            "127.0.0.1".to_string()
-        }
-    }
-
-    #[cfg(target_os = "linux")]
     fn resolve_node_host() -> String {
         if !wsl::is_wsl() || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
@@ -443,7 +427,7 @@ mod tests {
                 .stdout;
             String::from_utf8_lossy(&output).to_string()
         } else {
-            // Assume that the docker is passed via wsl-integran
+            // We assume it's ither Docker for Mac or passed via wsl integration
             "127.0.0.1".to_string()
         }
     }
