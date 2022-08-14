@@ -1,3 +1,5 @@
+#!/bin/bash
+
 case $1 in
   include) first=1; second=0;;
   exclude) first=0; second=1;;

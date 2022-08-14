@@ -704,4 +704,43 @@ mod tests {
         assert!(res.success());
         process.assert_stderr();
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh"];
+        let mirrord_args = vec!["--override-env-vars-include", "*"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
+        let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_include_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
+        let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
 }
