@@ -419,7 +419,7 @@ mod tests {
     }
 
     fn resolve_node_host() -> String {
-        if !wsl::is_wsl() || std::env::var("USE_MINIKUBE").is_ok() {
+        if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
                 .arg("ip")
                 .output()
