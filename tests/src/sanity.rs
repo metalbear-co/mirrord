@@ -427,7 +427,7 @@ mod tests {
                 .stdout;
             String::from_utf8_lossy(&output).to_string()
         } else {
-            // We assume it's ither Docker for Mac or passed via wsl integration
+            // We assume it's either Docker for Mac or passed via wsl integration
             "127.0.0.1".to_string()
         }
     }
