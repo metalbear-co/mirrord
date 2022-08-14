@@ -407,9 +407,8 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn resolve_node_host() -> String {
-        if std::env::var("USE_MINIKUBE").is_ok() {
+        if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
                 .arg("ip")
                 .output()
@@ -417,19 +416,9 @@ mod tests {
                 .stdout;
             String::from_utf8_lossy(&output).to_string()
         } else {
-            // We assume it's Docker for Mac
+            // We assume it's either Docker for Mac or passed via wsl integration
             "127.0.0.1".to_string()
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn resolve_node_host() -> String {
-        let output = std::process::Command::new("minikube")
-            .arg("ip")
-            .output()
-            .unwrap()
-            .stdout;
-        String::from_utf8_lossy(&output).to_string()
     }
 
     async fn get_service_url(kube_client: Client, service: &EchoService) -> String {
