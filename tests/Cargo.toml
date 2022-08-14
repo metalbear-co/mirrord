@@ -22,3 +22,6 @@ tokio-util = "0.7"
 rand = "*"
 futures-util = "*"
 tempdir = "*"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wsl = "0.1.0"
