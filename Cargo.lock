@@ -2594,6 +2594,7 @@ dependencies = [
  "tempdir",
  "tokio",
  "tokio-util 0.7.3",
+ "wsl",
 ]
 
 [[package]]
@@ -3269,6 +3270,12 @@ checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
 ]
+
+[[package]]
+name = "wsl"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dab7ac864710bdea6594becbea5b5050333cf34fefb0dc319567eb347950d4"
 
 [[package]]
 name = "xattr"
