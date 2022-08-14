@@ -8,6 +8,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Fixed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220) 
+
+### Fixed
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
 
 ### Changed
