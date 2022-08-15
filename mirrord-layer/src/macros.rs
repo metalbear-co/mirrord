@@ -42,10 +42,10 @@ macro_rules! hook_symbol {
                 frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
             ) {
                 Err(e) => {
-                    debug!("{} error: {:?}", $func, e);
+                    tracing::debug!("{} error: {:?}", $func, e);
                 }
                 Ok(_) => {
-                    debug!("{} hooked", $func);
+                    tracing::debug!("{} hooked", $func);
                 }
             }
         };
