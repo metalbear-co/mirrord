@@ -333,6 +333,31 @@ pub(crate) unsafe extern "C" fn write_detour(
     }
 }
 
+/// Hook for `libc::faccessat`.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn faccessat_detour(
+    dirfd: RawFd,
+    pathname: *const c_char,
+    mode: c_int,
+    flags: c_int,
+) -> c_int {
+    trace!(
+        "faccessat_detour -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
+        dirfd,
+        pathname,
+        mode,
+        flags
+    );
+
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&dirfd).cloned();
+
+    if let Some(_remote_fd) = remote_fd {
+        todo!("implement")
+    } else {
+        FN_FACCESSAT(dirfd, pathname, mode, flags)
+    }
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
@@ -344,4 +369,11 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
+    let _ = replace!(
+        interceptor,
+        "faccessat",
+        faccessat_detour,
+        FnFaccessat,
+        FN_FACCESSAT
+    );
 }

@@ -7,10 +7,10 @@ use std::{
 };
 
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileRequest, FileResponse, OpenFileRequest,
-    OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    CloseFileRequest, CloseFileResponse, FAccessAtFileRequest, FAccessAtFileResponse, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest,
+    SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
 
@@ -69,6 +69,15 @@ impl FileManager {
             FileRequest::Close(CloseFileRequest { fd }) => {
                 let close_result = self.close(fd);
                 Ok(FileResponse::Close(close_result))
+            }
+            FileRequest::FAccessAt(FAccessAtFileRequest {
+                dirfd,
+                pathname,
+                mode,
+                flags,
+            }) => {
+                let faccessat2_result = self.faccessat2(dirfd, pathname, mode, flags);
+                Ok(FileResponse::FAccessAt(faccessat2_result))
             }
         }
     }
@@ -253,5 +262,15 @@ impl FileManager {
         self.index_allocator.free_index(fd);
 
         Ok(CloseFileResponse)
+    }
+
+    pub(crate) fn faccessat2(
+        &mut self,
+        _dirfd: usize,
+        _pathname: PathBuf,
+        _mode: usize,
+        _flags: usize,
+    ) -> RemoteResult<FAccessAtFileResponse> {
+        todo!("implement faccessat2")
     }
 }

@@ -10,10 +10,10 @@ use std::{
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FAccessAtFileRequest,
+    FAccessAtFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
+    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -126,6 +126,7 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
+    faccessat_queue: ResponseDeque<FAccessAtFileResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -170,6 +171,10 @@ impl FileHandler {
                 debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
                 pop_send(&mut self.close_queue, close)
             }
+            FAccessAt(faccessat) => {
+                debug!("DaemonMessage::FAccessAtFileResponse {:#?}!", faccessat);
+                pop_send(&mut self.faccessat_queue, faccessat)
+            }
         }
     }
 
@@ -192,6 +197,7 @@ impl FileHandler {
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
+            FAccessAt(faccessat) => self.handle_hook_faccessat(faccessat, codec).await,
         }
     }
 
@@ -360,6 +366,40 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
         codec.send(request).await.map_err(From::from)
     }
+
+    async fn handle_hook_faccessat(
+        &mut self,
+        facccessat2: FAccessAt,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
+        let FAccessAt {
+            dirfd,
+            pathname,
+            mode,
+            flags,
+            file_channel_tx,
+        } = facccessat2;
+
+        debug!(
+            "HookMessage::FAccessAtFileHook dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
+            dirfd, pathname, mode, flags
+        );
+
+        self.faccessat_queue.push_back(file_channel_tx);
+
+        let faccessat_file_request = FAccessAtFileRequest {
+            dirfd,
+            pathname,
+            mode,
+            flags,
+        };
+
+        let request = ClientMessage::FileRequest(FileRequest::FAccessAt(faccessat_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
 }
 
 #[derive(Debug)]
@@ -405,6 +445,15 @@ pub struct Close {
 }
 
 #[derive(Debug)]
+pub struct FAccessAt {
+    pub(crate) dirfd: usize,
+    pub(crate) pathname: PathBuf,
+    pub(crate) mode: usize,
+    pub(crate) flags: usize,
+    pub(crate) file_channel_tx: ResponseChannel<FAccessAtFileResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -412,4 +461,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Write(Write),
     Close(Close),
+    FAccessAt(FAccessAt),
 }
