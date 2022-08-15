@@ -1,21 +1,20 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
-    core::WatchEvent,
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
 
