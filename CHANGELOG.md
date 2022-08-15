@@ -6,6 +6,8 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+## Changed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
 
 ### Fixed
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
