@@ -67,6 +67,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                 }
             },
             _ = sleep(Duration::from_secs(1)) => {
+                debug!("sleep occured");
                 if remote_stream_closed {
                     warn!("tcp_tunnel -> exiting due to remote stream closed!");
                     break;
