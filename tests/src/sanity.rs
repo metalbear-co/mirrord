@@ -547,7 +547,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
+        process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
         send_requests(&url).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
