@@ -69,43 +69,34 @@ impl TcpOutgoingApi {
         trace!("intercept_task -> id {:#?}", connection_id);
 
         let mut buffer = vec![0; 1500];
-        let (remote_reader, mut remote_writer) = stream.into_split();
+        let (mut remote_reader, mut remote_writer) = stream.into_split();
 
         loop {
             select! {
                 biased;
 
-                // TODO(alex) [mid] 2022-08-12: Revert this `try_read` handling to just check if `read_amount == 0`.
-                readable = remote_reader.readable() => {
-                    match readable {
-                        Ok(_) => {
-                            match remote_reader.try_read(&mut buffer) {
-                                Ok(read_amount) if read_amount == 0 => {
-                                    warn!("intercept_task -> Read stream is closed!");
-                                    break;
-                                }
-                                Ok(read_amount) => {
-                                    let bytes = buffer[..read_amount].to_vec();
-                                    let read = ReadResponse {
-                                        id: connection_id,
-                                        bytes,
-                                    };
-                                    let response = TcpOutgoingResponse::Read(Ok(read));
+                read = remote_reader.read(&mut buffer) => {
+                    match read {
+                        Ok(read_amount) if read_amount == 0 => {
+                            warn!("intercept_task -> Read stream is closed!");
+                            break;
+                        }
+                        Ok(read_amount) => {
+                            let bytes = buffer[..read_amount].to_vec();
+                            let read = ReadResponse {
+                                id: connection_id,
+                                bytes,
+                            };
+                            let response = TcpOutgoingResponse::Read(Ok(read));
 
-                                    if let Err(fail) = response_tx.send(response).await {
-                                        error!("intercept_task -> Failed sending response with {:#?}", fail);
-                                        break;
-                                    }
-                                }
-                                Err(ref fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
-                                Err(fail) => {
-                                    error!("Failed reading stream with {:#?}", fail);
-                                    break;
-                                }
+                            if let Err(fail) = response_tx.send(response).await {
+                                error!("intercept_task -> Failed sending response with {:#?}", fail);
+                                break;
                             }
                         }
+                        Err(ref fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
                         Err(fail) => {
-                            error!("Failed remote_reader readable() with {:#?}", fail);
+                            error!("Failed reading stream with {:#?}", fail);
                             break;
                         }
                     }

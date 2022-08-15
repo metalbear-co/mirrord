@@ -53,30 +53,23 @@ function debugConnect() {
 }
 
 function debugRequest(listening) {
+  // TODO(alex) [high] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
+  // the correct IP, but when using a name ("google.com") it becomes a local address (that
+  // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
+  // set to `true`).
   const options = {
-    // TODO(alex) [high] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
-    // the correct IP, but when using a name ("google.com") it becomes a local address (that
-    // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
-    // set to `true`).
     hostname: "20.81.111.66",
     port: 80,
+    // hostname: "www.google.com",
+    // port: 443,
     path: "/",
     method: "GET",
   };
 
   console.log(">> options ", options);
 
-  // http.get("20.81.111.66", (res) => {
-  //   console.log(`statusCode: ${res.statusCode}`);
-
-  //   res.on("data", (d) => {
-  //     process.stdout.write(d);
-
-  //     exit(0);
-  //   });
-  // });
-
   const req = http.request(options, (res) => {
+  // const req = https.request(options, (res) => {
     console.log(`statusCode: ${res.statusCode}`);
 
     res.on("data", (d) => {
