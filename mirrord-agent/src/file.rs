@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
 };
 
+use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     CloseFileRequest, CloseFileResponse, FAccessAtFileRequest, FAccessAtFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
@@ -76,7 +77,14 @@ impl FileManager {
                 mode,
                 flags,
             }) => {
-                let faccessat2_result = self.faccessat2(dirfd, pathname, mode, flags);
+                let pathname = pathname
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(pathname);
+
+                let faccessat2_result = self.faccessat2(dirfd, full_path, mode, flags);
                 Ok(FileResponse::FAccessAt(faccessat2_result))
             }
         }
@@ -266,11 +274,36 @@ impl FileManager {
 
     pub(crate) fn faccessat2(
         &mut self,
-        _dirfd: usize,
-        _pathname: PathBuf,
-        _mode: usize,
-        _flags: usize,
+        dirfd: usize,
+        pathname: PathBuf,
+        mode: usize,
+        flags: usize,
     ) -> RemoteResult<FAccessAtFileResponse> {
-        todo!("implement faccessat2")
+        trace!(
+            "FileManager::faccessat2 -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
+            dirfd,
+            pathname,
+            mode,
+            flags
+        );
+
+        let mut access_mode = AccessMode::EXISTS;
+
+        if mode & 4 == 4 {
+            access_mode = access_mode.union(AccessMode::READ);
+        }
+        if mode & 2 == 2 {
+            access_mode = access_mode.union(AccessMode::WRITE);
+        }
+        if mode & 1 == 1 {
+            access_mode = access_mode.union(AccessMode::EXECUTE);
+        }
+
+        trace!("FileManager::faccessat2 AccessMode {:?}", access_mode);
+
+        pathname
+            .access(access_mode)
+            .map(|_| FAccessAtFileResponse)
+            .map_err(|err| ResponseError::from(err))
     }
 }

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     error::LayerError,
-    file::ops::{lseek, open, read, write},
+    file::ops::{faccessat, lseek, open, read, write},
     replace,
 };
 
@@ -337,24 +337,53 @@ pub(crate) unsafe extern "C" fn write_detour(
 #[hook_fn]
 pub(crate) unsafe extern "C" fn faccessat_detour(
     dirfd: RawFd,
-    pathname: *const c_char,
-    mode: c_int,
-    flags: c_int,
+    raw_pathname: *const c_char,
+    raw_mode: c_int,
+    raw_flags: c_int,
 ) -> c_int {
     trace!(
         "faccessat_detour -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
         dirfd,
-        pathname,
-        mode,
-        flags
+        raw_pathname,
+        raw_mode,
+        raw_flags
     );
 
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&dirfd).cloned();
+    let path = match CStr::from_ptr(raw_pathname)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
+    };
 
-    if let Some(_remote_fd) = remote_fd {
-        todo!("implement")
+    let mode = match raw_mode.try_into().map_err(LayerError::from) {
+        Ok(mode) => mode,
+        Err(fail) => return fail.into(),
+    };
+
+    let flags = match raw_flags.try_into().map_err(LayerError::from) {
+        Ok(flags) => flags,
+        Err(fail) => return fail.into(),
+    };
+
+    if path.is_absolute() || dirfd == AT_FDCWD {
+        let faccessat_result = faccessat(AT_FDCWD as usize, path, mode, flags);
+
+        let (Ok(result) | Err(result)) = faccessat_result.map_err(From::from);
+        result
     } else {
-        FN_FACCESSAT(dirfd, pathname, mode, flags)
+        let remote_fd = OPEN_FILES.lock().unwrap().get(&dirfd).cloned();
+
+        if let Some(remote_fd) = remote_fd {
+            let faccessat_result = faccessat(remote_fd, path, mode, flags);
+
+            let (Ok(result) | Err(result)) = faccessat_result.map_err(From::from);
+            result
+        } else {
+            FN_FACCESSAT(dirfd, raw_pathname, raw_mode, raw_flags)
+        }
     }
 }
 
