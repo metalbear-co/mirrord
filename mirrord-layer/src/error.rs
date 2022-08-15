@@ -116,6 +116,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
+
+    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
+    AgentReadyTimeout,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -7,10 +9,12 @@ use k8s_openapi::api::{
 use kube::{
     api::{Api, ListParams, Portforwarder, PostParams},
     core::WatchEvent,
+    runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
+use tokio::pin;
 use tracing::{debug, error, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
@@ -219,29 +223,21 @@ async fn create_ephemeral_container_agent(
         .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
         .timeout(60);
 
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+    pin!(stream);
 
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Modified(pod) | WatchEvent::Added(pod) => {
-                if is_ephemeral_container_running(pod, &mirrord_agent_name) {
-                    debug!("container ready");
-                    break;
-                } else {
-                    debug!("container not ready yet");
-                }
-            }
-            WatchEvent::Error(s) => {
-                error!("Error watching pod: {:?}", s);
-                break;
-            }
-            _ => {}
+    while let Some(Ok(pod)) = tokio::time::timeout(Duration::from_secs(60), stream.next())
+        .await
+        .map_err(|_| LayerError::AgentReadyTimeout)?
+    {
+        if is_ephemeral_container_running(pod, &mirrord_agent_name) {
+            debug!("container ready");
+            break;
+        } else {
+            debug!("container not ready yet");
         }
     }
+
     debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
 }
@@ -322,30 +318,19 @@ async fn create_job_pod_agent(
         .labels(&format!("job-name={}", mirrord_agent_job_name))
         .timeout(60);
 
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+    pin!(stream);
 
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Added(pod) | WatchEvent::Modified(pod) => {
-                if let Some(status) = &pod.status && let Some(phase) = &status.phase {
+    while let Some(Ok(pod)) = tokio::time::timeout(Duration::from_secs(60), stream.next())
+        .await
+        .map_err(|_| LayerError::AgentReadyTimeout)?
+    {
+        if let Some(status) = &pod.status && let Some(phase) = &status.phase {
                     debug!("Pod Phase = {phase:?}");
                 if phase == "Running" {
                     break;
                 }
-                }
             }
-            WatchEvent::Error(s) => {
-                error!("Error watching pods: {:?}", s);
-                break;
-            }
-            _ => {
-                debug!("Unexpected Watch Event");
-            }
-        }
     }
 
     let pods = pods_api
