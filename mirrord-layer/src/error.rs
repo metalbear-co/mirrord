@@ -116,9 +116,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
-
-    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
-    AgentReadyTimeout,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -181,7 +178,6 @@ impl From<LayerError> for i64 {
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
             LayerError::PodNotFound(_) => libc::EINVAL,
-            LayerError::AgentReadyTimeout => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

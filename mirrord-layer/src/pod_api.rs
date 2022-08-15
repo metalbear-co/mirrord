@@ -225,10 +225,7 @@ async fn create_ephemeral_container_agent(
     let stream = watcher(pods_api.clone(), params).applied_objects();
     pin!(stream);
 
-    while let Some(Ok(pod)) = tokio::time::timeout(Duration::from_secs(60), stream.next())
-        .await
-        .map_err(|_| LayerError::AgentReadyTimeout)?
-    {
+    while let Some(Ok(pod)) = stream.next().await {
         if is_ephemeral_container_running(pod, &mirrord_agent_name) {
             debug!("container ready");
             break;
@@ -320,10 +317,7 @@ async fn create_job_pod_agent(
     let stream = watcher(pods_api.clone(), params).applied_objects();
     pin!(stream);
 
-    while let Some(Ok(pod)) = tokio::time::timeout(Duration::from_secs(60), stream.next())
-        .await
-        .map_err(|_| LayerError::AgentReadyTimeout)?
-    {
+    while let Some(Ok(pod)) = stream.next().await {
         if let Some(status) = &pod.status && let Some(phase) = &status.phase {
                     debug!("Pod Phase = {phase:?}");
                 if phase == "Running" {
