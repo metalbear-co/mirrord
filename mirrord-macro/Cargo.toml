@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-protocol"
+name = "mirrord-macro"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -13,9 +13,10 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+[lib]
+proc-macro = true
+
 [dependencies]
-actix-codec.workspace = true
-bytes.workspace = true
-thiserror.workspace = true
-dns-lookup.workspace = true
-bincode =  { version = "2.0.0-rc.1" }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "1", features = ["full"] }

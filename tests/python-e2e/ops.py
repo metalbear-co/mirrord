@@ -6,6 +6,14 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 
 
 class FileOpsTest(unittest.TestCase):
+    def setUp(self):
+        """
+        Check if the default file exists.
+        """        
+        with open("/app/test.txt", "r") as f:
+            f.seek(0)
+            self.assertEqual(f.readline(), TEXT)
+
     def test_read_write_family(self):
         """
         Reads data from a file in "/tmp" and verifies the text expected is the same as the text written.
@@ -16,7 +24,6 @@ class FileOpsTest(unittest.TestCase):
             rw_file.seek(0)
             read_text = rw_file.readline()
             self.assertEqual(read_text, TEXT)
-            rw_file.close()
 
     def test_lseek(self):
         """
@@ -39,8 +46,7 @@ class FileOpsTest(unittest.TestCase):
         dir = os.open(
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
-        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK |
-                       os.O_CLOEXEC, dir_fd=dir)
+        file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
         self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)

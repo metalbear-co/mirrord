@@ -2,9 +2,11 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(naked_functions)]
 
 use std::{
     collections::{HashSet, VecDeque},
+    ops::Deref,
     sync::{LazyLock, OnceLock},
 };
 
@@ -17,10 +19,12 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -37,19 +41,45 @@ mod common;
 mod config;
 mod error;
 mod file;
+mod go_hooks;
 mod macros;
 mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+
+/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
+/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+#[derive(Debug)]
+pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
+
+impl<T> Deref for HookFn<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get().unwrap()
+    }
+}
+
+impl<T> const Default for HookFn<T> {
+    fn default() -> Self {
+        Self(std::sync::OnceLock::new())
+    }
+}
+
+impl<T> HookFn<T> {
+    pub(crate) fn set(&self, value: T) -> Result<(), T> {
+        self.0.set(value)
+    }
+}
 
 #[ctor]
 fn init() {
@@ -61,9 +91,12 @@ fn init() {
     info!("Initializing mirrord-layer!");
 
     let config = LayerConfig::init_from_env().unwrap();
+    let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+
+    info!("Using port `{connection_port:?}` for communication");
 
     let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(config.clone()))
+        .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|e| {
             panic!("failed to create agent: {}", e);
         });
@@ -76,7 +109,12 @@ fn init() {
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
-    RUNTIME.block_on(start_layer_thread(port_forwarder, receiver, config));
+    RUNTIME.block_on(start_layer_thread(
+        port_forwarder,
+        receiver,
+        config,
+        connection_port,
+    ));
 }
 
 struct Layer<T>
@@ -227,8 +265,9 @@ async fn start_layer_thread(
     mut pf: Portforwarder,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
+    connection_port: u16,
 ) {
-    let port = pf.take_stream(61337).unwrap(); // TODO: Make port configurable
+    let port = pf.take_stream(connection_port).unwrap(); // TODO: Make port configurable
 
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)
@@ -285,27 +324,36 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    hook!(interceptor, "close", close_detour);
+    unsafe {
+        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+    };
 
-    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
+    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
     if enabled_file_ops {
-        file::hooks::enable_file_hooks(&mut interceptor);
+        unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
-
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "x86_64")]
+    {
+        let modules = frida_gum::Module::enumerate_modules();
+        let binary = &modules.first().unwrap().name;
+        go_hooks::go_socket_hooks::enable_socket_hooks(&mut interceptor, binary);
+    }
     interceptor.end_transaction();
 }
 
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
+#[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
 
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        libc::close(fd)
+        FN_CLOSE(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
@@ -319,9 +367,9 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
                 })
                 .unwrap_or_else(|fail| fail)
         } else {
-            libc::close(fd)
+            FN_CLOSE(fd)
         }
     } else {
-        libc::close(fd)
+        FN_CLOSE(fd)
     }
 }

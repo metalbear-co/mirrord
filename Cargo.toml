@@ -5,13 +5,14 @@ members = [
     "mirrord-agent",
     "mirrord-layer",
     "mirrord-cli",
+    "mirrord-macro",
     "sample/rust",
     "tests"
 ]
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"

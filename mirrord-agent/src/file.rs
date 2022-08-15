@@ -12,7 +12,7 @@ use mirrord_protocol::{
     ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::{error::AgentError, util::IndexAllocator};
 
@@ -78,6 +78,7 @@ impl FileManager {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
             None => PathBuf::from("/"),
         };
+        debug!("Agent root path >> {root_path:?}");
         Self {
             open_files: HashMap::new(),
             root_path,

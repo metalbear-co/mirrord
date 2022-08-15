@@ -1,3 +1,4 @@
+edition = "2021"
 group_imports = "StdExternalCrate"
 comment_width = 100
 wrap_comments = true
