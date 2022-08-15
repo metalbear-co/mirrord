@@ -24,6 +24,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - add `trace` for tests to have paramaterized arguments printed
 - mirrord-agent - add debug print of args to identify runs
 - E2E - remove double `--extract-path` parameter in tests
+- E2E - macOS colima start with 3 cores and 8GB of RAM.
 
 
 ## 2.6.0
