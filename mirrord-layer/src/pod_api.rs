@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use k8s_openapi::api::{
