@@ -223,6 +223,9 @@ jobs:
           path: /tmp
       - name: load image
         run: docker load --input /tmp/test.tar
+      - name: wait for k8s api to be ready
+        run: |
+          while ! kubectl get pods; do echo waiting for k8s api to be ready && sleep 1; done
       - name: cargo test
         run: cargo test -p tests
       - name: Collect container logs
