@@ -5,7 +5,6 @@ pub(crate) mod go_socket_hooks {
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
-    use tracing::debug;
 
     use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
 
@@ -304,7 +303,6 @@ pub(crate) mod go_socket_hooks {
         param2: i64,
         param3: i64,
     ) -> i64 {
-        debug!("C ABI handler received `Syscall - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}",syscall, param1, param2, param3);
         let res = match syscall {
             libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
@@ -313,14 +311,9 @@ pub(crate) mod go_socket_hooks {
             libc::SYS_close => close_detour(param1 as _) as i64,
             _ => {
                 let syscall_res = syscall_3(syscall, param1, param2, param3);
-                debug!("c_abi_syscall_handler (syscall_3) >> result -> {syscall_res:?}");
                 return syscall_res;
             }
         };
-        debug!(
-            "c_abi_syscall6_handler (detour) >> result -> {res:?}, errorno -> {:?}",
-            errno().0
-        );
         match res {
             -1 => -errno().0 as i64,
             _ => res as i64,
@@ -339,7 +332,6 @@ pub(crate) mod go_socket_hooks {
         param5: i64,
         param6: i64,
     ) -> i64 {
-        debug!("C ABI handler received `Syscall6 - {:?}` with args >> arg1 -> {:?}, arg2 -> {:?}, arg3 -> {:?}, arg4 -> {:?}, arg5 -> {:?}, arg6 -> {:?}", syscall, param1, param2, param3, param4, param5, param6);
         let res = match syscall {
             libc::SYS_accept4 => {
                 accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
@@ -347,14 +339,9 @@ pub(crate) mod go_socket_hooks {
             _ => {
                 let syscall_res =
                     syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-                debug!("c_abi_syscall6_handler (syscall_6) >> result -> {syscall_res:?}");
                 return syscall_res;
             }
         };
-        debug!(
-            "c_abi_syscall6_handler (detour) >> result -> {res:?}, errorno -> {:?}",
-            errno().0
-        );
         match res {
             -1 => -errno().0 as i64,
             _ => res as i64,

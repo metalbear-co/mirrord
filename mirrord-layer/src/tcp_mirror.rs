@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -16,6 +17,7 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, warn};
@@ -28,10 +30,9 @@ use crate::{
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
-
+    let mut remote_stream_closed = false;
     loop {
         select! {
-            biased; // To allow local socket to be read before being closed
             // Read the application's response from the socket and discard the data, so that the socket doesn't fill up.
             read = local_stream.read(&mut buffer) => {
                 match read {
@@ -49,7 +50,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                     Ok(_) => {}
                 }
             },
-            bytes = remote_stream.next() => {
+            bytes = remote_stream.next(), if !remote_stream_closed => {
                 match bytes {
                     Some(bytes) => {
                         if let Err(fail) = local_stream.write_all(&bytes).await {
@@ -58,11 +59,17 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         }
                     },
                     None => {
-                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
-                        break;
+                        // The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
+                        debug!("remote stream closed");
+                        remote_stream_closed = true;
+
                     }
                 }
             },
+            _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
+                warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                break;
+            }
         }
     }
     debug!("tcp_tunnel -> exiting");

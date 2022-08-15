@@ -11,6 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
+- mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
+- mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
 
 ### Changed
 - reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
@@ -19,6 +21,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - Don't do file stuff on http traffic to reduce flakiness (doesn't add any coverage value..)
 - mirrord-layer - Change tcp mirror tunnel `select` to be biased so it flushes all data before closing it (better testing, reduces e2e flakiness)
 - E2E - unify resolve_node_host for linux and macOS with support for wsl provided Docker & Kubernetes
+- E2E - add `trace` for tests to have paramaterized arguments printed
+- mirrord-agent - add debug print of args to identify runs
+- E2E - remove double `--extract-path` parameter in tests
+
 
 ## 2.6.0
 

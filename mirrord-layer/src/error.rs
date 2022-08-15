@@ -87,14 +87,14 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
     PodSpecNotFound(String),
 
+    #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
+    PodNotFound(String),
+
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
-
-    #[error("mirrord-layer: Timed Out!")]
-    TimeOutError,
 
     #[error("mirrord-layer: DNS does not resolve!")]
     DNSNoName,
@@ -170,7 +170,6 @@ impl From<LayerError> for i64 {
             LayerError::PodSpecNotFound(_) => libc::EINVAL,
             LayerError::KubeError(_) => libc::EINVAL,
             LayerError::JSONConvertError(_) => libc::EINVAL,
-            LayerError::TimeOutError => libc::ETIMEDOUT,
             LayerError::DNSNoName => libc::EFAULT,
             LayerError::Utf8(_) => libc::EINVAL,
             LayerError::AddressConversion => libc::EINVAL,
@@ -178,6 +177,7 @@ impl From<LayerError> for i64 {
             LayerError::BypassedPort(_) => libc::EINVAL,
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
+            LayerError::PodNotFound(_) => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

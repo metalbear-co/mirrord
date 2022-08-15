@@ -237,15 +237,22 @@ async fn thread_loop(
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
             daemon_message = layer.codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    if let Err(err) = layer.handle_daemon_message(
-                        message).await {
-                        error!("Error handling daemon message: {:?}", err);
+                match daemon_message {
+                    Some(Ok(message)) => {
+                        if let Err(err) = layer.handle_daemon_message(
+                            message).await {
+                            error!("Error handling daemon message: {:?}", err);
+                            break;
+                        }
+                    },
+                    Some(Err(err)) => {
+                        error!("Error receiving daemon message: {:?}", err);
                         break;
                     }
-                } else {
-                    error!("agent disconnected");
-                    break;
+                    None => {
+                        error!("agent disconnected");
+                        break;
+                    }
                 }
             },
             _ = sleep(Duration::from_secs(60)) => {
