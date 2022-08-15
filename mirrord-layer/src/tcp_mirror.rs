@@ -30,7 +30,7 @@ use crate::{
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
-
+    let mut remote_stream_closed = false;
     loop {
         select! {
             biased; // To allow local socket to be read before being closed
@@ -61,12 +61,17 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                     },
                     None => {
                         // The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
-                        sleep(Duration::from_secs(1)).await;
-                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
-                        break;
+                        remote_stream_closed = true;
+
                     }
                 }
             },
+            _ = sleep(Duration::from_secs(1)) => {
+                if remote_stream_closed {
+                    warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                    break;
+                }
+            }
         }
     }
     debug!("tcp_tunnel -> exiting");
