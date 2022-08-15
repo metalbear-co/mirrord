@@ -181,6 +181,7 @@ impl From<LayerError> for i64 {
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
             LayerError::PodNotFound(_) => libc::EINVAL,
+            LayerError::AgentReadyTimeout => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
