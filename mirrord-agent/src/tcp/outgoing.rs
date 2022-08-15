@@ -75,6 +75,7 @@ impl TcpOutgoingApi {
             select! {
                 biased;
 
+                // TODO(alex) [mid] 2022-08-12: Revert this `try_read` handling to just check if `read_amount == 0`.
                 readable = remote_reader.readable() => {
                     match readable {
                         Ok(_) => {

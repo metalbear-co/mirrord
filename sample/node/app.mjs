@@ -54,7 +54,7 @@ function debugConnect() {
 
 function debugRequest(listening) {
   const options = {
-    // TODO(alex) [mid] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
+    // TODO(alex) [high] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
     // the correct IP, but when using a name ("google.com") it becomes a local address (that
     // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
     // set to `true`).
