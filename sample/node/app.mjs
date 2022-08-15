@@ -57,19 +57,23 @@ function debugRequest(listening) {
   // the correct IP, but when using a name ("google.com") it becomes a local address (that
   // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
   // set to `true`).
+  //
+  // ADD(alex) [high] 2022-08-15: There is a difference in behavior when using a direct IP address
+  // when we hit the `req.on(socket)` call. With IP the local and remote addresses have values,
+  // meanwhile for DNS both are undefined. IP doens't use `getaddrinfo`, that's the difference.
   const options = {
-    hostname: "20.81.111.66",
-    port: 80,
-    // hostname: "www.google.com",
-    // port: 443,
+    // hostname: "20.81.111.66",
+    // port: 80,
+    hostname: "www.google.com",
+    port: 443,
     path: "/",
     method: "GET",
   };
 
   console.log(">> options ", options);
 
-  const req = http.request(options, (res) => {
-  // const req = https.request(options, (res) => {
+  // const req = http.request(options, (res) => {
+  const req = https.request(options, (res) => {
     console.log(`statusCode: ${res.statusCode}`);
 
     res.on("data", (d) => {
@@ -90,6 +94,23 @@ function debugRequest(listening) {
       ":",
       socket.remotePort
     );
+
+    socket.on("lookup", (fail, address, family, host) => {
+      console.log(
+        ">> socket lookup -> fail ",
+        fail,
+        " address ",
+        address,
+        " family ",
+        family,
+        " host ",
+        host
+      );
+    });
+
+    socket.on("error", (fail) => {
+      console.err(">> socket error -> fail ", fail);
+    });
   });
 
   req.on("close", () => {

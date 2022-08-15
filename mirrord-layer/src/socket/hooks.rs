@@ -1,7 +1,7 @@
 use std::{ffi::CStr, os::unix::io::RawFd, slice, sync::atomic::Ordering};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
@@ -10,6 +10,18 @@ use tracing::{debug, error, trace, warn};
 use super::ops::*;
 use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
 
+/// TODO(alex) [high] 2022-08-15: Flow is (for named connect):
+/// 1. `socket` with domain set to `PF_ROUTE` (fd 28);
+/// 2. `bind` called on (fd 28) with address `sa_family: 16` and `sa_data` just a bunch of `0`s;
+/// 3. `getsockname` on (fd 28);
+/// 4. `socket` with domain `AF_INET`;
+/// 5. `setsockopt` on (fd 28) with option 11;
+/// 6. `connect` on (fd 28);
+///
+/// ADD(alex) [high] 2022-08-15: So, what happens is that it'll first try to connect to a local
+/// address. When the DNS feature is disabled, the first call to connect will have my lan IP, only
+/// after we do a second `socket` call and get the proper address lookup. It's like we must first
+/// connect to retrieve the address from "google.com", before we do an actual call to connect to it.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
@@ -23,45 +35,20 @@ pub(crate) unsafe extern "C" fn socket_detour(
         protocol
     );
 
-    let socket_result = FN_SOCKET(domain, type_, protocol);
-
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("socket_detour -> bypassed");
-        socket_result
+        FN_SOCKET(domain, type_, protocol)
     } else {
         let (Ok(result) | Err(result)) =
-            socket(socket_result, domain, type_, protocol).map_err(From::from);
+            socket(domain, type_, protocol).map_err(|fail| match fail {
+                LayerError::BypassedType(_) | LayerError::BypassedDomain(_) => {
+                    FN_SOCKET(domain, type_, protocol)
+                }
+                other => other.into(),
+            });
+
         result
     }
-}
-
-#[hook_fn]
-pub(crate) unsafe extern "C" fn socketpair_detour(
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-    sv: *mut c_int,
-) -> c_int {
-    trace!(
-        "socketpair_detour -> domain {:#?} | type:{:#?} | protocol {:#?} | sv {:#?}",
-        domain,
-        type_,
-        protocol,
-        sv.is_null()
-    );
-
-    let socketpair_result = FN_SOCKETPAIR(domain, type_, protocol, sv);
-    if socketpair_result == -1 {
-        return socketpair_result;
-    }
-
-    let new_sockets = slice::from_raw_parts_mut(sv, 2);
-    // TODO(alex) [high] 2022-08-04: Pairs of socket probably the culprit, I think we might be using
-    // the wrong socket fd to try and connect??? Doesn't make much sense, as we lose the remote
-    // address in favor of some local address, this might be why.
-    debug!("socketpair_detour -> sockets {:#?}", new_sockets);
-
-    socketpair_result
 }
 
 #[hook_fn]
@@ -70,24 +57,33 @@ pub(crate) unsafe extern "C" fn bind_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    trace!("bind_detour -> sockfd {:#?}", sockfd);
+    trace!(
+        "bind_detour -> sockfd {:#?} | raw_address {:#?}",
+        sockfd,
+        *raw_address
+    );
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("bind_detour -> bypassed");
         FN_BIND(sockfd, raw_address, address_length)
     } else {
-        // TODO: Is this conversion safe?
-        let address = SockAddr::new(*(raw_address as *const _), address_length)
-            .as_socket()
-            .ok_or(LayerError::AddressConversion);
+        let address = SockAddr::init(|storage, len| {
+            storage.copy_from_nonoverlapping(raw_address.cast(), 1);
+            len.copy_from_nonoverlapping(&address_length, 1);
+
+            Ok(())
+        })
+        .map_err(LayerError::from);
 
         match address {
-            Ok(address) => {
+            Ok(((), address)) => {
                 let (Ok(result) | Err(result)) =
                     bind(sockfd, address)
                         .map(|()| 0)
                         .map_err(|fail| match fail {
-                            LayerError::LocalFDNotFound(_) | LayerError::BypassedPort(_) => {
+                            LayerError::LocalFDNotFound(_)
+                            | LayerError::BypassedPort(_)
+                            | LayerError::AddressConversion => {
                                 FN_BIND(sockfd, raw_address, address_length)
                             }
                             other => other.into(),
@@ -207,7 +203,16 @@ pub(super) unsafe extern "C" fn getsockname_detour(
 
     if IS_INTERNAL_CALL.load(Ordering::Acquire) {
         debug!("getsockname_detour -> bypassed");
-        FN_GETSOCKNAME(sockfd, address, address_len)
+
+        let result = FN_GETSOCKNAME(sockfd, address, address_len);
+        let sockaddr = SockAddr::new(*(address as *const _), *address_len);
+        debug!(
+            "getsockname_detour -> sockaddr {:#?} | std {:#?}",
+            sockaddr,
+            sockaddr.as_socket()
+        );
+
+        result
     } else {
         let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
             .map(|()| 0)
@@ -435,22 +440,15 @@ pub(super) unsafe extern "C" fn getaddrinfo_detour(
 
     let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
 
-    getaddrinfo(node, service, hints)
+    let (Ok(result) | Err(result)) = getaddrinfo(node, service, hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
             0
         })
-        .map_err(|fail| {
-            error!("Failed resolving DNS with {:#?}", fail);
+        .map_err(From::from);
 
-            match fail {
-                LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
-                LayerError::DNSNoName => libc::EAI_NONAME,
-                _ => libc::EAI_FAIL,
-            }
-        })
-        .unwrap_or_else(|fail| fail)
+    result
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
@@ -481,15 +479,45 @@ pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinf
     }
 }
 
+#[hook_fn]
+pub(super) unsafe extern "C" fn getsockopt_detour(
+    sockfd: RawFd,
+    level: c_int,
+    option_name: c_int,
+    option_value: *mut c_void,
+    option_length: *mut socklen_t,
+) -> c_int {
+    trace!(
+        "getsockopt_detour -> sockfd {:#?} | level {:#?} | option_name {:#?}",
+        sockfd,
+        level,
+        option_name
+    );
+
+    FN_GETSOCKOPT(sockfd, level, option_name, option_value, option_length)
+}
+
+#[hook_fn]
+pub(super) unsafe extern "C" fn setsockopt_detour(
+    sockfd: RawFd,
+    level: c_int,
+    option_name: c_int,
+    option_value: *const c_void,
+    option_length: *mut socklen_t,
+) -> c_int {
+    trace!(
+        "setsockopt_detour -> sockfd {:#?} | level {:#?} | option_name {:#?}",
+        sockfd,
+        level,
+        option_name
+    );
+
+    FN_SETSOCKOPT(sockfd, level, option_name, option_value, option_length)
+}
+
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
-    let _ = replace!(
-        interceptor,
-        "socketpair",
-        socketpair_detour,
-        FnSocketpair,
-        FN_SOCKETPAIR
-    );
+
     let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
     let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 
@@ -561,4 +589,20 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
             FN_FREEADDRINFO
         );
     }
+
+    let _ = replace!(
+        interceptor,
+        "getsockopt",
+        getsockopt_detour,
+        FnGetsockopt,
+        FN_GETSOCKOPT
+    );
+
+    let _ = replace!(
+        interceptor,
+        "setsockopt",
+        setsockopt_detour,
+        FnSetsockopt,
+        FN_SETSOCKOPT
+    );
 }

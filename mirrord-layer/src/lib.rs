@@ -3,6 +3,7 @@
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
 #![feature(naked_functions)]
+#![feature(result_flattening)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -365,6 +366,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// so it tries to do the same for files.
 #[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    trace!("close_detour -> fd {:#?}", fd);
+
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");

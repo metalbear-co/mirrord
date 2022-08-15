@@ -114,6 +114,12 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
     BypassedPort(u16),
 
+    #[error("mirrord-layer: Socket operation called with type `{0}` that is not handled by us!")]
+    BypassedType(i32),
+
+    #[error("mirrord-layer: Socket operation called with domain `{0}` that is not handled by us!")]
+    BypassedDomain(i32),
+
     #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
     SocketInvalidState(RawFd),
 
@@ -133,7 +139,11 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for Layer
 impl From<LayerError> for i64 {
     fn from(fail: LayerError) -> Self {
         match fail {
-            LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => {
+            LayerError::SocketInvalidState(_)
+            | LayerError::LocalFDNotFound(_)
+            | LayerError::BypassedType(_)
+            | LayerError::BypassedDomain(_)
+            | LayerError::BypassedPort(_) => {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
@@ -180,6 +190,8 @@ impl From<LayerError> for i64 {
             LayerError::AddressConversion => libc::EINVAL,
             LayerError::UnsupportedDomain(_) => libc::EINVAL,
             LayerError::BypassedPort(_) => libc::EINVAL,
+            LayerError::BypassedType(_) => libc::EINVAL,
+            LayerError::BypassedDomain(_) => libc::EINVAL,
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
         };

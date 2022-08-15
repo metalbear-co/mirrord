@@ -4,14 +4,17 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
-use socket2::SockAddr;
+use socket2::{Domain, SockAddr, Type};
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::{hooks::*, *};
 use crate::{
@@ -31,42 +34,58 @@ use crate::{
 pub(crate) static IS_INTERNAL_CALL: AtomicBool = AtomicBool::new(false);
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(
-    sockfd: RawFd,
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-) -> Result<RawFd, LayerError> {
-    trace!("socket -> domain {:#?} | type:{:#?}", domain, type_);
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd, LayerError> {
+    trace!(
+        "socket -> domain {:#?} | type:{:#?} | protocol {:#?}",
+        domain,
+        type_,
+        protocol
+    );
 
-    if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
-    {
-        debug!("non Tcp socket domain:{:?}, type:{:?}", domain, type_);
+    // TODO(alex) [high] 2022-08-15: The DNS issue is that we receive a `domain` value of
+    // `PF_ROUTE`, and on top of that we have `type_` as `SOCK_RAW`, which matches both
+    // `SOCK_STREAM` and `SOCK_DGRAM`.
+
+    if !(type_ & libc::SOCK_STREAM > 0) {
+        Err(LayerError::BypassedType(type_))
+    } else if !(domain == libc::AF_INET) || (domain == libc::AF_INET6) {
+        Err(LayerError::BypassedDomain(domain))
     } else {
-        let mut sockets = SOCKETS.lock()?;
-        sockets.insert(
-            sockfd,
-            Arc::new(MirrorSocket {
-                domain,
-                type_,
-                protocol,
-                state: SocketState::default(),
-            }),
-        );
-    }
+        Ok(())
+    }?;
 
-    Ok(sockfd)
+    let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
+
+    let socket_fd = if socket_result == -1 {
+        Err(std::io::Error::from_raw_os_error(socket_result))
+    } else {
+        Ok(socket_result)
+    }?;
+
+    let new_socket = MirrorSocket {
+        domain,
+        type_,
+        protocol,
+        state: SocketState::default(),
+    };
+    debug!(
+        "socket -> socket_fd {:#?} | new_socket {:#?}",
+        socket_fd, new_socket
+    );
+
+    let mut sockets = SOCKETS.lock()?;
+    sockets.insert(socket_fd, Arc::new(new_socket));
+
+    Ok(socket_fd)
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-pub(super) fn bind(sockfd: c_int, requested_address: SocketAddr) -> Result<(), LayerError> {
-    trace!(
-        "bind -> sockfd {:#?} | address {:#?}",
-        sockfd,
-        requested_address
-    );
+pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<(), LayerError> {
+    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+
+    let requested_address = address.as_socket().ok_or(LayerError::AddressConversion)?;
 
     let mut socket = {
         SOCKETS
@@ -82,11 +101,10 @@ pub(super) fn bind(sockfd: c_int, requested_address: SocketAddr) -> Result<(), L
             })?
     };
 
-    (!is_ignored_port(requested_address.port()))
+    let requested_port = requested_address.port();
+    (!is_ignored_port(requested_port))
         .then_some(())
         .ok_or_else(|| LayerError::BypassedPort(requested_address.port()))?;
-
-    let requested_port = requested_address.port();
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
