@@ -1,7 +1,7 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::ReadFileResponse;
 use tracing::{error, trace};
@@ -374,7 +374,7 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
         flags
     );
 
-    if dirfd == AT_FDCWD {
+    if dirfd == AT_FDCWD && flags == AT_EACCESS {
         access_detour(pathname, mode)
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)

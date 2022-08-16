@@ -278,8 +278,10 @@ impl FileManager {
             mode,
         );
 
-        let mode = AccessMode::from_bits(mode.rotate_right(4).reverse_bits() | 1)
-            .unwrap_or(AccessMode::EXISTS);
+        // Mirror bit representation of flags to support how the flags are represented in the
+        // faccess library
+        let mode =
+            AccessMode::from_bits((mode << 4).reverse_bits() | 1).unwrap_or(AccessMode::EXISTS);
 
         pathname
             .access(mode)
