@@ -171,20 +171,24 @@ async fn create_ephemeral_container_agent(
 
     let mirrord_agent_name = get_agent_name();
 
+    let mut agent_command_line = vec![
+        "./mirrord-agent".to_string(),
+        "-l".to_string(),
+        connection_port.to_string(),
+        "-e".to_string(),
+    ];
+    if let Some(timeout) = config.agent_communication_timeout {
+        agent_command_line.push("-t".to_string());
+        agent_command_line.push(timeout.to_string());
+    }
+
     let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
         "name": mirrord_agent_name,
         "image": agent_image,
         "imagePullPolicy": config.image_pull_policy,
         "targetContainerName": config.impersonated_container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
-        "command": [
-            "./mirrord-agent",
-            "-t",
-            "30",
-            "-l",
-            connection_port.to_string(),
-            "-e",
-        ],
+        "command": agent_command_line,
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
@@ -246,6 +250,20 @@ async fn create_job_pod_agent(
 ) -> Result<String, LayerError> {
     let mirrord_agent_job_name = get_agent_name();
 
+    let mut agent_command_line = vec![
+        "./mirrord-agent".to_string(),
+        "--container-id".to_string(),
+        runtime_data.container_id,
+        "--container-runtime".to_string(),
+        runtime_data.container_runtime,
+        "-l".to_string(),
+        connection_port.to_string(),
+    ];
+    if let Some(timeout) = config.agent_communication_timeout {
+        agent_command_line.push("-t".to_string());
+        agent_command_line.push(timeout.to_string());
+    }
+
     let agent_pod: Job =
         serde_json::from_value(json!({ // Only Jobs support self deletion after completion
                 "metadata": {
@@ -284,17 +302,7 @@ async fn create_job_pod_agent(
                                     "name": "sockpath"
                                 }
                             ],
-                            "command": [
-                                "./mirrord-agent",
-                                "--container-id",
-                                runtime_data.container_id,
-                                "--container-runtime",
-                                runtime_data.container_runtime,
-                                "-t",
-                                "30",
-                                "-l",
-                                connection_port.to_string(),
-                            ],
+                            "command": agent_command_line,
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
                         }
                     ]

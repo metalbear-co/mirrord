@@ -225,6 +225,7 @@ mod tests {
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
         env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", "test");
+        env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
         env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
             .args(args.clone())
@@ -547,7 +548,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
+        process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
         send_requests(&url).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");

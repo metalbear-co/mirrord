@@ -215,7 +215,7 @@ jobs:
       - name: setup cluster requirements
         run: brew install docker colima kubectl
       - name: create cluster
-        run: colima start --kubernetes --network-address
+        run: colima start --kubernetes --network-address --cpu 3 --memory 8
       - name: download image
         uses: actions/download-artifact@v2
         with:
