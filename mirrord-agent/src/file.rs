@@ -286,6 +286,6 @@ impl FileManager {
         pathname
             .access(mode)
             .map(|_| AccessFileResponse)
-            .map_err(|err| ResponseError::from(err))
+            .map_err(ResponseError::from)
     }
 }
