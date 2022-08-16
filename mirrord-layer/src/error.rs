@@ -102,9 +102,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
 
-    #[error("mirrord-layer: TCP Steal message while not initialized!")]
-    UninitializedTcpSteal,
-
     #[error("mirrord-layer: Failed converting `sockaddr`!")]
     AddressConversion,
 
@@ -181,7 +178,6 @@ impl From<LayerError> for i64 {
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
             LayerError::PodNotFound(_) => libc::EINVAL,
-            LayerError::UninitializedTcpSteal => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
