@@ -2,7 +2,7 @@ use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_macro::hook_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
 use tracing::{debug, error, trace, warn};
@@ -10,7 +10,7 @@ use tracing::{debug, error, trace, warn};
 use super::ops::*;
 use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
     type_: c_int,
@@ -32,7 +32,7 @@ pub(crate) unsafe extern "C" fn socket_detour(
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -68,7 +68,7 @@ pub(crate) unsafe extern "C" fn bind_detour(
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     debug!(
         "listen_detour -> sockfd {:#?} | backlog {:#?}",
@@ -89,7 +89,7 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -123,7 +123,7 @@ pub(super) unsafe extern "C" fn connect_detour(
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -144,7 +144,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -165,7 +165,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     result
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
@@ -193,7 +193,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
 }
 
 #[cfg(target_os = "linux")]
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn accept4_detour(
     sockfd: i32,
     address: *mut sockaddr,
@@ -222,7 +222,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
 }
 
 #[cfg(target_os = "linux")]
-#[hook_fn]
+#[hook_guard_fn]
 #[allow(non_snake_case)]
 pub(super) unsafe extern "C" fn uv__accept4_detour(
     sockfd: i32,
@@ -242,6 +242,10 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
+    let guard = crate::DetourGuard::new();
+    if guard.is_none() {
+        return fcntl_result;
+    }
 
     if fcntl_result == -1 {
         fcntl_result
@@ -255,7 +259,7 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     }
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     trace!("dup_detour -> fd {:#?}", fd);
 
@@ -277,7 +281,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     }
 }
 
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     trace!("dup2_detour -> oldfd {:#?} | newfd {:#?}", oldfd, newfd);
 
@@ -304,7 +308,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
 }
 
 #[cfg(target_os = "linux")]
-#[hook_fn]
+#[hook_guard_fn]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
     trace!(
         "dup3_detour -> oldfd {:#?} | newfd {:#?} | flags {:#?}",
@@ -334,7 +338,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
 ///
 /// # Warning:
 /// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
-#[hook_fn]
+#[hook_guard_fn]
 unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
     raw_service: *const c_char,
@@ -410,7 +414,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 ///
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
-#[hook_fn]
+#[hook_guard_fn]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
