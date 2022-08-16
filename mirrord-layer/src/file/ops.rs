@@ -12,8 +12,8 @@ use crate::{
     common::blocking_send_hook_message,
     error::LayerError,
     file::{
-        Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek, Write,
-        OPEN_FILES,
+        Access, Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek,
+        Write, OPEN_FILES,
     },
     HookMessage,
 };
@@ -266,5 +266,23 @@ pub(crate) fn close(fd: usize) -> Result<c_int, LayerError> {
     blocking_send_file_message(HookMessageFile::Close(closing_file))?;
 
     file_channel_rx.blocking_recv()??;
+    Ok(0)
+}
+
+pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int, LayerError> {
+    trace!("access -> pathname {:#?} | mode {:?}", pathname, mode,);
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let access = Access {
+        pathname,
+        mode,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::Access(access))?;
+
+    file_channel_rx.blocking_recv()??;
+
     Ok(0)
 }
