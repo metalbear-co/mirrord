@@ -6,8 +6,9 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
-## Changed
-- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
+
+### Added
+- mirrord-layer: You can now pass `MIRRORD_AGENT_COMMUNICATION_TIMEOUT` as environment variable to control agent timeout.
 
 ### Fixed
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
@@ -15,6 +16,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
 
 ### Changed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
 - reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
 - reduce e2e flakiness - increase timeout time
 - mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
@@ -25,7 +27,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent - add debug print of args to identify runs
 - E2E - remove double `--extract-path` parameter in tests
 - E2E - macOS colima start with 3 cores and 8GB of RAM.
-
+- E2E - Increase agent communication timeout to reduce flakiness.
 
 ## 2.6.0
 
