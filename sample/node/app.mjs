@@ -40,9 +40,9 @@ function debugDns() {
 
 // debug_file_ops();
 // debugDns();
-debugRequest(null);
+// debugRequest(null);
 // debugConnect();
-// debugListen();
+debugListen();
 
 function debugConnect() {
   let options = { readable: true, writable: true };
