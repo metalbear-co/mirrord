@@ -7,16 +7,43 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- mirrord-layer: You can now pass `MIRRORD_AGENT_COMMUNICATION_TIMEOUT` as environment variable to control agent timeout.
+- Expand file system operations with `access` and `faccessat` hooks for absolute paths
+
+### Fixed
+- Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
+- mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
+- mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
+
+### Changed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
+- reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
+- reduce e2e flakiness - increase timeout time
+- mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
+- E2E - Don't do file stuff on http traffic to reduce flakiness (doesn't add any coverage value..)
+- mirrord-layer - Change tcp mirror tunnel `select` to be biased so it flushes all data before closing it (better testing, reduces e2e flakiness)
+- E2E - unify resolve_node_host for linux and macOS with support for wsl provided Docker & Kubernetes
+- E2E - add `trace` for tests to have paramaterized arguments printed
+- mirrord-agent - add debug print of args to identify runs
+- E2E - remove double `--extract-path` parameter in tests
+- E2E - macOS colima start with 3 cores and 8GB of RAM.
+- E2E - Increase agent communication timeout to reduce flakiness.
+- mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
+
+## 2.6.0
 
 ### Added
 - Add a flag for the agent, `--ephemeral-container`, to correctly refer to the filesystem i.e. refer to root path as `/proc/1/root` when the flag is on, otherwise `/`.
+- Add support for Golang on amd64 (x86-64).
 
 ### Changed
 - Assign a random port number instead of `61337`. (Reason: A forking process creates multiple agents sending traffic on the same port, causing addrinuse error.)
+- `mirrord-layer/socket` now uses `socket2::SockAddr` to comply with Rust's new IP format.
 
 ### Fixed
 - Fix filesystem tests to only run if the default path exists.
-
+- Fix extension not running due to the node_modules directory not being packaged.
 
 ## 2.5.0
 

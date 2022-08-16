@@ -68,8 +68,14 @@ mod tests {
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
             .await
             .expect("port subscribe failed");
-        // Let message be acknowledged and dummy socket to start listening
-        sleep(Duration::from_millis(2000)).await;
+        let _ = assert!(matches!(
+            codec
+                .next()
+                .await
+                .expect("couldn't get next message")
+                .expect("got invalid message"),
+            DaemonMessage::Tcp(DaemonTcp::Subscribed)
+        ));
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
             .expect("connection to dummy failed");

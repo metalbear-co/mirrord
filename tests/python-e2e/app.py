@@ -1,6 +1,6 @@
-from os import getcwd, remove, getpid, kill
+from os import getpid, kill
 from signal import SIGTERM
-from flask import Flask, request
+from flask import Flask
 import logging
 import sys
 import uuid
@@ -15,38 +15,32 @@ cli.show_server_banner = lambda *x: print("Server listening on port 80")
 app = Flask(__name__)
 
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-PATH = getcwd() + str(uuid.uuid4())
 
 
 @app.route("/", methods=["GET"])
 def get():
     print("GET: Request completed")
-    return "GET"
+    return "OK"
 
 
 @app.route("/", methods=["POST"])
 def post():
-    if str(request.data, "utf-8") == TEXT:
-        print("POST: Request completed")
-        return "POST"
-    return "!"
+    print("POST: Request completed")
+    return "OK"
 
 
 @app.route("/", methods=["PUT"])
 def put():
-    with open(PATH, "w") as f:
-        f.write(TEXT)    
     print("PUT: Request completed")
-    return "PUT"
+    return "OK"
 
 
 @app.route("/", methods=["DELETE"])
 def delete():
-    remove(PATH)
     print("DELETE: Request completed")
     # killing Flask is the hardest thing I've done in my life - A.H
     kill(getpid(), SIGTERM)
-    return "DELETE"
+    return "OK"
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /a
 COPY sample/rust /app/sample/rust
 COPY mirrord-protocol /app/mirrord-protocol
 COPY mirrord-agent /app/mirrord-agent
+COPY mirrord-macro /app/mirrord-macro
 COPY mirrord-layer /app/mirrord-layer
 COPY mirrord-cli /app/mirrord-cli
 COPY tests /app/tests

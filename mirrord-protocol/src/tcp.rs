@@ -37,6 +37,9 @@ pub enum DaemonTcp {
     NewConnection(TcpNewConnection),
     Data(TcpData),
     Close(TcpClose),
+    /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
+    /// flakiness.
+    Subscribed,
 }
 
 /// Messages related to Steal Tcp handler from client.

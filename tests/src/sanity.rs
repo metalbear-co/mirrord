@@ -22,10 +22,7 @@ mod tests {
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
     };
-    use rand::{
-        distributions::{Alphanumeric, DistString},
-        Rng,
-    };
+    use rand::{distributions::Alphanumeric, Rng};
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -40,17 +37,6 @@ mod tests {
     use tokio_util::sync::{CancellationToken, DropGuard};
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
-
-    fn get_shared_lib_path() -> String {
-        let agent_name = format!(
-            "/tmp/{}",
-            Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
-                .to_lowercase()
-        );
-        std::fs::create_dir(&agent_name).unwrap();
-        agent_name
-    }
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
@@ -81,12 +67,14 @@ mod tests {
         rand_str
     }
 
+    #[derive(Debug)]
     enum Application {
         PythonHTTP,
         NodeHTTP,
-        #[cfg(target_os = "macos")]
         GoHTTP,
     }
+
+    #[derive(Debug)]
     pub enum Agent {
         #[cfg(target_os = "linux")]
         Ephemeral,
@@ -119,11 +107,8 @@ mod tests {
             while now.elapsed() < timeout {
                 let stdout = self.get_stdout();
                 if stdout.contains(line) {
-                    // for race conditions
-                    std::thread::sleep(Duration::from_millis(100));
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(1000));
             }
             panic!("Timeout waiting for line: {}", line);
         }
@@ -189,7 +174,6 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
-                #[cfg(target_os = "macos")]
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
@@ -239,9 +223,10 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
-        env.insert("MIRRORD_AGENT_RUST_LOG", "debug");
+        env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
         env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", "test");
-        env.insert("RUST_LOG", "debug");
+        env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+        env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
             .args(args.clone())
             .envs(env)
@@ -423,9 +408,8 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn resolve_node_host() -> String {
-        if std::env::var("USE_MINIKUBE").is_ok() {
+        if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
                 .arg("ip")
                 .output()
@@ -433,19 +417,9 @@ mod tests {
                 .stdout;
             String::from_utf8_lossy(&output).to_string()
         } else {
-            // We assume it's Docker for Mac
+            // We assume it's either Docker for Mac or passed via wsl integration
             "127.0.0.1".to_string()
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn resolve_node_host() -> String {
-        let output = std::process::Command::new("minikube")
-            .arg("ip")
-            .output()
-            .unwrap()
-            .stdout;
-        String::from_utf8_lossy(&output).to_string()
     }
 
     async fn get_service_url(kube_client: Client, service: &EchoService) -> String {
@@ -536,11 +510,16 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
+        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -549,8 +528,12 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
-        send_requests(&url, false).await;
+        process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
+        send_requests(&url).await;
+        process.wait_for_line(Duration::from_secs(10), "GET");
+        process.wait_for_line(Duration::from_secs(10), "POST");
+        process.wait_for_line(Duration::from_secs(10), "PUT");
+        process.wait_for_line(Duration::from_secs(10), "DELETE");
         timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -560,10 +543,15 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_mirror_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
         #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
@@ -573,8 +561,12 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
-        send_requests(&url, false).await;
+        process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
+        send_requests(&url).await;
+        process.wait_for_line(Duration::from_secs(10), "GET");
+        process.wait_for_line(Duration::from_secs(10), "POST");
+        process.wait_for_line(Duration::from_secs(10), "PUT");
+        process.wait_for_line(Duration::from_secs(10), "DELETE");
         timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -584,18 +576,19 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_file_ops(
-        #[future] service: EchoService,
+        #[future]
+        #[notrace]
+        service: EchoService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let mut args = vec!["--enable-fs"];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
@@ -615,15 +608,19 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[rstest]
+    #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(#[future] service: EchoService, #[values(Agent::Job)] agent: Agent) {
+    pub async fn test_file_ops(
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
-        let shared_lib_path = get_shared_lib_path();
-
-        let mut args = vec!["--enable-fs", "--extract-path", &shared_lib_path];
+        let mut args = vec!["--enable-fs"];
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);

@@ -2,9 +2,12 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
+#![feature(naked_functions)]
 
 use std::{
+    cell::RefCell,
     collections::{HashSet, VecDeque},
+    ops::Deref,
     sync::{LazyLock, OnceLock},
 };
 
@@ -17,6 +20,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
@@ -39,6 +43,7 @@ mod common;
 mod config;
 mod error;
 mod file;
+mod go_hooks;
 mod macros;
 mod pod_api;
 mod socket;
@@ -46,13 +51,76 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler, macros::hook};
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .on_thread_start(detour_bypass_on)
+        .on_thread_stop(detour_bypass_off)
+        .build()
+        .unwrap()
+});
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
-
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+
+thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
+
+fn detour_bypass_on() {
+    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
+}
+
+fn detour_bypass_off() {
+    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
+}
+
+pub(crate) struct DetourGuard;
+
+impl DetourGuard {
+    /// Create a new DetourGuard if it's not already enabled.
+    pub(crate) fn new() -> Option<Self> {
+        DETOUR_BYPASS.with(|enabled| {
+            if *enabled.borrow() {
+                None
+            } else {
+                *enabled.borrow_mut() = true;
+                Some(Self)
+            }
+        })
+    }
+}
+
+impl Drop for DetourGuard {
+    fn drop(&mut self) {
+        detour_bypass_off();
+    }
+}
+
+/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
+/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+#[derive(Debug)]
+pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
+
+impl<T> Deref for HookFn<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get().unwrap()
+    }
+}
+
+impl<T> const Default for HookFn<T> {
+    fn default() -> Self {
+        Self(std::sync::OnceLock::new())
+    }
+}
+
+impl<T> HookFn<T> {
+    pub(crate) fn set(&self, value: T) -> Result<(), T> {
+        self.0.set(value)
+    }
+}
 
 #[ctor]
 fn init() {
@@ -227,15 +295,22 @@ async fn thread_loop(
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
             daemon_message = layer.codec.next() => {
-                if let Some(Ok(message)) = daemon_message {
-                    if let Err(err) = layer.handle_daemon_message(
-                        message).await {
-                        error!("Error handling daemon message: {:?}", err);
+                match daemon_message {
+                    Some(Ok(message)) => {
+                        if let Err(err) = layer.handle_daemon_message(
+                            message).await {
+                            error!("Error handling daemon message: {:?}", err);
+                            break;
+                        }
+                    },
+                    Some(Err(err)) => {
+                        error!("Error receiving daemon message: {:?}", err);
                         break;
                     }
-                } else {
-                    error!("agent disconnected");
-                    break;
+                    None => {
+                        error!("agent disconnected");
+                        break;
+                    }
                 }
             },
             Some(message) = layer.tcp_steal_handler.next() => {
@@ -317,27 +392,36 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
-    hook!(interceptor, "close", close_detour);
+    unsafe {
+        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+    };
 
-    socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns);
+    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
     if enabled_file_ops {
-        file::hooks::enable_file_hooks(&mut interceptor);
+        unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
-
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "x86_64")]
+    {
+        let modules = frida_gum::Module::enumerate_modules();
+        let binary = &modules.first().unwrap().name;
+        go_hooks::go_socket_hooks::enable_socket_hooks(&mut interceptor, binary);
+    }
     interceptor.end_transaction();
 }
 
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
+#[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
 
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        libc::close(fd)
+        FN_CLOSE(fd)
     } else if *enabled_file_ops {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
@@ -351,9 +435,9 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
                 })
                 .unwrap_or_else(|fail| fail)
         } else {
-            libc::close(fd)
+            FN_CLOSE(fd)
         }
     } else {
-        libc::close(fd)
+        FN_CLOSE(fd)
     }
 }
