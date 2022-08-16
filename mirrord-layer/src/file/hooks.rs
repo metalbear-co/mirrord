@@ -1,7 +1,7 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_FDCWD, FILE};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::ReadFileResponse;
 use tracing::{error, trace};
@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     error::LayerError,
-    file::ops::{lseek, open, read, write},
+    file::ops::{access, lseek, open, read, write},
     replace,
 };
 
@@ -333,6 +333,54 @@ pub(crate) unsafe extern "C" fn write_detour(
     }
 }
 
+/// Hook for `libc::access`.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
+    trace!("access_detour -> path {:#?} | mode {:#?}", raw_path, mode);
+
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
+    };
+
+    // Calls with non absolute paths are sent to libc::open.
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
+        FN_ACCESS(raw_path, mode)
+    } else {
+        let access_result = access(path, mode as u8);
+
+        let (Ok(result) | Err(result)) = access_result.map_err(From::from);
+        result
+    }
+}
+
+/// Hook for `libc::faccessat`.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn faccessat_detour(
+    dirfd: RawFd,
+    pathname: *const c_char,
+    mode: c_int,
+    flags: c_int,
+) -> c_int {
+    trace!(
+        "faccessat_detour -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
+        dirfd,
+        pathname,
+        mode,
+        flags
+    );
+
+    if dirfd == AT_FDCWD && flags == AT_EACCESS {
+        access_detour(pathname, mode)
+    } else {
+        FN_FACCESSAT(dirfd, pathname, mode, flags)
+    }
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
@@ -344,4 +392,12 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
+    let _ = replace!(interceptor, "access", access_detour, FnAccess, FN_ACCESS);
+    let _ = replace!(
+        interceptor,
+        "faccessat",
+        faccessat_detour,
+        FnFaccessat,
+        FN_FACCESSAT
+    );
 }
