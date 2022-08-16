@@ -1,4 +1,10 @@
-use std::{ffi::CStr, os::unix::io::RawFd, slice, sync::atomic::Ordering};
+use std::{
+    ffi::CStr,
+    net::{IpAddr, Ipv4Addr},
+    os::unix::io::RawFd,
+    slice,
+    sync::atomic::Ordering,
+};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
@@ -42,6 +48,7 @@ pub(crate) unsafe extern "C" fn socket_detour(
         let (Ok(result) | Err(result)) =
             socket(domain, type_, protocol).map_err(|fail| match fail {
                 LayerError::BypassedType(_) | LayerError::BypassedDomain(_) => {
+                    warn!("socket_detour -> bypassed with {:#?}", fail);
                     FN_SOCKET(domain, type_, protocol)
                 }
                 other => other.into(),
@@ -84,6 +91,8 @@ pub(crate) unsafe extern "C" fn bind_detour(
                             LayerError::LocalFDNotFound(_)
                             | LayerError::BypassedPort(_)
                             | LayerError::AddressConversion => {
+                                warn!("bind_detour -> bypassed with {:#?}", fail);
+
                                 FN_BIND(sockfd, raw_address, address_length)
                             }
                             other => other.into(),
@@ -115,6 +124,7 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
                 .map(|()| 0)
                 .map_err(|fail| match fail {
                     LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                        warn!("listen_detour -> bypassed with {:#?}", fail);
                         FN_LISTEN(sockfd, backlog)
                     }
                     other => other.into(),
@@ -153,6 +163,7 @@ pub(super) unsafe extern "C" fn connect_detour(
                         .map(|()| 0)
                         .map_err(|fail| match fail {
                             LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                                warn!("connect_detour -> bypassed with {:#?}", fail);
                                 FN_CONNECT(sockfd, raw_address, address_length)
                             }
                             other => other.into(),
@@ -452,7 +463,8 @@ pub(super) unsafe extern "C" fn getaddrinfo_detour(
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
-/// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`.
+/// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`. Same thing must also
+/// be done for `addrinfo.ai_addr`.
 ///
 /// Also follows the `addr_info.ai_next` pointer, deallocating the next pointers in the linked list.
 ///
@@ -473,8 +485,11 @@ pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinf
     let mut current = addrinfo;
     while !current.is_null() {
         let current_box = Box::from_raw(current);
+        let ai_addr = Box::from_raw(current_box.ai_addr);
 
         current = (*current).ai_next;
+
+        drop(ai_addr);
         drop(current_box);
     }
 }

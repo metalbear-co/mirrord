@@ -40,6 +40,7 @@ pub enum TcpOutgoingRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ConnectResponse {
     pub user_fd: i32,
+    pub remote_address: SocketAddr,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]

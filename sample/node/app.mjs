@@ -4,6 +4,7 @@ import { open, readFile } from "fs/promises";
 import https from "node:https";
 import http from "node:http";
 import { exit } from "node:process";
+import dns from "node:dns";
 
 async function debug_file_ops() {
   try {
@@ -31,7 +32,14 @@ async function debug_file_ops() {
   }
 }
 
+function debugDns() {
+  dns.lookup("www.google.com", null, (err, address, family) => {
+    console.log("address: %j family: IPv%s", address, family);
+  });
+}
+
 // debug_file_ops();
+// debugDns();
 debugRequest(null);
 // debugConnect();
 // debugListen();
@@ -53,14 +61,6 @@ function debugConnect() {
 }
 
 function debugRequest(listening) {
-  // TODO(alex) [high] 2022-08-05: When using an IP address, outgoing traffic tries to connect to
-  // the correct IP, but when using a name ("google.com") it becomes a local address (that
-  // changes based on `MIRRORD_DNS` feature, local machine when set to `false`, pod local IP when
-  // set to `true`).
-  //
-  // ADD(alex) [high] 2022-08-15: There is a difference in behavior when using a direct IP address
-  // when we hit the `req.on(socket)` call. With IP the local and remote addresses have values,
-  // meanwhile for DNS both are undefined. IP doens't use `getaddrinfo`, that's the difference.
   const options = {
     // hostname: "20.81.111.66",
     // port: 80,
@@ -161,26 +161,31 @@ function debugListen() {
       port: 80,
     },
     function () {
-      console.log("server listening to %j", server.address());
+      console.log(">> server listening to %j", server.address());
     }
   );
 
   function handleConnection(conn) {
     var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-    console.log("new client connection from %s", remoteAddress);
+    console.log(">> new client connection from %s", remoteAddress);
+
     conn.on("data", onConnData);
     conn.once("close", onConnClose);
     conn.on("error", onConnError);
 
     function onConnData(d) {
-      console.log("connection data from %s: %j", remoteAddress, d.toString());
+      console.log(
+        ">> connection data from %s: %j",
+        remoteAddress,
+        d.toString()
+      );
       conn.write(d);
     }
     function onConnClose() {
-      console.log("connection from %s closed", remoteAddress);
+      console.log(">> connection from %s closed", remoteAddress);
     }
     function onConnError(err) {
-      console.log("Connection %s error: %s", remoteAddress, err.message);
+      console.log(">> Connection %s error: %s", remoteAddress, err.message);
     }
   }
 }

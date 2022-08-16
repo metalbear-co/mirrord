@@ -88,6 +88,7 @@ impl TcpOutgoingApi {
                                 bytes,
                             };
                             let response = TcpOutgoingResponse::Read(Ok(read));
+                            debug!("interceptor_task -> read response {:#?}", response);
 
                             if let Err(fail) = response_tx.send(response).await {
                                 error!("intercept_task -> Failed sending response with {:#?}", fail);
@@ -114,11 +115,11 @@ impl TcpOutgoingApi {
                                     break;
                                 }
                                 Ok(()) => {
-                                    debug!("interceptor_task -> write ok!");
                                     let write = WriteResponse {
                                         id: connection_id,
                                     };
                                     let response = TcpOutgoingResponse::Write(Ok(write));
+                                    debug!("interceptor_task -> write response {:#?}", response);
 
                                     if let Err(fail) = response_tx.send(response).await {
                                         error!("Failed sending read message with {:#?}!", fail);
@@ -181,7 +182,10 @@ impl TcpOutgoingApi {
                                             remote_stream,
                                         ));
 
-                                        ConnectResponse { user_fd }
+                                        ConnectResponse {
+                                            user_fd,
+                                            remote_address,
+                                        }
                                     });
 
                             trace!("Connect -> response {:#?}", connect_response);

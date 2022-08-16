@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::atomic::Ordering,
 };
 
@@ -213,7 +213,10 @@ impl TcpOutgoingHandler {
             TcpOutgoingResponse::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
-                let ConnectResponse { user_fd } = connect?;
+                let ConnectResponse {
+                    user_fd,
+                    remote_address,
+                } = connect?;
 
                 debug!("handle_daemon_message -> usef_fd {:#?}", user_fd);
 
@@ -223,8 +226,17 @@ impl TcpOutgoingHandler {
                 // TODO(alex) [mid] 2022-08-08: This must match the `family` of the original
                 // request, meaning that, if the user tried to connect with Ipv4, this should be
                 // an Ipv4 (same for Ipv6).
-                let mirror_listener =
-                    TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).await?;
+                let mirror_listener = match remote_address {
+                    SocketAddr::V4(_) => {
+                        TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                            .await?
+                    }
+                    SocketAddr::V6(_) => {
+                        TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                            .await?
+                    }
+                };
+
                 debug!(
                     "handle_daemon_message -> mirror_listener {:#?}",
                     mirror_listener
@@ -267,15 +279,6 @@ impl TcpOutgoingHandler {
                 trace!("Read -> read {:?}", read);
                 // `agent` read something from remote, so we write it to the `user`.
                 let ReadResponse { id, bytes } = read?;
-
-                // TODO(alex) [high] 2022-08-12: We're getting this back, so it looks like
-                // everything is working? Just gotta not crash after the request is done, and figure
-                // out the `syscall` write error.
-                /*
-                "HTTP/1.1 400 Bad Request\r\nDate: Fri, 12 Aug 2022 18:56:35 GMT\r\nContent-Type: text/html\r\nContent-Length: 150\r\nConnection: close\r\n\r\n<html>\r\n<head><title>400 Bad Request</title></head>\r\n<body>\r\n<center><h1>400 Bad Request</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
-                                 */
-                let message = std::str::from_utf8(&bytes);
-                debug!("handle_daemon_message -> message {:#?}", message);
 
                 let sender = self
                     .mirrors

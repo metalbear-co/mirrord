@@ -14,7 +14,7 @@ use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
 use socket2::{Domain, SockAddr, Type};
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::{hooks::*, *};
 use crate::{
@@ -42,13 +42,9 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
-    // TODO(alex) [high] 2022-08-15: The DNS issue is that we receive a `domain` value of
-    // `PF_ROUTE`, and on top of that we have `type_` as `SOCK_RAW`, which matches both
-    // `SOCK_STREAM` and `SOCK_DGRAM`.
-
     if !(type_ & libc::SOCK_STREAM > 0) {
         Err(LayerError::BypassedType(type_))
-    } else if !(domain == libc::AF_INET) || (domain == libc::AF_INET6) {
+    } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
         Err(LayerError::BypassedDomain(domain))
     } else {
         Ok(())
@@ -460,20 +456,24 @@ pub(super) fn getaddrinfo(
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
 
-    addr_info_list
+    let result = addr_info_list
         .into_iter()
         .map(AddrInfo::from)
         .map(|addr_info| {
             let AddrInfo {
-                socktype,
-                protocol,
-                address,
+                socktype: ai_socktype,
+                protocol: ai_protocol,
+                address: ai_family,
                 sockaddr,
                 canonname,
-                flags,
+                flags: ai_flags,
             } = addr_info;
 
-            let sockaddr = socket2::SockAddr::from(sockaddr);
+            let rawish_sockaddr = socket2::SockAddr::from(sockaddr);
+            let ai_addrlen = rawish_sockaddr.len();
+
+            // Must be allocated, as it is stored as a pointer in `libc::addrinfo`.
+            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sockaddr.as_ptr() }));
 
             let canonname = canonname.map(CString::new).transpose().unwrap();
             let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
@@ -482,12 +482,13 @@ pub(super) fn getaddrinfo(
             }) as *mut _;
 
             libc::addrinfo {
-                ai_flags: flags,
-                ai_family: address,
-                ai_socktype: socktype,
-                ai_protocol: protocol,
-                ai_addrlen: sockaddr.len(),
-                ai_addr: sockaddr.as_ptr() as *mut _,
+                ai_flags,
+                ai_family,
+                ai_socktype,
+                ai_protocol,
+                ai_addrlen,
+                // TODO(alex) [high] 2022-08-16: Box this, otherwise we lose it.
+                ai_addr,
                 ai_canonname,
                 ai_next: ptr::null_mut(),
             }
@@ -496,10 +497,14 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {
-            // Safety: These pointers were just allocated using `Box::new`, so they should be fine
-            // regarding memory layout, and are not dangling.
+            // Safety: These pointers were just allocated using `Box::new`, so they should be
+            // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .ok_or(LayerError::DNSNoName)
+        .ok_or(LayerError::DNSNoName);
+
+    info!("getaddrinfo -> result {:#?}", result);
+
+    result
 }
