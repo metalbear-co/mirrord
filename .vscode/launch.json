@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "Launch index.ts",
-      "type": "node",
+      "type": "pwa-node",
       "request": "launch",
       "runtimeArgs": ["-r", "ts-node/register"],
       "args": [
@@ -20,7 +20,7 @@
       "name": "Launch Extension",
       "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
       "request": "launch",
-      "type": "extensionHost"
+      "type": "pwa-extensionHost"
     },
     {
       "type": "lldb",

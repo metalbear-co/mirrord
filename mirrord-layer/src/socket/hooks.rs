@@ -382,26 +382,20 @@ unsafe extern "C" fn getaddrinfo_detour(
 
     let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
 
-    getaddrinfo(node, service, hints)
+    let (Ok(result) | Err(result)) = getaddrinfo(node, service, hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
             0
         })
-        .map_err(|fail| {
-            error!("Failed resolving DNS with {:#?}", fail);
+        .map_err(From::from);
 
-            match fail {
-                LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap(),
-                LayerError::DNSNoName => libc::EAI_NONAME,
-                _ => libc::EAI_FAIL,
-            }
-        })
-        .unwrap_or_else(|fail| fail)
+    result
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
-/// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`.
+/// `getaddrinfo_detour` and converted into a raw pointer by `Box::into_raw`. Same thing must also
+/// be done for `addrinfo.ai_addr`.
 ///
 /// Also follows the `addr_info.ai_next` pointer, deallocating the next pointers in the linked list.
 ///
@@ -415,15 +409,18 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
 #[hook_guard_fn]
-unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
+pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     trace!("freeaddrinfo_detour -> addrinfo {:#?}", *addrinfo);
 
     // Iterate over `addrinfo` linked list dropping it.
     let mut current = addrinfo;
     while !current.is_null() {
         let current_box = Box::from_raw(current);
+        let ai_addr = Box::from_raw(current_box.ai_addr);
 
         current = (*current).ai_next;
+
+        drop(ai_addr);
         drop(current_box);
     }
 }
