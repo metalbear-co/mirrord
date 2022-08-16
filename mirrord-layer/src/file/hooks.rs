@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     error::LayerError,
-    file::ops::{faccessat, lseek, open, read, write},
+    file::ops::{access, lseek, open, read, write},
     replace,
 };
 
@@ -333,23 +333,12 @@ pub(crate) unsafe extern "C" fn write_detour(
     }
 }
 
-/// Hook for `libc::faccessat`.
+/// Hook for `libc::access`.
 #[hook_fn]
-pub(crate) unsafe extern "C" fn faccessat_detour(
-    dirfd: RawFd,
-    raw_pathname: *const c_char,
-    raw_mode: c_int,
-    raw_flags: c_int,
-) -> c_int {
-    trace!(
-        "faccessat_detour -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
-        dirfd,
-        raw_pathname,
-        raw_mode,
-        raw_flags
-    );
+pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
+    trace!("access_detour -> path {:#?} | mode {:#?}", raw_path, mode);
 
-    let path = match CStr::from_ptr(raw_pathname)
+    let path = match CStr::from_ptr(raw_path)
         .to_str()
         .map_err(LayerError::from)
         .map(PathBuf::from)
@@ -358,32 +347,37 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
         Err(fail) => return fail.into(),
     };
 
-    let mode = match raw_mode.try_into().map_err(LayerError::from) {
-        Ok(mode) => mode,
-        Err(fail) => return fail.into(),
-    };
-
-    let flags = match raw_flags.try_into().map_err(LayerError::from) {
-        Ok(flags) => flags,
-        Err(fail) => return fail.into(),
-    };
-
-    if path.is_absolute() || dirfd == AT_FDCWD {
-        let faccessat_result = faccessat(AT_FDCWD as usize, path, mode, flags);
-
-        let (Ok(result) | Err(result)) = faccessat_result.map_err(From::from);
-        result
+    // Calls with non absolute paths are sent to libc::open.
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
+        FN_ACCESS(raw_path, mode)
     } else {
-        let remote_fd = OPEN_FILES.lock().unwrap().get(&dirfd).cloned();
+        let access_result = access(path, mode as u8);
 
-        if let Some(remote_fd) = remote_fd {
-            let faccessat_result = faccessat(remote_fd, path, mode, flags);
+        let (Ok(result) | Err(result)) = access_result.map_err(From::from);
+        result
+    }
+}
 
-            let (Ok(result) | Err(result)) = faccessat_result.map_err(From::from);
-            result
-        } else {
-            FN_FACCESSAT(dirfd, raw_pathname, raw_mode, raw_flags)
-        }
+/// Hook for `libc::faccessat`.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn faccessat_detour(
+    dirfd: RawFd,
+    pathname: *const c_char,
+    mode: c_int,
+    flags: c_int,
+) -> c_int {
+    trace!(
+        "faccessat_detour -> dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
+        dirfd,
+        pathname,
+        mode,
+        flags
+    );
+
+    if dirfd == AT_FDCWD {
+        access_detour(pathname, mode)
+    } else {
+        FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
 }
 
@@ -398,6 +392,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
+    let _ = replace!(interceptor, "access", access_detour, FnAccess, FN_ACCESS);
     let _ = replace!(
         interceptor,
         "faccessat",

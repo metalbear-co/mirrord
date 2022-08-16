@@ -10,8 +10,8 @@ use std::{
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FAccessAtFileRequest,
-    FAccessAtFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
+    AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
+    CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
     SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
@@ -126,7 +126,7 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
-    faccessat_queue: ResponseDeque<FAccessAtFileResponse>,
+    access_queue: ResponseDeque<AccessFileResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -171,9 +171,9 @@ impl FileHandler {
                 debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
                 pop_send(&mut self.close_queue, close)
             }
-            FAccessAt(faccessat) => {
-                debug!("DaemonMessage::FAccessAtFileResponse {:#?}!", faccessat);
-                pop_send(&mut self.faccessat_queue, faccessat)
+            Access(access) => {
+                debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
+                pop_send(&mut self.access_queue, access)
             }
         }
     }
@@ -197,7 +197,7 @@ impl FileHandler {
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
-            FAccessAt(faccessat) => self.handle_hook_faccessat(faccessat, codec).await,
+            Access(access) => self.handle_hook_access(access, codec).await,
         }
     }
 
@@ -367,37 +367,30 @@ impl FileHandler {
         codec.send(request).await.map_err(From::from)
     }
 
-    async fn handle_hook_faccessat(
+    async fn handle_hook_access(
         &mut self,
-        facccessat2: FAccessAt,
+        acccess: Access,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        let FAccessAt {
-            dirfd,
+        let Access {
             pathname,
             mode,
-            flags,
             file_channel_tx,
-        } = facccessat2;
+        } = acccess;
 
         debug!(
-            "HookMessage::FAccessAtFileHook dirfd {:#?} | pathname {:#?} | mode {:#?} | flags {:#?}",
-            dirfd, pathname, mode, flags
+            "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
+            pathname, mode
         );
 
-        self.faccessat_queue.push_back(file_channel_tx);
+        self.access_queue.push_back(file_channel_tx);
 
-        let faccessat_file_request = FAccessAtFileRequest {
-            dirfd,
-            pathname,
-            mode,
-            flags,
-        };
+        let access_file_request = AccessFileRequest { pathname, mode };
 
-        let request = ClientMessage::FileRequest(FileRequest::FAccessAt(faccessat_file_request));
+        let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
         codec.send(request).await.map_err(From::from)
     }
 }
@@ -445,12 +438,10 @@ pub struct Close {
 }
 
 #[derive(Debug)]
-pub struct FAccessAt {
-    pub(crate) dirfd: usize,
+pub struct Access {
     pub(crate) pathname: PathBuf,
-    pub(crate) mode: usize,
-    pub(crate) flags: usize,
-    pub(crate) file_channel_tx: ResponseChannel<FAccessAtFileResponse>,
+    pub(crate) mode: u8,
+    pub(crate) file_channel_tx: ResponseChannel<AccessFileResponse>,
 }
 
 #[derive(Debug)]
@@ -461,5 +452,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Write(Write),
     Close(Close),
-    FAccessAt(FAccessAt),
+    Access(Access),
 }
