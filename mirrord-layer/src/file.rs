@@ -369,7 +369,7 @@ impl FileHandler {
 
     async fn handle_hook_access(
         &mut self,
-        acccess: Access,
+        access: Access,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
@@ -379,7 +379,7 @@ impl FileHandler {
             pathname,
             mode,
             file_channel_tx,
-        } = acccess;
+        } = access;
 
         debug!(
             "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
