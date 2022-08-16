@@ -529,7 +529,7 @@ mod tests {
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
-        send_requests(&url).await;
+        send_requests(&url, false).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
         process.wait_for_line(Duration::from_secs(10), "PUT");
@@ -562,7 +562,7 @@ mod tests {
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
-        send_requests(&url).await;
+        send_requests(&url, false).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
         process.wait_for_line(Duration::from_secs(10), "PUT");
