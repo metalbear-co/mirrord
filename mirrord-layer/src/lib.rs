@@ -73,7 +73,6 @@ fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
 }
 
-
 pub(crate) struct DetourGuard;
 
 impl DetourGuard {
