@@ -5,6 +5,7 @@
 #![feature(naked_functions)]
 
 use std::{
+    cell::RefCell,
     collections::{HashSet, VecDeque},
     ops::Deref,
     sync::{LazyLock, OnceLock},
@@ -49,12 +50,50 @@ mod tcp;
 mod tcp_mirror;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .on_thread_start(detour_bypass_on)
+        .on_thread_stop(detour_bypass_off)
+        .build()
+        .unwrap()
+});
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
-
 pub static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+
+thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
+
+fn detour_bypass_on() {
+    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
+}
+
+fn detour_bypass_off() {
+    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
+}
+
+pub(crate) struct DetourGuard;
+
+impl DetourGuard {
+    /// Create a new DetourGuard if it's not already enabled.
+    pub(crate) fn new() -> Option<Self> {
+        DETOUR_BYPASS.with(|enabled| {
+            if *enabled.borrow() {
+                None
+            } else {
+                *enabled.borrow_mut() = true;
+                Some(Self)
+            }
+        })
+    }
+}
+
+impl Drop for DetourGuard {
+    fn drop(&mut self) {
+        detour_bypass_off();
+    }
+}
 
 /// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
 /// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
