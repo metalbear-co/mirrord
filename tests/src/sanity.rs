@@ -540,7 +540,7 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(Application::PythonHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;

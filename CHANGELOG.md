@@ -33,6 +33,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
 - E2E - print contents of log directory on failure and add filename before print.
 - mirrord-layer - extract reused detours to seperate logic functions
+- E2E - macOS run only sanity http mirror traffic with Python
+
 
 ## 2.6.0
 
@@ -66,6 +68,7 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 - E2E: Collect minikube logs and fix collecting container logs
 - E2E: macOS use colima instead of minikube.
 - Refactored `mirrord-layer/lib.rs` - no more passing many arguments! :)
+- Refactored `mirrord-layer/lib.rs` - remove `unwrap()` and propagate error using `Result`
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
