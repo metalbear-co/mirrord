@@ -181,7 +181,7 @@ jobs:
       - name: Collect logs
         if: ${{ failure() }}
         run: |
-          docker exec minikube find /var/log/pods -f -print -exec cat {} \;
+          docker exec minikube find /var/log/pods -type f -print -exec cat {} \;
 
   e2e_macos:
     runs-on: macos-12
