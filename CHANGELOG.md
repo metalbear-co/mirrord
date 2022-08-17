@@ -30,6 +30,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - macOS colima start with 3 cores and 8GB of RAM.
 - E2E - Increase agent communication timeout to reduce flakiness.
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
+- E2E - Linux print contents of log directory on failure.
 
 ## 2.6.0
 

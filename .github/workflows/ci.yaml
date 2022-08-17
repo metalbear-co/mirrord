@@ -180,7 +180,9 @@ jobs:
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
-        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+        run: |
+          docker exec minikube ls -laR /var/log
+          for FILE in $(docker exec minikube ls /var/log/containers); do echo $FILE && docker exec minikube cat /var/log/containers/$FILE; done
 
   e2e_macos:
     runs-on: macos-12
