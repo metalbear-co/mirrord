@@ -11,7 +11,7 @@ mod tests {
         time::Duration,
     };
 
-    use chrono::{DateTime, Utc};
+    use chrono::Utc;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -133,7 +133,7 @@ mod tests {
                     }
 
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr {:?} {pid}: {}", Utc::<DateTime<Utc>>::now(), string);
+                    eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -148,7 +148,7 @@ mod tests {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout {:?} {pid}: {}", Utc::<DateTime<Utc>>::now(), string);
+                    println!("stdout {:?} {pid}: {}", Utc::now(), string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
