@@ -32,6 +32,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - Increase agent communication timeout to reduce flakiness.
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
 - mirrord-layer - extract reused detours to seperate logic functions
+- E2E - macOS run only sanity http mirror traffic with Python
+
 
 ## 2.6.0
 
