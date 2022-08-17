@@ -181,6 +181,7 @@ jobs:
       - name: Collect logs
         if: ${{ failure() }}
         run: |
+          kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   e2e_macos:
