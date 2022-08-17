@@ -6,19 +6,34 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
-## Changed
-- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
+
+### Added
+- mirrord-layer: You can now pass `MIRRORD_AGENT_COMMUNICATION_TIMEOUT` as environment variable to control agent timeout.
+- Expand file system operations with `access` and `faccessat` hooks for absolute paths
 
 ### Fixed
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
+- mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
+- mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
+- mirrord-layer: Fix DNS issue where `ai_addr` would not live long enough (breaking the remote DNS feature).
 
 ### Changed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
 - reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
 - reduce e2e flakiness - increase timeout time
 - mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
 - E2E - Don't do file stuff on http traffic to reduce flakiness (doesn't add any coverage value..)
 - mirrord-layer - Change tcp mirror tunnel `select` to be biased so it flushes all data before closing it (better testing, reduces e2e flakiness)
 - E2E - unify resolve_node_host for linux and macOS with support for wsl provided Docker & Kubernetes
+- E2E - add `trace` for tests to have paramaterized arguments printed
+- mirrord-agent - add debug print of args to identify runs
+- E2E - remove double `--extract-path` parameter in tests
+- E2E - macOS colima start with 3 cores and 8GB of RAM.
+- E2E - Increase agent communication timeout to reduce flakiness.
+- mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
+- mirrord-layer - extract reused detours to seperate logic functions
+- E2E - macOS run only sanity http mirror traffic with Python
+
 
 ## 2.6.0
 
