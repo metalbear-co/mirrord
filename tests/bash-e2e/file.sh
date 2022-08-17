@@ -6,10 +6,22 @@ validation_text="Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
 
 case $1 in
   exists)
-    if [[ ! -f "$validation_file" ]]; then
-        echo "Read File operation did not find file $validation_file or is not a file";
+    if [[ ! -d "/app" ]]; then
+        echo "Exists Directory operation [[ -d /app ]] failed";
         exit -1
     fi
+    if [[ ! -r "$validation_file" ]]; then
+        echo "Exists File operation [[ -r $validation_file ]] failed";
+        exit -1
+    fi
+    # if [[ ! -f "$validation_file" ]]; then
+    #     echo "Exists File operation [[ -f $validation_file ]] failed";
+    #     exit -1
+    # fi
+    # if [[ ! -s "$validation_file" ]]; then
+    #     echo "Exists File operation [[ -s $validation_file ]] failed";
+    #     exit -1
+    # fi
   ;;
   read)
       if [[ -r "$validation_file" ]]; then
