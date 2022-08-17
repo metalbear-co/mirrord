@@ -23,6 +23,11 @@ use crate::{
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     trace!("open_detour -> open_flags {:#?}", open_flags);
 
+    open_logic(raw_path, open_flags)
+}
+
+/// Implementation of open_detour, used in open_detour and openat_detour
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
         .map_err(LayerError::from)
@@ -144,7 +149,7 @@ pub(super) unsafe extern "C" fn openat_detour(
     // when called with AT_FDCWD, the call is propagated to `open`.
 
     if path.is_absolute() || fd == AT_FDCWD {
-        open_detour(raw_path, open_flags)
+        open_logic(raw_path, open_flags)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
         // what).
@@ -220,7 +225,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
     );
 
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_detour(file_stream);
+    let fd = fileno_logic(file_stream);
 
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
@@ -255,6 +260,11 @@ pub(crate) unsafe extern "C" fn fread_detour(
 pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     trace!("fileno_detour ->");
 
+    fileno_logic(file_stream)
+}
+
+/// Implementation of fileno_detour, used in fileno_detour and fread_detour
+unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
 
     if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
@@ -338,6 +348,11 @@ pub(crate) unsafe extern "C" fn write_detour(
 pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
     trace!("access_detour -> path {:#?} | mode {:#?}", raw_path, mode);
 
+    access_logic(raw_path, mode)
+}
+
+/// Implementation of access_detour, used in access_detour and faccessat_detour
+unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
         .map_err(LayerError::from)
@@ -375,7 +390,7 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
     );
 
     if dirfd == AT_FDCWD && flags == AT_EACCESS {
-        access_detour(pathname, mode)
+        access_logic(pathname, mode)
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
