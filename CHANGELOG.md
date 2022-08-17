@@ -32,6 +32,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - Increase agent communication timeout to reduce flakiness.
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
 - E2E - print contents of log directory on failure and add filename before print.
+- mirrord-layer - extract reused detours to seperate logic functions
 
 ## 2.6.0
 
