@@ -494,42 +494,6 @@ pub(super) unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinf
     }
 }
 
-#[hook_fn]
-pub(super) unsafe extern "C" fn getsockopt_detour(
-    sockfd: RawFd,
-    level: c_int,
-    option_name: c_int,
-    option_value: *mut c_void,
-    option_length: *mut socklen_t,
-) -> c_int {
-    trace!(
-        "getsockopt_detour -> sockfd {:#?} | level {:#?} | option_name {:#?}",
-        sockfd,
-        level,
-        option_name
-    );
-
-    FN_GETSOCKOPT(sockfd, level, option_name, option_value, option_length)
-}
-
-#[hook_fn]
-pub(super) unsafe extern "C" fn setsockopt_detour(
-    sockfd: RawFd,
-    level: c_int,
-    option_name: c_int,
-    option_value: *const c_void,
-    option_length: *mut socklen_t,
-) -> c_int {
-    trace!(
-        "setsockopt_detour -> sockfd {:#?} | level {:#?} | option_name {:#?}",
-        sockfd,
-        level,
-        option_name
-    );
-
-    FN_SETSOCKOPT(sockfd, level, option_name, option_value, option_length)
-}
-
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
 
@@ -604,20 +568,4 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
             FN_FREEADDRINFO
         );
     }
-
-    let _ = replace!(
-        interceptor,
-        "getsockopt",
-        getsockopt_detour,
-        FnGetsockopt,
-        FN_GETSOCKOPT
-    );
-
-    let _ = replace!(
-        interceptor,
-        "setsockopt",
-        setsockopt_detour,
-        FnSetsockopt,
-        FN_SETSOCKOPT
-    );
 }

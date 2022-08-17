@@ -38,8 +38,16 @@ function debugDns() {
   });
 }
 
+// TODO(alex) [high] 2022-08-17: Working flows:
+// 1. request -> request;
+// 2. listen -> request;
+//
+// Broken flows:
+// 1. request -> listen -> request;
+
 // debug_file_ops();
 // debugDns();
+// debugRequest(null);
 // debugRequest(null);
 // debugConnect();
 debugListen();
@@ -77,9 +85,12 @@ function debugRequest(listening) {
     console.log(`statusCode: ${res.statusCode}`);
 
     res.on("data", (d) => {
-      process.stdout.write(d);
-
-      exit(0);
+      console.log(
+        ">> data -> listening ",
+        listening,
+        " | bytes ",
+        d.slice(0, 10)
+      );
     });
   });
 
@@ -162,6 +173,8 @@ function debugListen() {
     },
     function () {
       console.log(">> server listening to %j", server.address());
+
+      debugRequest(server.address());
     }
   );
 

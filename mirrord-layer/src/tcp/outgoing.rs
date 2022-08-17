@@ -117,7 +117,7 @@ impl TcpOutgoingHandler {
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
-                            warn!("tcp_tunnel -> exiting due to local stream closed!");
+                            warn!("interceptor_task -> exiting due to local stream closed!");
                             break;
                         },
                         Ok(read_amount) => {

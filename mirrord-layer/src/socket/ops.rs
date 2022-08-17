@@ -508,3 +508,9 @@ pub(super) fn getaddrinfo(
 
     result
 }
+
+pub(crate) fn close(fd: usize) -> Result<(), LayerError> {
+    trace!("close -> fd {:#?}", fd);
+
+    todo!()
+}

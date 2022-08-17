@@ -28,7 +28,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::prelude::*;
 use util::{ClientID, IndexAllocator};
 
@@ -171,6 +171,7 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
 }
 
 struct ClientConnectionHandler {
+    keep_alive: bool,
     id: ClientID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
@@ -200,10 +201,10 @@ impl ClientConnectionHandler {
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
-        //here hold channel!
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
+            keep_alive: true,
             id,
             file_manager,
             stream,
@@ -217,6 +218,14 @@ impl ClientConnectionHandler {
         Ok(())
     }
 
+    async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
+        trace!("respond -> response {:#?}", response);
+
+        Ok(self.stream.send(response).await?)
+    }
+
+    // TODO(alex) [high] 2022-08-17: Need some sort of keep-alive message to not `break` on
+    // outgoing when there are no messages left.
     async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
         let mut running = true;
         while running {
@@ -231,7 +240,7 @@ impl ClientConnectionHandler {
                 },
                 message = self.tcp_sniffer_api.recv() => {
                     if let Some(message) = message {
-                        self.stream.send(DaemonMessage::Tcp(message)).await?;
+                        self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
                         error!("tcp sniffer stopped?");
                         break;
@@ -239,10 +248,20 @@ impl ClientConnectionHandler {
                 }
                 outgoing_response = self.tcp_outgoing_api.response() => {
                     match outgoing_response {
-                        Ok(response) => self.stream.send(DaemonMessage::TcpOutgoing(response)).await?,
+                        Ok(response) => self.respond(DaemonMessage::TcpOutgoing(response)).await?,
                         Err(fail) => {
-                            error!("ClientConnectionHandler::handle_loop -> Failed with {:#?}", fail);
-                            break;
+                            match fail {
+                                AgentError::ReceiverClosed => if self.keep_alive {
+                                     continue;
+                                } else {
+                                    debug!("handle_look -> Client {:#?} disconnected!", self.id);
+                                    break;
+                                }
+                                other => {
+                                    error!("handle_loop -> Outgoing failed with {:#?}", other);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -261,7 +280,7 @@ impl ClientConnectionHandler {
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
-                self.stream.send(DaemonMessage::File(response)).await?
+                self.respond(DaemonMessage::File(response)).await?
             }
             ClientMessage::TcpOutgoing(request) => self.tcp_outgoing_api.request(request).await?,
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
@@ -282,8 +301,7 @@ impl ClientConnectionHandler {
                 let env_vars_result =
                     select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
 
-                self.stream
-                    .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
@@ -291,14 +309,18 @@ impl ClientConnectionHandler {
 
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
-                self.stream
-                    .send(DaemonMessage::GetAddrInfoResponse(response))
+                self.respond(DaemonMessage::GetAddrInfoResponse(response))
                     .await?
             }
-            ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
+            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
+            }
+            ClientMessage::ExitRequest => {
+                self.keep_alive = false;
+
+                ()
             }
         }
         Ok(true)

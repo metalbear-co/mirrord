@@ -11,7 +11,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{GetAddrInfoHook, ResponseChannel};
+use common::{blocking_send_hook_message, GetAddrInfoHook, HookMessageExit, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
 use error::LayerError;
@@ -23,7 +23,7 @@ use libc::c_int;
 use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
-    GetEnvVarsRequest,
+    GetEnvVarsRequest, RemoteResult,
 };
 use rand::Rng;
 use socket::SOCKETS;
@@ -32,10 +32,13 @@ use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::prelude::*;
 
 mod common;
@@ -196,6 +199,15 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
+            HookMessage::Exit(message) => {
+                trace!("HookMessage::Exit");
+
+                let request = ClientMessage::ExitRequest;
+
+                self.codec.send(request).await.unwrap();
+
+                message.hook_channel_tx.send(Ok(())).unwrap();
+            }
         }
     }
 
@@ -344,6 +356,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(&mut interceptor, "exit", exit_detour, FnExit, FN_EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -361,13 +374,63 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.end_transaction();
 }
 
+/*
+
+/// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
+/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
+/// so it tries to do the same for files.
+unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    trace!("close_detour -> fd {:#?}", fd);
+
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get()
+        .expect("Should be set during initialization!");
+
+    if let Some(mirror_socket) = SOCKETS.lock().unwrap().remove(&fd) {
+        match mirror_socket.state {
+            socket::SocketState::Initialized => todo!(),
+            socket::SocketState::Bound(_) => todo!(),
+            socket::SocketState::Listening(Bound {
+                requested_port,
+                address,
+            }) => todo!(),
+            socket::SocketState::Connected(Connected {
+                remote_address,
+                mirror_address,
+            }) => todo!(),
+        }
+
+        socket::ops::close(fd);
+
+        FN_CLOSE(fd)
+    } else if *enabled_file_ops {
+        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
+
+        if let Some(remote_fd) = remote_fd {
+            let close_file_result = file::ops::close(remote_fd);
+
+            close_file_result
+                .map_err(|fail| {
+                    error!("Failed writing file with {fail:#?}");
+                    -1
+                })
+                .unwrap_or_else(|fail| fail)
+        } else {
+            FN_CLOSE(fd)
+        }
+    } else {
+        FN_CLOSE(fd)
+    }
+}
+
+
+ */
+
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 #[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    trace!("close_detour -> fd {:#?}", fd);
-
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
@@ -392,4 +455,27 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     } else {
         FN_CLOSE(fd)
     }
+}
+
+fn exit() -> Result<(), LayerError> {
+    trace!("exit ->");
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+
+    let exit_hook = HookMessageExit { hook_channel_tx };
+
+    blocking_send_hook_message(HookMessage::Exit(exit_hook))?;
+
+    Ok(hook_channel_rx.blocking_recv()??)
+}
+
+#[hook_fn]
+unsafe extern "C" fn exit_detour(status: c_int) {
+    trace!("exit_detour -> status {:#?}", status);
+    let (Ok(result) | Err(result)) = exit().map(|()| 0).map_err(From::from);
+
+    if result != status {
+        warn!("exit_detour -> result {:#?} | status {:#?}", result, status);
+    }
+
+    FN_EXIT(status)
 }
