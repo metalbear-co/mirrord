@@ -352,7 +352,6 @@ pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_i
 }
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
-#[inline]
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
