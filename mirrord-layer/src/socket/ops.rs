@@ -365,15 +365,19 @@ pub(super) fn getaddrinfo(
         .map(AddrInfo::from)
         .map(|addr_info| {
             let AddrInfo {
-                socktype,
-                protocol,
-                address,
+                socktype: ai_socktype,
+                protocol: ai_protocol,
+                address: ai_family,
                 sockaddr,
                 canonname,
-                flags,
+                flags: ai_flags,
             } = addr_info;
 
-            let sockaddr = socket2::SockAddr::from(sockaddr);
+            let rawish_sockaddr = socket2::SockAddr::from(sockaddr);
+            let ai_addrlen = rawish_sockaddr.len();
+
+            // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
+            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sockaddr.as_ptr() }));
 
             let canonname = canonname.map(CString::new).transpose().unwrap();
             let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
@@ -382,12 +386,12 @@ pub(super) fn getaddrinfo(
             }) as *mut _;
 
             libc::addrinfo {
-                ai_flags: flags,
-                ai_family: address,
-                ai_socktype: socktype,
-                ai_protocol: protocol,
-                ai_addrlen: sockaddr.len(),
-                ai_addr: sockaddr.as_ptr() as *mut _,
+                ai_flags,
+                ai_family,
+                ai_socktype,
+                ai_protocol,
+                ai_addrlen,
+                ai_addr,
                 ai_canonname,
                 ai_next: ptr::null_mut(),
             }
@@ -396,8 +400,8 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {
-            // Safety: These pointers were just allocated using `Box::new`, so they should be fine
-            // regarding memory layout, and are not dangling.
+            // Safety: These pointers were just allocated using `Box::new`, so they should be
+            // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
             previous
         })
