@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
 - mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
 - mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
+- mirrord-layer: Fix DNS issue where `ai_addr` would not live long enough (breaking the remote DNS feature).
 
 ### Changed
 - Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
