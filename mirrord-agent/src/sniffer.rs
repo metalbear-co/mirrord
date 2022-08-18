@@ -125,6 +125,7 @@ fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
     Ok(capture)
 }
 
+#[derive(Debug)]
 struct TcpPacketData {
     bytes: Vec<u8>,
     flags: u16,
@@ -467,6 +468,9 @@ impl TCPConnectionSniffer {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
+                    if tcp_flags == 24 {
+                        debug!("handle_packet -> wiwiwi {:?}", &tcp_packet);
+                    }
                     debug!("not new connection {tcp_flags:?}");
                     return Ok(());
                 }
