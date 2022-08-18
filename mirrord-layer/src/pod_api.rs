@@ -5,7 +5,7 @@ use k8s_openapi::api::{
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, AttachParams, ListParams, LogParams, Portforwarder, PostParams},
+    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
