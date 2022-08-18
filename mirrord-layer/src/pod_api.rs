@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, ListParams, Portforwarder, PostParams},
+    api::{Api, AttachParams, ListParams, LogParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
@@ -159,6 +159,31 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
         .unwrap_or(false)
 }
 
+async fn wait_for_agent_startup(
+    pods_api: &Api<Pod>,
+    pod_name: &str,
+    container_name: String,
+) -> Result<(), LayerError> {
+    let mut logs = pods_api
+        .log_stream(
+            pod_name,
+            &LogParams {
+                follow: true,
+                container: Some(container_name),
+                ..LogParams::default()
+            },
+        )
+        .await?;
+
+    while let Some(line) = logs.try_next().await? {
+        let line = String::from_utf8_lossy(&line);
+        if line.contains("agent ready") {
+            break;
+        }
+    }
+    Ok(())
+}
+
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     agent_image: String,
@@ -234,6 +259,8 @@ async fn create_ephemeral_container_agent(
             debug!("container not ready yet");
         }
     }
+
+    wait_for_agent_startup(pods_api, &config.impersonated_pod_name, mirrord_agent_name).await?;
 
     debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
@@ -342,5 +369,6 @@ async fn create_job_pod_agent(
         .and_then(|pod| pod.metadata.name.clone())
         .ok_or(LayerError::PodNotFound(mirrord_agent_job_name))?;
 
+    wait_for_agent_startup(pods_api, &pod_name, "mirrord-agent".to_string()).await?;
     Ok(pod_name)
 }

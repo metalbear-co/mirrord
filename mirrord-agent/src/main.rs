@@ -332,6 +332,7 @@ async fn start_agent() -> Result<(), AgentError> {
         cancellation_token.clone(),
     ));
 
+    info!("agent ready");
     let mut clients = FuturesUnordered::new();
     loop {
         select! {
