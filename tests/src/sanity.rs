@@ -282,8 +282,8 @@ mod tests {
                         .delete(&name, &DeleteParams::default())
                         .await
                         .unwrap();
-                    barrier.wait();
                 }
+                barrier.wait();
             });
             guard
         }
