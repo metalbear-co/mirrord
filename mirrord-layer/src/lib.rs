@@ -23,7 +23,7 @@ use libc::c_int;
 use mirrord_macro::hook_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
-    GetEnvVarsRequest, RemoteResult,
+    GetEnvVarsRequest,
 };
 use rand::Rng;
 use socket::SOCKETS;

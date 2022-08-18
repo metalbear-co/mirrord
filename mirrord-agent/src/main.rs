@@ -28,7 +28,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 use util::{ClientID, IndexAllocator};
 

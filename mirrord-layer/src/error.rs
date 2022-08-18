@@ -3,7 +3,10 @@ use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 use errno::set_errno;
 use kube::config::InferConfigError;
 use libc::FILE;
-use mirrord_protocol::{tcp::LayerTcp, ResponseError};
+use mirrord_protocol::{
+    tcp::{outgoing, LayerTcp},
+    ResponseError,
+};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, warn};
@@ -62,6 +65,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: No connection found for id `{0}`!")]
     NoConnectionId(u16),
+
+    #[error("mirrord-layer: No connection found for mirror `{0}`!")]
+    MirrorNotFound(outgoing::ConnectionId),
 
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
@@ -167,6 +173,7 @@ impl From<LayerError> for i64 {
             LayerError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             LayerError::PortNotFound(_) => libc::EADDRNOTAVAIL,
             LayerError::ConnectionIdNotFound(_) => libc::EADDRNOTAVAIL,
+            LayerError::MirrorNotFound(_) => libc::EADDRNOTAVAIL,
             LayerError::ListenAlreadyExists => libc::EEXIST,
             LayerError::SendErrorFileResponse => libc::EINVAL,
             LayerError::SendErrorTcpResponse => libc::EINVAL,

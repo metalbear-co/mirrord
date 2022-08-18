@@ -6,13 +6,7 @@ use std::{
 };
 
 use futures::SinkExt;
-use mirrord_protocol::{
-    tcp::outgoing::{
-        ConnectRequest, ConnectResponse, ReadResponse, TcpOutgoingRequest, TcpOutgoingResponse,
-        WriteRequest, WriteResponse,
-    },
-    ClientCodec, ClientMessage,
-};
+use mirrord_protocol::{tcp::outgoing::*, ClientCodec, ClientMessage};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -38,18 +32,17 @@ pub(crate) struct MirrorConnect {
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
     pub(crate) channel_tx: ResponseChannel<MirrorConnect>,
-    pub(crate) user_fd: i32,
 }
 
 pub(crate) struct Write {
-    pub(crate) id: i32,
+    pub(crate) connection_id: ConnectionId,
     pub(crate) bytes: Vec<u8>,
 }
 
 impl fmt::Debug for Write {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Write")
-            .field("id", &self.id)
+            .field("id", &self.connection_id)
             .field("bytes (length)", &self.bytes.len())
             .finish()
     }
@@ -94,7 +87,7 @@ impl Default for TcpOutgoingHandler {
 impl TcpOutgoingHandler {
     /// TODO(alex) [low] 2022-08-09: Document this function.
     async fn interceptor_task(
-        id: i32,
+        connection_id: ConnectionId,
         mut mirror_stream: TcpStream,
         remote_stream: Receiver<Vec<u8>>,
     ) {
@@ -126,7 +119,7 @@ impl TcpOutgoingHandler {
 
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = Write { id, bytes: buffer[..read_amount].to_vec() };
+                            let write = Write { connection_id, bytes: buffer[..read_amount].to_vec() };
                             let outgoing_data = TcpOutgoing::Write(write);
 
                             // TODO(alex) [mid] 2022-08-09: Must handle a response from `agent`
@@ -175,8 +168,6 @@ impl TcpOutgoingHandler {
             TcpOutgoing::Connect(Connect {
                 remote_address,
                 channel_tx,
-                // TODO(alex) [mid] 2022-07-20: Has to be socket address, rather than fd?
-                user_fd,
             }) => {
                 trace!("Connect -> remote_address {:#?}", remote_address,);
 
@@ -184,19 +175,26 @@ impl TcpOutgoingHandler {
 
                 Ok(codec
                     .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Connect(
-                        ConnectRequest {
-                            user_fd,
-                            remote_address,
-                        },
+                        ConnectRequest { remote_address },
                     )))
                     .await?)
             }
-            TcpOutgoing::Write(Write { id, bytes }) => {
-                trace!("Write -> id {:#?} | bytes (len) {:#?}", id, bytes.len(),);
+            TcpOutgoing::Write(Write {
+                connection_id,
+                bytes,
+            }) => {
+                trace!(
+                    "Write -> connection_id {:#?} | bytes (len) {:#?}",
+                    connection_id,
+                    bytes.len(),
+                );
 
                 Ok(codec
                     .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Write(
-                        WriteRequest { id, bytes },
+                        WriteRequest {
+                            connection_id,
+                            bytes,
+                        },
                     )))
                     .await?)
             }
@@ -214,11 +212,14 @@ impl TcpOutgoingHandler {
                 trace!("Connect -> connect {:#?}", connect);
 
                 let ConnectResponse {
-                    user_fd,
+                    connection_id,
                     remote_address,
                 } = connect?;
 
-                debug!("handle_daemon_message -> usef_fd {:#?}", user_fd);
+                debug!(
+                    "handle_daemon_message -> connection_id {:#?}",
+                    connection_id
+                );
 
                 IS_INTERNAL_CALL.store(true, Ordering::Release);
 
@@ -265,10 +266,11 @@ impl TcpOutgoingHandler {
                 let (sender, receiver) = channel::<Vec<u8>>(1000);
 
                 // TODO(alex) [high] 2022-08-08: Should be very similar to `handle_new_connection`.
-                self.mirrors.insert(user_fd, ConnectionMirror { sender });
+                self.mirrors
+                    .insert(connection_id, ConnectionMirror { sender });
 
                 task::spawn(TcpOutgoingHandler::interceptor_task(
-                    user_fd,
+                    connection_id,
                     mirror_stream,
                     receiver,
                 ));
@@ -278,12 +280,15 @@ impl TcpOutgoingHandler {
             TcpOutgoingResponse::Read(read) => {
                 trace!("Read -> read {:?}", read);
                 // `agent` read something from remote, so we write it to the `user`.
-                let ReadResponse { id, bytes } = read?;
+                let ReadResponse {
+                    connection_id,
+                    bytes,
+                } = read?;
 
                 let sender = self
                     .mirrors
-                    .get_mut(&id)
-                    .ok_or(LayerError::LocalFDNotFound(id))
+                    .get_mut(&connection_id)
+                    .ok_or(LayerError::MirrorNotFound(connection_id))
                     .map(|mirror| &mut mirror.sender)?;
 
                 Ok(sender.send(bytes).await?)
@@ -291,7 +296,7 @@ impl TcpOutgoingHandler {
             TcpOutgoingResponse::Write(write) => {
                 trace!("Write -> write {:?}", write);
 
-                let WriteResponse { id } = write?;
+                let WriteResponse { connection_id } = write?;
                 // TODO(alex) [mid] 2022-07-20: Receive message from agent.
                 // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works
                 // with `Vec<u8>`, so maybe wrapping it in a `Result<Vec<u8>, Error>` would make

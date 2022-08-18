@@ -1,13 +1,7 @@
-use std::{
-    ffi::CStr,
-    net::{IpAddr, Ipv4Addr},
-    os::unix::io::RawFd,
-    slice,
-    sync::atomic::Ordering,
-};
+use std::{ffi::CStr, os::unix::io::RawFd, sync::atomic::Ordering};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{c_char, c_int, c_void, sockaddr, socklen_t};
+use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::hook_fn;
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
@@ -16,18 +10,6 @@ use tracing::{debug, error, trace, warn};
 use super::ops::*;
 use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
 
-/// TODO(alex) [high] 2022-08-15: Flow is (for named connect):
-/// 1. `socket` with domain set to `PF_ROUTE` (fd 28);
-/// 2. `bind` called on (fd 28) with address `sa_family: 16` and `sa_data` just a bunch of `0`s;
-/// 3. `getsockname` on (fd 28);
-/// 4. `socket` with domain `AF_INET`;
-/// 5. `setsockopt` on (fd 28) with option 11;
-/// 6. `connect` on (fd 28);
-///
-/// ADD(alex) [high] 2022-08-15: So, what happens is that it'll first try to connect to a local
-/// address. When the DNS feature is disabled, the first call to connect will have my lan IP, only
-/// after we do a second `socket` call and get the proper address lookup. It's like we must first
-/// connect to retrieve the address from "google.com", before we do an actual call to connect to it.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,

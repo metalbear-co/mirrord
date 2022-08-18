@@ -1,13 +1,7 @@
 use core::fmt;
 use std::{collections::HashMap, path::PathBuf};
 
-use mirrord_protocol::{
-    tcp::outgoing::{
-        ConnectRequest, ConnectResponse, ReadResponse, TcpOutgoingRequest, TcpOutgoingResponse,
-        WriteRequest, WriteResponse,
-    },
-    RemoteResult,
-};
+use mirrord_protocol::{tcp::outgoing::*, RemoteResult};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -29,14 +23,14 @@ pub(crate) struct TcpOutgoingApi {
 }
 
 pub struct Data {
-    id: i32,
+    connection_id: ConnectionId,
     bytes: Vec<u8>,
 }
 
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Data")
-            .field("id", &self.id)
+            .field("connection_id", &self.connection_id)
             .field("bytes (length)", &self.bytes.len())
             .finish()
     }
@@ -66,7 +60,7 @@ impl TcpOutgoingApi {
         mut write_rx: Receiver<Data>,
         stream: TcpStream,
     ) {
-        trace!("intercept_task -> id {:#?}", connection_id);
+        trace!("intercept_task -> connection_id {:#?}", connection_id);
 
         let mut buffer = vec![0; 1500];
         let (mut remote_reader, mut remote_writer) = stream.into_split();
@@ -83,10 +77,12 @@ impl TcpOutgoingApi {
                         }
                         Ok(read_amount) => {
                             let bytes = buffer[..read_amount].to_vec();
+
                             let read = ReadResponse {
-                                id: connection_id,
+                                connection_id,
                                 bytes,
                             };
+
                             let response = TcpOutgoingResponse::Read(Ok(read));
                             debug!("interceptor_task -> read response {:#?}", response);
 
@@ -116,7 +112,7 @@ impl TcpOutgoingApi {
                                 }
                                 Ok(()) => {
                                     let write = WriteResponse {
-                                        id: connection_id,
+                                        connection_id,
                                     };
                                     let response = TcpOutgoingResponse::Write(Ok(write));
                                     debug!("interceptor_task -> write response {:#?}", response);
@@ -162,10 +158,7 @@ impl TcpOutgoingApi {
                     trace!("inner_request_handler -> request {:?}", request);
 
                     match request {
-                        TcpOutgoingRequest::Connect(ConnectRequest {
-                            user_fd,
-                            remote_address,
-                        }) => {
+                        TcpOutgoingRequest::Connect(ConnectRequest { remote_address }) => {
                             let connect_response: RemoteResult<_> =
                                 TcpStream::connect(remote_address)
                                     .await
@@ -173,17 +166,24 @@ impl TcpOutgoingApi {
                                     .map(|remote_stream| {
                                         let (write_tx, write_rx) = mpsc::channel(1000);
 
-                                        senders.insert(user_fd, write_tx.clone());
+                                        let connection_id = senders
+                                            .keys()
+                                            .copied()
+                                            .last()
+                                            .map(|last| last + 1)
+                                            .unwrap_or_default();
+
+                                        senders.insert(connection_id, write_tx.clone());
 
                                         task::spawn(Self::interceptor_task(
-                                            user_fd,
+                                            connection_id,
                                             response_tx.clone(),
                                             write_rx,
                                             remote_stream,
                                         ));
 
                                         ConnectResponse {
-                                            user_fd,
+                                            connection_id,
                                             remote_address,
                                         }
                                     });
@@ -193,11 +193,18 @@ impl TcpOutgoingApi {
                             let response = TcpOutgoingResponse::Connect(connect_response);
                             response_tx.send(response).await?
                         }
-                        TcpOutgoingRequest::Write(WriteRequest { id, bytes }) => {
-                            trace!("Write -> request {:#?}", id);
+                        TcpOutgoingRequest::Write(WriteRequest {
+                            connection_id,
+                            bytes,
+                        }) => {
+                            trace!("Write -> request {:#?}", connection_id);
 
-                            let write = Data { id, bytes };
-                            senders.get(&id).unwrap().send(write).await?
+                            let write = Data {
+                                connection_id,
+                                bytes,
+                            };
+
+                            senders.get(&connection_id).unwrap().send(write).await?
                         }
                     }
                 }

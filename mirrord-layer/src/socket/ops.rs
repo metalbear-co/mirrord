@@ -4,17 +4,14 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
-use socket2::{Domain, SockAddr, Type};
+use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -227,7 +224,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             let (mirror_tx, mirror_rx) = oneshot::channel();
 
             let connect = Connect {
-                user_fd: sockfd,
                 remote_address,
                 channel_tx: mirror_tx,
             };
@@ -507,10 +503,4 @@ pub(super) fn getaddrinfo(
     info!("getaddrinfo -> result {:#?}", result);
 
     result
-}
-
-pub(crate) fn close(fd: usize) -> Result<(), LayerError> {
-    trace!("close -> fd {:#?}", fd);
-
-    todo!()
 }
