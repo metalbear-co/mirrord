@@ -12,6 +12,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - E2E - print contents of log directory on failure and add filename before print.
 
+### Added
+- E2E - add basic env tests for bash scripts
+
+
 ## 2.7.0
 
 ### Added
