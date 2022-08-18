@@ -95,10 +95,10 @@ fn is_closed_connection(flags: u16) -> bool {
 pub struct TcpManagerCodec;
 
 impl PacketCodec for TcpManagerCodec {
-    type Type = Vec<u8>;
+    type Item = Vec<u8>;
 
-    fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
-        Ok(packet.data.to_vec())
+    fn decode(&mut self, packet: pcap::Packet) -> Self::Item {
+        packet.data.to_vec()
     }
 }
 
@@ -359,7 +359,7 @@ impl TCPConnectionSniffer {
 
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
-        let sniffer = self.stream.inner_mut();
+        let sniffer = self.stream.capture_mut();
 
         if ports.is_empty() {
             debug!("packet_worker -> empty ports, setting dummy bpf");
