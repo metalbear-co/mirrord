@@ -11,6 +11,7 @@ mod tests {
         time::Duration,
     };
 
+    use chrono::Utc;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -31,6 +32,7 @@ mod tests {
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
+        task::JoinHandle,
         time::timeout,
     };
     // 0.8
@@ -132,7 +134,7 @@ mod tests {
                     }
 
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr {pid}: {}", string);
+                    eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -147,7 +149,7 @@ mod tests {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout pid {pid}: {}", string);
+                    println!("stdout {:?} {pid}: {}", Utc::now(), string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -252,6 +254,7 @@ mod tests {
     struct ResourceGuard {
         guard: Option<DropGuard>,
         barrier: std::sync::Arc<std::sync::Barrier>,
+        handle: JoinHandle<()>,
     }
 
     impl ResourceGuard {
@@ -266,29 +269,37 @@ mod tests {
             let cancel_token = CancellationToken::new();
             let resource_token = cancel_token.clone();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-            let guard = Self {
-                guard: Some(resource_token.drop_guard()),
-                barrier: barrier.clone(),
-            };
+            let guard_barrier = barrier.clone();
             let name = name.clone();
             let cloned_api = api.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 cancel_token.cancelled().await;
+                // Don't clean pods on failure, so that we can debug
+                println!("deleting {:?}", &name);
                 cloned_api
                     .delete(&name, &DeleteParams::default())
                     .await
                     .unwrap();
                 barrier.wait();
             });
+            let guard = Self {
+                guard: Some(resource_token.drop_guard()),
+                barrier: guard_barrier,
+                handle,
+            };
             guard
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            let guard = self.guard.take();
-            drop(guard);
-            self.barrier.wait();
+            if std::thread::panicking() {
+                self.handle.abort();
+            } else {
+                let guard = self.guard.take();
+                drop(guard);
+                self.barrier.wait();
+            }
         }
     }
 
