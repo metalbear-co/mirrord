@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, ListParams, Portforwarder, PostParams},
+    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
@@ -29,9 +29,9 @@ impl RuntimeData {
         pod_name: &str,
         pod_namespace: &str,
         container_name: &Option<String>,
-    ) -> Self {
+    ) -> Result<Self> {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
-        let pod = pods_api.get(pod_name).await.unwrap();
+        let pod = pods_api.get(pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
@@ -43,8 +43,7 @@ impl RuntimeData {
                         "no container named {} found in namespace={}, pod={}",
                         &container_name, &pod_namespace, &pod_name
                     )
-                })
-                .unwrap()
+                })?
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
@@ -65,12 +64,12 @@ impl RuntimeData {
 
         let container_id = container_info.last().unwrap();
 
-        RuntimeData {
+        Ok(RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
             socket_path: socket_path.to_string(),
-        }
+        })
     }
 }
 
@@ -120,7 +119,7 @@ pub(crate) async fn create_agent(
             &config,
             agent_image,
             &pods_api,
-            runtime_data,
+            runtime_data.unwrap(),
             &jobs_api,
             connection_port,
         )
@@ -158,6 +157,31 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
                 })
         })
         .unwrap_or(false)
+}
+
+async fn wait_for_agent_startup(
+    pods_api: &Api<Pod>,
+    pod_name: &str,
+    container_name: String,
+) -> Result<(), LayerError> {
+    let mut logs = pods_api
+        .log_stream(
+            pod_name,
+            &LogParams {
+                follow: true,
+                container: Some(container_name),
+                ..LogParams::default()
+            },
+        )
+        .await?;
+
+    while let Some(line) = logs.try_next().await? {
+        let line = String::from_utf8_lossy(&line);
+        if line.contains("agent ready") {
+            break;
+        }
+    }
+    Ok(())
 }
 
 async fn create_ephemeral_container_agent(
@@ -241,6 +265,8 @@ async fn create_ephemeral_container_agent(
             debug!("container not ready yet");
         }
     }
+
+    wait_for_agent_startup(pods_api, &config.impersonated_pod_name, mirrord_agent_name).await?;
 
     debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
@@ -349,5 +375,6 @@ async fn create_job_pod_agent(
         .and_then(|pod| pod.metadata.name.clone())
         .ok_or(LayerError::PodNotFound(mirrord_agent_job_name))?;
 
+    wait_for_agent_startup(pods_api, &pod_name, "mirrord-agent".to_string()).await?;
     Ok(pod_name)
 }

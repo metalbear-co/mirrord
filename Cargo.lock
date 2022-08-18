@@ -289,9 +289,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfd4d1b31faaa3a89d7934dbded3111da0d2ef28e3ebccdb4f0179f5929d1ef1"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-integer",
  "num-traits",
  "serde",
+ "time",
+ "wasm-bindgen",
  "winapi",
 ]
 
@@ -852,7 +855,7 @@ checksum = "4eb1a864a501629691edf6c15a593b7a51eebaa1e8468e9ddc623de7c9b58ec6"
 dependencies = [
  "cfg-if",
  "libc",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
 ]
 
 [[package]]
@@ -1297,9 +1300,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.131"
+version = "0.2.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04c3b4822ccebfa39c02fc03d1534441b22ead323fa0f48bb7ddd8e6ba076a40"
+checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
 
 [[package]]
 name = "libloading"
@@ -1401,13 +1404,13 @@ checksum = "57ee1c23c7c63b0c9250c339ffdc69255f110b298b901b9f6c82547b7b87caaf"
 dependencies = [
  "libc",
  "log",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys",
 ]
 
 [[package]]
 name = "mirrord"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
@@ -1421,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1452,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1485,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macro"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1494,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "2.6.0"
+version = "2.7.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1762,16 +1765,18 @@ checksum = "9423e2b32f7a043629287a536f21951e8c6a82482d0acb1eeebfc90bc2225b22"
 
 [[package]]
 name = "pcap"
-version = "0.9.2"
-source = "git+https://github.com/aviramha/pcap.git?branch=make_codec_public#df1b99fdff9cb1b30d6a360f69ddd6c6791f1c37"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2da544c8115cc65b474554569c7654fc94a4f6a167f79192536e148fd654e17a"
 dependencies = [
+ "bitflags",
  "errno",
  "futures",
  "libc",
  "libloading 0.6.7",
  "regex",
  "tokio",
- "winapi",
+ "windows-sys",
 ]
 
 [[package]]
@@ -2632,6 +2637,7 @@ checksum = "8e7a7de15468c6e65dd7db81cf3822c1ec94c71b2a3c1a976ea8e4696c91115c"
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "futures-util",
  "k8s-openapi",
@@ -2690,6 +2696,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5516c27b78311c50bf42c071425c560ac799b11c30b31f87e3081965fe5e0180"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "time"
+version = "0.1.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6db9e6914ab8b1ae1c260a4ae7a49b6c5611b40328a735b21862567685e73255"
+dependencies = [
+ "libc",
+ "wasi 0.10.0+wasi-snapshot-preview1",
+ "winapi",
 ]
 
 [[package]]
@@ -3126,6 +3143,12 @@ dependencies = [
  "log",
  "try-lock",
 ]
+
+[[package]]
+name = "wasi"
+version = "0.10.0+wasi-snapshot-preview1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a143597ca7c7793eff794def352d41792a93c481eb1042423ff7ff72ba2c31f"
 
 [[package]]
 name = "wasi"

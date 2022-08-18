@@ -19,7 +19,7 @@ containerd-client = {git = "https://github.com/containerd/rust-extensions", rev=
 tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
-pcap = { git = "https://github.com/aviramha/pcap.git", branch="make_codec_public", features =["capture-stream"] }
+pcap = { version = "0.10", features =["capture-stream"] }
 pnet = "0.31"
 nix.workspace = true
 clap.workspace = true

@@ -11,6 +11,7 @@ mod tests {
         time::Duration,
     };
 
+    use chrono::Utc;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -31,6 +32,7 @@ mod tests {
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
+        task::JoinHandle,
         time::timeout,
     };
     // 0.8
@@ -132,7 +134,7 @@ mod tests {
                     }
 
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr {pid}: {}", string);
+                    eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -147,7 +149,7 @@ mod tests {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout pid {pid}: {}", string);
+                    println!("stdout {:?} {pid}: {}", Utc::now(), string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -252,6 +254,7 @@ mod tests {
     struct ResourceGuard {
         guard: Option<DropGuard>,
         barrier: std::sync::Arc<std::sync::Barrier>,
+        handle: JoinHandle<()>,
     }
 
     impl ResourceGuard {
@@ -266,29 +269,37 @@ mod tests {
             let cancel_token = CancellationToken::new();
             let resource_token = cancel_token.clone();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-            let guard = Self {
-                guard: Some(resource_token.drop_guard()),
-                barrier: barrier.clone(),
-            };
+            let guard_barrier = barrier.clone();
             let name = name.clone();
             let cloned_api = api.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 cancel_token.cancelled().await;
+                // Don't clean pods on failure, so that we can debug
+                println!("deleting {:?}", &name);
                 cloned_api
                     .delete(&name, &DeleteParams::default())
                     .await
                     .unwrap();
                 barrier.wait();
             });
+            let guard = Self {
+                guard: Some(resource_token.drop_guard()),
+                barrier: guard_barrier,
+                handle,
+            };
             guard
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            let guard = self.guard.take();
-            drop(guard);
-            self.barrier.wait();
+            if std::thread::panicking() {
+                self.handle.abort();
+            } else {
+                let guard = self.guard.take();
+                drop(guard);
+                self.barrier.wait();
+            }
         }
     }
 
@@ -552,7 +563,7 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(Application::PythonHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -745,29 +756,95 @@ mod tests {
         process.assert_stderr();
     }
 
-    #[cfg(target_os = "macos")]
+    #[rstest]
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh"];
+        let mirrord_args = vec!["--override-env-vars-include", "*"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
+        let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_remote_env_vars_include_works(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
+        let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    // Currently fails due to Layer >> AddressConversion in ci for some reason
+
+    #[ignore]
+    #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_steal_http_traffic(
-        #[future] service: EchoService,
-        #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
-        #[values(Agent::Job)] agent: Agent,
-    ) {
+    pub async fn test_bash_file_exists(#[future] service: EchoService) {
         let service = service.await;
-        let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--tcp-steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), Some(flags))
-            .await;
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
-        send_requests(&url, true).await;
-        timeout(Duration::from_secs(40), process.child.wait())
-            .await
-            .unwrap()
-            .unwrap();
+        let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
+        let mirrord_args = vec!["--enable-fs"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    // currently there is an issue with piping across forks of processes so 'test_bash_file_read'
+    // and 'test_bash_file_write' cannot pass
+
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_file_read(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
+        let mirrord_args = vec!["--enable-fs"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_file_write(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
+        let mirrord_args = vec!["--enable-fs"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
         process.assert_stderr();
     }
 }

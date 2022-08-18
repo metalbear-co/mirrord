@@ -6,6 +6,21 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Fixed
+- mirrord-agent - Update pcap library, hopefully will fix dropped packets (syn sometimes missed in e2e).
+- mirrord-agent/layer - Sometimes layer tries to conenct to agent before it finsihed loading, even though pod is running. Added watching the log stream for a "ready" log message before attempting to connect.
+
+### Changed
+- E2E - describe all pods on failure and add file name to print of logs.
+- E2E - print timestamp of stdout/stderr of `TestProcess`.
+- E2E - Don't delete pod/service on failure, instead leave them for debugging.
+
+
+### Added
+- E2E - add basic env tests for bash scripts
+
+
+## 2.7.0
 
 ### Added
 - mirrord-layer: You can now pass `MIRRORD_AGENT_COMMUNICATION_TIMEOUT` as environment variable to control agent timeout.
@@ -15,6 +30,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
 - mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
 - mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
+- mirrord-layer: Fix DNS issue where `ai_addr` would not live long enough (breaking the remote DNS feature).
 
 ### Changed
 - Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
@@ -30,6 +46,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - macOS colima start with 3 cores and 8GB of RAM.
 - E2E - Increase agent communication timeout to reduce flakiness.
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
+- mirrord-layer - extract reused detours to seperate logic functions
+- E2E - macOS run only sanity http mirror traffic with Python
+
 
 ## 2.6.0
 
@@ -63,6 +82,7 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 - E2E: Collect minikube logs and fix collecting container logs
 - E2E: macOS use colima instead of minikube.
 - Refactored `mirrord-layer/lib.rs` - no more passing many arguments! :)
+- Refactored `mirrord-layer/lib.rs` - remove `unwrap()` and propagate error using `Result`
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.
