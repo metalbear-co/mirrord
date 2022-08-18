@@ -706,6 +706,7 @@ mod tests {
     }
 
     #[rstest]
+    #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
@@ -719,6 +720,7 @@ mod tests {
     }
 
     #[rstest]
+    #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
@@ -732,6 +734,7 @@ mod tests {
     }
 
     #[rstest]
+    #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_bash_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
