@@ -374,63 +374,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.end_transaction();
 }
 
-/*
-
-/// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
-/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
-/// so it tries to do the same for files.
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    trace!("close_detour -> fd {:#?}", fd);
-
-    let enabled_file_ops = ENABLED_FILE_OPS
-        .get()
-        .expect("Should be set during initialization!");
-
-    if let Some(mirror_socket) = SOCKETS.lock().unwrap().remove(&fd) {
-        match mirror_socket.state {
-            socket::SocketState::Initialized => todo!(),
-            socket::SocketState::Bound(_) => todo!(),
-            socket::SocketState::Listening(Bound {
-                requested_port,
-                address,
-            }) => todo!(),
-            socket::SocketState::Connected(Connected {
-                remote_address,
-                mirror_address,
-            }) => todo!(),
-        }
-
-        socket::ops::close(fd);
-
-        FN_CLOSE(fd)
-    } else if *enabled_file_ops {
-        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
-
-        if let Some(remote_fd) = remote_fd {
-            let close_file_result = file::ops::close(remote_fd);
-
-            close_file_result
-                .map_err(|fail| {
-                    error!("Failed writing file with {fail:#?}");
-                    -1
-                })
-                .unwrap_or_else(|fail| fail)
-        } else {
-            FN_CLOSE(fd)
-        }
-    } else {
-        FN_CLOSE(fd)
-    }
-}
-
-
- */
-
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 #[hook_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    trace!("close_detour -> fd {:#?}", fd);
+
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
