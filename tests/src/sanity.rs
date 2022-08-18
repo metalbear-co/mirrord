@@ -277,6 +277,7 @@ mod tests {
                 cancel_token.cancelled().await;
                 // Don't clean pods on failure, so that we can debug
                 if !std::thread::panicking() {
+                    println!("deleting {:?}", &name);
                     cloned_api
                         .delete(&name, &DeleteParams::default())
                         .await
