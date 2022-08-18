@@ -275,11 +275,14 @@ mod tests {
             let cloned_api = api.clone();
             tokio::spawn(async move {
                 cancel_token.cancelled().await;
-                cloned_api
-                    .delete(&name, &DeleteParams::default())
-                    .await
-                    .unwrap();
-                barrier.wait();
+                // Don't clean pods on failure, so that we can debug
+                if !std::thread::panicking() {
+                    cloned_api
+                        .delete(&name, &DeleteParams::default())
+                        .await
+                        .unwrap();
+                    barrier.wait();
+                }
             });
             guard
         }
