@@ -10,10 +10,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionID, Port,
 };
-use pcap::{
-    stream::{PacketCodec, PacketStream},
-    Active, Capture, Device, Linktype,
-};
+use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
