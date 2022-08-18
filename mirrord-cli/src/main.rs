@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use exec::execvp;
+use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -148,6 +149,40 @@ fn exec(args: &ExecArgs) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+fn save_token(token: &str) -> Result<()> {
+    File::create("~/.mirrord_credentials")?
+        .write_all(format!("MIRRORD_API_KEY={}", token).as_bytes())?;
+
+    Ok(())
+}
+
+fn login(args: LoginArgs) -> Result<()> {
+    match &args.token {
+        Some(token) => save_token(token),
+        None => {
+            let ref_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+
+            webbrowser::open(&format!(
+                "https://identity.metalbear.co/login?ref={}",
+                ref_id
+            ))?;
+
+            let client = reqwest::blocking::Client::new();
+
+            let token = client
+                .get(format!(
+                    "https://identity.metalbear.co/callback?ref={}",
+                    ref_id
+                ))
+                .timeout(Duration::from_secs(args.timeout))
+                .send()?
+                .text()?;
+
+            save_token(&token)
+        }
+    }
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
@@ -162,6 +197,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path))?;
         }
+        Commands::Login(args) => login(args)?,
     }
     Ok(())
 }

@@ -14,6 +14,7 @@ pub(super) enum Commands {
         #[clap(value_parser)]
         path: String,
     },
+    Login(LoginArgs),
 }
 
 #[derive(Args, Debug)]
@@ -81,4 +82,13 @@ pub(super) struct ExecArgs {
     /// Use an Ephemeral Container to mirror traffic.
     #[clap(short, long, value_parser)]
     pub ephemeral_container: bool,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct LoginArgs {
+    #[clap(long)]
+    pub token: Option<String>,
+
+    #[clap(long, default_value = "120")]
+    pub timeout: u64,
 }
