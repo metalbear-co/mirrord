@@ -10,10 +10,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionID, Port,
 };
-use pcap::{
-    stream::{PacketCodec, PacketStream},
-    Active, Capture, Device, Linktype,
-};
+use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -98,10 +95,10 @@ fn is_closed_connection(flags: u16) -> bool {
 pub struct TcpManagerCodec;
 
 impl PacketCodec for TcpManagerCodec {
-    type Type = Vec<u8>;
+    type Item = Vec<u8>;
 
-    fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
-        Ok(packet.data.to_vec())
+    fn decode(&mut self, packet: pcap::Packet) -> Self::Item {
+        packet.data.to_vec()
     }
 }
 
@@ -128,6 +125,7 @@ fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
     Ok(capture)
 }
 
+#[derive(Debug)]
 struct TcpPacketData {
     bytes: Vec<u8>,
     flags: u16,
@@ -362,7 +360,7 @@ impl TCPConnectionSniffer {
 
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
-        let sniffer = self.stream.inner_mut();
+        let sniffer = self.stream.capture_mut();
 
         if ports.is_empty() {
             debug!("packet_worker -> empty ports, setting dummy bpf");
@@ -483,6 +481,9 @@ impl TCPConnectionSniffer {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
+                    if tcp_flags == 24 {
+                        debug!("handle_packet -> wiwiwi {:?}", &tcp_packet);
+                    }
                     debug!("not new connection {tcp_flags:?}");
                     return Ok(());
                 }

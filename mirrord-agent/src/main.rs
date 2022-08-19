@@ -342,6 +342,8 @@ impl ClientConnectionHandler {
 async fn start_agent() -> Result<(), AgentError> {
     let args = parse_args();
 
+    debug!("starting with args {args:?}");
+
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::new(0, 0, 0, 0),
         args.communicate_port,
@@ -368,6 +370,7 @@ async fn start_agent() -> Result<(), AgentError> {
         cancellation_token.clone(),
     ));
 
+    info!("agent ready");
     let mut clients = FuturesUnordered::new();
     loop {
         select! {

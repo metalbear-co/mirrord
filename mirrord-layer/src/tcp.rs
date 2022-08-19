@@ -6,7 +6,6 @@ use std::{
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::io::RawFd,
-    sync::atomic::Ordering,
 };
 
 use async_trait::async_trait;
@@ -20,7 +19,8 @@ use tracing::{debug, trace};
 
 use crate::{
     error::LayerError,
-    socket::{ops::IS_INTERNAL_CALL, SocketInformation, CONNECTION_QUEUE},
+    socket::{SocketInformation, CONNECTION_QUEUE},
+    DetourGuard,
 };
 
 pub(crate) mod outgoing;
@@ -148,9 +148,10 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
-        IS_INTERNAL_CALL.store(true, Ordering::Release);
-        let tcp_stream = TcpStream::connect(addr).await.map_err(From::from);
-        IS_INTERNAL_CALL.store(false, Ordering::Release);
+        let tcp_stream = {
+            let _ = DetourGuard::new();
+            TcpStream::connect(addr).await.map_err(From::from)
+        };
 
         tcp_stream
     }

@@ -131,6 +131,12 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AccessFileRequest {
+    pub pathname: PathBuf,
+    pub mode: u8,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetEnvVarsRequest {
     pub env_vars_filter: HashSet<String>,
     pub env_vars_select: HashSet<String>,
@@ -144,6 +150,7 @@ pub enum FileRequest {
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
+    Access(AccessFileRequest),
 }
 
 /// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
@@ -194,6 +201,9 @@ pub struct WriteFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileResponse;
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AccessFileResponse;
+
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
@@ -204,6 +214,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
+    Access(RemoteResult<AccessFileResponse>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

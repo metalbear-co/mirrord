@@ -6,6 +6,12 @@ lookup("nginx")
   .then((resolved) => {
     console.log(">> resolved ", resolved);
 
+    assert(
+      resolved.address !== "255.127.0.0",
+      ">> Trying to resolve pod failed with an invalid address ",
+      resolved
+    );
+
     process.exit(0);
   })
   .catch((fail) => {

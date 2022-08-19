@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
 };
 
 use dns_lookup::AddrInfo;
@@ -22,13 +22,6 @@ use crate::{
         HookMessageTcp, Listen,
     },
 };
-
-// TODO(alex) [high] 2022-07-21: Separate sockets into 2 compartments, listen sockets go into a
-// thread for listening, connect sockets into another thread. Try to get rid of the overall global
-// theme around sockets.
-// Worth it?
-
-pub(crate) static IS_INTERNAL_CALL: AtomicBool = AtomicBool::new(false);
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd, LayerError> {
@@ -468,7 +461,7 @@ pub(super) fn getaddrinfo(
             let rawish_sockaddr = socket2::SockAddr::from(sockaddr);
             let ai_addrlen = rawish_sockaddr.len();
 
-            // Must be allocated, as it is stored as a pointer in `libc::addrinfo`.
+            // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
             let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sockaddr.as_ptr() }));
 
             let canonname = canonname.map(CString::new).transpose().unwrap();
@@ -483,7 +476,6 @@ pub(super) fn getaddrinfo(
                 ai_socktype,
                 ai_protocol,
                 ai_addrlen,
-                // TODO(alex) [high] 2022-08-16: Box this, otherwise we lose it.
                 ai_addr,
                 ai_canonname,
                 ai_next: ptr::null_mut(),

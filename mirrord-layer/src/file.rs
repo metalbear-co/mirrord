@@ -10,10 +10,10 @@ use std::{
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
+    CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
+    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -128,6 +128,7 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
+    access_queue: ResponseDeque<AccessFileResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -175,6 +176,10 @@ impl FileHandler {
                 debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
                 pop_send(&mut self.close_queue, close)
             }
+            Access(access) => {
+                debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
+                pop_send(&mut self.access_queue, access)
+            }
         }
     }
 
@@ -197,6 +202,7 @@ impl FileHandler {
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
+            Access(access) => self.handle_hook_access(access, codec).await,
         }
     }
 
@@ -365,6 +371,33 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
         codec.send(request).await.map_err(From::from)
     }
+
+    async fn handle_hook_access(
+        &mut self,
+        access: Access,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<(), LayerError> {
+        let Access {
+            pathname,
+            mode,
+            file_channel_tx,
+        } = access;
+
+        debug!(
+            "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
+            pathname, mode
+        );
+
+        self.access_queue.push_back(file_channel_tx);
+
+        let access_file_request = AccessFileRequest { pathname, mode };
+
+        let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
 }
 
 #[derive(Debug)]
@@ -410,6 +443,13 @@ pub struct Close {
 }
 
 #[derive(Debug)]
+pub struct Access {
+    pub(crate) pathname: PathBuf,
+    pub(crate) mode: u8,
+    pub(crate) file_channel_tx: ResponseChannel<AccessFileResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -417,4 +457,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Write(Write),
     Close(Close),
+    Access(Access),
 }

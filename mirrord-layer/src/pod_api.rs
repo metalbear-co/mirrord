@@ -5,14 +5,14 @@ use k8s_openapi::api::{
     core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, ListParams, Portforwarder, PostParams},
-    core::WatchEvent,
-    runtime::wait::{await_condition, conditions::is_pod_running},
+    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
+    runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
-use tracing::{debug, error, info, warn};
+use tokio::pin;
+use tracing::{debug, info, warn};
 
 use crate::{config::LayerConfig, error::LayerError};
 
@@ -29,9 +29,9 @@ impl RuntimeData {
         pod_name: &str,
         pod_namespace: &str,
         container_name: &Option<String>,
-    ) -> Self {
+    ) -> Result<Self> {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
-        let pod = pods_api.get(pod_name).await.unwrap();
+        let pod = pods_api.get(pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
@@ -43,8 +43,7 @@ impl RuntimeData {
                         "no container named {} found in namespace={}, pod={}",
                         &container_name, &pod_namespace, &pod_name
                     )
-                })
-                .unwrap()
+                })?
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
@@ -65,12 +64,12 @@ impl RuntimeData {
 
         let container_id = container_info.last().unwrap();
 
-        RuntimeData {
+        Ok(RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
             node_name: node_name.as_ref().unwrap().to_string(),
             socket_path: socket_path.to_string(),
-        }
+        })
     }
 }
 
@@ -120,7 +119,7 @@ pub(crate) async fn create_agent(
             &config,
             agent_image,
             &pods_api,
-            runtime_data,
+            runtime_data.unwrap(),
             &jobs_api,
             connection_port,
         )
@@ -160,6 +159,31 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
         .unwrap_or(false)
 }
 
+async fn wait_for_agent_startup(
+    pods_api: &Api<Pod>,
+    pod_name: &str,
+    container_name: String,
+) -> Result<(), LayerError> {
+    let mut logs = pods_api
+        .log_stream(
+            pod_name,
+            &LogParams {
+                follow: true,
+                container: Some(container_name),
+                ..LogParams::default()
+            },
+        )
+        .await?;
+
+    while let Some(line) = logs.try_next().await? {
+        let line = String::from_utf8_lossy(&line);
+        if line.contains("agent ready") {
+            break;
+        }
+    }
+    Ok(())
+}
+
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     agent_image: String,
@@ -171,20 +195,24 @@ async fn create_ephemeral_container_agent(
 
     let mirrord_agent_name = get_agent_name();
 
+    let mut agent_command_line = vec![
+        "./mirrord-agent".to_string(),
+        "-l".to_string(),
+        connection_port.to_string(),
+        "-e".to_string(),
+    ];
+    if let Some(timeout) = config.agent_communication_timeout {
+        agent_command_line.push("-t".to_string());
+        agent_command_line.push(timeout.to_string());
+    }
+
     let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
         "name": mirrord_agent_name,
         "image": agent_image,
         "imagePullPolicy": config.image_pull_policy,
         "targetContainerName": config.impersonated_container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
-        "command": [
-            "./mirrord-agent",
-            "-t",
-            "30",
-            "-l",
-            connection_port.to_string(),
-            "-e",
-        ],
+        "command": agent_command_line,
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
@@ -220,29 +248,20 @@ async fn create_ephemeral_container_agent(
         .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
         .timeout(60);
 
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+    pin!(stream);
 
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Modified(pod) | WatchEvent::Added(pod) => {
-                if is_ephemeral_container_running(pod, &mirrord_agent_name) {
-                    debug!("container ready");
-                    break;
-                } else {
-                    debug!("container not ready yet");
-                }
-            }
-            WatchEvent::Error(s) => {
-                error!("Error watching pod: {:?}", s);
-                break;
-            }
-            _ => {}
+    while let Some(Ok(pod)) = stream.next().await {
+        if is_ephemeral_container_running(pod, &mirrord_agent_name) {
+            debug!("container ready");
+            break;
+        } else {
+            debug!("container not ready yet");
         }
     }
+
+    wait_for_agent_startup(pods_api, &config.impersonated_pod_name, mirrord_agent_name).await?;
+
     debug!("container is ready");
     Ok(config.impersonated_pod_name.clone())
 }
@@ -256,6 +275,20 @@ async fn create_job_pod_agent(
     connection_port: u16,
 ) -> Result<String, LayerError> {
     let mirrord_agent_job_name = get_agent_name();
+
+    let mut agent_command_line = vec![
+        "./mirrord-agent".to_string(),
+        "--container-id".to_string(),
+        runtime_data.container_id,
+        "--container-runtime".to_string(),
+        runtime_data.container_runtime,
+        "-l".to_string(),
+        connection_port.to_string(),
+    ];
+    if let Some(timeout) = config.agent_communication_timeout {
+        agent_command_line.push("-t".to_string());
+        agent_command_line.push(timeout.to_string());
+    }
 
     let agent_pod: Job =
         serde_json::from_value(json!({ // Only Jobs support self deletion after completion
@@ -295,17 +328,7 @@ async fn create_job_pod_agent(
                                     "name": "sockpath"
                                 }
                             ],
-                            "command": [
-                                "./mirrord-agent",
-                                "--container-id",
-                                runtime_data.container_id,
-                                "--container-runtime",
-                                runtime_data.container_runtime,
-                                "-t",
-                                "30",
-                                "-l",
-                                connection_port.to_string(),
-                            ],
+                            "command": agent_command_line,
                             "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
                         }
                     ]
@@ -323,21 +346,16 @@ async fn create_job_pod_agent(
         .labels(&format!("job-name={}", mirrord_agent_job_name))
         .timeout(60);
 
-    let mut stream = pods_api
-        .watch(&params, "0")
-        .await
-        .map_err(LayerError::KubeError)?
-        .boxed();
+    let stream = watcher(pods_api.clone(), params).applied_objects();
+    pin!(stream);
 
-    while let Some(status) = stream.try_next().await? {
-        match status {
-            WatchEvent::Added(_) => break,
-            WatchEvent::Error(s) => {
-                error!("Error watching pods: {:?}", s);
-                break;
+    while let Some(Ok(pod)) = stream.next().await {
+        if let Some(status) = &pod.status && let Some(phase) = &status.phase {
+                    debug!("Pod Phase = {phase:?}");
+                if phase == "Running" {
+                    break;
+                }
             }
-            _ => {}
-        }
     }
 
     let pods = pods_api
@@ -345,12 +363,12 @@ async fn create_job_pod_agent(
         .await
         .map_err(LayerError::KubeError)?;
 
-    let pod = pods.items.first().unwrap();
-    let pod_name = pod.metadata.name.clone().unwrap();
-    let running = await_condition(pods_api.clone(), &pod_name, is_pod_running());
+    let pod_name = pods
+        .items
+        .first()
+        .and_then(|pod| pod.metadata.name.clone())
+        .ok_or(LayerError::PodNotFound(mirrord_agent_job_name))?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(120), running)
-        .await
-        .map_err(|_| LayerError::TimeOutError)?; // TODO: convert the elapsed error to string?
+    wait_for_agent_startup(pods_api, &pod_name, "mirrord-agent".to_string()).await?;
     Ok(pod_name)
 }

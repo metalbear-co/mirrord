@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::atomic::Ordering,
 };
 
 use futures::SinkExt;
@@ -20,7 +19,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
     error::LayerError,
-    socket::ops::IS_INTERNAL_CALL,
+    DetourGuard,
 };
 
 #[derive(Debug)]
@@ -221,47 +220,49 @@ impl TcpOutgoingHandler {
                     connection_id
                 );
 
-                IS_INTERNAL_CALL.store(true, Ordering::Release);
+                let mirror_stream = {
+                    let _ = DetourGuard::new();
 
-                debug!("handle_daemon_message -> before binding");
-                // TODO(alex) [mid] 2022-08-08: This must match the `family` of the original
-                // request, meaning that, if the user tried to connect with Ipv4, this should be
-                // an Ipv4 (same for Ipv6).
-                let mirror_listener = match remote_address {
-                    SocketAddr::V4(_) => {
-                        TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-                            .await?
+                    debug!("handle_daemon_message -> before binding");
+                    // TODO(alex) [mid] 2022-08-08: This must match the `family` of the original
+                    // request, meaning that, if the user tried to connect with Ipv4, this should be
+                    // an Ipv4 (same for Ipv6).
+                    let mirror_listener = match remote_address {
+                        SocketAddr::V4(_) => {
+                            TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                                .await?
+                        }
+                        SocketAddr::V6(_) => {
+                            TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                                .await?
+                        }
+                    };
+
+                    debug!(
+                        "handle_daemon_message -> mirror_listener {:#?}",
+                        mirror_listener
+                    );
+
+                    {
+                        let mirror_address = mirror_listener.local_addr()?;
+                        let mirror_connect = MirrorConnect { mirror_address };
+
+                        let _ = self
+                            .connect_queue
+                            .pop_front()
+                            .ok_or(LayerError::SendErrorTcpResponse)?
+                            .send(Ok(mirror_connect))
+                            .map_err(|_| LayerError::SendErrorTcpResponse)?;
                     }
-                    SocketAddr::V6(_) => {
-                        TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                            .await?
-                    }
-                };
 
-                debug!(
-                    "handle_daemon_message -> mirror_listener {:#?}",
-                    mirror_listener
-                );
+                    let (mirror_stream, user_address) = mirror_listener.accept().await?;
+                    debug!(
+                        "handle_daemon_message -> mirror_stream {:#?}",
+                        mirror_stream
+                    );
 
-                {
-                    let mirror_address = mirror_listener.local_addr()?;
-                    let mirror_connect = MirrorConnect { mirror_address };
-
-                    let _ = self
-                        .connect_queue
-                        .pop_front()
-                        .ok_or(LayerError::SendErrorTcpResponse)?
-                        .send(Ok(mirror_connect))
-                        .map_err(|_| LayerError::SendErrorTcpResponse)?;
-                }
-
-                let (mirror_stream, user_address) = mirror_listener.accept().await?;
-                debug!(
-                    "handle_daemon_message -> mirror_stream {:#?}",
                     mirror_stream
-                );
-
-                IS_INTERNAL_CALL.store(false, Ordering::Release);
+                };
 
                 let (sender, receiver) = channel::<Vec<u8>>(1000);
 
