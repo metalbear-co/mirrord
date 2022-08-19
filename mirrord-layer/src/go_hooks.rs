@@ -1,12 +1,18 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
-pub(crate) mod go_socket_hooks {
-    use std::arch::asm;
+pub(crate) mod go_hooks {
+    use std::{arch::asm, sync::OnceLock};
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
+    use tracing::error;
 
-    use crate::{close_detour, macros::hook_symbol, socket::hooks::*};
+    use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*};
+    static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+    /*
+     * Reference for which which syscall detours call file/socket detours:
+     *
+     */
 
     /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
     /// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
@@ -309,6 +315,16 @@ pub(crate) mod go_socket_hooks {
             libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
             libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_close => close_detour(param1 as _) as i64,
+
+            _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
+                libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _) as i64,
+                _ => {
+                    let syscall_res = syscall_3(syscall, param1, param2, param3);
+                    return syscall_res;
+                }
+            },
             _ => {
                 let syscall_res = syscall_3(syscall, param1, param2, param3);
                 return syscall_res;
@@ -336,6 +352,14 @@ pub(crate) mod go_socket_hooks {
             libc::SYS_accept4 => {
                 accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
             }
+            _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
+                libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                _ => {
+                    let syscall_res =
+                        syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                    return syscall_res;
+                }
+            },
             _ => {
                 let syscall_res =
                     syscall_6(syscall, param1, param2, param3, param4, param5, param6);
@@ -393,7 +417,18 @@ pub(crate) mod go_socket_hooks {
     /// Refer:
     ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
     ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-    pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
+    pub(crate) fn enable_socket_hooks(
+        interceptor: &mut Interceptor,
+        binary: &str,
+        enabled_file_ops: bool,
+    ) {
+        ENABLED_FILE_OPS
+            .set(enabled_file_ops)
+            .map_err(|e| {
+                error!("Error setting ENABLED_FILE_OPS: {}", e);
+            })
+            .unwrap();
+
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",
