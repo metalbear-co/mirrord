@@ -173,9 +173,11 @@ impl StealWorker {
                     warn!("Port {port:?} is already subscribed");
                     Ok(())
                 } else {
+                    debug!("adding redirect rule");
                     self.iptables.add_redirect(port, self.listen_port)?;
                     self.ports.insert(port);
                     self.sender.send(DaemonTcp::Subscribed).await?;
+                    debug!("sent subscribed");
                     Ok(())
                 }
             }
