@@ -11,6 +11,7 @@ mod tests {
         time::Duration,
     };
 
+    use bytes::Bytes;
     use chrono::Utc;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
@@ -488,7 +489,7 @@ mod tests {
 
         let resp = res.bytes().await.unwrap();
         if expect_response {
-            assert_eq!(resp, "GET".as_bytes());
+            assert_eq!(resp, Bytes::from("GET"));
         }
 
         let client = reqwest::Client::new();
@@ -747,7 +748,7 @@ mod tests {
             .run(&service.pod_name, Some(&service.namespace), Some(flags))
             .await;
 
-        process.wait_for_line(Duration::from_secs(30), "real_port: 80");
+        process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
         send_requests(&url, true).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await

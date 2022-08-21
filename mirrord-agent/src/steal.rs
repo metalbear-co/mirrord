@@ -175,6 +175,7 @@ impl StealWorker {
                 } else {
                     self.iptables.add_redirect(port, self.listen_port)?;
                     self.ports.insert(port);
+                    self.sender.send(DaemonTcp::Subscribed).await?;
                     Ok(())
                 }
             }
