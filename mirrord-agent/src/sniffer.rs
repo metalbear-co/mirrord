@@ -8,7 +8,7 @@ use std::{
 use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionID, Port,
+    ConnectionId, Port,
 };
 use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
@@ -77,7 +77,7 @@ impl Hash for TcpSessionIdentifier {
 
 #[derive(Debug)]
 struct TCPSession {
-    id: ConnectionID,
+    id: ConnectionId,
     clients: HashSet<ClientID>,
 }
 
@@ -179,7 +179,7 @@ enum SnifferCommands {
     NewAgent(Sender<DaemonTcp>),
     Subscribe(Port),
     UnsubscribePort(Port),
-    UnsubscribeConnection(ConnectionID),
+    UnsubscribeConnection(ConnectionId),
     AgentClosed,
 }
 
@@ -227,7 +227,7 @@ impl TCPSnifferAPI {
 
     pub async fn connection_unsubscribe(
         &mut self,
-        connection_id: ConnectionID,
+        connection_id: ConnectionId,
     ) -> Result<(), AgentError> {
         self.sender
             .send(SnifferCommand {
@@ -271,8 +271,8 @@ pub struct TCPConnectionSniffer {
     stream: PacketStream<Active, TcpManagerCodec>,
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
-    connection_id_to_tcp_identifier: HashMap<ConnectionID, TcpSessionIdentifier>,
-    index_allocator: IndexAllocator<ConnectionID>,
+    connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
+    index_allocator: IndexAllocator<ConnectionId>,
 }
 
 impl TCPConnectionSniffer {

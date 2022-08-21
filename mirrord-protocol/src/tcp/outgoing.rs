@@ -3,9 +3,7 @@ use std::net::SocketAddr;
 
 use bincode::{Decode, Encode};
 
-use crate::RemoteResult;
-
-pub type ConnectionId = i32;
+use crate::{ConnectionId, RemoteResult};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ConnectRequest {

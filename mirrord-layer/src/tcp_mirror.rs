@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionID,
+    ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -79,7 +79,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
 
 struct Connection {
     writer: Sender<Vec<u8>>,
-    id: ConnectionID,
+    id: ConnectionId,
 }
 
 impl Eq for Connection {}
@@ -97,7 +97,7 @@ impl Hash for Connection {
 }
 
 impl Connection {
-    pub fn new(id: ConnectionID, writer: Sender<Vec<u8>>) -> Self {
+    pub fn new(id: ConnectionId, writer: Sender<Vec<u8>>) -> Self {
         Self { id, writer }
     }
 
@@ -106,8 +106,8 @@ impl Connection {
     }
 }
 
-impl Borrow<ConnectionID> for Connection {
-    fn borrow(&self) -> &ConnectionID {
+impl Borrow<ConnectionId> for Connection {
+    fn borrow(&self) -> &ConnectionId {
         &self.id
     }
 }

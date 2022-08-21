@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{collections::HashMap, path::PathBuf};
 
-use mirrord_protocol::{tcp::outgoing::*, RemoteResult};
+use mirrord_protocol::{tcp::outgoing::*, ConnectionId, RemoteResult};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -16,6 +16,8 @@ use crate::{error::AgentError, runtime::set_namespace};
 type Request = TcpOutgoingRequest;
 type Response = TcpOutgoingResponse;
 
+// TODO(alex) [high] 2022-08-19: Instead of spawning a bunch of tasks, use a `StreamMap` to deal
+// with multiple connections!
 pub(crate) struct TcpOutgoingApi {
     task: task::JoinHandle<Result<(), AgentError>>,
     request_channel_tx: Sender<Request>,
@@ -55,7 +57,7 @@ impl TcpOutgoingApi {
     }
 
     async fn interceptor_task(
-        connection_id: i32,
+        connection_id: ConnectionId,
         response_tx: Sender<Response>,
         mut write_rx: Receiver<Data>,
         stream: TcpStream,
@@ -149,7 +151,7 @@ impl TcpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
-        let mut senders: HashMap<i32, Sender<Data>> = HashMap::with_capacity(4);
+        let mut senders: HashMap<ConnectionId, Sender<Data>> = HashMap::with_capacity(4);
 
         loop {
             // [layer] -> [agent]

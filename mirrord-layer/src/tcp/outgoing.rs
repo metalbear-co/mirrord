@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::SinkExt;
-use mirrord_protocol::{tcp::outgoing::*, ClientCodec, ClientMessage};
+use mirrord_protocol::{tcp::outgoing::*, ClientCodec, ClientMessage, ConnectionId};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -55,7 +55,7 @@ pub(crate) enum TcpOutgoing {
 
 #[derive(Debug)]
 pub(crate) struct TcpOutgoingHandler {
-    mirrors: HashMap<i32, ConnectionMirror>,
+    mirrors: HashMap<ConnectionId, ConnectionMirror>,
     connect_queue: ResponseDeque<MirrorConnect>,
 }
 
@@ -289,7 +289,7 @@ impl TcpOutgoingHandler {
                 let sender = self
                     .mirrors
                     .get_mut(&connection_id)
-                    .ok_or(LayerError::MirrorNotFound(connection_id))
+                    .ok_or(LayerError::NoConnectionId(connection_id))
                     .map(|mirror| &mut mirror.sender)?;
 
                 Ok(sender.send(bytes).await?)
