@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[derive(Debug)]
-    enum FileOps {
+    pub enum FileOps {
         Python,
         Go,
     }
