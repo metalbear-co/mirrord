@@ -4,6 +4,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ToggleAction
 
+@Suppress("DialogTitleCapitalization")
 class ToggleButton : ToggleAction() {
 
     override fun isSelected(e: AnActionEvent): Boolean {
@@ -11,9 +12,9 @@ class ToggleButton : ToggleAction() {
     }
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
-        var notificationManager = NotificationGroupManager
+        val notificationManager = NotificationGroupManager
                 .getInstance()
-                .getNotificationGroup("Mirrord Notification Handler")
+                .getNotificationGroup("mirrord Notification Handler")
         if (state) {
             notificationManager
                     .createNotification("mirrord", "mirrord configuration is active, current project will run in context of the remote pod when debugged")

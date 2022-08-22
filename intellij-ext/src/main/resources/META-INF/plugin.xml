@@ -13,7 +13,7 @@
 <!--    <depends>com.intellij.modules.python</depends>-->
 
     <extensions defaultExtensionNs="com.intellij">
-        <notificationGroup id="Mirrord Notification Handler"
+        <notificationGroup id="mirrord Notification Handler"
                            displayType="BALLOON"/>
     </extensions>
 

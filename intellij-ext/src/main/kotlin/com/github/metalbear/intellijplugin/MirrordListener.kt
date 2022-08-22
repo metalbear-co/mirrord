@@ -7,6 +7,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import javax.swing.JCheckBox
+import javax.swing.JTextField
 
 
 class MirrordListener : ExecutionListener {
@@ -14,11 +15,13 @@ class MirrordListener : ExecutionListener {
     private val log: Logger = Logger.getInstance("MirrordListener")
 
     init {
-        mirrordEnv["DYLD_INSERT_LIBRARIES"] = "target/debug/libmirrord_layer.dylib"
-        mirrordEnv["LD_PRELOAD"] = "target/debug/libmirrord_layer.so"
-        mirrordEnv["RUST_LOG"] = "DEBUG"
-        mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = "nginx-deployment-66b6c48dd5-ggd9n"
-        mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = "true"
+        val (ldPreloadPath, dylibPath, defaultMirrordAgentLog, rustLog, invalidCertificates) = MirrordDefaultData()
+
+        mirrordEnv["DYLD_INSERT_LIBRARIES"] = dylibPath
+        mirrordEnv["LD_PRELOAD"] = ldPreloadPath
+        mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = defaultMirrordAgentLog
+        mirrordEnv["RUST_LOG"] = rustLog
+        mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = invalidCertificates.toString()
 
         log.debug("Default mirrord environment variables set.")
     }
@@ -29,32 +32,37 @@ class MirrordListener : ExecutionListener {
     }
 
     override fun processStarting(executorId: String, env: ExecutionEnvironment) {
+        val customDialogBuilder = MirrordDialogBuilder()
+
         if (enabled) {
             val kubeDataProvider = KubeDataProvider()
 
             // Prompt the user to choose a namespace
             val namespaces = JBList(kubeDataProvider.getNamespaces())
-            var customDialogBuilder = MirrordDialogBuilder()
             val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
-            var dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+            val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
             // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
             if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE) {
                 val choseNamespace = namespaces.selectedValue
                 val pods = JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
+
                 val fileOpsCheckbox = JCheckBox("Enable File Operations")
                 val remoteDnsCheckbox = JCheckBox("Enable Remote DNS")
-                val panel = customDialogBuilder.createMirrordKubeDialog(pods, fileOpsCheckbox, remoteDnsCheckbox)
+                val agentRustLog = JTextField(mirrordEnv["MIRRORD_AGENT_RUST_LOG"])
+                val rustLog = JTextField(mirrordEnv["RUST_LOG"])
 
-                var dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+                val panel = customDialogBuilder.createMirrordKubeDialog(pods, fileOpsCheckbox, remoteDnsCheckbox, agentRustLog, rustLog)
+                val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
                 // SUCCESS: set the respective environment variables
-                if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE) {
+                if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && pods.selectedValue != null) {
                     mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = pods.selectedValue as String
                     mirrordEnv["MIRRORD_FILE_OPS"] = fileOpsCheckbox.isSelected.toString()
                     mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDnsCheckbox.isSelected.toString()
+                    mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
 
-                    var envMap = getPythonEnv(env)
+                    val envMap = getPythonEnv(env)
                     envMap.putAll(mirrordEnv)
 
                     log.debug("mirrord env set")
@@ -71,7 +79,7 @@ class MirrordListener : ExecutionListener {
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
         if (enabled and envSet) {
-            var envMap = getPythonEnv(env)
+            val envMap = getPythonEnv(env)
             for (key in mirrordEnv.keys) {
                 if (mirrordEnv.containsKey(key)) {
                     envMap.remove(key)
@@ -84,7 +92,7 @@ class MirrordListener : ExecutionListener {
 
     private fun getPythonEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
         log.debug("fetching python env")
-        var envMethod = env.runProfile.javaClass.getMethod("getEnvs")
+        val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
     }
 }
