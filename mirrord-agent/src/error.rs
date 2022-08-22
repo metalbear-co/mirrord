@@ -61,6 +61,9 @@ pub enum AgentError {
 
     #[error("IPTables failed with `{0}`")]
     IPTablesError(String),
+
+    #[error("Join task failed")]
+    JoinTask,
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;
