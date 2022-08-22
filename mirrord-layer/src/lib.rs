@@ -74,6 +74,7 @@ static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
@@ -101,7 +102,8 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    enable_hooks(*enabled_file_ops, config.remote_dns);
+    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
+    enable_hooks(*enabled_file_ops, config.remote_dns, *enabled_tcp_outgoing);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -347,7 +349,7 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_tcp_outgoing: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
@@ -385,10 +387,15 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
+    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
+        .get()
+        .expect("Should be set during initialization!");
+
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
         debug!("close_detour -> closing in SOCKETS!");
         FN_CLOSE(fd)
-    } else if let Some(connection_id) = OUTGOING_SOCKETS.lock().unwrap().remove(&fd) {
+    } else if *enabled_tcp_outgoing
+        && let Some(connection_id) = OUTGOING_SOCKETS.lock().unwrap().remove(&fd) {
         // TODO(alex) [mid] 2022-08-21: Close the sockets (only outgoing).
         debug!("close_detour -> closing in OUTGOING!");
 
@@ -397,7 +404,8 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
             blocking_send_hook_message(HookMessage::TcpOutgoing(TcpOutgoing::Close(close_hook)));
 
         FN_CLOSE(fd)
-    } else if *enabled_file_ops && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
+    } else if *enabled_file_ops
+        && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
         close_file_result

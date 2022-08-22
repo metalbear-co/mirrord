@@ -21,6 +21,7 @@ use crate::{
         outgoing::{Connect, MirrorConnect, TcpOutgoing},
         HookMessageTcp, Listen,
     },
+    ENABLED_TCP_OUTGOING,
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
@@ -202,18 +203,38 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             .remove(&sockfd)
             .ok_or(LayerError::LocalFDNotFound(sockfd))?
     };
-    debug!("connect -> user_socket_info {:#?}", user_socket_info);
+
+    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
+        .get()
+        .expect("Should be set during initialization!");
 
     match user_socket_info.state {
-        SocketState::Initialized => {
-            debug!(
+        SocketState::Initialized if *enabled_tcp_outgoing == false => {
+            trace!(
                 "connect -> SocketState::Initialized {:#?}",
                 user_socket_info
             );
-            // TODO(alex) [high] 2022-07-15: Implementation plan
-            // 4. Calls to read on this socket in `agent` will contain data that we log, and then
-            // write to `remote_address`;
 
+            let rawish_remote_address = SockAddr::from(remote_address);
+            let result = unsafe {
+                FN_CONNECT(
+                    sockfd,
+                    rawish_remote_address.as_ptr(),
+                    rawish_remote_address.len(),
+                )
+            };
+
+            if result != 0 {
+                Err(io::Error::from_raw_os_error(result))?
+            } else {
+                Ok::<_, LayerError>(())
+            }
+        }
+        SocketState::Initialized => {
+            trace!(
+                "connect -> SocketState::Initialized {:#?}",
+                user_socket_info
+            );
             let (mirror_tx, mirror_rx) = oneshot::channel();
 
             let connect = Connect {
@@ -221,23 +242,16 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
                 channel_tx: mirror_tx,
             };
 
-            debug!("connect -> connect {:#?}", connect);
-
             let connect_hook = TcpOutgoing::Connect(connect);
 
             blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
             let MirrorConnect { mirror_address } = mirror_rx.blocking_recv()??;
 
             let connect_to = SockAddr::from(mirror_address);
-            debug!(
-                "connect -> connect_to {:#?} | mirror_address {:#?}",
-                connect_to, mirror_address
-            );
 
-            // TODO(alex) [high] 2022-08-08: Connection between 2 local sockets is created, it just
-            // doesn't do anything.
             let connect_result =
                 unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
             let err_code = errno::errno().0;
             if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
                 error!(
@@ -252,8 +266,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
                 remote_address,
                 mirror_address,
             };
-
-            debug!("connect -> connected {:#?}", connected);
 
             Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
 

@@ -1,6 +1,6 @@
 import { lookup } from "dns/promises";
 
-console.log(">> test_outgoing_traffic");
+console.log(">> test_outgoing_traffic_single_request");
 
 const options = {
   hostname: "www.rust-lang.org",

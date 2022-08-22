@@ -49,4 +49,7 @@ pub struct LayerConfig {
     /// Enables resolving a remote DNS.
     #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
     pub remote_dns: bool,
+
+    #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "false")]
+    pub enabled_tcp_outgoing: bool,
 }
