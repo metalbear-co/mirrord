@@ -427,6 +427,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.end_transaction();
 }
 
+// TODO(alex) [high] 2022-08-22: When this is annotated with `hook_guard_fn`, then the outgoing
+// sockets never call it (we just bypass). Everything works, so, should we intervene?
+//
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.

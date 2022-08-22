@@ -38,18 +38,11 @@ function debugDns() {
   });
 }
 
-// TODO(alex) [high] 2022-08-17: Working flows:
-// 1. request -> request;
-// 2. listen -> request;
-//
-// Broken flows:
-// 1. request -> listen -> request;
-
 // debug_file_ops();
 // debugDns();
 debugRequest(null);
 // debugConnect();
-// debugListen();
+debugListen();
 
 function debugConnect() {
   let options = { readable: true, writable: true };
@@ -71,7 +64,8 @@ function debugRequest(listening) {
   const options = {
     // hostname: "20.81.111.66",
     // port: 80,
-    hostname: "www.google.com",
+    // hostname: "www.google.com",
+    hostname: "www.rust-lang.org",
     port: 443,
     path: "/",
     method: "GET",
@@ -84,12 +78,13 @@ function debugRequest(listening) {
     console.log(`statusCode: ${res.statusCode}`);
 
     res.on("data", (d) => {
-      console.log(
-        ">> data -> listening ",
-        listening,
-        " | bytes ",
-        d.slice(0, 10)
-      );
+      console.log(">> data -> listening ", listening, " | bytes ", d);
+
+      process.stdout.write(d);
+    });
+
+    res.on("close", () => {
+      console.log(">> response is done, closing!");
     });
   });
 
@@ -173,7 +168,7 @@ function debugListen() {
     function () {
       console.log(">> server listening to %j", server.address());
 
-      // debugRequest(server.address());
+      debugRequest(server.address());
     }
   );
 
