@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - print timestamp of stdout/stderr of `TestProcess`.
 - E2E - Don't delete pod/service on failure, instead leave them for debugging.
 - mirrord-agent - Don't use `tokio::spawn` for spawning `sniffer` (or any other namespace changing task) to avoid namespace-clashing/undefined behavior. Possibly fixing bugs.
+- Change the version check on the VS Code extension to happen when mirrord is enabled rather than when the IDE starts up.
 
 ### Added
 - E2E - add basic env tests for bash scripts
