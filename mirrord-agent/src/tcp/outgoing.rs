@@ -1,20 +1,19 @@
 use core::fmt;
 use std::{collections::HashMap, path::PathBuf, thread};
 
-use mirrord_protocol::{tcp::outgoing::*, ConnectionId, RemoteResult, ResponseError};
+use mirrord_protocol::{tcp::outgoing::*, ConnectionId, ResponseError};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
     select,
     sync::mpsc::{self, Receiver, Sender},
-    task,
 };
 use tokio_stream::{StreamExt, StreamMap};
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace, util::run_thread};
 
@@ -24,7 +23,7 @@ type Response = TcpOutgoingResponse;
 // TODO(alex) [high] 2022-08-19: Instead of spawning a bunch of tasks, use a `StreamMap` to deal
 // with multiple connections!
 pub(crate) struct TcpOutgoingApi {
-    task: thread::JoinHandle<Result<(), AgentError>>,
+    _task: thread::JoinHandle<Result<(), AgentError>>,
     request_tx: Sender<Request>,
     response_rx: Receiver<Response>,
 }
@@ -52,7 +51,7 @@ impl TcpOutgoingApi {
         let task = run_thread(Self::interceptor_task(pid, request_rx, response_tx));
 
         Self {
-            task,
+            _task: task,
             request_tx,
             response_rx,
         }
