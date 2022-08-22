@@ -11,16 +11,17 @@ import javax.swing.border.EmptyBorder
 
 
 class MirrordDialogBuilder {
-    private val heading: String = "mirrord"
-    private val labelName: String = "Select pod to impersonate"
+    private val dialogHeading: String = "mirrord"
+    private val podLabel: JLabel = JLabel("Select pod to impersonate")
+    private val namespaceLabel: JLabel = JLabel("Select Namespace to use")
+    private val optionLabel: JLabel = JLabel("Options")
 
     fun createMirrordKubeDialog(pods: JBList<String>, fileOpsCheckbox: JCheckBox, remoteDnsCheckbox: JCheckBox, ephemeralCheckbox: JCheckBox, agentRustLog: JTextField, rustLog: JTextField): JPanel {
         val dialogPanel = JPanel(BorderLayout())
-        val label = JLabel(labelName)
-        label.border = EmptyBorder(5, 40, 5, 5)
+        podLabel.border = EmptyBorder(5, 40, 5, 5)
 
         val podPanel = JPanel(GridLayout(2, 1, 10, 5))
-        podPanel.add(label, BorderLayout.NORTH)
+        podPanel.add(podLabel, BorderLayout.NORTH)
         podPanel.add(pods)
 
         dialogPanel.add(podPanel, BorderLayout.WEST)
@@ -29,7 +30,6 @@ class MirrordDialogBuilder {
                 BorderLayout.CENTER)
 
         val optionsPanel = JPanel(GridLayout(6, 1, 10, 2))
-        val optionLabel = JLabel("Options")
         optionLabel.border = EmptyBorder(5, 110, 5, 20)
 
         optionsPanel.add(optionLabel)
@@ -61,10 +61,8 @@ class MirrordDialogBuilder {
 
     fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel {
         val dialogPanel = JPanel(BorderLayout())
-        val label = JLabel("Select Namespace to use")
-        val border = EmptyBorder(5, 20, 5, 20)
-        label.border = border
-        dialogPanel.add(label, BorderLayout.NORTH)
+        namespaceLabel.border = EmptyBorder(5, 20, 5, 20)
+        dialogPanel.add(namespaceLabel, BorderLayout.NORTH)
         dialogPanel.add(namespaces, BorderLayout.SOUTH)
         return dialogPanel
     }
@@ -73,7 +71,7 @@ class MirrordDialogBuilder {
         val dialogBuilder = DialogBuilder()
 
         dialogBuilder.setCenterPanel(dialogPanel)
-        dialogBuilder.setTitle(heading)
+        dialogBuilder.setTitle(dialogHeading)
 
         return dialogBuilder
     }
