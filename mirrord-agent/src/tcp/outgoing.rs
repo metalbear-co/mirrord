@@ -1,14 +1,19 @@
 use core::fmt;
 use std::{collections::HashMap, path::PathBuf};
 
-use mirrord_protocol::{tcp::outgoing::*, ConnectionId, RemoteResult};
+use mirrord_protocol::{tcp::outgoing::*, ConnectionId, RemoteResult, ResponseError};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
     select,
     sync::mpsc::{self, Receiver, Sender},
     task,
 };
+use tokio_stream::{StreamExt, StreamMap};
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error, trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace};
@@ -20,8 +25,8 @@ type Response = TcpOutgoingResponse;
 // with multiple connections!
 pub(crate) struct TcpOutgoingApi {
     task: task::JoinHandle<Result<(), AgentError>>,
-    request_channel_tx: Sender<Request>,
-    response_channel_rx: Receiver<Response>,
+    request_tx: Sender<Request>,
+    response_rx: Receiver<Response>,
 }
 
 pub struct Data {
@@ -40,105 +45,19 @@ impl fmt::Debug for Data {
 
 impl TcpOutgoingApi {
     pub(crate) fn new(pid: Option<u64>) -> Self {
-        let (request_channel_tx, request_channel_rx) = mpsc::channel(1000);
-        let (response_channel_tx, response_channel_rx) = mpsc::channel(1000);
+        let (request_tx, request_rx) = mpsc::channel(1000);
+        let (response_tx, response_rx) = mpsc::channel(1000);
 
-        let task = task::spawn(Self::request_task(
-            pid,
-            request_channel_rx,
-            response_channel_tx,
-        ));
+        let task = task::spawn(Self::interceptor_task(pid, request_rx, response_tx));
 
         Self {
             task,
-            request_channel_tx,
-            response_channel_rx,
+            request_tx,
+            response_rx,
         }
     }
 
     async fn interceptor_task(
-        connection_id: ConnectionId,
-        response_tx: Sender<Response>,
-        mut write_rx: Receiver<Data>,
-        stream: TcpStream,
-    ) {
-        trace!("intercept_task -> connection_id {:#?}", connection_id);
-
-        let mut buffer = vec![0; 1500];
-        let (mut remote_reader, mut remote_writer) = stream.into_split();
-
-        loop {
-            select! {
-                biased;
-
-                read = remote_reader.read(&mut buffer) => {
-                    match read {
-                        Ok(read_amount) if read_amount == 0 => {
-                            warn!("intercept_task -> Read stream is closed!");
-                            break;
-                        }
-                        Ok(read_amount) => {
-                            let bytes = buffer[..read_amount].to_vec();
-
-                            let read = ReadResponse {
-                                connection_id,
-                                bytes,
-                            };
-
-                            let response = TcpOutgoingResponse::Read(Ok(read));
-                            debug!("interceptor_task -> read response {:#?}", response);
-
-                            if let Err(fail) = response_tx.send(response).await {
-                                error!("intercept_task -> Failed sending response with {:#?}", fail);
-                                break;
-                            }
-                        }
-                        Err(ref fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
-                        Err(fail) => {
-                            error!("Failed reading stream with {:#?}", fail);
-                            break;
-                        }
-                    }
-                }
-
-                write = write_rx.recv() => {
-                    match write {
-                        Some(data) => {
-                            let result = remote_writer.write_all(&data.bytes).await;
-
-                            match result {
-                                Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => continue,
-                                Err(fail) => {
-                                    error!("Failed writing stream with {:#?}", fail);
-                                    break;
-                                }
-                                Ok(()) => {
-                                    let write = WriteResponse {
-                                        connection_id,
-                                    };
-                                    let response = TcpOutgoingResponse::Write(Ok(write));
-                                    debug!("interceptor_task -> write response {:#?}", response);
-
-                                    if let Err(fail) = response_tx.send(response).await {
-                                        error!("Failed sending read message with {:#?}!", fail);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("intercept_task-> write_rx closed {:#?}!", connection_id);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        trace!("intercept_task -> Finished id {:#?}", connection_id);
-    }
-
-    async fn request_task(
         pid: Option<u64>,
         mut request_rx: Receiver<Request>,
         response_tx: Sender<Response>,
@@ -151,67 +70,100 @@ impl TcpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
-        let mut senders: HashMap<ConnectionId, Sender<Data>> = HashMap::with_capacity(4);
+        let mut writers: HashMap<ConnectionId, OwnedWriteHalf> = HashMap::default();
+        let mut readers: StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>> =
+            StreamMap::default();
 
         loop {
-            // [layer] -> [agent]
-            match request_rx.recv().await {
-                Some(request) => {
-                    trace!("inner_request_handler -> request {:?}", request);
+            select! {
+                biased;
+
+                // [layer] -> [agent]
+                request = request_rx.recv() => {
+                    trace!("interceptor_task -> request {:?}", request);
 
                     match request {
-                        TcpOutgoingRequest::Connect(ConnectRequest { remote_address }) => {
-                            let connect_response: RemoteResult<_> =
-                                TcpStream::connect(remote_address)
-                                    .await
-                                    .map_err(From::from)
-                                    .map(|remote_stream| {
-                                        let (write_tx, write_rx) = mpsc::channel(1000);
+                        Some(request) => {
+                            match request {
+                                // [layer] -> [agent] -> [layer]
+                                TcpOutgoingRequest::Connect(ConnectRequest { remote_address }) => {
+                                    let connect_response =
+                                        TcpStream::connect(remote_address)
+                                            .await
+                                            .map_err(From::from)
+                                            .map(|remote_stream| {
+                                                let connection_id = writers
+                                                    .keys()
+                                                    .last()
+                                                    .copied()
+                                                    .map(|last| last + 1)
+                                                    .unwrap_or_default();
 
-                                        let connection_id = senders
-                                            .keys()
-                                            .copied()
-                                            .last()
-                                            .map(|last| last + 1)
-                                            .unwrap_or_default();
+                                                let (read_half, write_half) = remote_stream.into_split();
+                                                writers.insert(connection_id, write_half);
+                                                readers.insert(connection_id, ReaderStream::new(read_half));
 
-                                        senders.insert(connection_id, write_tx.clone());
+                                                ConnectResponse {
+                                                    connection_id,
+                                                    remote_address,
+                                                }
+                                            });
 
-                                        task::spawn(Self::interceptor_task(
-                                            connection_id,
-                                            response_tx.clone(),
-                                            write_rx,
-                                            remote_stream,
-                                        ));
+                                    let response = TcpOutgoingResponse::Connect(connect_response);
+                                    response_tx.send(response).await?
+                                }
+                                // [layer] -> [agent] -> [remote]
+                                TcpOutgoingRequest::Write(WriteRequest {
+                                    connection_id,
+                                    bytes,
+                                }) => {
+                                    let write_response = match writers
+                                        .get_mut(&connection_id)
+                                        .ok_or(ResponseError::NotFound(connection_id as usize))
+                                    {
+                                        Ok(writer) => writer
+                                            .write_all(&bytes)
+                                            .await
+                                            .map_err(ResponseError::from)
+                                            .map(|()| WriteResponse { connection_id }),
+                                        Err(fail) => Err(fail),
+                                    };
 
-                                        ConnectResponse {
-                                            connection_id,
-                                            remote_address,
-                                        }
-                                    });
+                                    let response = TcpOutgoingResponse::Write(write_response);
+                                    response_tx.send(response).await?
+                                }
 
-                            trace!("Connect -> response {:#?}", connect_response);
+                                TcpOutgoingRequest::Close(CloseRequest { connection_id} ) => {
+                                    writers.remove(&connection_id);
+                                    readers.remove(&connection_id);
 
-                            let response = TcpOutgoingResponse::Connect(connect_response);
-                            response_tx.send(response).await?
+                                    if writers.len() == 0 && readers.len() == 0 {
+                                        break;
+                                    }
+                                }
+                            }
                         }
-                        TcpOutgoingRequest::Write(WriteRequest {
-                            connection_id,
-                            bytes,
-                        }) => {
-                            trace!("Write -> request {:#?}", connection_id);
-
-                            let write = Data {
-                                connection_id,
-                                bytes,
-                            };
-
-                            senders.get(&connection_id).unwrap().send(write).await?
+                        None => {
+                            warn!("run -> Disconnected!");
+                            break;
                         }
                     }
                 }
-                None => {
-                    warn!("run -> Disconnected!");
+
+                // [remote] -> [agent] -> [layer]
+                Some((connection_id, value)) = readers.next() => {
+                    trace!("interceptor_task -> read connection_id {:#?}", connection_id);
+
+                    let read_response = value
+                        .map_err(ResponseError::from)
+                        .map(|bytes| ReadResponse { connection_id, bytes: bytes.to_vec() });
+
+                    let response = TcpOutgoingResponse::Read(read_response);
+                    response_tx.send(response).await?
+
+                }
+                else => {
+                    trace!("interceptor_task -> no messages left");
                     break;
                 }
             }
@@ -221,11 +173,12 @@ impl TcpOutgoingApi {
     }
 
     pub(crate) async fn request(&mut self, request: TcpOutgoingRequest) -> Result<(), AgentError> {
-        Ok(self.request_channel_tx.send(request).await?)
+        trace!("TcpOutgoingApi::request -> request {:#?}", request);
+        Ok(self.request_tx.send(request).await?)
     }
 
     pub(crate) async fn response(&mut self) -> Result<TcpOutgoingResponse, AgentError> {
-        self.response_channel_rx
+        self.response_rx
             .recv()
             .await
             .ok_or(AgentError::ReceiverClosed)

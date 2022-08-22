@@ -1,14 +1,14 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoHint, Port};
+use mirrord_protocol::{AddrInfoHint, ConnectionId, Port};
 use socket2::SockAddr;
 
 use crate::error::LayerError;
@@ -17,6 +17,9 @@ pub(super) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) static OUTGOING_SOCKETS: LazyLock<Mutex<HashMap<RawFd, ConnectionId>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =

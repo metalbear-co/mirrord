@@ -21,6 +21,11 @@ pub struct WriteRequest {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct CloseRequest {
+    pub connection_id: ConnectionId,
+}
+
 impl fmt::Debug for WriteRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WriteRequest")
@@ -34,6 +39,7 @@ impl fmt::Debug for WriteRequest {
 pub enum TcpOutgoingRequest {
     Connect(ConnectRequest),
     Write(WriteRequest),
+    Close(CloseRequest),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

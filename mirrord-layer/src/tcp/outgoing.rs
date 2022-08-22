@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    os::unix::prelude::AsRawFd,
 };
 
 use futures::SinkExt;
@@ -19,6 +20,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
     error::LayerError,
+    socket::OUTGOING_SOCKETS,
     DetourGuard,
 };
 
@@ -38,6 +40,11 @@ pub(crate) struct Write {
     pub(crate) bytes: Vec<u8>,
 }
 
+#[derive(Debug)]
+pub(crate) struct Close {
+    pub(crate) connection_id: ConnectionId,
+}
+
 impl fmt::Debug for Write {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Write")
@@ -51,6 +58,7 @@ impl fmt::Debug for Write {
 pub(crate) enum TcpOutgoing {
     Connect(Connect),
     Write(Write),
+    Close(Close),
 }
 
 #[derive(Debug)]
@@ -61,7 +69,7 @@ pub(crate) struct TcpOutgoingHandler {
 
 #[derive(Debug)]
 pub(crate) struct ConnectionMirror {
-    sender: tokio::sync::mpsc::Sender<Vec<u8>>,
+    remote_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
 
 impl Default for TcpOutgoingHandler {
@@ -88,9 +96,9 @@ impl TcpOutgoingHandler {
     async fn interceptor_task(
         connection_id: ConnectionId,
         mut mirror_stream: TcpStream,
-        remote_stream: Receiver<Vec<u8>>,
+        remote_rx: Receiver<Vec<u8>>,
     ) {
-        let mut remote_stream = ReceiverStream::new(remote_stream);
+        let mut remote_stream = ReceiverStream::new(remote_rx);
         let mut buffer = vec![0; 1024];
 
         loop {
@@ -113,18 +121,11 @@ impl TcpOutgoingHandler {
                             break;
                         },
                         Ok(read_amount) => {
-                            // TODO(alex) [mid] 2022-08-09: Use hook channel or create some other
-                            // new channel just to handle these types of messages?
-
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
                             let write = Write { connection_id, bytes: buffer[..read_amount].to_vec() };
                             let outgoing_data = TcpOutgoing::Write(write);
 
-                            // TODO(alex) [mid] 2022-08-09: Must handle a response from `agent`
-                            // mostly for the case where `send` failed sending data to remote.
-                            // Need a `written_amount` or error type of response to mimick how
-                            // proper `io` works.
                             if let Err(fail) = send_hook_message(HookMessage::TcpOutgoing(outgoing_data)).await {
                                 error!("Failed sending write message with {:#?}!", fail);
                                 break;
@@ -144,13 +145,18 @@ impl TcpOutgoingHandler {
                             }
                         },
                         None => {
-                            warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                            warn!("interceptor_task -> exiting due to remote stream closed!");
                             break;
                         }
                     }
                 },
             }
         }
+
+        trace!(
+            "interceptor_task done -> connection_id {:#?}",
+            connection_id
+        );
     }
 
     pub(crate) async fn handle_hook_message(
@@ -197,6 +203,15 @@ impl TcpOutgoingHandler {
                     )))
                     .await?)
             }
+            TcpOutgoing::Close(Close { connection_id }) => {
+                trace!("Close -> connection_id {:#?}", connection_id);
+
+                Ok(codec
+                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Close(
+                        CloseRequest { connection_id },
+                    )))
+                    .await?)
+            }
         }
     }
 
@@ -223,10 +238,6 @@ impl TcpOutgoingHandler {
                 let mirror_stream = {
                     let _ = DetourGuard::new();
 
-                    debug!("handle_daemon_message -> before binding");
-                    // TODO(alex) [mid] 2022-08-08: This must match the `family` of the original
-                    // request, meaning that, if the user tried to connect with Ipv4, this should be
-                    // an Ipv4 (same for Ipv6).
                     let mirror_listener = match remote_address {
                         SocketAddr::V4(_) => {
                             TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -238,42 +249,33 @@ impl TcpOutgoingHandler {
                         }
                     };
 
-                    debug!(
-                        "handle_daemon_message -> mirror_listener {:#?}",
-                        mirror_listener
-                    );
+                    let mirror_address = mirror_listener.local_addr()?;
+                    let mirror_connect = MirrorConnect { mirror_address };
 
-                    {
-                        let mirror_address = mirror_listener.local_addr()?;
-                        let mirror_connect = MirrorConnect { mirror_address };
+                    let _ = self
+                        .connect_queue
+                        .pop_front()
+                        .ok_or(LayerError::SendErrorTcpResponse)?
+                        .send(Ok(mirror_connect))
+                        .map_err(|_| LayerError::SendErrorTcpResponse)?;
 
-                        let _ = self
-                            .connect_queue
-                            .pop_front()
-                            .ok_or(LayerError::SendErrorTcpResponse)?
-                            .send(Ok(mirror_connect))
-                            .map_err(|_| LayerError::SendErrorTcpResponse)?;
-                    }
-
-                    let (mirror_stream, user_address) = mirror_listener.accept().await?;
-                    debug!(
-                        "handle_daemon_message -> mirror_stream {:#?}",
-                        mirror_stream
-                    );
-
+                    let (mirror_stream, _) = mirror_listener.accept().await?;
                     mirror_stream
                 };
 
-                let (sender, receiver) = channel::<Vec<u8>>(1000);
+                let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
-                // TODO(alex) [high] 2022-08-08: Should be very similar to `handle_new_connection`.
                 self.mirrors
-                    .insert(connection_id, ConnectionMirror { sender });
+                    .insert(connection_id, ConnectionMirror { remote_tx });
+
+                OUTGOING_SOCKETS
+                    .lock()?
+                    .insert(mirror_stream.as_raw_fd(), connection_id);
 
                 task::spawn(TcpOutgoingHandler::interceptor_task(
                     connection_id,
                     mirror_stream,
-                    receiver,
+                    remote_rx,
                 ));
 
                 Ok(())
@@ -290,18 +292,14 @@ impl TcpOutgoingHandler {
                     .mirrors
                     .get_mut(&connection_id)
                     .ok_or(LayerError::NoConnectionId(connection_id))
-                    .map(|mirror| &mut mirror.sender)?;
+                    .map(|mirror| &mut mirror.remote_tx)?;
 
                 Ok(sender.send(bytes).await?)
             }
             TcpOutgoingResponse::Write(write) => {
                 trace!("Write -> write {:?}", write);
 
-                let WriteResponse { connection_id } = write?;
-                // TODO(alex) [mid] 2022-07-20: Receive message from agent.
-                // ADD(alex) [mid] 2022-08-09: Should be very similar to `Read`, but `sender` works
-                // with `Vec<u8>`, so maybe wrapping it in a `Result<Vec<u8>, Error>` would make
-                // more sense, and enable this idea.
+                let WriteResponse { .. } = write?;
 
                 Ok(())
             }

@@ -21,14 +21,17 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
-use mirrord_macro::hook_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
+use tcp::{
+    outgoing::{TcpOutgoing, TcpOutgoingHandler},
+    TcpHandler,
+};
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
@@ -53,7 +56,10 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
+use crate::{
+    common::HookMessage, config::LayerConfig, file::FileHandler, socket::OUTGOING_SOCKETS,
+    tcp::outgoing,
+};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -424,7 +430,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
-#[hook_fn]
+#[hook_guard_fn]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     trace!("close_detour -> fd {:#?}", fd);
 
@@ -433,22 +439,26 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .expect("Should be set during initialization!");
 
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
+        debug!("close_detour -> closing in SOCKETS!");
         FN_CLOSE(fd)
-    } else if *enabled_file_ops {
-        let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
+    } else if let Some(connection_id) = OUTGOING_SOCKETS.lock().unwrap().remove(&fd) {
+        // TODO(alex) [high] 2022-08-21: Close the sockets (only outgoing).
+        debug!("close_detour -> closing in OUTGOING!");
 
-        if let Some(remote_fd) = remote_fd {
-            let close_file_result = file::ops::close(remote_fd);
+        let close_hook = outgoing::Close { connection_id };
+        let close_result =
+            blocking_send_hook_message(HookMessage::TcpOutgoing(TcpOutgoing::Close(close_hook)));
 
-            close_file_result
-                .map_err(|fail| {
-                    error!("Failed writing file with {fail:#?}");
-                    -1
-                })
-                .unwrap_or_else(|fail| fail)
-        } else {
-            FN_CLOSE(fd)
-        }
+        FN_CLOSE(fd)
+    } else if *enabled_file_ops && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
+        let close_file_result = file::ops::close(remote_fd);
+
+        close_file_result
+            .map_err(|fail| {
+                error!("Failed writing file with {fail:#?}");
+                -1
+            })
+            .unwrap_or_else(|fail| fail)
     } else {
         FN_CLOSE(fd)
     }

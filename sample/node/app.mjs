@@ -47,10 +47,9 @@ function debugDns() {
 
 // debug_file_ops();
 // debugDns();
-// debugRequest(null);
-// debugRequest(null);
+debugRequest(null);
 // debugConnect();
-debugListen();
+// debugListen();
 
 function debugConnect() {
   let options = { readable: true, writable: true };
@@ -174,7 +173,7 @@ function debugListen() {
     function () {
       console.log(">> server listening to %j", server.address());
 
-      debugRequest(server.address());
+      // debugRequest(server.address());
     }
   );
 
