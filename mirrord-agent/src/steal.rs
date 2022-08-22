@@ -25,6 +25,7 @@ use crate::{
     runtime::set_namespace,
 };
 
+/// Wrapper struct for IPTables so it flushes on drop.
 struct SafeIpTables {
     inner: iptables::IPTables,
     chain_name: String,
@@ -235,6 +236,7 @@ impl StealWorker {
             address: address.ip(),
         });
         self.sender.send(new_connection).await?;
+        debug!("sent new connection");
         Ok(())
     }
 
@@ -259,7 +261,6 @@ pub async fn steal_worker(
     tx: Sender<DaemonTcp>,
     pid: Option<u64>,
 ) -> Result<()> {
-    debug!("setting namespace");
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
             .join(PathBuf::from(pid.to_string()))
