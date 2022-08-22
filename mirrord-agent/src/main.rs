@@ -378,7 +378,9 @@ async fn start_agent() -> Result<(), AgentError> {
 
     debug!("start_agent -> shutting down start");
     drop(cancel_guard);
-    sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
+    if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
+        error!("start_agent -> sniffer task failed with error: {}", err);
+    }
 
     debug!("shutdown done");
     Ok(())
