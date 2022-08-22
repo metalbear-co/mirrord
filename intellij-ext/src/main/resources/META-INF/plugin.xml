@@ -23,8 +23,8 @@
     </projectListeners>
 
     <actions>
-        <action id="com.github.metalbear.intellijplugin.ToggleButton"
-                class="com.github.metalbear.intellijplugin.ToggleButton" text="Enable/Disable mirrord"
+        <action id="com.github.metalbear.intellijplugin.MirrordEnabler"
+                class="com.github.metalbear.intellijplugin.MirrordEnabler" text="Enable/Disable mirrord"
                 description="Toggle the mirrord plugin"
                 icon="MirrordIcons.mirrordIcon">
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>

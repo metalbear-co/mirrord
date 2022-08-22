@@ -14,9 +14,10 @@ class MirrordDialogBuilder {
     private val heading: String = "mirrord"
     private val labelName: String = "Select pod to impersonate"
 
-    fun createMirrordKubeDialog(pods: JBList<String>, fileOpsCheckbox: JCheckBox, remoteDnsCheckbox: JCheckBox, agentRustLog: JTextField, rustLog: JTextField): JPanel {
+    fun createMirrordKubeDialog(pods: JBList<String>, fileOpsCheckbox: JCheckBox, remoteDnsCheckbox: JCheckBox, ephemeralCheckbox: JCheckBox, agentRustLog: JTextField, rustLog: JTextField): JPanel {
         val dialogPanel = JPanel(BorderLayout())
         val label = JLabel(labelName)
+        label.border = EmptyBorder(5, 40, 5, 5)
 
         val podPanel = JPanel(GridLayout(2, 1, 10, 5))
         podPanel.add(label, BorderLayout.NORTH)
@@ -27,9 +28,14 @@ class MirrordDialogBuilder {
         dialogPanel.add(JSeparator(JSeparator.VERTICAL),
                 BorderLayout.CENTER)
 
-        val checkBoxPanel = JPanel(GridLayout(4, 1, 10, 2))
-        checkBoxPanel.add(fileOpsCheckbox)
-        checkBoxPanel.add(remoteDnsCheckbox)
+        val optionsPanel = JPanel(GridLayout(6, 1, 10, 2))
+        val optionLabel = JLabel("Options")
+        optionLabel.border = EmptyBorder(5, 110, 5, 20)
+
+        optionsPanel.add(optionLabel)
+        optionsPanel.add(fileOpsCheckbox)
+        optionsPanel.add(remoteDnsCheckbox)
+        optionsPanel.add(ephemeralCheckbox)
 
         val agentLogPanel = JPanel(GridBagLayout())
         agentLogPanel.add(JLabel("MIRRORD_AGENT_RUST_LOG"))
@@ -45,10 +51,10 @@ class MirrordDialogBuilder {
 
         rustLogPanel.border = EmptyBorder(10, 10, 10, 10);
 
-        checkBoxPanel.add(agentLogPanel)
-        checkBoxPanel.add(rustLogPanel)
+        optionsPanel.add(agentLogPanel)
+        optionsPanel.add(rustLogPanel)
 
-        dialogPanel.add(checkBoxPanel, BorderLayout.EAST)
+        dialogPanel.add(optionsPanel, BorderLayout.EAST)
 
         return dialogPanel
     }
