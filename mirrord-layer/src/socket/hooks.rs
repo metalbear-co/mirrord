@@ -253,7 +253,7 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
-    let guard = crate::DetourGuard::new();
+    let guard = crate::detour::DetourGuard::new();
     if guard.is_none() {
         return fcntl_result;
     }

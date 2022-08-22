@@ -18,9 +18,9 @@ use tokio::net::TcpStream;
 use tracing::{debug, trace};
 
 use crate::{
+    detour::DetourGuard,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
-    DetourGuard,
 };
 
 pub(crate) mod outgoing;

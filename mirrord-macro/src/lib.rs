@@ -69,8 +69,8 @@ pub fn hook_fn(
 
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
-            #visibility static #static_name: crate::HookFn<#type_name> =
-                crate::HookFn::default()
+            #visibility static #static_name: crate::detour::HookFn<#type_name> =
+                crate::detour::HookFn::default()
         };
 
         let output = quote! {
@@ -149,14 +149,14 @@ pub fn hook_guard_fn(
 
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
-            #visibility static #static_name: crate::HookFn<#type_name> =
-                crate::HookFn::default()
+            #visibility static #static_name: crate::detour::HookFn<#type_name> =
+                crate::detour::HookFn::default()
         };
 
         let mut modified_function = proper_function.clone();
         modified_function.block.stmts = Block::parse_within
             .parse2(quote!(
-                let __bypass = crate::DetourGuard::new();
+                let __bypass = crate::detour::DetourGuard::new();
                 if __bypass.is_none() {
                     return #static_name (#fn_arg_names);
                 }

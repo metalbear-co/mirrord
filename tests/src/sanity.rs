@@ -808,6 +808,8 @@ mod tests {
         process.assert_stderr();
     }
 
+    // TODO(alex) [high] 2022-08-22: Write more tests for this feature (remember to add the feature
+    // enabled args).
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic(#[future] service: EchoService) {

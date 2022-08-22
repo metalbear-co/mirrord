@@ -6,9 +6,7 @@
 #![feature(result_flattening)]
 
 use std::{
-    cell::RefCell,
     collections::{HashSet, VecDeque},
-    ops::Deref,
     sync::{LazyLock, OnceLock},
 };
 
@@ -45,8 +43,14 @@ use tokio::{
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::prelude::*;
 
+use crate::{
+    common::HookMessage, config::LayerConfig, file::FileHandler, socket::OUTGOING_SOCKETS,
+    tcp::outgoing,
+};
+
 mod common;
 mod config;
+mod detour;
 mod error;
 mod file;
 mod go_hooks;
@@ -56,80 +60,20 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 
-use crate::{
-    common::HookMessage, config::LayerConfig, file::FileHandler, socket::OUTGOING_SOCKETS,
-    tcp::outgoing,
-};
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .on_thread_start(detour_bypass_on)
-        .on_thread_stop(detour_bypass_off)
+        .on_thread_start(detour::detour_bypass_on)
+        .on_thread_stop(detour::detour_bypass_off)
         .build()
         .unwrap()
 });
+
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
-
-thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
-
-fn detour_bypass_on() {
-    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
-}
-
-fn detour_bypass_off() {
-    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
-}
-
-pub(crate) struct DetourGuard;
-
-impl DetourGuard {
-    /// Create a new DetourGuard if it's not already enabled.
-    pub(crate) fn new() -> Option<Self> {
-        DETOUR_BYPASS.with(|enabled| {
-            if *enabled.borrow() {
-                None
-            } else {
-                *enabled.borrow_mut() = true;
-                Some(Self)
-            }
-        })
-    }
-}
-
-impl Drop for DetourGuard {
-    fn drop(&mut self) {
-        detour_bypass_off();
-    }
-}
-
-/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
-/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
-#[derive(Debug)]
-pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
-
-impl<T> Deref for HookFn<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.get().unwrap()
-    }
-}
-
-impl<T> const Default for HookFn<T> {
-    fn default() -> Self {
-        Self(std::sync::OnceLock::new())
-    }
-}
-
-impl<T> HookFn<T> {
-    pub(crate) fn set(&self, value: T) -> Result<(), T> {
-        self.0.set(value)
-    }
-}
 
 #[ctor]
 fn init() {
@@ -445,7 +389,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         debug!("close_detour -> closing in SOCKETS!");
         FN_CLOSE(fd)
     } else if let Some(connection_id) = OUTGOING_SOCKETS.lock().unwrap().remove(&fd) {
-        // TODO(alex) [high] 2022-08-21: Close the sockets (only outgoing).
+        // TODO(alex) [mid] 2022-08-21: Close the sockets (only outgoing).
         debug!("close_detour -> closing in OUTGOING!");
 
         let close_hook = outgoing::Close { connection_id };

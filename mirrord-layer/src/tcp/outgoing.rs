@@ -19,9 +19,9 @@ use tracing::{debug, error, trace, warn};
 
 use crate::{
     common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
+    detour::DetourGuard,
     error::LayerError,
     socket::OUTGOING_SOCKETS,
-    DetourGuard,
 };
 
 #[derive(Debug)]
