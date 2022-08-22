@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - describe all pods on failure and add file name to print of logs.
 - E2E - print timestamp of stdout/stderr of `TestProcess`.
 - E2E - Don't delete pod/service on failure, instead leave them for debugging.
+- Change the version check on the VS Code extension to happen when mirrord is enabled rather than when the IDE starts up.
 
 
 ### Added
