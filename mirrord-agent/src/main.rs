@@ -39,7 +39,7 @@ use cli::parse_args;
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use util::{ClientID, IndexAllocator};
 
-use crate::runtime::get_container_pid;
+use crate::{runtime::get_container_pid, util::run_thread};
 
 trait AddrInfoHintExt {
     fn into_lookup(self) -> dns_lookup::AddrInfoHints;
@@ -325,7 +325,7 @@ async fn start_agent() -> Result<(), AgentError> {
     let cancel_guard = cancellation_token.clone().drop_guard();
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
 
-    let sniffer_task = tokio::spawn(TCPConnectionSniffer::start(
+    let sniffer_task = run_thread(TCPConnectionSniffer::start(
         sniffer_command_rx,
         pid,
         args.interface,
@@ -378,7 +378,9 @@ async fn start_agent() -> Result<(), AgentError> {
 
     debug!("start_agent -> shutting down start");
     drop(cancel_guard);
-    sniffer_task.await??;
+    if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
+        error!("start_agent -> sniffer task failed with error: {}", err);
+    }
 
     debug!("shutdown done");
     Ok(())

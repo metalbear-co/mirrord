@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-18.04
+          - os: ubuntu-latest
             extension: so
             target: x86_64-unknown-linux-gnu
     runs-on: ${{matrix.os}}
