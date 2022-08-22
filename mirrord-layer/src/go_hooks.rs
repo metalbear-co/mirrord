@@ -436,8 +436,8 @@ pub(crate) mod hooks {
     ) {
         ENABLED_FILE_OPS
             .set(enabled_file_ops)
-            .map_err(|e| {
-                error!("Error setting ENABLED_FILE_OPS: {}", e);
+            .map_err(|err| {
+                error!("Error setting ENABLED_FILE_OPS: {}", err);
             })
             .unwrap();
 

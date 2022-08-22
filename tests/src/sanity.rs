@@ -83,6 +83,7 @@ mod tests {
         Job,
     }
 
+    #[derive(Debug)]
     enum FileOps {
         Python,
         Go,
