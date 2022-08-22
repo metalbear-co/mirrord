@@ -6,9 +6,15 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+## 2.8.0
+
+### Added
+- E2E - add basic env tests for bash scripts
+
 ### Fixed
 - mirrord-agent - Update pcap library, hopefully will fix dropped packets (syn sometimes missed in e2e).
-- mirrord-agent/layer - Sometimes layer tries to conenct to agent before it finsihed loading, even though pod is running. Added watching the log stream for a "ready" log message before attempting to connect.
+- mirrord-agent/layer - Sometimes layer tries to connect to agent before it finsihed loading, even though pod is running. Added watching the log stream for a "ready" log message before attempting to connect.
 
 ### Changed
 - E2E - describe all pods on failure and add file name to print of logs.
@@ -16,9 +22,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - Don't delete pod/service on failure, instead leave them for debugging.
 - mirrord-agent - Don't use `tokio::spawn` for spawning `sniffer` (or any other namespace changing task) to avoid namespace-clashing/undefined behavior. Possibly fixing bugs.
 - Change the version check on the VS Code extension to happen when mirrord is enabled rather than when the IDE starts up.
-
-### Added
-- E2E - add basic env tests for bash scripts
 
 
 ## 2.7.0
