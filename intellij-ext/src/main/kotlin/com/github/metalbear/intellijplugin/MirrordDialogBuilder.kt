@@ -42,14 +42,14 @@ class MirrordDialogBuilder {
         agentRustLog.size = Dimension(5, 5)
         agentLogPanel.add(agentRustLog)
 
-        agentLogPanel.border = EmptyBorder(10, 10, 10, 10);
+        agentLogPanel.border = EmptyBorder(10, 10, 10, 10)
 
         val rustLogPanel = JPanel(GridBagLayout())
         rustLogPanel.add(JLabel("RUST_LOG"))
         rustLog.size = Dimension(5, 5)
         rustLogPanel.add(rustLog)
 
-        rustLogPanel.border = EmptyBorder(10, 10, 10, 10);
+        rustLogPanel.border = EmptyBorder(10, 10, 10, 10)
 
         optionsPanel.add(agentLogPanel)
         optionsPanel.add(rustLogPanel)
