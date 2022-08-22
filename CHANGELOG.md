@@ -14,7 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E - describe all pods on failure and add file name to print of logs.
 - E2E - print timestamp of stdout/stderr of `TestProcess`.
 - E2E - Don't delete pod/service on failure, instead leave them for debugging.
-
+- mirrord-agent - Don't use `tokio::spawn` for spawning `sniffer` (or any other namespace changing task) to avoid namespace-clashing/undefined behavior. Possibly fixing bugs.
 
 ### Added
 - E2E - add basic env tests for bash scripts
