@@ -273,6 +273,7 @@ pub async fn steal_worker(
     let mut worker = StealWorker::new(tx, listen_port)?;
     debug!("finished preparing steal");
     worker.handle_loop(rx, listener).await?;
+    debug!("steal exiting");
 
     Ok(())
 }
