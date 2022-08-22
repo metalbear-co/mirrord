@@ -271,16 +271,9 @@ pub async fn steal_worker(
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
     let mut worker = StealWorker::new(tx, listen_port)?;
-    tokio::spawn(async move {
-        worker
-            .handle_loop(rx, listener)
-            .await
-            .unwrap_or_else(|err| {
-                error!("steal worker error: {:?}", err);
-            });
-    });
+    debug!("finished preparing steal");
+    worker.handle_loop(rx, listener).await?;
 
-    debug!("finished preparing");
     Ok(())
 }
 

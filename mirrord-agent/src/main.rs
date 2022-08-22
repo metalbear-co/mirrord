@@ -205,7 +205,11 @@ impl ClientConnectionHandler {
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
 
-        steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await?;
+        let _ = run_thread(steal_worker(
+            tcp_steal_layer_receiver,
+            tcp_steal_daemon_sender,
+            pid,
+        ));
 
         let mut client_handler = ClientConnectionHandler {
             id,
@@ -218,7 +222,6 @@ impl ClientConnectionHandler {
         };
 
         client_handler.handle_loop(cancel_token).await?;
-
         Ok(())
     }
 
