@@ -35,14 +35,7 @@ intellij {
     version.set(properties("platformVersion"))
     type.set(properties("platformType"))
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
-    plugins.set(properties("platformPlugins").split(',').map(String::trim).filter(String::isNotEmpty))
-    /*
-    TODO: fix this, it runs the PyCharm IDE but the icon changes and a bunch of other errors
-    version.set(properties("platformVersion"))
-    type.set("PC")
-    plugins.set(listOf("PythonCore"))
-    downloadSources.set(false)
-    */
+    plugins.set(properties("platformPlugins").split(',').map(String::trim).filter(String::isNotEmpty))    
 }
 
 // Configure Gradle Changelog Plugin - read more: https://github.com/JetBrains/gradle-changelog-plugin
@@ -91,9 +84,17 @@ tasks {
                 }
                 subList(indexOf(start) + 1, indexOf(end))
             }.joinToString("\n").run { markdownToHTML(this) }
-        )        
+        )
     }
 
+    prepareSandbox {
+        doLast {
+            copy {
+                from(file("$projectDir/libmirrord_layer.dylib"))
+                into(file("$buildDir/idea-sandbox/config"))
+            }
+        }
+    }
     // Configure UI tests plugin
     // Read more: https://github.com/JetBrains/intellij-ui-test-robot
     runIdeForUiTests {
