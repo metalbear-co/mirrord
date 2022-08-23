@@ -171,6 +171,8 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
 }
 
 struct ClientConnectionHandler {
+    /// Used to prevent closing the main loop (`handle_loop`) when any request is done (tcp
+    /// outgoing feature). Stays `true` until `agent` receives an `ExitRequest`.
     keep_alive: bool,
     id: ClientID,
     file_manager: FileManager,

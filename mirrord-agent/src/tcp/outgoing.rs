@@ -1,4 +1,3 @@
-use core::fmt;
 use std::{collections::HashMap, path::PathBuf, thread};
 
 use mirrord_protocol::{tcp::outgoing::*, ConnectionId, ResponseError};
@@ -20,24 +19,17 @@ use crate::{error::AgentError, runtime::set_namespace, util::run_thread};
 type Request = TcpOutgoingRequest;
 type Response = TcpOutgoingResponse;
 
+/// Handles (briefly) the `TcpOutgoingRequest` and `TcpOutgoingResponse` messages, mostly the
+/// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct TcpOutgoingApi {
+    /// Holds the `interceptor_task`.
     _task: thread::JoinHandle<Result<(), AgentError>>,
+
+    /// Sends the `Request` to the `interceptor_task`.
     request_tx: Sender<Request>,
+
+    /// Reads the `Response` from the `interceptor_task`.
     response_rx: Receiver<Response>,
-}
-
-pub struct Data {
-    connection_id: ConnectionId,
-    bytes: Vec<u8>,
-}
-
-impl fmt::Debug for Data {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Data")
-            .field("connection_id", &self.connection_id)
-            .field("bytes (length)", &self.bytes.len())
-            .finish()
-    }
 }
 
 impl TcpOutgoingApi {
@@ -45,7 +37,6 @@ impl TcpOutgoingApi {
         let (request_tx, request_rx) = mpsc::channel(1000);
         let (response_tx, response_rx) = mpsc::channel(1000);
 
-        // let task = task::spawn(Self::interceptor_task(pid, request_rx, response_tx));
         let task = run_thread(Self::interceptor_task(pid, request_rx, response_tx));
 
         Self {
@@ -55,6 +46,7 @@ impl TcpOutgoingApi {
         }
     }
 
+    /// Does the actual work for `Request`s and prepares the `Responses:
     async fn interceptor_task(
         pid: Option<u64>,
         mut request_rx: Receiver<Request>,
@@ -83,7 +75,8 @@ impl TcpOutgoingApi {
                     match request {
                         Some(request) => {
                             match request {
-                                // [layer] -> [agent] -> [layer]
+                                // [user] -> [layer] -> [agent] -> [layer]
+                                // `user` is asking us to connect to some remote host.
                                 TcpOutgoingRequest::Connect(ConnectRequest { remote_address }) => {
                                     let connect_response =
                                         TcpStream::connect(remote_address)
@@ -97,6 +90,8 @@ impl TcpOutgoingApi {
                                                     .map(|last| last + 1)
                                                     .unwrap_or_default();
 
+                                                // Split the `remote_stream` so we can keep reading
+                                                // and writing from multiple hosts without blocking.
                                                 let (read_half, write_half) = remote_stream.into_split();
                                                 writers.insert(connection_id, write_half);
                                                 readers.insert(connection_id, ReaderStream::new(read_half));
@@ -110,7 +105,8 @@ impl TcpOutgoingApi {
                                     let response = TcpOutgoingResponse::Connect(connect_response);
                                     response_tx.send(response).await?
                                 }
-                                // [layer] -> [agent] -> [remote]
+                                // [user] -> [layer] -> [agent] -> [remote]
+                                // `user` wrote some message to the remote host.
                                 TcpOutgoingRequest::Write(WriteRequest {
                                     connection_id,
                                     bytes,
@@ -130,25 +126,19 @@ impl TcpOutgoingApi {
                                     let response = TcpOutgoingResponse::Write(write_response);
                                     response_tx.send(response).await?
                                 }
-
-                                TcpOutgoingRequest::Close(CloseRequest { connection_id} ) => {
-                                    writers.remove(&connection_id);
-                                    readers.remove(&connection_id);
-
-                                    if writers.is_empty() && readers.is_empty() {
-                                        break;
-                                    }
-                                }
                             }
                         }
                         None => {
-                            warn!("run -> Disconnected!");
+                            // We have no more requests coming.
+                            warn!("interceptor_task -> no requests left!");
                             break;
                         }
                     }
                 }
 
-                // [remote] -> [agent] -> [layer]
+                // [remote] -> [agent] -> [layer] -> [user]
+                // Read the data from one of the connected remote hosts, and forward the result back
+                // to the `user`.
                 Some((connection_id, value)) = readers.next() => {
                     trace!("interceptor_task -> read connection_id {:#?}", connection_id);
 
@@ -161,7 +151,8 @@ impl TcpOutgoingApi {
 
                 }
                 else => {
-                    trace!("interceptor_task -> no messages left");
+                    // We have no more data coming from any of the remote hosts.
+                    warn!("interceptor_task -> no messages left");
                     break;
                 }
             }
@@ -170,11 +161,13 @@ impl TcpOutgoingApi {
         Ok(())
     }
 
+    /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
     pub(crate) async fn request(&mut self, request: TcpOutgoingRequest) -> Result<(), AgentError> {
         trace!("TcpOutgoingApi::request -> request {:#?}", request);
         Ok(self.request_tx.send(request).await?)
     }
 
+    /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.
     pub(crate) async fn response(&mut self) -> Result<TcpOutgoingResponse, AgentError> {
         self.response_rx
             .recv()
