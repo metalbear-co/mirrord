@@ -13,7 +13,7 @@
     },
     {
       "name": "Launch index.ts",
-      "type": "pwa-node",
+      "type": "node",
       "request": "launch",
       "runtimeArgs": [
         "-r",
@@ -34,7 +34,7 @@
         "${workspaceFolder}/vscode-ext/out/**/*.js"
       ],
       "request": "launch",
-      "type": "pwa-extensionHost"
+      "type": "extensionHost"
     },
     {
       "type": "lldb",
