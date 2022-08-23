@@ -26,10 +26,7 @@ use mirrord_protocol::{
 };
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{
-    outgoing::{TcpOutgoing, TcpOutgoingHandler},
-    TcpHandler,
-};
+use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
@@ -43,10 +40,7 @@ use tokio::{
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::{
-    common::HookMessage, config::LayerConfig, file::FileHandler, socket::OUTGOING_SOCKETS,
-    tcp::outgoing,
-};
+use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 
 mod common;
 mod config;
@@ -102,8 +96,8 @@ fn init() {
     };
 
     let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
-    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
-    enable_hooks(*enabled_file_ops, config.remote_dns, *enabled_tcp_outgoing);
+    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
+    enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -349,7 +343,7 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
-fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_tcp_outgoing: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
@@ -373,8 +367,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, enabled_tcp_ou
     interceptor.end_transaction();
 }
 
-// TODO(alex) [high] 2022-08-22: When this is annotated with `hook_guard_fn`, then the outgoing
-// sockets never call it (we just bypass). Everything works, so, should we intervene?
+// TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
+// just bypass). Everything works, so, should we intervene?
 //
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
@@ -387,22 +381,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
-        .get()
-        .expect("Should be set during initialization!");
-
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        debug!("close_detour -> closing in SOCKETS!");
-        FN_CLOSE(fd)
-    } else if *enabled_tcp_outgoing
-        && let Some(connection_id) = OUTGOING_SOCKETS.lock().unwrap().remove(&fd) {
-        // TODO(alex) [mid] 2022-08-21: Close the sockets (only outgoing).
-        debug!("close_detour -> closing in OUTGOING!");
-
-        let close_hook = outgoing::Close { connection_id };
-        let close_result =
-            blocking_send_hook_message(HookMessage::TcpOutgoing(TcpOutgoing::Close(close_hook)));
-
         FN_CLOSE(fd)
     } else if *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
@@ -427,7 +406,7 @@ fn exit() -> Result<(), LayerError> {
 
     blocking_send_hook_message(HookMessage::Exit(exit_hook))?;
 
-    Ok(hook_channel_rx.blocking_recv()??)
+    hook_channel_rx.blocking_recv()?
 }
 
 #[hook_fn]

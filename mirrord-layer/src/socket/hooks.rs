@@ -102,8 +102,6 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
-    // TODO(alex) [high] 2022-08-03: We're trying to connect to 255.127.0.0, why? Looks like the
-    // DNS stuff is returning correct values (this address appears nowhere).
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
@@ -111,12 +109,8 @@ pub(super) unsafe extern "C" fn connect_detour(
 
     // TODO: Is this conversion safe?
     let address = SockAddr::new(*(raw_address as *const _), address_length);
-    debug!("connect_detour -> address {:#?}", address);
-
     let address = address.as_socket().ok_or(LayerError::AddressConversion);
 
-    // TODO(alex) [high] 2022-08-03: Drilling down, maybe we need to bypass a bunch of stuff
-    // when connect is being called, then release the bypass?
     match address {
         Ok(address) => {
             let (Ok(result) | Err(result)) =

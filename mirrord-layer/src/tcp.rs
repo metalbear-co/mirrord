@@ -148,6 +148,7 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
+        #[allow(clippy::let_and_return)]
         let tcp_stream = {
             let _ = DetourGuard::new();
             TcpStream::connect(addr).await.map_err(From::from)

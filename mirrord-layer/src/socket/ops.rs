@@ -33,7 +33,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
-    if !(type_ & libc::SOCK_STREAM > 0) {
+    if type_ & libc::SOCK_STREAM <= 0 {
         Err(LayerError::BypassedType(type_))
     } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
         Err(LayerError::BypassedDomain(domain))
@@ -125,7 +125,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<(), LayerError> {
             if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
                 error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
 
-                Err(io::Error::from_raw_os_error(-1).into())
+                Err(io::Error::from_raw_os_error(-1))
             } else {
                 Ok(())
             }
@@ -209,7 +209,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         .expect("Should be set during initialization!");
 
     match user_socket_info.state {
-        SocketState::Initialized if *enabled_tcp_outgoing == false => {
+        SocketState::Initialized if !(*enabled_tcp_outgoing) => {
             trace!(
                 "connect -> SocketState::Initialized {:#?}",
                 user_socket_info

@@ -20,8 +20,6 @@ use crate::{error::AgentError, runtime::set_namespace, util::run_thread};
 type Request = TcpOutgoingRequest;
 type Response = TcpOutgoingResponse;
 
-// TODO(alex) [high] 2022-08-19: Instead of spawning a bunch of tasks, use a `StreamMap` to deal
-// with multiple connections!
 pub(crate) struct TcpOutgoingApi {
     _task: thread::JoinHandle<Result<(), AgentError>>,
     request_tx: Sender<Request>,
@@ -137,7 +135,7 @@ impl TcpOutgoingApi {
                                     writers.remove(&connection_id);
                                     readers.remove(&connection_id);
 
-                                    if writers.len() == 0 && readers.len() == 0 {
+                                    if writers.is_empty() && readers.is_empty() {
                                         break;
                                     }
                                 }

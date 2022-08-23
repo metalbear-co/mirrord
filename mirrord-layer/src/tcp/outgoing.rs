@@ -40,11 +40,6 @@ pub(crate) struct Write {
     pub(crate) bytes: Vec<u8>,
 }
 
-#[derive(Debug)]
-pub(crate) struct Close {
-    pub(crate) connection_id: ConnectionId,
-}
-
 impl fmt::Debug for Write {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Write")
@@ -58,7 +53,6 @@ impl fmt::Debug for Write {
 pub(crate) enum TcpOutgoing {
     Connect(Connect),
     Write(Write),
-    Close(Close),
 }
 
 #[derive(Debug)]
@@ -81,18 +75,7 @@ impl Default for TcpOutgoingHandler {
     }
 }
 
-// TODO(alex) [high] 2022-08-08: Need something very similar to `TcpMirrorHandler`, where we
-// separate a task that keeps reading from the user stream, reading from the remote stream, and
-// sends what has been (local) read to agent as a message.
-// Something like:
-//
-// - (local) write [user] -> (mirror) read -> client message -> daemon response -> (mirror) write ->
-//   (local) read [user]
-//
-// - (remote) write [out] -> daemon response -> (mirror) read -> (mirror) write ->
-// (local) read [user]
 impl TcpOutgoingHandler {
-    /// TODO(alex) [low] 2022-08-09: Document this function.
     async fn interceptor_task(
         connection_id: ConnectionId,
         mut mirror_stream: TcpStream,
@@ -203,15 +186,6 @@ impl TcpOutgoingHandler {
                     )))
                     .await?)
             }
-            TcpOutgoing::Close(Close { connection_id }) => {
-                trace!("Close -> connection_id {:#?}", connection_id);
-
-                Ok(codec
-                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Close(
-                        CloseRequest { connection_id },
-                    )))
-                    .await?)
-            }
         }
     }
 
@@ -252,8 +226,7 @@ impl TcpOutgoingHandler {
                     let mirror_address = mirror_listener.local_addr()?;
                     let mirror_connect = MirrorConnect { mirror_address };
 
-                    let _ = self
-                        .connect_queue
+                    self.connect_queue
                         .pop_front()
                         .ok_or(LayerError::SendErrorTcpResponse)?
                         .send(Ok(mirror_connect))

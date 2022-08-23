@@ -224,8 +224,6 @@ impl ClientConnectionHandler {
         Ok(self.stream.send(response).await?)
     }
 
-    // TODO(alex) [high] 2022-08-17: Need some sort of keep-alive message to not `break` on
-    // outgoing when there are no messages left.
     async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
         let mut running = true;
         while running {
@@ -319,8 +317,6 @@ impl ClientConnectionHandler {
             }
             ClientMessage::ExitRequest => {
                 self.keep_alive = false;
-
-                ()
             }
         }
         Ok(true)
