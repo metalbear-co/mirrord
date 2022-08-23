@@ -339,7 +339,6 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         FN_CONNECT
     );
 
-
     let _ = replace!(
         interceptor,
         "getpeername",
@@ -372,7 +371,7 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
             accept4_detour,
             FnAccept4,
             FN_ACCEPT4
-        );        
+        );
     }
 
     let _ = replace!(interceptor, "accept", accept_detour, FnAccept, FN_ACCEPT);

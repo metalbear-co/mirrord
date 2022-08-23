@@ -2,8 +2,7 @@ use frida_gum::interceptor::Interceptor;
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
-use crate::{error::LayerError, HOOK_SENDER, file::HookMessageFile, tcp::HookMessageTcp, replace};
-
+use crate::{error::LayerError, file::HookMessageFile, replace, tcp::HookMessageTcp, HOOK_SENDER};
 
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
@@ -32,7 +31,6 @@ pub enum HookMessage {
     GetAddrInfoHook(GetAddrInfoHook),
 }
 
-
 mod common_ops {
     use std::os::unix::prelude::RawFd;
 
@@ -59,13 +57,13 @@ mod common_ops {
     }
 }
 
-
 mod common_hooks {
     use libc::c_int;
-    use tracing::trace;    
-    use crate::error::LayerError;
+    use mirrord_macro::{hook_fn, hook_guard_fn};
+    use tracing::trace;
 
     use super::common_ops::*;
+    use crate::error::LayerError;
 
     /// https://github.com/metalbear-co/mirrord/issues/184
     #[hook_fn]
@@ -141,9 +139,7 @@ mod common_hooks {
 
     #[cfg(target_os = "linux")]
     #[hook_guard_fn]
-    pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {        
-        use crate::error::LayerError;
-
+    pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
         trace!(
             "dup3_detour -> oldfd {:#?} | newfd {:#?} | flags {:#?}",
             oldfd,
@@ -171,9 +167,27 @@ mod common_hooks {
 }
 
 pub(crate) unsafe fn enable_common_hooks(interceptor: &mut Interceptor) {
-    let _ = replace!(interceptor, "fcntl", common_hooks::fcntl_detour, FnFcntl, FN_FCNTL);
+    let _ = replace!(
+        interceptor,
+        "fcntl",
+        common_hooks::fcntl_detour,
+        FnFcntl,
+        FN_FCNTL
+    );
     let _ = replace!(interceptor, "dup", common_hooks::dup_detour, FnDup, FN_DUP);
-    let _ = replace!(interceptor, "dup2", common_hooks::dup2_detour, FnDup2, FN_DUP2);
+    let _ = replace!(
+        interceptor,
+        "dup2",
+        common_hooks::dup2_detour,
+        FnDup2,
+        FN_DUP2
+    );
     #[cfg(target_os = "linux")]
-    let _ = replace!(interceptor, "dup3", common_hooks::dup3_detour, FnDup3, FN_DUP3);
+    let _ = replace!(
+        interceptor,
+        "dup3",
+        common_hooks::dup3_detour,
+        FnDup3,
+        FN_DUP3
+    );
 }
