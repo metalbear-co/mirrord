@@ -8,20 +8,21 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 class FileOpsTest(unittest.TestCase):
     def setUp(self):
         """
-        Check if the default file exists and reads the text.
-        """
+        Check if the default file exists.
+        """        
         with open("/app/test.txt", "r") as f:
             f.seek(0)
             self.assertEqual(f.readline(), TEXT)
 
-    def test_write(self):
+    def test_read_write_family(self):
         """
         Reads data from a file in "/tmp" and verifies the text expected is the same as the text written.
         """
         file_path, _ = self._create_new_tmp_file()
         self.assertFalse(self._check_path_exists_on_host(file_path))
-        with open(file_path, "r+") as file:
-            read_text = file.readline()
+        with open(file_path, "r+") as rw_file:
+            rw_file.seek(0)
+            read_text = rw_file.readline()
             self.assertEqual(read_text, TEXT)
 
     def test_lseek(self):
@@ -31,9 +32,9 @@ class FileOpsTest(unittest.TestCase):
         read_str = ""
         file_path, _ = self._create_new_tmp_file()
         self.assertFalse(self._check_path_exists_on_host(file_path))
-        with open(file_path, "r+") as file:
+        with open(file_path, "r+") as rw_file:
             while read_str != TEXT:
-                read_str += file.read(0, 1)
+                read_str += rw_file.read(1)
             self.assertEqual(read_str, TEXT)
 
     def test_openat(self):
@@ -66,3 +67,4 @@ class FileOpsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+Footer
