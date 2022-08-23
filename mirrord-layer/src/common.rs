@@ -3,8 +3,10 @@ use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 use tracing::error;
 
+#[cfg(target_os = "linux")]
+use crate::common::common_hooks::{FnDup3, FN_DUP3};
 use crate::{
-    common::common_hooks::{FnDup, FnDup2, FnDup3, FnFcntl, FN_DUP, FN_DUP2, FN_DUP3, FN_FCNTL},
+    common::common_hooks::{FnDup, FnDup2, FnFcntl, FN_DUP, FN_DUP2, FN_FCNTL},
     error::LayerError,
     file::HookMessageFile,
     replace,
