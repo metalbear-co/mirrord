@@ -1,1 +1,1 @@
-rootProject.name = "mirrord-intellij-plugin"
+rootProject.name = "mirrord"
