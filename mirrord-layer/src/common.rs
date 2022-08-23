@@ -58,7 +58,7 @@ mod common_ops {
         if let Some(socket) = SOCKETS.lock()?.get(&fd) {
             SOCKETS.lock()?.insert(dup_fd as RawFd, socket.clone());
         } else if let Some(file) = OPEN_FILES.lock()?.get(&fd) && *ENABLED_FILE_OPS.get().unwrap() {
-            OPEN_FILES.lock()?.insert(dup_fd as RawFd, file.clone());
+            OPEN_FILES.lock()?.insert(dup_fd as RawFd, *file);
         } else {
             return Err(LayerError::LocalFDNotFound(fd));
         }

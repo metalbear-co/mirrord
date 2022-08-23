@@ -9,6 +9,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - Support for Golang fileops
+- Support for fcntl, dup, dup2, dup3 for fileops
+
+### Changed
+- Move functionality for fcntl, dup, dup2, dup3 into a common module
 
 
 ## 2.8.1
