@@ -2,7 +2,14 @@ use frida_gum::interceptor::Interceptor;
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
-use crate::{error::LayerError, file::HookMessageFile, replace, tcp::HookMessageTcp, HOOK_SENDER};
+use crate::{
+    common::common_hooks::{FnDup, FnDup2, FnDup3, FnFcntl, FN_DUP, FN_DUP2, FN_DUP3, FN_FCNTL},
+    error::LayerError,
+    file::HookMessageFile,
+    replace,
+    tcp::HookMessageTcp,
+    HOOK_SENDER,
+};
 
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
     unsafe {
