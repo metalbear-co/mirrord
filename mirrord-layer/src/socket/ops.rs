@@ -49,7 +49,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         Ok(socket_result)
     }?;
 
-    let new_socket = MirrorSocket {
+    let new_socket = UserSocket {
         domain,
         type_,
         protocol,
@@ -67,8 +67,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
-/// update the socket state and don't call bind (will be called later). In any other case, we call
-/// regular bind.
+/// update the socket state.
 pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<(), LayerError> {
     trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
@@ -144,8 +143,8 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<(), LayerError> {
     Ok(())
 }
 
-/// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
-/// Messages received from the agent on the real port will later be routed to the fake local port.
+/// Subscribe to the agent on the real port. Messages received from the agent on the real port will
+/// later be routed to the fake local port.
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
@@ -190,6 +189,15 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     Ok(())
 }
 
+/// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
+///
+/// 1. Outgoing traffic is **disabled**: this just becomes a normal `libc::connect` call, removing
+/// the socket from our list of managed sockets.
+///
+/// 2. Outgoing traffic is **enabled** and `socket.state` is `Initialized`: sends a hook message
+/// that will be handled by `TcpOutgoingHandler`, starting the request interception procedure.
+///
+/// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
     trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
@@ -210,6 +218,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
     match user_socket_info.state {
         SocketState::Initialized if !(*enabled_tcp_outgoing) => {
+            // Just call `libc::connect`.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",
                 user_socket_info
@@ -231,6 +240,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             }
         }
         SocketState::Initialized => {
+            // Prepare this socket to be intercepted.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",
                 user_socket_info
@@ -249,6 +259,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
 
             let connect_to = SockAddr::from(mirror_address);
 
+            // Connect to the interceptor socket that is listening.
             let connect_result =
                 unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
 
@@ -387,7 +398,7 @@ pub(super) fn accept(
             .map(|socket| socket.address)?
     };
 
-    let new_socket = MirrorSocket {
+    let new_socket = UserSocket {
         domain,
         protocol,
         type_,
