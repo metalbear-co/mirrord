@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 
 import com.intellij.openapi.application.PathManager
 import java.nio.file.Paths
