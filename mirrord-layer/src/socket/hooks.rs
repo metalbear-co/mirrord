@@ -2,7 +2,7 @@ use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_macro::{hook_fn, hook_guard_fn};
+use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
 use tracing::{debug, error, trace, warn};

@@ -1,6 +1,7 @@
 use frida_gum::interceptor::Interceptor;
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
+use tracing::error;
 
 use crate::{
     common::common_hooks::{FnDup, FnDup2, FnDup3, FnFcntl, FN_DUP, FN_DUP2, FN_DUP3, FN_FCNTL},
@@ -39,11 +40,12 @@ pub enum HookMessage {
 }
 
 mod common_ops {
-    use std::os::unix::prelude::RawFd;
+    use std::{os::unix::prelude::RawFd, sync::OnceLock};
 
     use libc::c_int;
 
     use crate::{error::LayerError, file::OPEN_FILES, socket::SOCKETS};
+    pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 
     pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
         match cmd {
@@ -55,7 +57,7 @@ mod common_ops {
     pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
         if let Some(socket) = SOCKETS.lock()?.get(&fd) {
             SOCKETS.lock()?.insert(dup_fd as RawFd, socket.clone());
-        } else if let Some(file) = OPEN_FILES.lock()?.get(&fd) {
+        } else if let Some(file) = OPEN_FILES.lock()?.get(&fd) && *ENABLED_FILE_OPS.get().unwrap() {
             OPEN_FILES.lock()?.insert(dup_fd as RawFd, file.clone());
         } else {
             return Err(LayerError::LocalFDNotFound(fd));
@@ -173,7 +175,14 @@ mod common_hooks {
     }
 }
 
-pub(crate) unsafe fn enable_common_hooks(interceptor: &mut Interceptor) {
+pub(crate) unsafe fn enable_common_hooks(interceptor: &mut Interceptor, enabled_file_ops: bool) {
+    common_ops::ENABLED_FILE_OPS
+        .set(enabled_file_ops)
+        .map_err(|err| {
+            error!("Error setting ENABLED_FILE_OPS: {}", err);
+        })
+        .unwrap();
+
     let _ = replace!(
         interceptor,
         "fcntl",

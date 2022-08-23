@@ -379,6 +379,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
+
+    unsafe { common::enable_common_hooks(&mut interceptor, enabled_file_ops) };
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
