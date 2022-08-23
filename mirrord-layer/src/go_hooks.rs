@@ -5,13 +5,17 @@ pub(crate) mod hooks {
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
-    use tracing::{debug, error, trace};
+    use tracing::{error, trace};
 
     use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*};
     static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
     /*
-     * Reference for which which syscall detours call file/socket detours:
+     * Reference for which syscalls are managed by the handlers:
+     * SYS_openat: Syscall6
+     * SYS_read, SYS_write, SYS_lseek, SYS_faccessat: Syscall
      *
+     * SYS_socket, SYS_bind, SYS_listen, SYS_accept, SYS_close: Syscall
+     * SYS_accept4: Syscall6
      */
 
     /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
