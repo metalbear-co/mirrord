@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+
+## 2.8.1
+
 ### Fixed
 - CI - remove usage of ubuntu-18.04 machines (deprecated)
 
