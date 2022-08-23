@@ -7,7 +7,7 @@ node_modules
 **/.DS_Store
 target
 tests/go-e2e/go-e2e
-
+tests/go-e2e-fileops/go-e2e-fileops
 ### VSCode ###
 .vscode/*
 !.vscode/settings.json
