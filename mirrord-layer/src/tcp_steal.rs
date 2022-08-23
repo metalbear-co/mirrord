@@ -78,13 +78,9 @@ impl TcpHandler for TcpStealHandler {
         let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
-        self.read_streams
-            .remove(&connection_id)
-            .ok_or(LayerError::ConnectionIdNotFound(connection_id))?;
+        let _ = self.read_streams.remove(&connection_id);
 
-        self.write_streams
-            .remove(&connection_id)
-            .ok_or(LayerError::ConnectionIdNotFound(connection_id))?;
+        let _ = self.write_streams.remove(&connection_id);
 
         Ok(())
     }
