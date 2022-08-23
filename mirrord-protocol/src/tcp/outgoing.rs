@@ -5,16 +5,13 @@ use bincode::{Decode, Encode};
 
 use crate::{ConnectionId, RemoteResult};
 
+/// `user` wants to connect to `remote_address`.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ConnectRequest {
     pub remote_address: SocketAddr,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadRequest {
-    pub connection_id: ConnectionId,
-}
-
+/// `user` wants to write `bytes` to remote host identified by `connection_id`.
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct WriteRequest {
     pub connection_id: ConnectionId,
