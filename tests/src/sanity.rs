@@ -524,7 +524,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
@@ -558,7 +558,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
@@ -592,7 +592,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_file_ops(
         #[future]
         #[notrace]
@@ -625,7 +625,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_file_ops(
         #[future]
         #[notrace]
@@ -656,7 +656,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -673,7 +673,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -690,7 +690,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_dns_enabled_works(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -707,7 +707,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_dns_lookup_google(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -724,7 +724,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_dns_lookup_pod_service(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
@@ -742,7 +742,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     async fn test_steal_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
@@ -770,7 +770,7 @@ mod tests {
     #[rstest]
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
@@ -785,7 +785,7 @@ mod tests {
     #[rstest]
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
@@ -800,7 +800,7 @@ mod tests {
     #[rstest]
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_remote_env_vars_include_works(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
@@ -818,7 +818,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_file_exists(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
@@ -837,7 +837,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_file_read(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
@@ -853,7 +853,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn test_bash_file_write(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
