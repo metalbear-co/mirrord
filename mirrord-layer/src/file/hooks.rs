@@ -389,7 +389,7 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
         flags
     );
 
-    if dirfd == AT_FDCWD && flags == AT_EACCESS {
+    if dirfd == AT_FDCWD && (flags == AT_EACCESS || flags == 0) {
         access_logic(pathname, mode)
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)

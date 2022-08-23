@@ -5,7 +5,7 @@ pub(crate) mod hooks {
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
-    use tracing::error;
+    use tracing::{debug, error, trace};
 
     use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*};
     static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
@@ -309,6 +309,13 @@ pub(crate) mod hooks {
         param2: i64,
         param3: i64,
     ) -> i64 {
+        trace!(
+            "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
+            syscall,
+            param1,
+            param2,
+            param3
+        );
         let res = match syscall {
             libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
@@ -360,6 +367,10 @@ pub(crate) mod hooks {
         param5: i64,
         param6: i64,
     ) -> i64 {
+        trace!(
+            "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
+            syscall, param1, param2, param3, param4, param5, param6
+        );
         let res = match syscall {
             libc::SYS_accept4 => {
                 accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64

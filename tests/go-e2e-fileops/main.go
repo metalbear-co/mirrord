@@ -89,5 +89,4 @@ func main() {
 	TestWrite()
 	TestLseek()
 	TestFaccessat()
-	TestLseek()
 }
