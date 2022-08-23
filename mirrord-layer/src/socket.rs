@@ -8,7 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoHint, ConnectionId, Port};
+use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
 
 use crate::error::LayerError;
@@ -17,9 +17,6 @@ pub(super) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub(crate) static OUTGOING_SOCKETS: LazyLock<Mutex<HashMap<RawFd, ConnectionId>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
