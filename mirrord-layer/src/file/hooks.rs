@@ -125,7 +125,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn openat_detour(
+pub(crate) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
@@ -389,7 +389,7 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
         flags
     );
 
-    if dirfd == AT_FDCWD && flags == AT_EACCESS {
+    if dirfd == AT_FDCWD && (flags == AT_EACCESS || flags == 0) {
         access_logic(pathname, mode)
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)

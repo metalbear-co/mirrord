@@ -83,6 +83,12 @@ mod tests {
         Job,
     }
 
+    #[derive(Debug)]
+    pub enum FileOps {
+        Python,
+        Go,
+    }
+
     struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
@@ -188,6 +194,24 @@ mod tests {
                 #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
+            }
+        }
+    }
+
+    impl FileOps {
+        fn command(&self) -> Vec<&str> {
+            match self {
+                FileOps::Python => {
+                    vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+                }
+                FileOps::Go => vec!["go-e2e-fileops/go-e2e-fileops"],
+            }
+        }
+
+        fn assert(&self, process: TestProcess) {
+            match self {
+                FileOps::Python => process.assert_python_fileops_stderr(),
+                FileOps::Go => process.assert_stderr(),
             }
         }
     }
@@ -581,10 +605,11 @@ mod tests {
         #[notrace]
         service: EchoService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+        #[values(FileOps::Python, FileOps::Go)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
+        let command = ops.command();
 
         let mut args = vec!["--enable-fs"];
 
@@ -593,7 +618,7 @@ mod tests {
         }
 
         let mut process = run(
-            python_command,
+            command,
             &service.pod_name,
             Some(&service.namespace),
             Some(args),
@@ -601,7 +626,7 @@ mod tests {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        ops.assert(process);
     }
 
     #[cfg(target_os = "macos")]
