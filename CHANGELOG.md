@@ -10,6 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Support for Golang fileops
 
+### Changed
+- mirrord-layer: Added common `Result` type to to reduce boilerplate, removed dependency of `anyhow` crate.
 
 ## 2.8.1
 

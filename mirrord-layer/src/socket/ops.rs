@@ -16,17 +16,12 @@ use tracing::{debug, error, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
-    error::LayerError,
+    error::{LayerError, Result},
     tcp::{HookMessageTcp, Listen},
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(
-    sockfd: RawFd,
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-) -> Result<RawFd, LayerError> {
+pub(super) fn socket(sockfd: RawFd, domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd> {
     trace!("socket -> domain {:#?} | type:{:#?}", domain, type_);
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
@@ -52,7 +47,7 @@ pub(super) fn socket(
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
+pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<()> {
     trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
     let mut socket = {
@@ -82,7 +77,7 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
     debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
@@ -157,7 +152,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     Ok(())
 }
 
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
     trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
         sockfd,
@@ -214,7 +209,7 @@ pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     trace!("getpeername -> sockfd {:#?}", sockfd);
 
     let remote_address = {
@@ -239,7 +234,7 @@ pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     trace!("getsockname -> sockfd {:#?}", sockfd);
 
     let local_address = {
@@ -268,7 +263,7 @@ pub(super) fn accept(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
-) -> Result<RawFd, LayerError> {
+) -> Result<RawFd> {
     let (local_address, domain, protocol, type_) = {
         SOCKETS
             .lock()?
@@ -306,14 +301,14 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
@@ -340,7 +335,7 @@ pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     hints: Option<AddrInfoHint>,
-) -> Result<*mut libc::addrinfo, LayerError> {
+) -> Result<*mut libc::addrinfo> {
     trace!(
         "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
         node,

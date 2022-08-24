@@ -14,7 +14,7 @@ use std::{
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
-use error::LayerError;
+use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -115,7 +115,7 @@ impl<T> const Default for HookFn<T> {
 }
 
 impl<T> HookFn<T> {
-    pub(crate) fn set(&self, value: T) -> Result<(), T> {
+    pub(crate) fn set(&self, value: T) -> std::result::Result<(), T> {
         self.0.set(value)
     }
 }
@@ -225,10 +225,7 @@ where
         }
     }
 
-    async fn handle_daemon_message(
-        &mut self,
-        daemon_message: DaemonMessage,
-    ) -> Result<(), LayerError> {
+    async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
                 self.tcp_mirror_handler.handle_daemon_message(message).await
