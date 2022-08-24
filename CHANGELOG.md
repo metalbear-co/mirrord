@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - New feature, [tcp outgoing traffic](https://github.com/metalbear-co/mirrord/issues/27). It's now possible to make requests to a remote host from the staging environment context. You can enable this feature setting the `MIRRORD_TCP_OUTGOING` variable to true, or using the `-o` option in mirrord-cli.
 - Support for Golang fileops
 
+### Changed
+- mirrord-layer: Added common `Result` type to to reduce boilerplate, removed dependency of `anyhow` crate.
+- mirrord-layer: Split `LayerError` into `LayerError` and `HookError` to distinguish between errors that can be handled by the layer and errors that can be handled by the hook. (no more requiring libc errno for each error!). Closes [#247](https://github.com/metalbear-co/mirrord/issues/247)
+
 ## 2.8.1
 
 ### Fixed

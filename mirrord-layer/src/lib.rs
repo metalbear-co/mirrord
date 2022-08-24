@@ -13,7 +13,7 @@ use std::{
 use common::{blocking_send_hook_message, GetAddrInfoHook, HookMessageExit, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
-use error::LayerError;
+use error::{HookResult, LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
@@ -197,10 +197,7 @@ where
         }
     }
 
-    async fn handle_daemon_message(
-        &mut self,
-        daemon_message: DaemonMessage,
-    ) -> Result<(), LayerError> {
+    async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
                 self.tcp_mirror_handler.handle_daemon_message(message).await
@@ -398,7 +395,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     }
 }
 
-fn exit() -> Result<(), LayerError> {
+fn exit() -> HookResult<()> {
     trace!("exit ->");
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
 

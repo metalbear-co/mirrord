@@ -42,7 +42,6 @@ regex = "1"
 errno = "0.2"
 async-trait = "0.1"
 socket2 = "0.4"
-anyhow.workspace = true
 
 [lib]
 crate_type = ["cdylib"]

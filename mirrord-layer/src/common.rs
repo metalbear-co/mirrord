@@ -4,7 +4,7 @@ use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
 use crate::{
-    error::LayerError,
+    error::{HookError, HookResult},
     file::HookMessageFile,
     tcp::{outgoing::TcpOutgoing, HookMessageTcp},
     HOOK_SENDER,
@@ -12,17 +12,17 @@ use crate::{
 
 pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
     unsafe {
         HOOK_SENDER
             .as_ref()
-            .ok_or(LayerError::EmptyHookSender)
+            .ok_or(HookError::EmptyHookSender)
             .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
     }
 }
 
-pub(crate) async fn send_hook_message(message: HookMessage) -> Result<(), LayerError> {
-    let hook_sender = unsafe { HOOK_SENDER.as_ref().ok_or(LayerError::EmptyHookSender)? };
+pub(crate) async fn send_hook_message(message: HookMessage) -> HookResult<()> {
+    let hook_sender = unsafe { HOOK_SENDER.as_ref().ok_or(HookError::EmptyHookSender)? };
 
     Ok(hook_sender.send(message).await?)
 }
@@ -39,7 +39,7 @@ pub struct GetAddrInfoHook {
 
 #[derive(Debug)]
 pub(crate) struct HookMessageExit {
-    pub(crate) hook_channel_tx: oneshot::Sender<Result<(), LayerError>>,
+    pub(crate) hook_channel_tx: oneshot::Sender<Result<(), HookError>>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
