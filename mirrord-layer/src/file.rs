@@ -18,7 +18,10 @@ use mirrord_protocol::{
 use regex::RegexSet;
 use tracing::{debug, error, warn};
 
-use crate::{common::ResponseChannel, error::LayerError};
+use crate::{
+    common::ResponseChannel,
+    error::{LayerError, Result},
+};
 
 pub(crate) mod hooks;
 pub(crate) mod ops;
@@ -130,7 +133,7 @@ pub struct FileHandler {
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
-fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(), LayerError> {
+fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<()> {
     deque
         .pop_front()
         .ok_or(LayerError::SendErrorFileResponse)?
@@ -139,10 +142,7 @@ fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(
 }
 
 impl FileHandler {
-    pub(crate) async fn handle_daemon_message(
-        &mut self,
-        message: FileResponse,
-    ) -> Result<(), LayerError> {
+    pub(crate) async fn handle_daemon_message(&mut self, message: FileResponse) -> Result<()> {
         use FileResponse::*;
         match message {
             Open(open) => {
@@ -185,7 +185,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         use HookMessageFile::*;
         match message {
             Open(open) => self.handle_hook_open(open, codec).await,
@@ -208,7 +208,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Open {
             file_channel_tx,
             path,
@@ -233,7 +233,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let OpenRelative {
             relative_fd,
             path,
@@ -265,7 +265,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Read {
             fd,
             buffer_size,
@@ -296,7 +296,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Seek {
             fd,
             seek_from,
@@ -325,7 +325,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Write {
             fd,
             write_bytes,
@@ -352,7 +352,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Close {
             fd,
             file_channel_tx,
@@ -374,7 +374,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Access {
             pathname,
             mode,
