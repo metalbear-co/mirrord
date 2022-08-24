@@ -2,17 +2,17 @@ use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
 use crate::{
-    error::{LayerError, Result},
+    error::{HookError, HookResult},
     file::HookMessageFile,
     tcp::HookMessageTcp,
     HOOK_SENDER,
 };
 
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<()> {
+pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
     unsafe {
         HOOK_SENDER
             .as_ref()
-            .ok_or(LayerError::EmptyHookSender)
+            .ok_or(HookError::EmptyHookSender)
             .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
     }
 }

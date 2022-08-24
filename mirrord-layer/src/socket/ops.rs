@@ -16,7 +16,7 @@ use tracing::{debug, error, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
-    error::{LayerError, Result},
+    error::{HookError, HookResult as Result},
     tcp::{HookMessageTcp, Listen},
 };
 
@@ -54,10 +54,10 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<()> {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| {
                 if !matches!(socket.state, SocketState::Initialized) {
-                    Err(LayerError::SocketInvalidState(sockfd))
+                    Err(HookError::SocketInvalidState(sockfd))
                 } else {
                     Ok(socket)
                 }
@@ -66,7 +66,7 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<()> {
 
     (!is_ignored_port(address.port()))
         .then_some(())
-        .ok_or_else(|| LayerError::BypassedPort(address.port()))?;
+        .ok_or_else(|| HookError::BypassedPort(address.port()))?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound { address });
 
@@ -84,7 +84,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))?
+            .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
 
     match &socket.state {
@@ -102,7 +102,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
                     IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                     0,
                 ))),
-                invalid => Err(LayerError::UnsupportedDomain(invalid)),
+                invalid => Err(HookError::UnsupportedDomain(invalid)),
             }?;
 
             let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
@@ -126,7 +126,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
-            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
+            let address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
@@ -144,7 +144,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
 
             Ok(())
         }
-        _ => Err(LayerError::SocketInvalidState(sockfd)),
+        _ => Err(HookError::SocketInvalidState(sockfd)),
     }?;
 
     SOCKETS.lock()?.insert(sockfd, socket);
@@ -163,7 +163,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))?
+            .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
     debug!("connect -> user_socket_info {:#?}", user_socket_info);
 
@@ -193,11 +193,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
             if result != 0 {
                 Err(io::Error::from_raw_os_error(result))?
             } else {
-                Ok::<_, LayerError>(())
+                Ok::<_, HookError>(())
             }
         }
     } else {
-        Err(LayerError::SocketInvalidState(sockfd))
+        Err(HookError::SocketInvalidState(sockfd))
     }?;
 
     Ok(())
@@ -216,10 +216,10 @@ pub(super) fn getpeername(
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Ok(connected.remote_address),
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -241,12 +241,12 @@ pub(super) fn getsockname(
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Ok(connected.local_address),
                 SocketState::Bound(bound) => Ok(bound.address),
                 SocketState::Listening(bound) => Ok(bound.address),
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -268,12 +268,12 @@ pub(super) fn accept(
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(bound) => {
                     Ok((bound.address, socket.domain, socket.protocol, socket.type_))
                 }
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -281,7 +281,7 @@ pub(super) fn accept(
         CONNECTION_QUEUE
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .map(|socket| socket.address)?
     };
 
@@ -312,7 +312,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
-        .ok_or(LayerError::LocalFDNotFound(fd))?
+        .ok_or(HookError::LocalFDNotFound(fd))?
         .clone();
 
     SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
@@ -400,5 +400,5 @@ pub(super) fn getaddrinfo(
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .ok_or(LayerError::DNSNoName)
+        .ok_or(HookError::DNSNoName)
 }

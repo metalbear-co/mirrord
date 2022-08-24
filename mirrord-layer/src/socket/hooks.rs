@@ -8,7 +8,7 @@ use socket2::SockAddr;
 use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
-use crate::{error::LayerError, replace, socket::AddrInfoHintExt};
+use crate::{error::HookError, replace, socket::AddrInfoHintExt};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -46,7 +46,7 @@ pub(crate) unsafe extern "C" fn bind_detour(
         address_length,
     )
     .as_socket()
-    .ok_or(LayerError::AddressConversion)
+    .ok_or(HookError::AddressConversion)
     {
         Ok(address) => address,
         Err(fail) => return fail.into(),
@@ -55,8 +55,8 @@ pub(crate) unsafe extern "C" fn bind_detour(
     let (Ok(result) | Err(result)) = bind(sockfd, address)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) => FN_BIND(sockfd, raw_address, address_length),
-            LayerError::BypassedPort(_) => {
+            HookError::LocalFDNotFound(_) => FN_BIND(sockfd, raw_address, address_length),
+            HookError::BypassedPort(_) => {
                 warn!("bind_detour -> bypass port");
                 FN_BIND(sockfd, raw_address, address_length)
             }
@@ -79,7 +79,7 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
         listen(sockfd, backlog)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
                     FN_LISTEN(sockfd, backlog)
                 }
                 other => other.into(),
@@ -103,7 +103,7 @@ pub(super) unsafe extern "C" fn connect_detour(
         address_length,
     )
     .as_socket()
-    .ok_or(LayerError::AddressConversion)
+    .ok_or(HookError::AddressConversion)
     {
         Ok(address) => address,
         Err(fail) => return fail.into(),
@@ -113,7 +113,7 @@ pub(super) unsafe extern "C" fn connect_detour(
         connect(sockfd, address)
             .map(|()| 0)
             .map_err(|fail| match fail {
-                LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+                HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
                     FN_CONNECT(sockfd, raw_address, address_length)
                 }
                 other => other.into(),
@@ -134,7 +134,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+            HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
                 FN_GETPEERNAME(sockfd, address, address_len)
             }
             other => other.into(),
@@ -155,7 +155,7 @@ pub(super) unsafe extern "C" fn getsockname_detour(
     let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
         .map(|()| 0)
         .map_err(|fail| match fail {
-            LayerError::LocalFDNotFound(_) | LayerError::SocketInvalidState(_) => {
+            HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
                 FN_GETSOCKNAME(sockfd, address, address_len)
             }
             other => other.into(),
@@ -180,7 +180,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
             .map_err(|fail| match fail {
-                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                HookError::SocketInvalidState(_) | HookError::LocalFDNotFound(_) => accept_result,
                 other => {
                     error!("accept error is {:#?}", other);
                     other.into()
@@ -209,7 +209,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
             .map_err(|fail| match fail {
-                LayerError::SocketInvalidState(_) | LayerError::LocalFDNotFound(_) => accept_result,
+                HookError::SocketInvalidState(_) | HookError::LocalFDNotFound(_) => accept_result,
                 other => {
                     error!("accept4 error is {:#?}", other);
                     other.into()
@@ -272,7 +272,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
             dup(fd, dup_result)
                 .map(|()| dup_result)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) => dup_result,
+                    HookError::LocalFDNotFound(_) => dup_result,
                     _ => fail.into(),
                 });
 
@@ -298,7 +298,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
             dup(oldfd, dup2_result)
                 .map(|()| dup2_result)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) => dup2_result,
+                    HookError::LocalFDNotFound(_) => dup2_result,
                     _ => fail.into(),
                 });
 
@@ -326,7 +326,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
             dup(oldfd, dup3_result)
                 .map(|()| dup3_result)
                 .map_err(|fail| match fail {
-                    LayerError::LocalFDNotFound(_) => dup3_result,
+                    HookError::LocalFDNotFound(_) => dup3_result,
                     _ => fail.into(),
                 });
 
