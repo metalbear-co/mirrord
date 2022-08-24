@@ -35,6 +35,7 @@ num-traits = "0.2"
 bollard = "0.13"
 tokio-util = "0.7"
 faccess = "0.2"
+streammap-ext = "0.1"
 
 [dev-dependencies]
 test_bin = "0.4"

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, thread};
 
 use mirrord_protocol::{tcp::outgoing::*, ConnectionId, ResponseError};
+use streammap_ext::StreamMap;
 use tokio::{
     io::AsyncWriteExt,
     net::{
@@ -10,7 +11,7 @@ use tokio::{
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tokio_stream::{StreamExt, StreamMap};
+use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
@@ -142,15 +143,24 @@ impl TcpOutgoingApi {
                 // [remote] -> [agent] -> [layer] -> [user]
                 // Read the data from one of the connected remote hosts, and forward the result back
                 // to the `user`.
-                Some((connection_id, value)) = readers.next() => {
+                Some((connection_id, remote_read)) = readers.next() => {
                     trace!("interceptor_task -> read connection_id {:#?}", connection_id);
 
-                    let daemon_read = value
-                        .map_err(ResponseError::from)
-                        .map(|bytes| DaemonRead { connection_id, bytes: bytes.to_vec() });
+                    match remote_read {
+                        Some(read) => {
+                            let daemon_read = read
+                                .map_err(ResponseError::from)
+                                .map(|bytes| DaemonRead { connection_id, bytes: bytes.to_vec() });
 
-                    let daemon_message = DaemonTcpOutgoing::Read(daemon_read);
-                    daemon_tx.send(daemon_message).await?
+                            let daemon_message = DaemonTcpOutgoing::Read(daemon_read);
+                            daemon_tx.send(daemon_message).await?
+                        }
+                        None => {
+                            trace!("interceptor_task -> close connection {:#?}", connection_id);
+                            let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                            daemon_tx.send(daemon_message).await?
+                        }
+                    }
                 }
                 else => {
                     // We have no more data coming from any of the remote hosts.
