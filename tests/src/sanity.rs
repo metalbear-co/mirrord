@@ -785,7 +785,6 @@ mod tests {
 
     // Currently fails due to Layer >> AddressConversion in ci for some reason
 
-    #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -803,7 +802,6 @@ mod tests {
     // currently there is an issue with piping across forks of processes so 'test_bash_file_read'
     // and 'test_bash_file_write' cannot pass
 
-    #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -818,7 +816,6 @@ mod tests {
         process.assert_stderr();
     }
 
-    #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
