@@ -39,6 +39,7 @@ use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 mod common;
+mod common_hooks;
 mod config;
 mod error;
 mod file;
@@ -380,7 +381,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
 
-    unsafe { common::enable_common_hooks(&mut interceptor, enabled_file_ops) };
+    unsafe { common_hooks::enable_common_hooks(&mut interceptor) };
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
