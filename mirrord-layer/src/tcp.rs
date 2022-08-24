@@ -25,15 +25,9 @@ use crate::{
 
 pub(crate) mod outgoing;
 
-#[derive(Debug, Clone)]
-pub(crate) struct ListenClose {
-    pub port: Port,
-}
-
 #[derive(Debug)]
 pub(crate) enum HookMessageTcp {
     Listen(Listen),
-    Close(ListenClose),
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +107,6 @@ pub(crate) trait TcpHandler {
         >,
     ) -> Result<(), LayerError> {
         match message {
-            HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
         }
     }
@@ -183,21 +176,6 @@ pub(crate) trait TcpHandler {
 
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
-            .await
-            .map_err(From::from)
-    }
-
-    /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError> {
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
             .await
             .map_err(From::from)
     }
