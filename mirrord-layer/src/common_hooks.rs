@@ -4,35 +4,44 @@ use frida_gum::interceptor::Interceptor;
 use crate::common_hooks::hooks::{FnDup3, FN_DUP3};
 use crate::{
     common_hooks::hooks::{FnDup, FnDup2, FnFcntl, FN_DUP, FN_DUP2, FN_FCNTL},
-    error::LayerError,
     replace,
 };
 
 mod ops {
-    use std::os::unix::prelude::RawFd;
+    use std::{borrow::BorrowMut, os::unix::prelude::RawFd};
 
     use libc::c_int;
 
-    use crate::{error::LayerError, file::OPEN_FILES, socket::SOCKETS, ENABLED_FILE_OPS};
+    use crate::{
+        error::{HookError, HookResult as Result},
+        file::OPEN_FILES,
+        socket::SOCKETS,
+        ENABLED_FILE_OPS,
+    };
 
-    pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
+    pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<()> {
         match cmd {
             libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
             _ => Ok(()),
         }
     }
 
-    pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
-        if let Some(socket) = SOCKETS.lock()?.get(&fd) {
-            SOCKETS.lock()?.insert(dup_fd as RawFd, socket.clone());
-        } else if *ENABLED_FILE_OPS.get().unwrap() {
-            if let Some(file) = &&OPEN_FILES.lock()?.get(&fd) {
-                OPEN_FILES.lock()?.insert(dup_fd as RawFd, **file);
+    pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
+        {
+            let mut sockets = SOCKETS.lock()?;
+            if let Some(socket) = sockets.get(&fd).cloned() {
+                sockets.insert(dup_fd as RawFd, socket.clone());
+                return Ok(());
             }
-        } else {
-            return Err(LayerError::LocalFDNotFound(fd));
         }
-        Ok(())
+        if *ENABLED_FILE_OPS.get().unwrap() {
+            let mut files = OPEN_FILES.lock()?;
+            if let Some(file) = files.get(&fd).cloned() {
+                files.insert(dup_fd as RawFd, file);
+                return Ok(());
+            }
+        }
+        Err(HookError::LocalFDNotFound(fd))
     }
 }
 
@@ -42,7 +51,7 @@ mod hooks {
     use tracing::trace;
 
     use super::ops::*;
-    use crate::error::LayerError;
+    use crate::error::HookError;
 
     /// https://github.com/metalbear-co/mirrord/issues/184
     #[hook_fn]
@@ -81,7 +90,7 @@ mod hooks {
                 dup(fd, dup_result)
                     .map(|()| dup_result)
                     .map_err(|fail| match fail {
-                        LayerError::LocalFDNotFound(_) => dup_result,
+                        HookError::LocalFDNotFound(_) => dup_result,
                         _ => fail.into(),
                     });
 
@@ -107,7 +116,7 @@ mod hooks {
                 dup(oldfd, dup2_result)
                     .map(|()| dup2_result)
                     .map_err(|fail| match fail {
-                        LayerError::LocalFDNotFound(_) => dup2_result,
+                        HookError::LocalFDNotFound(_) => dup2_result,
                         _ => fail.into(),
                     });
 
@@ -135,7 +144,7 @@ mod hooks {
                 dup(oldfd, dup3_result)
                     .map(|()| dup3_result)
                     .map_err(|fail| match fail {
-                        LayerError::LocalFDNotFound(_) => dup3_result,
+                        HookError::LocalFDNotFound(_) => dup3_result,
                         _ => fail.into(),
                     });
 
