@@ -116,6 +116,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
+
+    #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
+    ContainerNotFound(String, String, String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -124,6 +127,8 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for Layer
         LayerError::LockError
     }
 }
+
+pub(crate) type Result<T> = std::result::Result<T, LayerError>;
 
 // mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 
@@ -178,6 +183,7 @@ impl From<LayerError> for i64 {
             LayerError::SocketInvalidState(_) => libc::EINVAL,
             LayerError::NullPointer => libc::EINVAL,
             LayerError::PodNotFound(_) => libc::EINVAL,
+            LayerError::ContainerNotFound(_, _, _) => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

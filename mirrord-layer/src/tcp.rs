@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 use tracing::debug;
 
 use crate::{
-    error::LayerError,
+    error::{LayerError, Result},
     socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
@@ -80,7 +80,7 @@ pub(crate) trait TcpHandler {
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
     /// Returns true to let caller know to keep running
-    async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
+    async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<()> {
         debug!("handle_incoming_message -> message {:?}", message);
 
         let handled = match message {
@@ -108,7 +108,7 @@ pub(crate) trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         match message {
             HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
@@ -116,14 +116,14 @@ pub(crate) trait TcpHandler {
     }
 
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<(), LayerError>;
+    async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<()>;
 
     /// Connects to the local listening socket, add it to the queue and return the stream.
     /// Find better name
     async fn create_local_stream(
         &mut self,
         tcp_connection: &NewTcpConnection,
-    ) -> Result<TcpStream, LayerError> {
+    ) -> Result<TcpStream> {
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
@@ -145,10 +145,10 @@ pub(crate) trait TcpHandler {
     }
 
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError>;
+    async fn handle_new_data(&mut self, data: TcpData) -> Result<()>;
 
     /// Handle connection close
-    fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
+    fn handle_close(&mut self, close: TcpClose) -> Result<()>;
 
     /// Handle listen request
     async fn handle_listen(
@@ -158,7 +158,7 @@ pub(crate) trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         debug!("handle_listen -> listen {:#?}", listen);
 
         let port = listen.real_port;
@@ -182,7 +182,7 @@ pub(crate) trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         codec
             .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
             .await

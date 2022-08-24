@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
 use async_trait::async_trait;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose, TcpData},
@@ -23,7 +22,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, warn};
 
 use crate::{
-    error::LayerError,
+    error::{LayerError, Result},
     tcp::{Listen, TcpHandler},
 };
 
@@ -99,7 +98,7 @@ impl Connection {
         Self { id, writer }
     }
 
-    pub async fn write(&mut self, data: Vec<u8>) -> Result<(), LayerError> {
+    pub async fn write(&mut self, data: Vec<u8>) -> Result<()> {
         self.writer.send(data).await.map_err(From::from)
     }
 }
@@ -120,10 +119,7 @@ pub struct TcpMirrorHandler {
 #[async_trait]
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
-    async fn handle_new_connection(
-        &mut self,
-        tcp_connection: NewTcpConnection,
-    ) -> Result<(), LayerError> {
+    async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
@@ -139,7 +135,7 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
+    async fn handle_new_data(&mut self, data: TcpData) -> Result<()> {
         debug!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
@@ -165,7 +161,7 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle connection close
-    fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
+    fn handle_close(&mut self, close: TcpClose) -> Result<()> {
         debug!("handle_close -> close {:#?}", close);
 
         let TcpClose { connection_id } = close;
