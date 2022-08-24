@@ -4,11 +4,11 @@ macro_rules! replace {
         let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
                          symbol_name,
                          detour: $detour_type|
-         -> crate::error::Result<$detour_type> {
+         -> $crate::error::Result<$detour_type> {
             tracing::info!("replace -> hooking {:#?}", $detour_name);
 
             let function = frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(
-                crate::error::LayerError::NoExportName(symbol_name.to_string()),
+                $crate::error::LayerError::NoExportName(symbol_name.to_string()),
             )?;
 
             let replaced = interceptor.replace(
