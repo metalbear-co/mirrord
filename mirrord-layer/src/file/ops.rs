@@ -10,7 +10,7 @@ use tracing::{debug, error, trace};
 
 use crate::{
     common::blocking_send_hook_message,
-    error::{LayerError, Result},
+    error::{HookError, HookResult as Result},
     file::{
         Access, Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek,
         Write, OPEN_FILES,
@@ -165,7 +165,7 @@ pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<
 
     open_files
         .get_key_value(&local_file_fd)
-        .ok_or(LayerError::LocalFDNotFound(local_file_fd))
+        .ok_or(HookError::LocalFDNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }
