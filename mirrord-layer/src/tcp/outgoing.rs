@@ -296,10 +296,10 @@ impl TcpOutgoingHandler {
 
                 Ok(sender.send(bytes).await?)
             }
-            DaemonTcpOutgoing::Write(write) => {
-                trace!("Write -> write {:?}", write);
-
-                let DaemonWrite { .. } = write?;
+            DaemonTcpOutgoing::Close(connection_id) => {
+                // (agent) failed to perform some operation.
+                trace!("Close -> connection_id {:?}", connection_id);
+                self.mirrors.remove(&connection_id);
 
                 Ok(())
             }

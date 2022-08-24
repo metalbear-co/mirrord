@@ -118,13 +118,19 @@ impl TcpOutgoingApi {
                                         Ok(writer) => writer
                                             .write_all(&bytes)
                                             .await
-                                            .map_err(ResponseError::from)
-                                            .map(|()| DaemonWrite { connection_id }),
+                                            .map_err(ResponseError::from),
                                         Err(fail) => Err(fail),
                                     };
 
-                                    let daemon_message = DaemonTcpOutgoing::Write(daemon_write);
-                                    daemon_tx.send(daemon_message).await?
+                                    if let Err(fail) = daemon_write {
+                                        warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
+
+                                        let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                                        daemon_tx.send(daemon_message).await?
+                                    } else {
+                                        ()
+                                    }
+
                                 }
                             }
                         }
@@ -148,7 +154,6 @@ impl TcpOutgoingApi {
 
                     let daemon_message = DaemonTcpOutgoing::Read(daemon_read);
                     daemon_tx.send(daemon_message).await?
-
                 }
                 else => {
                     // We have no more data coming from any of the remote hosts.
