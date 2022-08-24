@@ -246,7 +246,7 @@ impl ClientConnectionHandler {
                         break;
                     }
                 }
-                outgoing_response = self.tcp_outgoing_api.response() => {
+                outgoing_response = self.tcp_outgoing_api.daemon_message() => {
                     match outgoing_response {
                         Ok(response) => self.respond(DaemonMessage::TcpOutgoing(response)).await?,
                         Err(fail) => {
@@ -282,7 +282,9 @@ impl ClientConnectionHandler {
                 let response = self.file_manager.handle_message(req)?;
                 self.respond(DaemonMessage::File(response)).await?
             }
-            ClientMessage::TcpOutgoing(request) => self.tcp_outgoing_api.request(request).await?,
+            ClientMessage::TcpOutgoing(layer_message) => {
+                self.tcp_outgoing_api.layer_message(layer_message).await?
+            }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,

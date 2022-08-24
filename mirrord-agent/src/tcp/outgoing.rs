@@ -16,8 +16,8 @@ use tracing::{trace, warn};
 
 use crate::{error::AgentError, runtime::set_namespace, util::run_thread};
 
-type Request = TcpOutgoingRequest;
-type Response = TcpOutgoingResponse;
+type Layer = LayerTcpOutgoing;
+type Daemon = DaemonTcpOutgoing;
 
 /// Handles (briefly) the `TcpOutgoingRequest` and `TcpOutgoingResponse` messages, mostly the
 /// passing of these messages to the `interceptor_task` thread.
@@ -26,31 +26,31 @@ pub(crate) struct TcpOutgoingApi {
     _task: thread::JoinHandle<Result<(), AgentError>>,
 
     /// Sends the `Request` to the `interceptor_task`.
-    request_tx: Sender<Request>,
+    layer_tx: Sender<Layer>,
 
     /// Reads the `Response` from the `interceptor_task`.
-    response_rx: Receiver<Response>,
+    daemon_rx: Receiver<Daemon>,
 }
 
 impl TcpOutgoingApi {
     pub(crate) fn new(pid: Option<u64>) -> Self {
-        let (request_tx, request_rx) = mpsc::channel(1000);
-        let (response_tx, response_rx) = mpsc::channel(1000);
+        let (layer_tx, layer_rx) = mpsc::channel(1000);
+        let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task = run_thread(Self::interceptor_task(pid, request_rx, response_tx));
+        let task = run_thread(Self::interceptor_task(pid, layer_rx, daemon_tx));
 
         Self {
             _task: task,
-            request_tx,
-            response_rx,
+            layer_tx,
+            daemon_rx,
         }
     }
 
     /// Does the actual work for `Request`s and prepares the `Responses:
     async fn interceptor_task(
         pid: Option<u64>,
-        mut request_rx: Receiver<Request>,
-        response_tx: Sender<Response>,
+        mut layer_rx: Receiver<Layer>,
+        daemon_tx: Sender<Daemon>,
     ) -> Result<(), AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
@@ -69,16 +69,16 @@ impl TcpOutgoingApi {
                 biased;
 
                 // [layer] -> [agent]
-                request = request_rx.recv() => {
-                    trace!("interceptor_task -> request {:?}", request);
+                layer_message = layer_rx.recv() => {
+                    trace!("interceptor_task -> layer_message {:?}", layer_message);
 
-                    match request {
-                        Some(request) => {
-                            match request {
+                    match layer_message {
+                        Some(layer_message) => {
+                            match layer_message {
                                 // [user] -> [layer] -> [agent] -> [layer]
                                 // `user` is asking us to connect to some remote host.
-                                TcpOutgoingRequest::Connect(ConnectRequest { remote_address }) => {
-                                    let connect_response =
+                                LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
+                                    let daemon_connect =
                                         TcpStream::connect(remote_address)
                                             .await
                                             .map_err(From::from)
@@ -96,22 +96,22 @@ impl TcpOutgoingApi {
                                                 writers.insert(connection_id, write_half);
                                                 readers.insert(connection_id, ReaderStream::new(read_half));
 
-                                                ConnectResponse {
+                                                DaemonConnect {
                                                     connection_id,
                                                     remote_address,
                                                 }
                                             });
 
-                                    let response = TcpOutgoingResponse::Connect(connect_response);
-                                    response_tx.send(response).await?
+                                    let daemon_message = DaemonTcpOutgoing::Connect(daemon_connect);
+                                    daemon_tx.send(daemon_message).await?
                                 }
                                 // [user] -> [layer] -> [agent] -> [remote]
                                 // `user` wrote some message to the remote host.
-                                TcpOutgoingRequest::Write(WriteRequest {
+                                LayerTcpOutgoing::Write(LayerWrite {
                                     connection_id,
                                     bytes,
                                 }) => {
-                                    let write_response = match writers
+                                    let daemon_write = match writers
                                         .get_mut(&connection_id)
                                         .ok_or(ResponseError::NotFound(connection_id as usize))
                                     {
@@ -119,12 +119,12 @@ impl TcpOutgoingApi {
                                             .write_all(&bytes)
                                             .await
                                             .map_err(ResponseError::from)
-                                            .map(|()| WriteResponse { connection_id }),
+                                            .map(|()| DaemonWrite { connection_id }),
                                         Err(fail) => Err(fail),
                                     };
 
-                                    let response = TcpOutgoingResponse::Write(write_response);
-                                    response_tx.send(response).await?
+                                    let daemon_message = DaemonTcpOutgoing::Write(daemon_write);
+                                    daemon_tx.send(daemon_message).await?
                                 }
                             }
                         }
@@ -142,12 +142,12 @@ impl TcpOutgoingApi {
                 Some((connection_id, value)) = readers.next() => {
                     trace!("interceptor_task -> read connection_id {:#?}", connection_id);
 
-                    let read_response = value
+                    let daemon_read = value
                         .map_err(ResponseError::from)
-                        .map(|bytes| ReadResponse { connection_id, bytes: bytes.to_vec() });
+                        .map(|bytes| DaemonRead { connection_id, bytes: bytes.to_vec() });
 
-                    let response = TcpOutgoingResponse::Read(read_response);
-                    response_tx.send(response).await?
+                    let daemon_message = DaemonTcpOutgoing::Read(daemon_read);
+                    daemon_tx.send(daemon_message).await?
 
                 }
                 else => {
@@ -162,14 +162,20 @@ impl TcpOutgoingApi {
     }
 
     /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
-    pub(crate) async fn request(&mut self, request: TcpOutgoingRequest) -> Result<(), AgentError> {
-        trace!("TcpOutgoingApi::request -> request {:#?}", request);
-        Ok(self.request_tx.send(request).await?)
+    pub(crate) async fn layer_message(
+        &mut self,
+        message: LayerTcpOutgoing,
+    ) -> Result<(), AgentError> {
+        trace!(
+            "TcpOutgoingApi::layer_message -> layer_message {:#?}",
+            message
+        );
+        Ok(self.layer_tx.send(message).await?)
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.
-    pub(crate) async fn response(&mut self) -> Result<TcpOutgoingResponse, AgentError> {
-        self.response_rx
+    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing, AgentError> {
+        self.daemon_rx
             .recv()
             .await
             .ok_or(AgentError::ReceiverClosed)

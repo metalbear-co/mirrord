@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     tcp::{
-        outgoing::{TcpOutgoingRequest, TcpOutgoingResponse},
+        outgoing::{DaemonTcpOutgoing, LayerTcpOutgoing},
         DaemonTcp, LayerTcp,
     },
     ResponseError,
@@ -169,7 +169,7 @@ pub struct GetAddrInfoRequest {
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
-    TcpOutgoing(TcpOutgoingRequest),
+    TcpOutgoing(LayerTcpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -276,7 +276,7 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
-    TcpOutgoing(TcpOutgoingResponse),
+    TcpOutgoing(DaemonTcpOutgoing),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

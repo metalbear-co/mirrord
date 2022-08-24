@@ -7,20 +7,20 @@ use crate::{ConnectionId, RemoteResult};
 
 /// `user` wants to connect to `remote_address`.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ConnectRequest {
+pub struct LayerConnect {
     pub remote_address: SocketAddr,
 }
 
 /// `user` wants to write `bytes` to remote host identified by `connection_id`.
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct WriteRequest {
+pub struct LayerWrite {
     pub connection_id: ConnectionId,
     pub bytes: Vec<u8>,
 }
 
-impl fmt::Debug for WriteRequest {
+impl fmt::Debug for LayerWrite {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WriteRequest")
+        f.debug_struct("LayerWrite")
             .field("connection_id", &self.connection_id)
             .field("bytes (length)", &self.bytes.len())
             .finish()
@@ -28,26 +28,26 @@ impl fmt::Debug for WriteRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum TcpOutgoingRequest {
-    Connect(ConnectRequest),
-    Write(WriteRequest),
+pub enum LayerTcpOutgoing {
+    Connect(LayerConnect),
+    Write(LayerWrite),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ConnectResponse {
+pub struct DaemonConnect {
     pub connection_id: ConnectionId,
     pub remote_address: SocketAddr,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct ReadResponse {
+pub struct DaemonRead {
     pub connection_id: ConnectionId,
     pub bytes: Vec<u8>,
 }
 
-impl fmt::Debug for ReadResponse {
+impl fmt::Debug for DaemonRead {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadResponse")
+        f.debug_struct("DaemonRead")
             .field("connection_id", &self.connection_id)
             .field("bytes (length)", &self.bytes.len())
             .finish()
@@ -55,13 +55,13 @@ impl fmt::Debug for ReadResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct WriteResponse {
+pub struct DaemonWrite {
     pub connection_id: ConnectionId,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum TcpOutgoingResponse {
-    Connect(RemoteResult<ConnectResponse>),
-    Read(RemoteResult<ReadResponse>),
-    Write(RemoteResult<WriteResponse>),
+pub enum DaemonTcpOutgoing {
+    Connect(RemoteResult<DaemonConnect>),
+    Read(RemoteResult<DaemonRead>),
+    Write(RemoteResult<DaemonWrite>),
 }

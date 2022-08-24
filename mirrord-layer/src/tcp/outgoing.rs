@@ -182,8 +182,8 @@ impl TcpOutgoingHandler {
                 self.connect_queue.push_back(channel_tx);
 
                 Ok(codec
-                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Connect(
-                        ConnectRequest { remote_address },
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
+                        LayerConnect { remote_address },
                     )))
                     .await?)
             }
@@ -198,8 +198,8 @@ impl TcpOutgoingHandler {
                 );
 
                 Ok(codec
-                    .send(ClientMessage::TcpOutgoing(TcpOutgoingRequest::Write(
-                        WriteRequest {
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
+                        LayerWrite {
                             connection_id,
                             bytes,
                         },
@@ -224,15 +224,15 @@ impl TcpOutgoingHandler {
     ///   response is only significant to handle errors when this send failed.
     pub(crate) async fn handle_daemon_message(
         &mut self,
-        response: TcpOutgoingResponse,
+        response: DaemonTcpOutgoing,
     ) -> Result<(), LayerError> {
         trace!("handle_daemon_message -> message {:?}", response);
 
         match response {
-            TcpOutgoingResponse::Connect(connect) => {
+            DaemonTcpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
-                let ConnectResponse {
+                let DaemonConnect {
                     connection_id,
                     remote_address,
                 } = connect?;
@@ -281,10 +281,10 @@ impl TcpOutgoingHandler {
 
                 Ok(())
             }
-            TcpOutgoingResponse::Read(read) => {
+            DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
                 trace!("Read -> read {:?}", read);
-                let ReadResponse {
+                let DaemonRead {
                     connection_id,
                     bytes,
                 } = read?;
@@ -296,10 +296,10 @@ impl TcpOutgoingHandler {
 
                 Ok(sender.send(bytes).await?)
             }
-            TcpOutgoingResponse::Write(write) => {
+            DaemonTcpOutgoing::Write(write) => {
                 trace!("Write -> write {:?}", write);
 
-                let WriteResponse { .. } = write?;
+                let DaemonWrite { .. } = write?;
 
                 Ok(())
             }
