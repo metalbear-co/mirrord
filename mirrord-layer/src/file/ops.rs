@@ -1,4 +1,4 @@
-use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, sync::Arc};
 
 use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
@@ -77,7 +77,10 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
         let _ = close_remote_file_on_failure(remote_fd)?;
     }
 
-    OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .insert(local_file_fd, Arc::new(remote_fd));
 
     Ok(local_file_fd)
 }
@@ -147,7 +150,10 @@ pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Re
         remote_fd
     );
 
-    OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .insert(local_file_fd, Arc::new(remote_fd));
 
     Ok(local_file_fd)
 }

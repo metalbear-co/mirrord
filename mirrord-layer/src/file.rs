@@ -4,7 +4,7 @@ use std::{
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use futures::SinkExt;
@@ -66,7 +66,7 @@ struct RemoteFile {
     fd: RawFd,
 }
 
-pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
+pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<RemoteFd>>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 pub(crate) trait OpenOptionsInternalExt {

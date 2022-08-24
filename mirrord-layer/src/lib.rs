@@ -404,7 +404,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         let remote_fd = OPEN_FILES.lock().unwrap().remove(&fd);
 
         if let Some(remote_fd) = remote_fd {
-            let close_file_result = file::ops::close(remote_fd);
+            let close_file_result = file::ops::close(*remote_fd);
 
             close_file_result
                 .map_err(|fail| {

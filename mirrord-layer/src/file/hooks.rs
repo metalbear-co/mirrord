@@ -110,7 +110,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 
     if let Some((local_fd, remote_fd)) = open_file {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
-        let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
+        let fdopen_result = fdopen(local_fd, **remote_fd, open_options);
 
         let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
         result
@@ -157,7 +157,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
 
         // Are we managing the relative part?
         if let Some(remote_fd) = remote_fd {
-            let openat_result = openat(path, open_flags, remote_fd);
+            let openat_result = openat(path, open_flags, *remote_fd);
 
             let (Ok(result) | Err(result)) = openat_result.map_err(From::from);
             result
@@ -184,7 +184,7 @@ pub(crate) unsafe extern "C" fn read_detour(
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
 
     if let Some(remote_fd) = remote_fd {
-        let read_result = read(remote_fd, count).map(|read_file| {
+        let read_result = read(*remote_fd, count).map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
@@ -230,7 +230,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
     if let Some(remote_fd) = remote_fd {
-        let read_result = read(remote_fd, element_size * number_of_elements).map(|read_file| {
+        let read_result = read(*remote_fd, element_size * number_of_elements).map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
@@ -302,7 +302,7 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
             }
         };
 
-        let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
+        let lseek_result = lseek(*remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
 
         let (Ok(result) | Err(result)) = lseek_result.map_err(From::from);
         result
@@ -334,7 +334,7 @@ pub(crate) unsafe extern "C" fn write_detour(
         let outside_buffer = slice::from_raw_parts(buffer as *const u8, count);
         let write_bytes = outside_buffer.to_vec();
 
-        let write_result = write(remote_fd, write_bytes);
+        let write_result = write(*remote_fd, write_bytes);
 
         let (Ok(result) | Err(result)) = write_result.map_err(From::from);
         result

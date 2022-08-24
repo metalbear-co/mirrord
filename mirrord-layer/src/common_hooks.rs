@@ -8,7 +8,7 @@ use crate::{
 };
 
 mod ops {
-    use std::{borrow::BorrowMut, os::unix::prelude::RawFd};
+    use std::os::unix::prelude::RawFd;
 
     use libc::c_int;
 
@@ -30,7 +30,7 @@ mod ops {
         {
             let mut sockets = SOCKETS.lock()?;
             if let Some(socket) = sockets.get(&fd).cloned() {
-                sockets.insert(dup_fd as RawFd, socket.clone());
+                sockets.insert(dup_fd as RawFd, socket);
                 return Ok(());
             }
         }
