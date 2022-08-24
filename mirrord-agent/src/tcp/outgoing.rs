@@ -127,10 +127,7 @@ impl TcpOutgoingApi {
 
                                         let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                                         daemon_tx.send(daemon_message).await?
-                                    } else {
-                                        ()
                                     }
-
                                 }
                             }
                         }
