@@ -186,6 +186,12 @@ where
                 .await
                 .unwrap(),
             HookMessage::Exit(message) => {
+                // TODO: Another way of handling this would be calling `exit` on our own (as
+                // suggested by aviram) when the loop ends.
+
+                // The main purpose of needing such a notification for `agent` is to avoid closing
+                // it prematurely (right now it could happen when enabling the "outgoing traffic"
+                // feature, after a single request is completed, `agent` would close without this).
                 trace!("HookMessage::Exit");
 
                 let request = ClientMessage::ExitRequest;
