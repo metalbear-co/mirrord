@@ -16,7 +16,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     common::{ResponseChannel, ResponseDeque},
@@ -118,6 +118,20 @@ impl TcpOutgoingHandler {
         let mut remote_stream = ReceiverStream::new(remote_rx);
         let mut buffer = vec![0; 1024];
 
+        // Sends a message to close the remote stream in `agent`, when it's
+        // being closed in `layer`.
+        //
+        // This happens when the `mirror_stream` has no more data to receive, or when it fails
+        // `read`ing.
+        let close_remote_stream = |layer_tx: Sender<_>| async move {
+            let close = LayerClose { connection_id };
+            let outgoing_close = LayerTcpOutgoing::Close(close);
+
+            if let Err(fail) = layer_tx.send(outgoing_close).await {
+                error!("Failed sending close message with {:#?}!", fail);
+            }
+        };
+
         loop {
             select! {
                 biased; // To allow local socket to be read before being closed
@@ -131,10 +145,14 @@ impl TcpOutgoingHandler {
                         },
                         Err(fail) => {
                             error!("Failed reading mirror_stream with {:#?}", fail);
+                            close_remote_stream(layer_tx.clone()).await;
+
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
-                            warn!("interceptor_task -> exiting due to local stream closed!");
+                            info!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            close_remote_stream(layer_tx.clone()).await;
+
                             break;
                         },
                         Ok(read_amount) => {
@@ -145,6 +163,7 @@ impl TcpOutgoingHandler {
 
                             if let Err(fail) = layer_tx.send(outgoing_write).await {
                                 error!("Failed sending write message with {:#?}!", fail);
+
                                 break;
                             }
                         }

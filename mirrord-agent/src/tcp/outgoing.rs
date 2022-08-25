@@ -134,6 +134,12 @@ impl TcpOutgoingApi {
                                         daemon_tx.send(daemon_message).await?
                                     }
                                 }
+                                // [layer] -> [agent]
+                                // `layer` closed their interceptor stream.
+                                LayerTcpOutgoing::Close(LayerClose { ref connection_id }) => {
+                                    writers.remove(connection_id);
+                                    readers.remove(connection_id);
+                                }
                             }
                         }
                         None => {

@@ -27,10 +27,17 @@ impl fmt::Debug for LayerWrite {
     }
 }
 
+/// `layer` interceptor socket closed or failed.
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct LayerClose {
+    pub connection_id: ConnectionId,
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpOutgoing {
     Connect(LayerConnect),
     Write(LayerWrite),
+    Close(LayerClose),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
