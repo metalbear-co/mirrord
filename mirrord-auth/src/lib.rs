@@ -25,7 +25,7 @@ lazy_static! {
 #[derive(Deserialize, Serialize)]
 pub struct AuthConfig {
     pub access_token: String,
-    pub refresh_token: String,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -67,10 +67,7 @@ impl AuthConfig {
             .next()
             .map(|val| val.to_owned())
             .expect("Invalid Token");
-        let refresh_token = parts
-            .next()
-            .map(|val| val.to_owned())
-            .expect("Invalid Token");
+        let refresh_token = parts.next().map(|val| val.to_owned());
 
         Ok(AuthConfig {
             access_token,
