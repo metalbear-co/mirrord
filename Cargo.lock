@@ -1440,13 +1440,12 @@ dependencies = [
  "anyhow",
  "clap 3.2.17",
  "exec",
+ "mirrord-auth",
  "mirrord-layer",
- "rand 0.8.5",
  "reqwest",
  "semver",
  "tracing",
  "tracing-subscriber",
- "webbrowser",
 ]
 
 [[package]]
@@ -1474,6 +1473,19 @@ dependencies = [
  "tokio-util 0.7.3",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mirrord-auth"
+version = "2.8.1"
+dependencies = [
+ "lazy_static",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "webbrowser",
 ]
 
 [[package]]

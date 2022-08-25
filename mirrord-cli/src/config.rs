@@ -91,4 +91,7 @@ pub(super) struct LoginArgs {
 
     #[clap(long, default_value = "120")]
     pub timeout: u64,
+
+    #[clap(long, default_value = "https://identity.metalbear.dev")]
+    pub auth_server: String,
 }
