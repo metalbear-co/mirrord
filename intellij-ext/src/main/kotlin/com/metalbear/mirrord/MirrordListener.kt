@@ -32,10 +32,9 @@ class MirrordListener : ExecutionListener {
         var envSet: Boolean = false
     }
 
-    override fun processStarting(executorId: String, env: ExecutionEnvironment) {
-        val customDialogBuilder = MirrordDialogBuilder()
-
+    override fun processStarting(executorId: String, env: ExecutionEnvironment) {        
         if (enabled) {
+            val customDialogBuilder = MirrordDialogBuilder()
             val kubeDataProvider = KubeDataProvider()
 
             // Prompt the user to choose a namespace
