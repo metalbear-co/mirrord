@@ -233,5 +233,3 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
-
-  

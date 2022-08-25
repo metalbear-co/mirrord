@@ -3,7 +3,6 @@ package com.metalbear.mirrord
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
-import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import javax.swing.JCheckBox
@@ -12,7 +11,6 @@ import javax.swing.JTextField
 
 class MirrordListener : ExecutionListener {
     private val mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
-    private val log: Logger = Logger.getInstance("MirrordListener")
 
     init {
         val (ldPreloadPath, dylibPath, defaultMirrordAgentLog, rustLog, invalidCertificates, ephemeralContainers) = MirrordDefaultData()
@@ -24,7 +22,6 @@ class MirrordListener : ExecutionListener {
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = invalidCertificates.toString()
         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainers.toString()
 
-        log.debug("Default mirrord environment variables set.")
     }
 
     companion object {
@@ -32,7 +29,8 @@ class MirrordListener : ExecutionListener {
         var envSet: Boolean = false
     }
 
-    override fun processStarting(executorId: String, env: ExecutionEnvironment) {        
+    override fun processStarting(executorId: String, env: ExecutionEnvironment) {
+
         if (enabled) {
             val customDialogBuilder = MirrordDialogBuilder()
             val kubeDataProvider = KubeDataProvider()
@@ -65,10 +63,9 @@ class MirrordListener : ExecutionListener {
                     mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDnsCheckbox.isSelected.toString()
                     mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
 
-                    val envMap = getPythonEnv(env)
+                    val envMap = getRunConfigEnv(env)
                     envMap.putAll(mirrordEnv)
 
-                    log.debug("mirrord env set")
                     envSet = true
                 }
             }
@@ -82,19 +79,17 @@ class MirrordListener : ExecutionListener {
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
         if (enabled and envSet) {
-            val envMap = getPythonEnv(env)
+            val envMap = getRunConfigEnv(env)
             for (key in mirrordEnv.keys) {
                 if (mirrordEnv.containsKey(key)) {
                     envMap.remove(key)
                 }
             }
-            log.debug("mirrord env reset")
         }
         super.processTerminating(executorId, env, handler)
     }
 
-    private fun getPythonEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
-        log.debug("fetching python env")
+    private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
         val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
     }
