@@ -221,7 +221,8 @@ jobs:
 
   build_intellij_plugin:
     runs-on: ubuntu-latest
-    steps:      
+    steps:
+      - uses: actions/checkout@v2
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
