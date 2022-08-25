@@ -7,21 +7,30 @@ macro_rules! replace {
          -> $crate::error::Result<$detour_type> {
             tracing::info!("replace -> hooking {:#?}", $detour_name);
 
-            let function = frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(
-                $crate::error::LayerError::NoExportName(symbol_name.to_string()),
-            )?;
+            let function = frida_gum::Module::find_export_by_name(None, symbol_name);
+
+            match &function {
+                Some(_) => {
+                    tracing::info!("replace -> found function {:#?}", $detour_name);
+                }
+                None => {
+                    tracing::info!("replace -> function not found");
+                    return Err($crate::error::LayerError::NoExportName(symbol_name.to_string()));
+                }
+            }
 
             let replaced = interceptor.replace(
-                function,
+                function.unwrap(),
                 frida_gum::NativePointer(detour as *mut libc::c_void),
                 frida_gum::NativePointer(std::ptr::null_mut()),
             );
-
-            tracing::info!(
-                "replace -> hooked {:#?} {:#?}",
-                $detour_name,
-                replaced.is_ok()
-            );
+          
+            match &replaced {
+                Ok(_) => tracing::info!("replace -> {:#?} [success]", $detour_name),
+                Err(e) => {
+                    tracing::info!("replace -> {:#?} [failure:{:#?}]", $detour_name, e)
+                }
+            }
 
             let original_fn: $detour_type = std::mem::transmute(replaced?);
 

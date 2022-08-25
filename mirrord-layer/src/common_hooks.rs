@@ -11,6 +11,7 @@ mod ops {
     use std::os::unix::prelude::RawFd;
 
     use libc::c_int;
+    use tracing::trace;
 
     use crate::{
         error::{HookError, HookResult as Result},
@@ -27,6 +28,7 @@ mod ops {
     }
 
     pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
+        trace!("inside dup op");
         {
             let mut sockets = SOCKETS.lock()?;
             if let Some(socket) = sockets.get(&fd).cloned() {
@@ -35,6 +37,7 @@ mod ops {
             }
         }
         if *ENABLED_FILE_OPS.get().unwrap() {
+            trace!("abput to do the deed");
             let mut files = OPEN_FILES.lock()?;
             if let Some(file) = files.get(&fd).cloned() {
                 files.insert(dup_fd as RawFd, file);
@@ -108,6 +111,7 @@ mod hooks {
         }
 
         let dup2_result = FN_DUP2(oldfd, newfd);
+        trace!("dup2_detour -> dup2_result {:#?}", dup2_result);
 
         if dup2_result == -1 {
             dup2_result
