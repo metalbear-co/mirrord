@@ -26,10 +26,10 @@ pub(crate) struct TcpOutgoingApi {
     /// Holds the `interceptor_task`.
     _task: thread::JoinHandle<Result<(), AgentError>>,
 
-    /// Sends the `Request` to the `interceptor_task`.
+    /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<Layer>,
 
-    /// Reads the `Response` from the `interceptor_task`.
+    /// Reads the `Daemon` message from the `interceptor_task`.
     daemon_rx: Receiver<Daemon>,
 }
 
@@ -61,6 +61,8 @@ impl TcpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
+        // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
+        // `Weak` for `writers`).
         let mut writers: HashMap<ConnectionId, OwnedWriteHalf> = HashMap::default();
         let mut readers: StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>> =
             StreamMap::default();
@@ -125,6 +127,8 @@ impl TcpOutgoingApi {
 
                                     if let Err(fail) = daemon_write {
                                         warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
+                                        writers.remove(&connection_id);
+                                        readers.remove(&connection_id);
 
                                         let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                                         daemon_tx.send(daemon_message).await?
@@ -157,6 +161,8 @@ impl TcpOutgoingApi {
                         }
                         None => {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
+                            writers.remove(&connection_id);
+
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }

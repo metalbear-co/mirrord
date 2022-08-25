@@ -273,6 +273,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                 return Err(io::Error::from_raw_os_error(connect_result).into());
             }
 
+            // Warning: We're treating `EINPROGRESS` as `Connected`!
             let connected = Connected {
                 remote_address,
                 mirror_address,

@@ -179,6 +179,8 @@ impl TcpOutgoingHandler {
             }) => {
                 trace!("Connect -> remote_address {:#?}", remote_address);
 
+                // TODO: We could be losing track of the proper order to respond to these (aviram
+                // suggests using a `HashMap`).
                 self.connect_queue.push_back(channel_tx);
 
                 Ok(codec

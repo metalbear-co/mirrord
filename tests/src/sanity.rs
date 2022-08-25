@@ -833,6 +833,9 @@ mod tests {
         process.assert_stderr();
     }
 
+    // TODO: This is valid for all "outgoing" tests:
+    //  We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
+    // which is bad.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {

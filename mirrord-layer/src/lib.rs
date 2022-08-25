@@ -262,6 +262,7 @@ async fn thread_loop(
                         error!("Error receiving daemon message: {:?}", err);
                         break;
                     }
+
                     None => {
                         error!("agent disconnected");
                         break;

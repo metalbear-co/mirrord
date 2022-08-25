@@ -246,8 +246,8 @@ impl ClientConnectionHandler {
                         break;
                     }
                 }
-                outgoing_response = self.tcp_outgoing_api.daemon_message() => {
-                    match outgoing_response {
+                message = self.tcp_outgoing_api.daemon_message() => {
+                    match message {
                         Ok(response) => self.respond(DaemonMessage::TcpOutgoing(response)).await?,
                         Err(fail) => {
                             match fail {
