@@ -16,17 +16,12 @@ use tracing::{debug, error, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
-    error::LayerError,
+    error::{HookError, HookResult as Result},
     tcp::{HookMessageTcp, Listen},
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(
-    sockfd: RawFd,
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-) -> Result<RawFd, LayerError> {
+pub(super) fn socket(sockfd: RawFd, domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd> {
     trace!("socket -> domain {:#?} | type:{:#?}", domain, type_);
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) && (type_ & libc::SOCK_STREAM) > 0)
@@ -52,17 +47,17 @@ pub(super) fn socket(
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state and don't call bind (will be called later). In any other case, we call
 /// regular bind.
-pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError> {
+pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<()> {
     trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
     let mut socket = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| {
                 if !matches!(socket.state, SocketState::Initialized) {
-                    Err(LayerError::SocketInvalidState(sockfd))
+                    Err(HookError::SocketInvalidState(sockfd))
                 } else {
                     Ok(socket)
                 }
@@ -71,7 +66,7 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 
     (!is_ignored_port(address.port()))
         .then_some(())
-        .ok_or_else(|| LayerError::BypassedPort(address.port()))?;
+        .ok_or_else(|| HookError::BypassedPort(address.port()))?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound { address });
 
@@ -82,14 +77,14 @@ pub(super) fn bind(sockfd: c_int, address: SocketAddr) -> Result<(), LayerError>
 
 /// Bind the socket to a fake, local port, and subscribe to the agent on the real port.
 /// Messages received from the agent on the real port will later be routed to the fake local port.
-pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
     debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))?
+            .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
 
     match &socket.state {
@@ -107,7 +102,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
                     IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                     0,
                 ))),
-                invalid => Err(LayerError::UnsupportedDomain(invalid)),
+                invalid => Err(HookError::UnsupportedDomain(invalid)),
             }?;
 
             let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
@@ -131,7 +126,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
                 return Err(io::Error::from_raw_os_error(getsockname_result).into());
             }
 
-            let address = address.as_socket().ok_or(LayerError::AddressConversion)?;
+            let address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
@@ -149,7 +144,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
 
             Ok(())
         }
-        _ => Err(LayerError::SocketInvalidState(sockfd)),
+        _ => Err(HookError::SocketInvalidState(sockfd)),
     }?;
 
     SOCKETS.lock()?.insert(sockfd, socket);
@@ -157,7 +152,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<(), LayerError> {
     Ok(())
 }
 
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), LayerError> {
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
     trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
         sockfd,
@@ -168,7 +163,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))?
+            .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
     debug!("connect -> user_socket_info {:#?}", user_socket_info);
 
@@ -198,11 +193,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<(), L
             if result != 0 {
                 Err(io::Error::from_raw_os_error(result))?
             } else {
-                Ok::<_, LayerError>(())
+                Ok::<_, HookError>(())
             }
         }
     } else {
-        Err(LayerError::SocketInvalidState(sockfd))
+        Err(HookError::SocketInvalidState(sockfd))
     }?;
 
     Ok(())
@@ -214,17 +209,17 @@ pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     trace!("getpeername -> sockfd {:#?}", sockfd);
 
     let remote_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Ok(connected.remote_address),
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -239,19 +234,19 @@ pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     trace!("getsockname -> sockfd {:#?}", sockfd);
 
     let local_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Ok(connected.local_address),
                 SocketState::Bound(bound) => Ok(bound.address),
                 SocketState::Listening(bound) => Ok(bound.address),
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -268,17 +263,17 @@ pub(super) fn accept(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
-) -> Result<RawFd, LayerError> {
+) -> Result<RawFd> {
     let (local_address, domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(bound) => {
                     Ok((bound.address, socket.domain, socket.protocol, socket.type_))
                 }
-                _ => Err(LayerError::SocketInvalidState(sockfd)),
+                _ => Err(HookError::SocketInvalidState(sockfd)),
             })?
     };
 
@@ -286,7 +281,7 @@ pub(super) fn accept(
         CONNECTION_QUEUE
             .lock()?
             .get(&sockfd)
-            .ok_or(LayerError::LocalFDNotFound(sockfd))
+            .ok_or(HookError::LocalFDNotFound(sockfd))
             .map(|socket| socket.address)?
     };
 
@@ -306,18 +301,18 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), LayerError> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), LayerError> {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
-        .ok_or(LayerError::LocalFDNotFound(fd))?
+        .ok_or(HookError::LocalFDNotFound(fd))?
         .clone();
 
     SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
@@ -340,7 +335,7 @@ pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     hints: Option<AddrInfoHint>,
-) -> Result<*mut libc::addrinfo, LayerError> {
+) -> Result<*mut libc::addrinfo> {
     trace!(
         "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
         node,
@@ -405,5 +400,5 @@ pub(super) fn getaddrinfo(
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .ok_or(LayerError::DNSNoName)
+        .ok_or(HookError::DNSNoName)
 }

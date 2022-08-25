@@ -11,7 +11,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
 
-use crate::error::LayerError;
+use crate::error::{HookError, HookResult as Result};
 
 pub(super) mod hooks;
 mod ops;
@@ -108,11 +108,11 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     if address.is_null() {
         Ok(())
     } else if address_len.is_null() {
-        Err(LayerError::NullPointer)
+        Err(HookError::NullPointer)
     } else {
         let os_address = SockAddr::from(new_address);
 
