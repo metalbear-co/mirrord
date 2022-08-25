@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 
 import com.intellij.notification.NotificationGroup
 import com.intellij.notification.NotificationGroupManager

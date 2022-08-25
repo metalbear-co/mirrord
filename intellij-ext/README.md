@@ -1,4 +1,4 @@
-# mirrord-intellij-plugin
+# mirrord
 
 <!-- Plugin description -->
 mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.

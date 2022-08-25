@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 
 import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.ui.components.JBList
@@ -38,14 +38,14 @@ class MirrordDialogBuilder {
         optionsPanel.add(ephemeralCheckbox)
 
         val agentLogPanel = JPanel(GridBagLayout())
-        agentLogPanel.add(JLabel("MIRRORD_AGENT_RUST_LOG"))
+        agentLogPanel.add(JLabel("Agent Log Level: "))
         agentRustLog.size = Dimension(5, 5)
         agentLogPanel.add(agentRustLog)
 
         agentLogPanel.border = EmptyBorder(10, 10, 10, 10)
 
         val rustLogPanel = JPanel(GridBagLayout())
-        rustLogPanel.add(JLabel("RUST_LOG"))
+        rustLogPanel.add(JLabel("Layer Log Level: "))
         rustLog.size = Dimension(5, 5)
         rustLogPanel.add(rustLog)
 

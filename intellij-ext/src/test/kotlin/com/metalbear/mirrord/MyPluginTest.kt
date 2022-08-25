@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 
 import com.intellij.ide.highlighter.XmlFileType
 import com.intellij.psi.xml.XmlFile

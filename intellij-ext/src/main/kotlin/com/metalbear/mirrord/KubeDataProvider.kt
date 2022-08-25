@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 import io.kubernetes.client.openapi.apis.CoreV1Api
 import io.kubernetes.client.util.Config
 

@@ -1,4 +1,4 @@
-package com.github.metalbear.intellijplugin
+package com.metalbear.mirrord
 
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler

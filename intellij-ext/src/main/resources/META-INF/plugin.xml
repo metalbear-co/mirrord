@@ -1,6 +1,6 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.metalbear.intellijplugin</id>
+    <id>com.metalbear.mirrord</id>
     <name>mirrord</name>
     <vendor email="hi@metalbear.co" url="https://metalbear.co/">MetalBear</vendor>
 
@@ -18,13 +18,13 @@
     </extensions>
 
     <projectListeners>
-        <listener class="com.github.metalbear.intellijplugin.MirrordListener"
+        <listener class="com.metalbear.mirrord.MirrordListener"
                   topic="com.intellij.execution.ExecutionListener"/>
     </projectListeners>
 
     <actions>
-        <action id="com.github.metalbear.intellijplugin.MirrordEnabler"
-                class="com.github.metalbear.intellijplugin.MirrordEnabler" text="Enable/Disable mirrord"
+        <action id="com.metalbear.mirrord.MirrordEnabler"
+                class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
                 description="Toggle the mirrord plugin"
                 icon="MirrordIcons.mirrordIcon">
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
