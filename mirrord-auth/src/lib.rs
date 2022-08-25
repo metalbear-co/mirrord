@@ -10,7 +10,9 @@ use thiserror::Error;
 
 lazy_static! {
     static ref FILE_DIR: PathBuf = [
-        std::env::var("HOME").unwrap_or_else(|_| "~".to_owned()),
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("HOMEPATH"))
+            .unwrap_or_else(|_| "~".to_owned()),
         ".mirrord_credentials".to_owned()
     ]
     .iter()
