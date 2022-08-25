@@ -155,6 +155,11 @@ fn login(args: LoginArgs) -> Result<()> {
         None => AuthConfig::from_webbrowser(&args.auth_server, args.timeout)?.save()?,
     }
 
+    println!(
+        "Config succesfuly saved at {}",
+        AuthConfig::config_path().display()
+    );
+
     Ok(())
 }
 

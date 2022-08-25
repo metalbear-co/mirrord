@@ -1,6 +1,9 @@
 #[cfg(feature = "webbrowser")]
 use std::time::Duration;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use lazy_static::lazy_static;
 #[cfg(feature = "webbrowser")]
@@ -39,6 +42,10 @@ pub enum AuthenticationError {
 type Result<T> = std::result::Result<T, AuthenticationError>;
 
 impl AuthConfig {
+    pub fn config_path() -> &'static Path {
+        FILE_DIR.as_path()
+    }
+
     pub fn load() -> Result<AuthConfig> {
         let bytes = fs::read(FILE_DIR.as_path())?;
 
@@ -75,12 +82,19 @@ impl AuthConfig {
     pub fn from_webbrowser(server: &str, timeout: u64) -> Result<AuthConfig> {
         let ref_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
 
-        webbrowser::open(&format!("{}/?ref={}", server, ref_id))?;
+        let url = format!("{}/oauth?ref={}", server, ref_id);
+
+        if let Err(_) = webbrowser::open(&url) {
+            println!(
+                "Problem auto launching webbrowser so please enter the following url in your webbrowser of choice\n\n url: {:?}\n",
+                url
+            );
+        }
 
         let client = reqwest::blocking::Client::new();
 
         client
-            .get(format!("{}/callback?ref={}", server, ref_id))
+            .get(format!("{}/wait?ref={}", server, ref_id))
             .timeout(Duration::from_secs(timeout))
             .send()?
             .json()
