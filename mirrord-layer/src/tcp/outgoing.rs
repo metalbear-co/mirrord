@@ -66,6 +66,10 @@ pub(crate) struct TcpOutgoingHandler {
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
     connect_queue: ResponseDeque<MirrorAddress>,
 
+    /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
+    /// main `layer` loop.
+    ///
+    /// This is sent from `interceptor_task`.
     layer_tx: Sender<LayerTcpOutgoing>,
     layer_rx: Receiver<LayerTcpOutgoing>,
 }
@@ -307,6 +311,8 @@ impl TcpOutgoingHandler {
         }
     }
 
+    /// Helper function to access the channel of messages that are to be passed directly as
+    /// `ClientMessage` from `layer`.
     pub(crate) fn recv(&mut self) -> impl Future<Output = Option<LayerTcpOutgoing>> + '_ {
         self.layer_rx.recv()
     }
