@@ -306,4 +306,6 @@ jobs:
             CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
             PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
             PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-          run: ./intellij-ext/gradlew publishPlugin        
+          run: |
+            chmod +x ./intellij-ext/gradlew
+            ./intellij-ext/gradlew publishPlugin
