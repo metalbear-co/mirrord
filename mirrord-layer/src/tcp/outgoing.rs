@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{
     collections::HashMap,
+    future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Deref, DerefMut},
 };
@@ -11,14 +12,14 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{channel, Receiver, Sender},
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{error, trace, warn};
 
 use crate::{
-    common::{send_hook_message, HookMessage, ResponseChannel, ResponseDeque},
+    common::{ResponseChannel, ResponseDeque},
     detour::DetourGuard,
     error::LayerError,
 };
@@ -51,11 +52,10 @@ impl fmt::Debug for Write {
 #[derive(Debug)]
 pub(crate) enum TcpOutgoing {
     Connect(Connect),
-    Write(Write),
 }
 
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct TcpOutgoingHandler {
     /// Holds the channels used to send daemon messages to the interceptor socket, for the case
     /// where (agent) received data from the remote host, and sent it to (layer), to finally be
@@ -65,6 +65,9 @@ pub(crate) struct TcpOutgoingHandler {
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
     connect_queue: ResponseDeque<MirrorAddress>,
+
+    layer_tx: Sender<LayerTcpOutgoing>,
+    layer_rx: Receiver<LayerTcpOutgoing>,
 }
 
 /// Wrapper type around `tokio::Sender`, used to send messages from the `agent` to our interceptor
@@ -88,8 +91,22 @@ impl DerefMut for ConnectionMirror {
     }
 }
 
+impl Default for TcpOutgoingHandler {
+    fn default() -> Self {
+        let (layer_tx, layer_rx) = channel(1000);
+
+        Self {
+            mirrors: Default::default(),
+            connect_queue: Default::default(),
+            layer_tx,
+            layer_rx,
+        }
+    }
+}
+
 impl TcpOutgoingHandler {
     async fn interceptor_task(
+        layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
         mut mirror_stream: TcpStream,
         remote_rx: Receiver<Vec<u8>>,
@@ -119,10 +136,10 @@ impl TcpOutgoingHandler {
                         Ok(read_amount) => {
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = Write { connection_id, bytes: buffer[..read_amount].to_vec() };
-                            let outgoing_data = TcpOutgoing::Write(write);
+                            let write = LayerWrite { connection_id, bytes: buffer[..read_amount].to_vec() };
+                            let outgoing_write = LayerTcpOutgoing::Write(write);
 
-                            if let Err(fail) = send_hook_message(HookMessage::TcpOutgoing(outgoing_data)).await {
+                            if let Err(fail) = layer_tx.send(outgoing_write).await {
                                 error!("Failed sending write message with {:#?}!", fail);
                                 break;
                             }
@@ -186,25 +203,6 @@ impl TcpOutgoingHandler {
                 Ok(codec
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
                         LayerConnect { remote_address },
-                    )))
-                    .await?)
-            }
-            TcpOutgoing::Write(Write {
-                connection_id,
-                bytes,
-            }) => {
-                trace!(
-                    "Write -> connection_id {:#?} | bytes (len) {:#?}",
-                    connection_id,
-                    bytes.len(),
-                );
-
-                Ok(codec
-                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
-                        LayerWrite {
-                            connection_id,
-                            bytes,
-                        },
                     )))
                     .await?)
             }
@@ -276,6 +274,7 @@ impl TcpOutgoingHandler {
                 // user and interceptor sockets are connected to each other, so now we spawn a new
                 // task to pair their reads/writes.
                 task::spawn(TcpOutgoingHandler::interceptor_task(
+                    self.layer_tx.clone(),
                     connection_id,
                     mirror_stream,
                     remote_rx,
@@ -306,5 +305,9 @@ impl TcpOutgoingHandler {
                 Ok(())
             }
         }
+    }
+
+    pub(crate) fn recv(&mut self) -> impl Future<Output = Option<LayerTcpOutgoing>> + '_ {
+        self.layer_rx.recv()
     }
 }

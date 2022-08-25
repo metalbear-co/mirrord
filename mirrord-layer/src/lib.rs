@@ -249,6 +249,13 @@ async fn thread_loop(
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
+            Some(outgoing_message) = layer.tcp_outgoing_handler.recv() => {
+                if let Err(fail) =
+                    layer.codec.send(ClientMessage::TcpOutgoing(outgoing_message)).await {
+                        error!("Error sending client message: {:#?}", fail);
+                        break;
+                    }
+            }
             daemon_message = layer.codec.next() => {
                 match daemon_message {
                     Some(Ok(message)) => {

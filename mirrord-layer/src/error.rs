@@ -152,6 +152,11 @@ pub(crate) type HookResult<T> = std::result::Result<T, HookError>;
 /// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
+        // TODO: These recoverable errors should probably be a "sub-Error" from `HookError`, so that
+        // we can do a single `match` for them everywhere, and avoid forgetting 1.
+        // To get a better sense of what I mean by this, imagine if we forget to check
+        // `BypassedDomain` in `socket::hooks::socket_detour` (we would error out, instead of
+        // bypassing as expected).
         match fail {
             HookError::SocketInvalidState(_)
             | HookError::LocalFDNotFound(_)
