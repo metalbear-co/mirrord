@@ -121,22 +121,22 @@ jobs:
       - run: sudo apt install -y libpcap-dev cmake
       - run: cargo +nightly build --manifest-path=./Cargo.toml
 
-  release_intellij_plugin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
+  # release_intellij_plugin:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions/download-artifact@v3
+  #       with:
+  #         path: /tmp/artifacts
+  #     - name: Setup Java
+  #       uses: actions/setup-java@v3
+  #       with:
+  #         distribution: zulu
+  #         java-version: 11
+  #       run: |
+  #         cd intellij-ext
+  #         chmod +x ./gradlew
+  #         ./gradlew buildPlugin
 
   e2e:
     runs-on: ubuntu-latest
