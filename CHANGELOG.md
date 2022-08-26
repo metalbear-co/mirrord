@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Support for Golang fileops
 - Support for fcntl, dup, dup2, dup3 for fileops
+- Support for stat i.e. hook for __xstat
 
 ### Changed
 - Move functionality for fcntl, dup, dup2, dup3 into a common module
