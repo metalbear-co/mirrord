@@ -6,6 +6,10 @@ validation_text="Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
 
 case $1 in
   exists)
+    if [[ ! -f "/app/test.txt" ]]; then
+        echo "Exists File operation [[ -f $validation_file ]] failed";
+        exit -1
+    fi
     if [[ ! -d "/app" ]]; then
         echo "Exists Directory operation [[ -d /app ]] failed";
         exit -1
