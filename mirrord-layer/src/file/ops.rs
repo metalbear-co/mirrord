@@ -286,7 +286,7 @@ pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
     Ok(0)
 }
 
-pub(crate) fn stat(pathname: PathBuf, buf: *mut libc_stat) -> Result<StatFileResponse> {
+pub(crate) fn stat(pathname: PathBuf, buf: *mut libc_stat) -> Result<c_int> {
     trace!("stat -> pathname {:#?} | buf {:#?}", pathname, buf);
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -295,5 +295,49 @@ pub(crate) fn stat(pathname: PathBuf, buf: *mut libc_stat) -> Result<StatFileRes
         file_channel_tx,
     };
     blocking_send_file_message(HookMessageFile::Stat(stat))?;
-    Ok(file_channel_rx.blocking_recv()??)
+
+    let stat_result = file_channel_rx.blocking_recv()??;
+
+    let StatFileResponse {
+        st_dev,
+        st_ino,
+        st_nlink,
+        st_mode,
+        st_uid,
+        st_gid,
+        st_rdev,
+        st_size,
+        st_blksize,
+        st_blocks,
+        st_atime,
+        st_atime_nsec,
+        st_mtime,
+        st_mtime_nsec,
+        st_ctime,
+        st_ctime_nsec,
+    } = stat_result;
+
+    unsafe {
+        let mut libc_stat_struct: libc_stat = mem::zeroed();
+        libc_stat_struct.st_dev = st_dev;
+        libc_stat_struct.st_ino = st_ino;
+        libc_stat_struct.st_nlink = st_nlink;
+        libc_stat_struct.st_mode = st_mode;
+        libc_stat_struct.st_uid = st_uid;
+        libc_stat_struct.st_gid = st_gid;
+        libc_stat_struct.st_rdev = st_rdev;
+        libc_stat_struct.st_size = st_size as i64;
+        libc_stat_struct.st_blksize = st_blksize as i64;
+        libc_stat_struct.st_blocks = st_blocks as i64;
+        libc_stat_struct.st_atime = st_atime;
+        libc_stat_struct.st_atime_nsec = st_atime_nsec;
+        libc_stat_struct.st_mtime = st_mtime;
+        libc_stat_struct.st_mtime_nsec = st_mtime_nsec;
+        libc_stat_struct.st_ctime = st_ctime;
+        libc_stat_struct.st_ctime_nsec = st_ctime_nsec;
+
+        buf.copy_from_nonoverlapping(&libc_stat_struct, 1);
+    }
+
+    Ok(0)
 }

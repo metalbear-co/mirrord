@@ -541,8 +541,8 @@ mod tests {
     //     #[future]
     //     #[notrace]
     //     kube_client: Client,
-    //     #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
-    //     #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    //     #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)]
+    // application: Application,     #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     // ) {
     //     let service = service.await;
     //     let kube_client = kube_client.await;

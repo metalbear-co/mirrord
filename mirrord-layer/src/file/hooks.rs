@@ -423,48 +423,13 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         FN___XSTAT(ver, raw_path, buf)
     } else {
-        let stat_result = file::ops::stat(path, buf);
+        let (Ok(result) | Err(result)) = file::ops::stat(path, buf).map_err(|fail| match fail {
+            HookError::ResponseError(_) => FN___XSTAT(ver, raw_path, buf),
+            other => other.into(),
+        });
 
-        let StatFileResponse {
-            st_dev,
-            st_ino,
-            st_nlink,
-            st_mode,
-            st_uid,
-            st_gid,
-            st_rdev,
-            st_size,
-            st_blksize,
-            st_blocks,
-            st_atime,
-            st_atime_nsec,
-            st_mtime,
-            st_mtime_nsec,
-            st_ctime,
-            st_ctime_nsec,
-        } = stat_result.unwrap();
-
-        let mut libc_stat_struct: stat = mem::zeroed();
-        libc_stat_struct.st_dev = st_dev;
-        libc_stat_struct.st_ino = st_ino;
-        libc_stat_struct.st_nlink = st_nlink;
-        libc_stat_struct.st_mode = st_mode;
-        libc_stat_struct.st_uid = st_uid;
-        libc_stat_struct.st_gid = st_gid;
-        libc_stat_struct.st_rdev = st_rdev;
-        libc_stat_struct.st_size = st_size as i64;
-        libc_stat_struct.st_blksize = st_blksize as i64;
-        libc_stat_struct.st_blocks = st_blocks as i64;
-        libc_stat_struct.st_atime = st_atime;
-        libc_stat_struct.st_atime_nsec = st_atime_nsec;
-        libc_stat_struct.st_mtime = st_mtime;
-        libc_stat_struct.st_mtime_nsec = st_mtime_nsec;
-        libc_stat_struct.st_ctime = st_ctime;
-        libc_stat_struct.st_ctime_nsec = st_ctime_nsec;
-
-        buf.copy_from_nonoverlapping(&libc_stat_struct, 1);
-
-        0
+        trace!("connect_detour -> result {:#?}", result);
+        result
     }
 }
 
