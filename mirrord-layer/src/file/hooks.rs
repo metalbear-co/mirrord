@@ -1,9 +1,9 @@
-use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
+use std::{ffi::CStr, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::ReadFileResponse;
+use mirrord_protocol::{ReadFileResponse, StatFileResponse};
 use tracing::{error, trace};
 
 use super::{
@@ -425,8 +425,46 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     } else {
         let stat_result = file::ops::stat(path, buf);
 
-        let (Ok(result) | Err(result)) = stat_result.map_err(From::from);
-        result
+        let StatFileResponse {
+            st_dev,
+            st_ino,
+            st_nlink,
+            st_mode,
+            st_uid,
+            st_gid,
+            st_rdev,
+            st_size,
+            st_blksize,
+            st_blocks,
+            st_atime,
+            st_atime_nsec,
+            st_mtime,
+            st_mtime_nsec,
+            st_ctime,
+            st_ctime_nsec,
+        } = stat_result.unwrap();
+
+        let mut libc_stat_struct: stat = mem::zeroed();
+        libc_stat_struct.st_dev = st_dev;
+        libc_stat_struct.st_ino = st_ino;
+        libc_stat_struct.st_nlink = st_nlink;
+        libc_stat_struct.st_mode = st_mode;
+        libc_stat_struct.st_uid = st_uid;
+        libc_stat_struct.st_gid = st_gid;
+        libc_stat_struct.st_rdev = st_rdev;
+        libc_stat_struct.st_size = st_size as i64;
+        libc_stat_struct.st_blksize = st_blksize as i64;
+        libc_stat_struct.st_blocks = st_blocks as i64;
+        libc_stat_struct.st_atime = st_atime;
+        libc_stat_struct.st_atime_nsec = st_atime_nsec;
+        libc_stat_struct.st_mtime = st_mtime;
+        libc_stat_struct.st_mtime_nsec = st_mtime_nsec;
+        libc_stat_struct.st_ctime = st_ctime;
+        libc_stat_struct.st_ctime_nsec = st_ctime_nsec;
+
+        buf.copy_from_nonoverlapping(&libc_stat_struct, 1);
+
+        0
     }
 }
 

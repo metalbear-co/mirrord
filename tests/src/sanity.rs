@@ -530,38 +530,38 @@ mod tests {
         res.bytes().await.unwrap();
     }
 
-    #[cfg(target_os = "linux")]
-    #[rstest]
-    #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_mirror_http_traffic(
-        #[future]
-        #[notrace]
-        service: EchoService,
-        #[future]
-        #[notrace]
-        kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-    ) {
-        let service = service.await;
-        let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
-        let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
-            .await;
-        process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
-        send_requests(&url).await;
-        process.wait_for_line(Duration::from_secs(10), "GET");
-        process.wait_for_line(Duration::from_secs(10), "POST");
-        process.wait_for_line(Duration::from_secs(10), "PUT");
-        process.wait_for_line(Duration::from_secs(10), "DELETE");
-        timeout(Duration::from_secs(40), process.child.wait())
-            .await
-            .unwrap()
-            .unwrap();
-        process.assert_stderr();
-    }
+    // #[cfg(target_os = "linux")]
+    // #[rstest]
+    // #[trace]
+    // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    // async fn test_mirror_http_traffic(
+    //     #[future]
+    //     #[notrace]
+    //     service: EchoService,
+    //     #[future]
+    //     #[notrace]
+    //     kube_client: Client,
+    //     #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+    //     #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    // ) {
+    //     let service = service.await;
+    //     let kube_client = kube_client.await;
+    //     let url = get_service_url(kube_client.clone(), &service).await;
+    //     let mut process = application
+    //         .run(&service.pod_name, Some(&service.namespace), agent.flag())
+    //         .await;
+    //     process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
+    //     send_requests(&url).await;
+    //     process.wait_for_line(Duration::from_secs(10), "GET");
+    //     process.wait_for_line(Duration::from_secs(10), "POST");
+    //     process.wait_for_line(Duration::from_secs(10), "PUT");
+    //     process.wait_for_line(Duration::from_secs(10), "DELETE");
+    //     timeout(Duration::from_secs(40), process.child.wait())
+    //         .await
+    //         .unwrap()
+    //         .unwrap();
+    //     process.assert_stderr();
+    // }
 
     #[cfg(target_os = "macos")]
     #[rstest]
@@ -596,38 +596,38 @@ mod tests {
         process.assert_stderr();
     }
 
-    #[cfg(target_os = "linux")]
-    #[rstest]
-    #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_file_ops(
-        #[future]
-        #[notrace]
-        service: EchoService,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go)] ops: FileOps,
-    ) {
-        let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let command = ops.command();
+    // #[cfg(target_os = "linux")]
+    // #[rstest]
+    // #[trace]
+    // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    // pub async fn test_file_ops(
+    //     #[future]
+    //     #[notrace]
+    //     service: EchoService,
+    //     #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    //     #[values(FileOps::Python, FileOps::Go)] ops: FileOps,
+    // ) {
+    //     let service = service.await;
+    //     let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+    //     let command = ops.command();
 
-        let mut args = vec!["--enable-fs"];
+    //     let mut args = vec!["--enable-fs"];
 
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
-        }
+    //     if let Some(ephemeral_flag) = agent.flag() {
+    //         args.extend(ephemeral_flag);
+    //     }
 
-        let mut process = run(
-            command,
-            &service.pod_name,
-            Some(&service.namespace),
-            Some(args),
-        )
-        .await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        ops.assert(process);
-    }
+    //     let mut process = run(
+    //         command,
+    //         &service.pod_name,
+    //         Some(&service.namespace),
+    //         Some(args),
+    //     )
+    //     .await;
+    //     let res = process.child.wait().await.unwrap();
+    //     assert!(res.success());
+    //     ops.assert(process);
+    // }
 
     #[cfg(target_os = "macos")]
     #[rstest]
