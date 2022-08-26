@@ -1,9 +1,9 @@
-use std::{ffi::CStr, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf, ptr, slice};
+use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{ReadFileResponse, StatFileResponse};
+use mirrord_protocol::ReadFileResponse;
 use tracing::{error, trace};
 
 use super::{

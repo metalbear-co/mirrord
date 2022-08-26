@@ -1,4 +1,4 @@
-use std::{ffi::CString, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf, ptr, sync::Arc};
+use std::{ffi::CString, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf, sync::Arc};
 
 use libc::{c_int, c_uint, stat as libc_stat, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
