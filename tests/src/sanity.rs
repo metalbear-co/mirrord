@@ -790,7 +790,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_bash_file_exists(#[future] service: EchoService) {
         let service = service.await;
-        let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
+        let bash_command = vec!["bash", "../test.sh"];
         let mirrord_args = vec!["--enable-fs"];
         let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
 

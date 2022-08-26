@@ -3,7 +3,7 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, sync::
 use libc::{c_int, c_uint, stat as libc_stat, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    WriteFileResponse, StatFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
@@ -295,6 +295,7 @@ pub(crate) fn stat(pathname: PathBuf, buf: *mut libc_stat) -> Result<c_int> {
         file_channel_tx,
     };
     blocking_send_file_message(HookMessageFile::Stat(stat))?;
-    file_channel_rx.blocking_recv()??;
+    let result = file_channel_rx.blocking_recv()??;
+    debug!("stat -> result {:#?}", result);
     Ok(0)
 }
