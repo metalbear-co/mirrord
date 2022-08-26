@@ -3,6 +3,7 @@
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
 #![feature(naked_functions)]
+#![feature(stmt_expr_attributes)]
 
 use std::{
     cell::RefCell,
