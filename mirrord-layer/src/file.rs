@@ -13,7 +13,8 @@ use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    SeekFileRequest, SeekFileResponse, StatFileRequest, StatFileResponse, WriteFileRequest,
+    WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -130,6 +131,7 @@ pub struct FileHandler {
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
+    stat_queue: ResponseDeque<StatFileResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -175,6 +177,10 @@ impl FileHandler {
                 debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
                 pop_send(&mut self.access_queue, access)
             }
+            Stat(stat) => {
+                debug!("DaemonMessage::StatFileResponse {:#?}!", stat);
+                pop_send(&mut self.stat_queue, stat)
+            }
         }
     }
 
@@ -198,6 +204,7 @@ impl FileHandler {
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
             Access(access) => self.handle_hook_access(access, codec).await,
+            Stat(stat) => self.handle_hook_stat(stat, codec).await,
         }
     }
 
@@ -393,6 +400,27 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
         codec.send(request).await.map_err(From::from)
     }
+
+    async fn handle_hook_stat(
+        &mut self,
+        stat: Stat,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let Stat {
+            pathname,
+            file_channel_tx,
+        } = stat;
+        debug!("HookMessage::StatFileHook pathname {:#?}", pathname);
+
+        self.stat_queue.push_back(file_channel_tx);
+        let stat_file_request = StatFileRequest { pathname };
+
+        let request = ClientMessage::FileRequest(FileRequest::Stat(stat_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
 }
 
 #[derive(Debug)]
@@ -445,6 +473,12 @@ pub struct Access {
 }
 
 #[derive(Debug)]
+pub struct Stat {
+    pub(crate) pathname: PathBuf,
+    pub(crate) file_channel_tx: ResponseChannel<StatFileResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -453,4 +487,5 @@ pub enum HookMessageFile {
     Write(Write),
     Close(Close),
     Access(Access),
+    Stat(Stat),
 }

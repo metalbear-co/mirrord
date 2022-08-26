@@ -134,6 +134,10 @@ pub struct AccessFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct StatFileRequest {
+    pub pathname: PathBuf,
+}
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetEnvVarsRequest {
     pub env_vars_filter: HashSet<String>,
     pub env_vars_select: HashSet<String>,
@@ -148,6 +152,7 @@ pub enum FileRequest {
     Write(WriteFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
+    Stat(StatFileRequest),
 }
 
 /// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
@@ -199,6 +204,26 @@ pub struct CloseFileResponse;
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AccessFileResponse;
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct StatFileResponse {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub st_rdev: u64,
+    pub st_size: u64,
+    pub st_blksize: u64,
+    pub st_blocks: u64,
+    pub st_atime: i64,
+    pub st_atime_nsec: i64,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: i64,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: i64,
+}
+
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
@@ -210,7 +235,12 @@ pub enum FileResponse {
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
+    Stat(RemoteResult<StatFileResponse>),
 }
+
+// #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+// pub struct StatInfoInternal {
+// }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AddrInfoInternal {

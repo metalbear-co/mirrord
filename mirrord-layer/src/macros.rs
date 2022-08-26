@@ -15,7 +15,9 @@ macro_rules! replace {
                 }
                 None => {
                     tracing::info!("replace -> function not found");
-                    return Err($crate::error::LayerError::NoExportName(symbol_name.to_string()));
+                    return Err($crate::error::LayerError::NoExportName(
+                        symbol_name.to_string(),
+                    ));
                 }
             }
 
@@ -24,7 +26,7 @@ macro_rules! replace {
                 frida_gum::NativePointer(detour as *mut libc::c_void),
                 frida_gum::NativePointer(std::ptr::null_mut()),
             );
-          
+
             match &replaced {
                 Ok(_) => tracing::info!("replace -> {:#?} [success]", $detour_name),
                 Err(e) => {

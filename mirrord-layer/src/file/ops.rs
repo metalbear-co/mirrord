@@ -1,6 +1,6 @@
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, sync::Arc};
 
-use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, stat as libc_stat, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse,
@@ -13,7 +13,7 @@ use crate::{
     error::{HookError, HookResult as Result},
     file::{
         Access, Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek,
-        Write, OPEN_FILES,
+        Stat, Write, OPEN_FILES,
     },
     HookMessage,
 };
@@ -283,5 +283,18 @@ pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
 
     file_channel_rx.blocking_recv()??;
 
+    Ok(0)
+}
+
+pub(crate) fn stat(pathname: PathBuf, buf: *mut libc_stat) -> Result<c_int> {
+    trace!("stat -> pathname {:#?} | buf {:#?}", pathname, buf);
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let stat = Stat {
+        pathname,
+        file_channel_tx,
+    };
+    blocking_send_file_message(HookMessageFile::Stat(stat))?;
+    file_channel_rx.blocking_recv()??;
     Ok(0)
 }

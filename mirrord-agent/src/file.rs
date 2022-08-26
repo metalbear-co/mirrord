@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{prelude::*, SeekFrom},
+    os::unix::prelude::MetadataExt,
     path::PathBuf,
 };
 
@@ -11,7 +12,7 @@ use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest,
-    SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    SeekFileResponse, StatFileRequest, StatFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
 
@@ -81,6 +82,17 @@ impl FileManager {
 
                 let access_result = self.access(full_path, mode);
                 Ok(FileResponse::Access(access_result))
+            }
+            FileRequest::Stat(StatFileRequest { pathname }) => {
+                let pathname = pathname
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(pathname);
+
+                let stat_result = self.stat(full_path);
+                Ok(FileResponse::Stat(stat_result))
             }
         }
     }
@@ -286,6 +298,30 @@ impl FileManager {
         pathname
             .access(mode)
             .map(|_| AccessFileResponse)
+            .map_err(ResponseError::from)
+    }
+
+    pub(crate) fn stat(&mut self, path: PathBuf) -> RemoteResult<StatFileResponse> {
+        trace!("FileManager::stat -> path {:#?}", path,);
+        path.metadata()
+            .map(|metadata| StatFileResponse {
+                st_dev: metadata.dev(),
+                st_ino: metadata.ino(),
+                st_nlink: metadata.nlink(),
+                st_mode: metadata.mode(),
+                st_uid: metadata.uid(),
+                st_gid: metadata.gid(),
+                st_rdev: metadata.rdev(),
+                st_size: metadata.size(),
+                st_blksize: metadata.blksize(),
+                st_blocks: metadata.blocks(),
+                st_atime: metadata.atime(),
+                st_atime_nsec: metadata.atime_nsec(),
+                st_mtime: metadata.mtime(),
+                st_mtime_nsec: metadata.mtime_nsec(),
+                st_ctime: metadata.ctime(),
+                st_ctime_nsec: metadata.ctime_nsec(),
+            })
             .map_err(ResponseError::from)
     }
 }

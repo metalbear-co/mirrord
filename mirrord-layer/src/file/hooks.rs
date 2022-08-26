@@ -1,7 +1,7 @@
 use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE, stat64};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::ReadFileResponse;
 use tracing::{error, trace};
@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{
     error::HookError,
-    file::ops::{access, lseek, open, read, write},
+    file::{
+        self,
+        ops::{access, lseek, open, read, write},
+    },
     replace,
 };
 
@@ -397,28 +400,45 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn xstat_detour(__ver: c_int, path: *const c_char, buf: *mut stat64) -> c_int {
-    trace!("stat_detour -> path {:#?}", path);
-    FN_XSTAT(__ver, path, buf)
-}
+pub(crate) unsafe extern "C" fn __xstat_detour(
+    ver: c_int,
+    raw_path: *const c_char,
+    buf: *mut stat,
+) -> c_int {
+    trace!(
+        "stat_detour -> ver {:#?}, raw_path {:#?}, buf {:#?}",
+        ver,
+        raw_path,
+        buf
+    );
+    let path = match CStr::from_ptr(raw_path)
+        .to_str()
+        .map_err(HookError::from)
+        .map(PathBuf::from)
+    {
+        Ok(path) => path,
+        Err(fail) => return fail.into(),
+    };
 
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, buf: *mut stat) -> c_int {
-    trace!("fstat_detour -> fd {:#?}", fd);
-    FN_FSTAT(fd, buf)
-}
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
+        FN___XSTAT(ver, raw_path, buf)
+    } else {
+        let stat_result = file::ops::stat(path, buf);
 
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fxstat_detour(__ver: c_int, fd: RawFd, buf: *mut stat) -> c_int {
-    trace!("fxstat_detour -> fd {:#?}", fd);
-    FN_FXSTAT(__ver, fd, buf)
+        let (Ok(result) | Err(result)) = stat_result.map_err(From::from);
+        result
+    }
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {    
-    let _ = replace!(interceptor, "__xstat", xstat_detour, FnXstat, FN_XSTAT);
-    let _ = replace!(interceptor, "__fxstat", fxstat_detour, FnFxstat, FN_FXSTAT);
-    let _ = replace!(interceptor, "fstat", fstat_detour, FnFstat, FN_FSTAT);
+pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
+    let _ = replace!(
+        interceptor,
+        "__xstat",
+        __xstat_detour,
+        Fn__xstat,
+        FN___XSTAT
+    );
     let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
     let _ = replace!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
     let _ = replace!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
