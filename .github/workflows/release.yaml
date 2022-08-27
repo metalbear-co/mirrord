@@ -140,7 +140,7 @@ jobs:
 
 
   release_intellij_plugin:
-      needs: [ build_binaries, build_binaries_macos ]
+      needs: [ build_binaries, build_binaries_macos, release_docker_image ]
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v2
