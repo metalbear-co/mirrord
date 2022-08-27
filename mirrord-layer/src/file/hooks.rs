@@ -425,13 +425,15 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     } else {
         let (Ok(result) | Err(result)) = file::ops::stat(path, buf).map_err(|fail| match fail {
             HookError::ResponseError(err) => match err {
-                ResponseError::NotFound(_) => FN___XSTAT(ver, raw_path, buf),
+                // Todo: The agent should translate OS`s NotFound to
+                // HookError::ResponseError::NotFound
+                ResponseError::RemoteIO(_) => FN___XSTAT(ver, raw_path, buf),
                 _ => -1,
             },
             other => other.into(),
         });
 
-        trace!("connect_detour -> result {:#?}", result);
+        trace!("__xstat -> result {:#?}", result);
         result
     }
 }
