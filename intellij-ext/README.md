@@ -8,6 +8,8 @@ mirrord works by letting you select a pod to mirror traffic from. It launches a 
 * Start debugging your project
 * Choose pod to mirror traffic from, select and configure mirrord options.
 * The debugged process will start with mirrord, and receive traffic.
+
+![Example Usage](./src/main/resources/META-INF/usage.gif)
  
 <!-- Plugin description end -->
 
