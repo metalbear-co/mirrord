@@ -3,7 +3,7 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::ReadFileResponse;
+use mirrord_protocol::{ReadFileResponse, ResponseError};
 use tracing::{error, trace};
 
 use super::{
@@ -424,7 +424,10 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         FN___XSTAT(ver, raw_path, buf)
     } else {
         let (Ok(result) | Err(result)) = file::ops::stat(path, buf).map_err(|fail| match fail {
-            HookError::ResponseError(_) => FN___XSTAT(ver, raw_path, buf),
+            HookError::ResponseError(err) => match err {
+                ResponseError::NotFound(_) => FN___XSTAT(ver, raw_path, buf),
+                _ => -1,
+            },
             other => other.into(),
         });
 
