@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.9.0
+
 ### Added
 - Support for Golang fileops
 - IntelliJ Extension for mirrord
