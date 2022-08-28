@@ -122,7 +122,8 @@ jobs:
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
         id: version
-      - run: npm install -g vsce typescript esbuild
+      # TypeScript set at 4.7.4 because @kubernetes/client-node 0.16.3 (and 0.17.0) breaks with version 4.8.2+
+      - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target linux-x64
