@@ -256,8 +256,8 @@ mod tests {
         let server = Command::new(path)
             .args(args.clone())
             .envs(env)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            // .stdout(Stdio::piped())
+            // .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         println!(
