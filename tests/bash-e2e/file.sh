@@ -28,7 +28,7 @@ case $1 in
     # fi
   ;;
   read)
-      if [[ -r "$validation_file" ]]; then
+      if [[ -f "$validation_file" ]]; then
         if [[ $(< $validation_file) != "$validation_text" ]]; then
           echo "Read File operation did not result in correct text";
           exit -1

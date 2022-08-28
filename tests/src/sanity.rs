@@ -802,19 +802,19 @@ mod tests {
     // currently there is an issue with piping across forks of processes so 'test_bash_file_read'
     // and 'test_bash_file_write' cannot pass
 
-    // #[cfg(target_os = "linux")]
-    // #[rstest]
-    // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    // pub async fn test_bash_file_read(#[future] service: EchoService) {
-    //     let service = service.await;
-    //     let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-    //     let mirrord_args = vec!["--enable-fs"];
-    //     let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+    #[cfg(target_os = "linux")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_bash_file_read(#[future] service: EchoService) {
+        let service = service.await;
+        let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
+        let mirrord_args = vec!["--enable-fs"];
+        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
 
-    //     let res = process.child.wait().await.unwrap();
-    //     assert!(res.success());
-    //     process.assert_stderr();
-    // }
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
 
     // #[cfg(target_os = "linux")]
     // #[rstest]
