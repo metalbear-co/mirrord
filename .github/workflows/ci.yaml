@@ -156,7 +156,7 @@ jobs:
           go build
       - run: |
           cd tests/go-e2e-fileops
-          go build          
+          go build
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
@@ -218,3 +218,18 @@ jobs:
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
+
+  build_intellij_plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: zulu
+          java-version: 11
+      - name: Build Plugin
+        run: |
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew buildPlugin
