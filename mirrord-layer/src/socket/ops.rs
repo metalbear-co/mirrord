@@ -234,7 +234,22 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
             };
 
             if result != 0 {
-                Err(io::Error::last_os_error())?
+                let io_error = io::Error::last_os_error();
+
+                match io_error.kind() {
+                    io::ErrorKind::Uncategorized => io_error
+                        .raw_os_error()
+                        .map(|blocking_error| {
+                            if blocking_error == libc::EINPROGRESS || blocking_error == libc::EINTR
+                            {
+                                Ok(())
+                            } else {
+                                Err(io_error)?
+                            }
+                        })
+                        .unwrap(),
+                    _ => Err(io_error)?,
+                }
             } else {
                 Ok::<_, HookError>(())
             }
@@ -273,11 +288,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                     errno::errno()
                 );
                 return Err(io::Error::last_os_error())?;
-            }
-
-            if err_code == libc::EINPROGRESS || err_code == libc::EINTR {
-                info!("connect -> EINPROGRESS or EINTR {:#?}", err_code);
-                // errno::set_errno(errno::Errno(0));
             }
 
             // Warning: We're treating `EINPROGRESS` as `Connected`!
