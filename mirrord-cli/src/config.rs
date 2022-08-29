@@ -101,8 +101,4 @@ pub(super) struct LoginArgs {
     /// Don't open web browser automatically and just print url
     #[clap(long)]
     pub no_open: bool,
-
-    /// Username to save under in keyring
-    #[clap(long)]
-    pub keyring_username: Option<String>,
 }

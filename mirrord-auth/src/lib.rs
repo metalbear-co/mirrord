@@ -1,5 +1,9 @@
 #[cfg(feature = "webbrowser")]
 use std::time::Duration;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use lazy_static::lazy_static;
 #[cfg(feature = "webbrowser")]
@@ -8,8 +12,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 lazy_static! {
-    static ref KEYRING_SERVICE: String =
-        std::env::var("MIRRORD_KEYRING_SERVICE").unwrap_or_else(|_| "mirrord".to_owned());
+    static ref HOME_DIR: PathBuf = [
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("HOMEPATH"))
+            .unwrap_or_else(|_| "~".to_owned()),
+        ".mirrord_credentials".to_owned()
+    ]
+    .iter()
+    .collect();
+    static ref AUTH_FILE_DIR: PathBuf = std::env::var("MIRRORD_AUTHENTICATION")
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or_else(|| HOME_DIR.to_path_buf());
 }
 
 #[derive(Deserialize, Serialize)]
@@ -21,35 +35,31 @@ pub struct AuthConfig {
 #[derive(Error, Debug)]
 pub enum AuthenticationError {
     #[error(transparent)]
-    Keyring(#[from] keyring::Error),
+    IoError(#[from] std::io::Error),
     #[error(transparent)]
-    ConfigParse(#[from] serde_json::Error),
+    ConfigParseError(#[from] serde_json::Error),
     #[error(transparent)]
     #[cfg(feature = "webbrowser")]
-    ConfigRequest(#[from] reqwest::Error),
+    ConfigRequestError(#[from] reqwest::Error),
 }
 
 type Result<T> = std::result::Result<T, AuthenticationError>;
 
 impl AuthConfig {
-    pub fn load(username: Option<String>) -> Result<AuthConfig> {
-        let username = username.unwrap_or_else(whoami::username);
-
-        let entry = keyring::Entry::new(&KEYRING_SERVICE, &username);
-
-        let password = entry.get_password()?;
-
-        serde_json::from_str(&password).map_err(|err| err.into())
+    pub fn config_path() -> &'static Path {
+        AUTH_FILE_DIR.as_path()
     }
 
-    pub fn save(&self, username: Option<String>) -> Result<()> {
-        let username = username.unwrap_or_else(whoami::username);
+    pub fn load() -> Result<AuthConfig> {
+        let bytes = fs::read(AUTH_FILE_DIR.as_path())?;
 
-        let entry = keyring::Entry::new(&KEYRING_SERVICE, &username);
+        serde_json::from_slice(&bytes).map_err(|err| err.into())
+    }
 
-        let password = serde_json::to_string(self)?;
+    pub fn save(&self) -> Result<()> {
+        let bytes = serde_json::to_vec_pretty(self)?;
 
-        entry.set_password(&password)?;
+        fs::write(AUTH_FILE_DIR.as_path(), bytes)?;
 
         Ok(())
     }
