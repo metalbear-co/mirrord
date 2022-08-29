@@ -273,6 +273,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                 return Err(io::Error::from_raw_os_error(connect_result).into());
             }
 
+            if err_code == libc::EINPROGRESS || err_code == libc::EINTR {
+                info!("connect -> EINPROGRESS or EINTR {:#?}", err_code);
+                errno::set_errno(errno::Errno(0));
+            }
+
             // Warning: We're treating `EINPROGRESS` as `Connected`!
             let connected = Connected {
                 remote_address,
