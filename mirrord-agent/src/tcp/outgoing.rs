@@ -72,80 +72,70 @@ impl TcpOutgoingApi {
                 biased;
 
                 // [layer] -> [agent]
-                layer_message = layer_rx.recv() => {
+                Some(layer_message) = layer_rx.recv() => {
                     trace!("interceptor_task -> layer_message {:?}", layer_message);
-
                     match layer_message {
-                        Some(layer_message) => {
-                            match layer_message {
-                                // [user] -> [layer] -> [agent] -> [layer]
-                                // `user` is asking us to connect to some remote host.
-                                LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                                    let daemon_connect =
-                                        TcpStream::connect(remote_address)
-                                            .await
-                                            .map_err(From::from)
-                                            .map(|remote_stream| {
-                                                let connection_id = writers
-                                                    .keys()
-                                                    .last()
-                                                    .copied()
-                                                    .map(|last| last + 1)
-                                                    .unwrap_or_default();
+                        // [user] -> [layer] -> [agent] -> [layer]
+                        // `user` is asking us to connect to some remote host.
+                        LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
+                            let daemon_connect =
+                                TcpStream::connect(remote_address)
+                                    .await
+                                    .map_err(From::from)
+                                    .map(|remote_stream| {
+                                        let connection_id = writers
+                                            .keys()
+                                            .last()
+                                            .copied()
+                                            .map(|last| last + 1)
+                                            .unwrap_or_default();
 
-                                                // Split the `remote_stream` so we can keep reading
-                                                // and writing from multiple hosts without blocking.
-                                                let (read_half, write_half) = remote_stream.into_split();
-                                                writers.insert(connection_id, write_half);
-                                                readers.insert(connection_id, ReaderStream::new(read_half));
+                                        // Split the `remote_stream` so we can keep reading
+                                        // and writing from multiple hosts without blocking.
+                                        let (read_half, write_half) = remote_stream.into_split();
+                                        writers.insert(connection_id, write_half);
+                                        readers.insert(connection_id, ReaderStream::new(read_half));
 
-                                                DaemonConnect {
-                                                    connection_id,
-                                                    remote_address,
-                                                }
-                                            });
+                                        DaemonConnect {
+                                            connection_id,
+                                            remote_address,
+                                        }
+                                    });
 
-                                    let daemon_message = DaemonTcpOutgoing::Connect(daemon_connect);
-                                    daemon_tx.send(daemon_message).await?
-                                }
-                                // [user] -> [layer] -> [agent] -> [remote]
-                                // `user` wrote some message to the remote host.
-                                LayerTcpOutgoing::Write(LayerWrite {
-                                    connection_id,
-                                    bytes,
-                                }) => {
-                                    let daemon_write = match writers
-                                        .get_mut(&connection_id)
-                                        .ok_or(ResponseError::NotFound(connection_id as usize))
-                                    {
-                                        Ok(writer) => writer
-                                            .write_all(&bytes)
-                                            .await
-                                            .map_err(ResponseError::from),
-                                        Err(fail) => Err(fail),
-                                    };
+                            let daemon_message = DaemonTcpOutgoing::Connect(daemon_connect);
+                            daemon_tx.send(daemon_message).await?
+                        }
+                        // [user] -> [layer] -> [agent] -> [remote]
+                        // `user` wrote some message to the remote host.
+                        LayerTcpOutgoing::Write(LayerWrite {
+                            connection_id,
+                            bytes,
+                        }) => {
+                            let daemon_write = match writers
+                                .get_mut(&connection_id)
+                                .ok_or(ResponseError::NotFound(connection_id as usize))
+                            {
+                                Ok(writer) => writer
+                                    .write_all(&bytes)
+                                    .await
+                                    .map_err(ResponseError::from),
+                                Err(fail) => Err(fail),
+                            };
 
-                                    if let Err(fail) = daemon_write {
-                                        warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
-                                        writers.remove(&connection_id);
-                                        readers.remove(&connection_id);
+                            if let Err(fail) = daemon_write {
+                                warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
+                                writers.remove(&connection_id);
+                                readers.remove(&connection_id);
 
-                                        let daemon_message = DaemonTcpOutgoing::Close(connection_id);
-                                        daemon_tx.send(daemon_message).await?
-                                    }
-                                }
-                                // [layer] -> [agent]
-                                // `layer` closed their interceptor stream.
-                                LayerTcpOutgoing::Close(LayerClose { ref connection_id }) => {
-                                    writers.remove(connection_id);
-                                    readers.remove(connection_id);
-                                }
+                                let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                                daemon_tx.send(daemon_message).await?
                             }
                         }
-                        None => {
-                            // We have no more requests coming.
-                            warn!("interceptor_task -> no requests left!");
-                            break;
+                        // [layer] -> [agent]
+                        // `layer` closed their interceptor stream.
+                        LayerTcpOutgoing::Close(LayerClose { ref connection_id }) => {
+                            writers.remove(connection_id);
+                            readers.remove(connection_id);
                         }
                     }
                 }

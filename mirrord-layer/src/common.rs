@@ -31,11 +31,6 @@ pub struct GetAddrInfoHook {
     pub(crate) hook_channel_tx: ResponseChannel<Vec<AddrInfoInternal>>,
 }
 
-#[derive(Debug)]
-pub(crate) struct HookMessageExit {
-    pub(crate) hook_channel_tx: oneshot::Sender<Result<(), HookError>>,
-}
-
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub(crate) enum HookMessage {
@@ -43,5 +38,4 @@ pub(crate) enum HookMessage {
     TcpOutgoing(TcpOutgoing),
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
-    Exit(HookMessageExit),
 }

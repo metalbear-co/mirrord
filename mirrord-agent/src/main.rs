@@ -173,7 +173,6 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
 struct ClientConnectionHandler {
     /// Used to prevent closing the main loop (`handle_loop`) when any request is done (tcp
     /// outgoing feature). Stays `true` until `agent` receives an `ExitRequest`.
-    keep_alive: bool,
     id: ClientID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
@@ -206,7 +205,6 @@ impl ClientConnectionHandler {
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
-            keep_alive: true,
             id,
             file_manager,
             stream,
@@ -247,23 +245,7 @@ impl ClientConnectionHandler {
                     }
                 }
                 message = self.tcp_outgoing_api.daemon_message() => {
-                    match message {
-                        Ok(response) => self.respond(DaemonMessage::TcpOutgoing(response)).await?,
-                        Err(fail) => {
-                            match fail {
-                                AgentError::ReceiverClosed => if self.keep_alive {
-                                     continue;
-                                } else {
-                                    debug!("handle_look -> Client {:#?} disconnected!", self.id);
-                                    break;
-                                }
-                                other => {
-                                    error!("handle_loop -> Outgoing failed with {:#?}", other);
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
                 }
                 _ = token.cancelled() => {
                     break;
@@ -318,9 +300,6 @@ impl ClientConnectionHandler {
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
-            }
-            ClientMessage::ExitRequest => {
-                self.keep_alive = false;
             }
         }
         Ok(true)
@@ -395,8 +374,7 @@ async fn start_agent() -> Result<(), AgentError> {
 
                     });
                     clients.push(client);
-                }
-                else {
+                } else {
                     error!("start_client -> Ran out of connections, dropping new connection");
                 }
 

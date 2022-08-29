@@ -834,8 +834,10 @@ mod tests {
     }
 
     // TODO: This is valid for all "outgoing" tests:
-    //  We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
+    // We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
     // which is bad.
+    // An idea to solve this problem would be to have some internal (or test-only) specific messages
+    // that we can pass back and forth between `layer` and `agent`.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {

@@ -11,16 +11,16 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{blocking_send_hook_message, GetAddrInfoHook, HookMessageExit, ResponseChannel};
+use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use envconfig::Envconfig;
-use error::{HookResult, LayerError, Result};
+use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
-use mirrord_macro::{hook_fn, hook_guard_fn};
+use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
@@ -32,13 +32,10 @@ use tcp_mirror::TcpMirrorHandler;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
@@ -186,21 +183,6 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
-            HookMessage::Exit(message) => {
-                // TODO: Another way of handling this would be calling `exit` on our own (as
-                // suggested by aviram) when the loop ends.
-
-                // The main purpose of needing such a notification for `agent` is to avoid closing
-                // it prematurely (right now it could happen when enabling the "outgoing traffic"
-                // feature, after a single request is completed, `agent` would close without this).
-                trace!("HookMessage::Exit");
-
-                let request = ClientMessage::ExitRequest;
-
-                self.codec.send(request).await.unwrap();
-
-                message.hook_channel_tx.send(Ok(())).unwrap();
-            }
         }
     }
 
@@ -361,7 +343,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
-        let _ = replace!(&mut interceptor, "exit", exit_detour, FnExit, FN_EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -408,27 +389,4 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     } else {
         FN_CLOSE(fd)
     }
-}
-
-fn exit() -> HookResult<()> {
-    trace!("exit ->");
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-
-    let exit_hook = HookMessageExit { hook_channel_tx };
-
-    blocking_send_hook_message(HookMessage::Exit(exit_hook))?;
-
-    hook_channel_rx.blocking_recv()?
-}
-
-#[hook_fn]
-unsafe extern "C" fn exit_detour(status: c_int) {
-    trace!("exit_detour -> status {:#?}", status);
-    let (Ok(result) | Err(result)) = exit().map(|()| 0).map_err(From::from);
-
-    if result != status {
-        warn!("exit_detour -> result {:#?} | status {:#?}", result, status);
-    }
-
-    FN_EXIT(status)
 }
