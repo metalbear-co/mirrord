@@ -80,16 +80,20 @@ impl AuthConfig {
     }
 
     #[cfg(feature = "webbrowser")]
-    pub fn from_webbrowser(server: &str, timeout: u64) -> Result<AuthConfig> {
+    pub fn from_webbrowser(server: &str, timeout: u64, no_open: bool) -> Result<AuthConfig> {
         let ref_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
 
         let url = format!("{}/oauth?ref={}", server, ref_id);
 
-        if let Err(_) = webbrowser::open(&url) {
-            println!(
-                "Problem auto launching webbrowser so please enter the following url in your webbrowser of choice\n\n url: {:?}\n",
-                url
-            );
+        let url_print = format!(
+            "Please enter the following url in your webbrowser of choice\n\n url: {:?}\n",
+            url
+        );
+
+        if no_open {
+            println!("{}", url_print);
+        } else if webbrowser::open(&url).is_err() {
+            println!("Problem auto launching webbrowser\n{}", url_print);
         }
 
         let client = reqwest::blocking::Client::new();

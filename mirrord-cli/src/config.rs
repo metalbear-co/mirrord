@@ -86,12 +86,19 @@ pub(super) struct ExecArgs {
 
 #[derive(Args, Debug)]
 pub(super) struct LoginArgs {
+    /// Manualy insert token
     #[clap(long)]
     pub token: Option<String>,
 
+    /// Time to wait till close the connection wating for reply from identity server
     #[clap(long, default_value = "120")]
     pub timeout: u64,
 
+    /// Override identity server url
     #[clap(long, default_value = "https://identity.metalbear.dev")]
     pub auth_server: String,
+
+    /// Don't open web browser automatically and just print url
+    #[clap(long)]
+    pub no_open: bool,
 }

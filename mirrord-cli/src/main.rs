@@ -152,7 +152,9 @@ fn exec(args: &ExecArgs) -> Result<()> {
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
-        None => AuthConfig::from_webbrowser(&args.auth_server, args.timeout)?.save()?,
+        None => {
+            AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?.save()?
+        }
     }
 
     println!(
