@@ -1,33 +1,44 @@
-use std::net::IpAddr;
+use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 
-use crate::{ConnectionID, Port};
+use crate::{ConnectionId, Port};
+
+pub mod outgoing;
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
-    pub connection_id: ConnectionID,
+    pub connection_id: ConnectionId,
     pub address: IpAddr,
     pub destination_port: Port,
     pub source_port: Port,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct TcpData {
-    pub connection_id: ConnectionID,
+    pub connection_id: ConnectionId,
     pub bytes: Vec<u8>,
+}
+
+impl fmt::Debug for TcpData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TcpData")
+            .field("connection_id", &self.connection_id)
+            .field("bytes (length)", &self.bytes.len())
+            .finish()
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TcpClose {
-    pub connection_id: ConnectionID,
+    pub connection_id: ConnectionId,
 }
 
 /// Messages related to Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcp {
     PortSubscribe(Port),
-    ConnectionUnsubscribe(ConnectionID),
+    ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
 }
 

@@ -8,7 +8,7 @@ use std::{
 use async_trait::async_trait;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionID,
+    ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,7 +19,7 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::{LayerError, Result},
@@ -27,6 +27,8 @@ use crate::{
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
+    trace!("tcp_tunnel -> local_stream {:#?}", local_stream);
+
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
     let mut remote_stream_closed = false;
@@ -76,7 +78,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
 
 struct Connection {
     writer: Sender<Vec<u8>>,
-    id: ConnectionID,
+    id: ConnectionId,
 }
 
 impl Eq for Connection {}
@@ -94,7 +96,7 @@ impl Hash for Connection {
 }
 
 impl Connection {
-    pub fn new(id: ConnectionID, writer: Sender<Vec<u8>>) -> Self {
+    pub fn new(id: ConnectionId, writer: Sender<Vec<u8>>) -> Self {
         Self { id, writer }
     }
 
@@ -103,8 +105,8 @@ impl Connection {
     }
 }
 
-impl Borrow<ConnectionID> for Connection {
-    fn borrow(&self) -> &ConnectionID {
+impl Borrow<ConnectionId> for Connection {
+    fn borrow(&self) -> &ConnectionId {
         &self.id
     }
 }
@@ -120,7 +122,7 @@ pub struct TcpMirrorHandler {
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
-        debug!("handle_new_connection -> {:#?}", tcp_connection);
+        trace!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
 
@@ -136,7 +138,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<()> {
-        debug!("handle_new_data -> id {:#?}", data.connection_id);
+        trace!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
@@ -162,7 +164,7 @@ impl TcpHandler for TcpMirrorHandler {
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<()> {
-        debug!("handle_close -> close {:#?}", close);
+        trace!("handle_close -> close {:#?}", close);
 
         let TcpClose { connection_id } = close;
 
