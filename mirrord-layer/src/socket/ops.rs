@@ -44,7 +44,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
     let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
 
     let socket_fd = if socket_result == -1 {
-        Err(std::io::Error::from_raw_os_error(socket_result))
+        Err(std::io::Error::last_os_error())
     } else {
         Ok(socket_result)
     }?;
@@ -114,7 +114,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
             unbound_address,
             errno::errno()
         );
-        return Err(io::Error::from_raw_os_error(bind_result).into());
+        return Err(io::Error::last_os_error())?;
     }
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
@@ -124,7 +124,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
             if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
                 error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
 
-                Err(io::Error::from_raw_os_error(-1))
+                Err(io::Error::last_os_error())?
             } else {
                 Ok(())
             }
@@ -164,7 +164,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
             if listen_result != 0 {
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
 
-                return Err(io::Error::from_raw_os_error(listen_result).into());
+                return Err(io::Error::last_os_error())?;
             }
 
             blocking_send_hook_message(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
@@ -234,7 +234,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
             };
 
             if result != 0 {
-                Err(io::Error::from_raw_os_error(result))?
+                Err(io::Error::last_os_error())?
             } else {
                 Ok::<_, HookError>(())
             }
@@ -263,6 +263,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
             let connect_result =
                 unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
 
+            debug!("connect -> connect_result {:#?}", connect_result);
+
             let err_code = errno::errno().0;
             if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
                 error!(
@@ -270,12 +272,12 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                     connect_result,
                     errno::errno()
                 );
-                return Err(io::Error::from_raw_os_error(connect_result).into());
+                return Err(io::Error::last_os_error())?;
             }
 
             if err_code == libc::EINPROGRESS || err_code == libc::EINTR {
                 info!("connect -> EINPROGRESS or EINTR {:#?}", err_code);
-                errno::set_errno(errno::Errno(0));
+                // errno::set_errno(errno::Errno(0));
             }
 
             // Warning: We're treating `EINPROGRESS` as `Connected`!
@@ -300,7 +302,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                     bind_result, address, sockfd
                 );
 
-                Err(io::Error::from_raw_os_error(bind_result))?
+                Err(io::Error::last_os_error())?
             } else {
                 let rawish_remote_address = SockAddr::from(remote_address);
                 let result = unsafe {
@@ -312,7 +314,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                 };
 
                 if result != 0 {
-                    Err(io::Error::from_raw_os_error(result))?
+                    Err(io::Error::last_os_error())?
                 } else {
                     Ok::<_, HookError>(())
                 }
