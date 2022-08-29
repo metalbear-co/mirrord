@@ -78,7 +78,9 @@ mirrord exec node app.js --pod-name my-pod
 
 ## How It Works
 mirrord works by letting you select a pod to plug into (mirror incoming traffic from, send outgoing traffic through, read and write files to, and read environment variables from). It launches a privileged pod on the same node which enters the namespace of the selected pod.
-
+<p align="center">
+<img src="./images/how_it_works.svg" alt="How It Works" width="60%"/>
+</p>
 ## Contributing
 Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
 If you wish to work an issue, please comment so you can be assigned.
