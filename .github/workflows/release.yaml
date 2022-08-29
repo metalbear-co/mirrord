@@ -104,7 +104,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    needs: [ build_binaries, build_binaries_macos, release_docker_image ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -122,14 +122,15 @@ jobs:
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
         id: version
-      - run: npm install -g vsce typescript esbuild
+      # TypeScript set at 4.7.4 because @kubernetes/client-node 0.16.3 (and 0.17.0) breaks with version 4.8.2+
+      - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
-      - run: mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target linux-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
-      - run: mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
+      - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
       # Same binary for darwin
       - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
         env:
@@ -138,8 +139,36 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+
+  release_intellij_plugin:
+      needs: [ build_binaries, build_binaries_macos, release_docker_image ]
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v2
+        - uses: actions/download-artifact@v3
+          with:
+            path: /tmp/artifacts
+        - name: Setup Java
+          uses: actions/setup-java@v3
+          with:
+            distribution: zulu
+            java-version: 11
+        - run: cp LICENSE intellij-ext/
+        - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.* intellij-ext/        
+        - name: Publish Plugin
+          env:
+            PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
+            CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
+            PRIVATE_KEY: ${{ secrets.INTELLIJ_PRIVATE_KEY }}
+            PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
+          run: |
+            cd intellij-ext
+            chmod +x ./gradlew
+            ./gradlew publishPlugin
+
+
   release_gh:
-    needs: [build_binaries, build_binaries_macos, release_docker_image, release_vscode_ext]
+    needs: [ build_binaries, build_binaries_macos, release_docker_image, release_vscode_ext ]
     runs-on: ubuntu-latest
     permissions:
       packages: write

@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use exec::execvp;
+use mirrord_auth::AuthConfig;
 use semver::Version;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -152,6 +153,22 @@ fn exec(args: &ExecArgs) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+fn login(args: LoginArgs) -> Result<()> {
+    match &args.token {
+        Some(token) => AuthConfig::from_input(token)?.save()?,
+        None => {
+            AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?.save()?
+        }
+    }
+
+    println!(
+        "Config succesfuly saved at {}",
+        AuthConfig::config_path().display()
+    );
+
+    Ok(())
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
@@ -166,6 +183,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path))?;
         }
+        Commands::Login(args) => login(args)?,
     }
     Ok(())
 }

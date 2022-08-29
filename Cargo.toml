@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "mirrord-auth",
     "mirrord-protocol",
     "mirrord-agent",
     "mirrord-layer",
@@ -12,7 +13,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "2.8.1"
+version = "2.9.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"

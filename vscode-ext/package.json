@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
 	"publisher": "MetalBear",
-	"version": "2.8.1",
+	"version": "2.9.1",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
