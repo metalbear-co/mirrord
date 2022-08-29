@@ -151,16 +151,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
-        Some(token) => AuthConfig::from_input(token)?.save()?,
-        None => {
-            AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?.save()?
-        }
+        Some(token) => AuthConfig::from_input(token)?.save(args.keyring_username)?,
+        None => AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?
+            .save(args.keyring_username)?,
     }
 
-    println!(
-        "Config succesfuly saved at {}",
-        AuthConfig::config_path().display()
-    );
+    println!("Config succesfuly saved to keyring");
 
     Ok(())
 }

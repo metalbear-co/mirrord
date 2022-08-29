@@ -20,6 +20,7 @@ default = []
 webbrowser = ["dep:rand", "dep:reqwest", "dep:webbrowser"]
 
 [dependencies]
+keyring = "1"
 lazy_static = "1"
 rand = { version = "0.8", optional = true }
 reqwest = { workspace = true, features=["json"], optional = true }
@@ -27,3 +28,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 webbrowser = { version = "0.7", optional = true }
+whoami = "1"
