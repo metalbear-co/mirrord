@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
-- mirrord-cli add login command for loggin in to metalbear-cloud
+- mirrord-cli add login command for logging in to metalbear-cloud
 
 ## 2.9.1
 ### Fixed
