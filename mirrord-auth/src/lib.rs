@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 lazy_static! {
-    static ref FILE_DIR: PathBuf = [
+    static ref HOME_DIR: PathBuf = [
         std::env::var("HOME")
             .or_else(|_| std::env::var("HOMEPATH"))
             .unwrap_or_else(|_| "~".to_owned()),
@@ -20,6 +20,10 @@ lazy_static! {
     ]
     .iter()
     .collect();
+    static ref AUTH_FILE_DIR: PathBuf = std::env::var("MIRRORD_AUTHENTICATION")
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or_else(|| HOME_DIR.to_path_buf());
 }
 
 #[derive(Deserialize, Serialize)]
@@ -43,11 +47,11 @@ type Result<T> = std::result::Result<T, AuthenticationError>;
 
 impl AuthConfig {
     pub fn config_path() -> &'static Path {
-        FILE_DIR.as_path()
+        AUTH_FILE_DIR.as_path()
     }
 
     pub fn load() -> Result<AuthConfig> {
-        let bytes = fs::read(FILE_DIR.as_path())?;
+        let bytes = fs::read(AUTH_FILE_DIR.as_path())?;
 
         serde_json::from_slice(&bytes).map_err(|err| err.into())
     }
@@ -55,7 +59,7 @@ impl AuthConfig {
     pub fn save(&self) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(self)?;
 
-        fs::write(FILE_DIR.as_path(), bytes)?;
+        fs::write(AUTH_FILE_DIR.as_path(), bytes)?;
 
         Ok(())
     }

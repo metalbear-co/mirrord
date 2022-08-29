@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "2.8.1"
+version = "2.9.1"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
