@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- mirrord-cli add login command for logging in to metalbear-cloud
+
 ## 2.9.1
 ### Fixed
 - CI - set typescript version at 4.7.4 to fix broken release action
