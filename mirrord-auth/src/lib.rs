@@ -16,7 +16,7 @@ lazy_static! {
         std::env::var("HOME")
             .or_else(|_| std::env::var("HOMEPATH"))
             .unwrap_or_else(|_| "~".to_owned()),
-        ".mirrord_credentials".to_owned()
+        ".metalbear_credentials".to_owned()
     ]
     .iter()
     .collect();
