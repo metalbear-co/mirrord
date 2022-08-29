@@ -1,9 +1,9 @@
 import https from "node:https";
 
-console.log(">> test_outgoing_traffic_single_request");
+console.log(">> test_outgoing_traffic_fails_for_bonkers_hostname");
 
 const options = {
-  hostname: "www.rust-lang.org",
+  hostname: "www.bonkers1234.com.net",
   port: 443,
   path: "/",
   method: "GET",
