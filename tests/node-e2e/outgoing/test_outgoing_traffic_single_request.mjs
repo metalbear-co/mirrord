@@ -14,8 +14,6 @@ const request = https.request(options, (response) => {
 
   response.on("data", (data) => {
     process.stdout.write(data);
-
-    process.exit();
   });
 
   response.on("error", (fail) => {
@@ -23,6 +21,12 @@ const request = https.request(options, (response) => {
 
     process.exit(-1);
   });
+
+  if (response.statusCode === 200) {
+    process.exit();
+  } else {
+    process.exit(-1);
+  }
 });
 
 request.on("error", (fail) => {
