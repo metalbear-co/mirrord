@@ -77,7 +77,7 @@ mirrord exec node app.js --pod-name my-pod
 ---
 
 ## How It Works
-When you select a pod to impersonate, mirrord launches a privileged pod on the same node as the pod you selected. The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process, routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables.
+When you select a pod to impersonate, mirrord launches a privileged pod on the same node as the pod you selected. The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process, routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
 <p align="center">
   <img src="./images/how_it_works.svg" alt="How It Works"/>
 </p>
