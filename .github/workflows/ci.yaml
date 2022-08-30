@@ -157,6 +157,9 @@ jobs:
       - run: |
           cd tests/go-e2e-fileops
           go build
+      - run: |
+          cd tests/go-e2e-env
+          go build
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
