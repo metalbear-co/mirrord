@@ -19,22 +19,18 @@ const makeRequest = () => {
     });
 
     response.on("error", (fail) => {
-      console.error(`>> response failed with ${fail}`);
-
-      process.exit(-1);
+      process.stderr.write(`>> response failed with ${fail}`);
+      throw fail;
     });
 
-    if (response.statusCode === 200) {
-      process.exit();
-    } else {
-      process.exit(-1);
+    if (response.statusCode !== 200) {
+      throw ">> response.statusCode !== 200";
     }
   });
 
   request.on("error", (fail) => {
-    console.error(`>> request failed with ${fail}`);
-
-    process.exit(-1);
+    process.stderr.write(`>> request failed with ${fail}`);
+    throw fail;
   });
 
   request.end();
@@ -55,8 +51,8 @@ const listen = () => {
   );
 
   server.on("error", (fail) => {
-    console.error(">> createServer failed with `${fail}`");
-    process.exit(-1);
+    process.stderr.write(">> createServer failed with `${fail}`");
+    throw fail;
   });
 
   server.on("connection", (socket) => {
@@ -65,22 +61,25 @@ const listen = () => {
 
     makeRequest();
 
-    conn.on("data", (data) => {
+    socket.on("data", (data) => {
       console.log(
-        ">> connection data from %s: %j",
-        remoteAddress,
+        `>> connection data from ${remoteAddress}: %j`,
         data.toString()
       );
-      conn.write(d);
+
+      socket.write(d);
     });
 
-    conn.once("close", () => {
+    socket.once("close", () => {
       console.log(">> connection from %s closed", remoteAddress);
     });
 
-    conn.on("error", (fail) => {
-      console.error(">> Connection %s error: %s", remoteAddress, err.message);
-      process.exit(-1);
+    socket.on("error", (fail) => {
+      process.stderr.write(
+        `>> failed connectio to ${remoteAddress} with ${err.message}`
+      );
+
+      throw fail;
     });
   });
 };

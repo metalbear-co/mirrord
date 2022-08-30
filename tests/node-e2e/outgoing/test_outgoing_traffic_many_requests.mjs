@@ -26,20 +26,18 @@ for (let host in hostList) {
     });
 
     response.on("error", (fail) => {
-      console.error(`>> response from ${host} failed with ${fail}`);
-
-      process.exit(-1);
+      process.stderr.write(`>> response from ${host} failed with ${fail}`);
+      throw fail;
     });
 
     if (response.statusCode !== 200) {
-      process.exit(-1);
+      throw ">> response.statusCode !== 200";
     }
   });
 
   request.on("error", (fail) => {
-    console.error(`>> request to ${host} failed with ${fail}`);
-
-    process.exit(-1);
+    process.stderr.write(`>> request to ${host} failed with ${fail}`);
+    throw fail;
   });
 
   request.end();

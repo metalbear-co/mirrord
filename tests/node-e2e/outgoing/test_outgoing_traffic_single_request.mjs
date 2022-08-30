@@ -17,22 +17,18 @@ const request = https.request(options, (response) => {
   });
 
   response.on("error", (fail) => {
-    console.error(`>> response failed with ${fail}`);
-
-    process.exit(-1);
+    process.stderr.write(`>> response failed with ${fail}`);
+    throw fail;
   });
 
-  if (response.statusCode === 200) {
-    process.exit();
-  } else {
-    process.exit(-1);
+  if (response.statusCode !== 200) {
+    throw ">> response.statusCode !== 200";
   }
 });
 
 request.on("error", (fail) => {
-  console.error(`>> request failed with ${fail}`);
-
-  process.exit(-1);
+  process.stderr.write(`>> request failed with ${fail}`);
+  throw fail;
 });
 
 request.end();
