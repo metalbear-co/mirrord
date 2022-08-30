@@ -9,6 +9,7 @@ import javax.swing.JCheckBox
 import javax.swing.JTextField
 
 
+@Suppress("UNCHECKED_CAST", "NAME_SHADOWING")
 class MirrordListener : ExecutionListener {
     private val mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
 
@@ -30,7 +31,6 @@ class MirrordListener : ExecutionListener {
     }
 
     override fun processStarting(executorId: String, env: ExecutionEnvironment) {
-
         if (enabled) {
             val customDialogBuilder = MirrordDialogBuilder()
             val kubeDataProvider = KubeDataProvider()
@@ -90,7 +90,11 @@ class MirrordListener : ExecutionListener {
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
-        val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
+        val method = when (env.runProfile::class.simpleName) {
+            "GoApplicationConfiguration" -> "getCustomEnvironment"
+            else -> "getEnvs"
+        }
+        val envMethod = env.runProfile.javaClass.getMethod(method)
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
     }
 }
