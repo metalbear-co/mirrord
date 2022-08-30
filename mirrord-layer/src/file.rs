@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
@@ -19,7 +19,7 @@ use regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
-    common::ResponseChannel,
+    common::{ResponseChannel, ResponseDeque},
     error::{LayerError, Result},
 };
 
@@ -59,7 +59,6 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
-type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {

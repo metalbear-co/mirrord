@@ -8,7 +8,7 @@ use socket2::SockAddr;
 use tracing::{debug, error, trace, warn};
 
 use super::ops::*;
-use crate::{error::HookError, replace, socket::AddrInfoHintExt};
+use crate::{detour::DetourGuard, error::HookError, replace, socket::AddrInfoHintExt};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -23,11 +23,13 @@ pub(crate) unsafe extern "C" fn socket_detour(
         protocol
     );
 
-    let socket_result = FN_SOCKET(domain, type_, protocol);
-    let (Ok(result) | Err(result)) =
-        socket(socket_result, domain, type_, protocol).map_err(From::from);
-
-    trace!("socket_detour -> result {:#?}", result);
+    let (Ok(result) | Err(result)) = socket(domain, type_, protocol).map_err(|fail| match fail {
+        HookError::BypassedType(_) | HookError::BypassedDomain(_) => {
+            warn!("socket_detour -> bypassed with {:#?}", fail);
+            FN_SOCKET(domain, type_, protocol)
+        }
+        other => other.into(),
+    });
 
     result
 }
@@ -38,34 +40,43 @@ pub(crate) unsafe extern "C" fn bind_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    trace!("bind_detour -> sockfd {:#?}", sockfd);
+    trace!(
+        "bind_detour -> sockfd {:#?} | raw_address {:#?}",
+        sockfd,
+        *raw_address
+    );
 
-    // TODO: Is this conversion safe?
-    let address = match SockAddr::new(
-        *(raw_address as *const libc::sockaddr_storage),
-        address_length,
-    )
-    .as_socket()
-    .ok_or(HookError::AddressConversion)
-    {
-        Ok(address) => address,
-        Err(fail) => return fail.into(),
-    };
+    let address = SockAddr::init(|storage, len| {
+        storage.copy_from_nonoverlapping(raw_address.cast(), 1);
+        len.copy_from_nonoverlapping(&address_length, 1);
 
-    let (Ok(result) | Err(result)) = bind(sockfd, address)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            HookError::LocalFDNotFound(_) => FN_BIND(sockfd, raw_address, address_length),
-            HookError::BypassedPort(_) => {
-                warn!("bind_detour -> bypass port");
-                FN_BIND(sockfd, raw_address, address_length)
-            }
-            other => other.into(),
-        });
+        Ok(())
+    })
+    .map_err(HookError::from);
 
-    trace!("bind_detour -> result {:#?}", result);
+    match address {
+        Ok(((), address)) => {
+            let (Ok(result) | Err(result)) =
+                bind(sockfd, address)
+                    .map(|()| 0)
+                    .map_err(|fail| match fail {
+                        HookError::LocalFDNotFound(_)
+                        | HookError::BypassedPort(_)
+                        | HookError::AddressConversion => {
+                            warn!("bind_detour -> bypassed with {:#?}", fail);
 
-    result
+                            FN_BIND(sockfd, raw_address, address_length)
+                        }
+                        other => other.into(),
+                    });
+            result
+        }
+        Err(_) => {
+            warn!("bind_detour -> Could not convert address, bypassing!");
+
+            FN_BIND(sockfd, raw_address, address_length)
+        }
+    }
 }
 
 #[hook_guard_fn]
@@ -80,12 +91,11 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
             .map(|()| 0)
             .map_err(|fail| match fail {
                 HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
+                    warn!("listen_detour -> bypassed with {:#?}", fail);
                     FN_LISTEN(sockfd, backlog)
                 }
                 other => other.into(),
             });
-
-    trace!("listen_detour -> result {:#?}", result);
     result
 }
 
@@ -98,29 +108,30 @@ pub(super) unsafe extern "C" fn connect_detour(
     trace!("connect_detour -> sockfd {:#?}", sockfd);
 
     // TODO: Is this conversion safe?
-    let address = match SockAddr::new(
-        *(raw_address as *const libc::sockaddr_storage),
-        address_length,
-    )
-    .as_socket()
-    .ok_or(HookError::AddressConversion)
-    {
-        Ok(address) => address,
-        Err(fail) => return fail.into(),
-    };
+    let address = SockAddr::new(*(raw_address as *const _), address_length);
+    let address = address.as_socket().ok_or(HookError::AddressConversion);
 
-    let (Ok(result) | Err(result)) =
-        connect(sockfd, address)
-            .map(|()| 0)
-            .map_err(|fail| match fail {
-                HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
-                    FN_CONNECT(sockfd, raw_address, address_length)
-                }
-                other => other.into(),
-            });
+    match address {
+        Ok(address) => {
+            let (Ok(result) | Err(result)) =
+                connect(sockfd, address)
+                    .map(|()| 0)
+                    .map_err(|fail| match fail {
+                        HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
+                            warn!("connect_detour -> bypassed with {:#?}", fail);
+                            FN_CONNECT(sockfd, raw_address, address_length)
+                        }
+                        other => other.into(),
+                    });
 
-    trace!("connect_detour -> result {:#?}", result);
-    result
+            result
+        }
+        Err(_) => {
+            warn!("connect_detour -> Could not convert address, bypassing!");
+
+            FN_CONNECT(sockfd, raw_address, address_length)
+        }
+    }
 }
 
 #[hook_guard_fn]
@@ -139,8 +150,6 @@ pub(super) unsafe extern "C" fn getpeername_detour(
             }
             other => other.into(),
         });
-
-    trace!("getpeername_detour -> result {:#?}", result);
     result
 }
 
@@ -160,8 +169,6 @@ pub(super) unsafe extern "C" fn getsockname_detour(
             }
             other => other.into(),
         });
-
-    trace!("getsockname_detour -> result {:#?}", result);
     result
 }
 
@@ -187,7 +194,6 @@ pub(crate) unsafe extern "C" fn accept_detour(
                 }
             });
 
-        trace!("accept_detour -> result {:#?}", result);
         result
     }
 }
@@ -216,7 +222,6 @@ pub(crate) unsafe extern "C" fn accept4_detour(
                 }
             });
 
-        trace!("accept4_detour -> result {:#?}", result);
         result
     }
 }
@@ -242,7 +247,7 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
-    let guard = crate::DetourGuard::new();
+    let guard = DetourGuard::new();
     if guard.is_none() {
         return fcntl_result;
     }
@@ -252,7 +257,10 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     } else {
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
-            .map_err(From::from);
+            .map_err(|fail| match fail {
+                HookError::LocalFDNotFound(_) => fcntl_result,
+                other => other.into(),
+            });
 
         trace!("fcntl_detour -> result {:#?}", result);
         result
@@ -427,6 +435,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 
 pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
     let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+
     let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
     let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
 

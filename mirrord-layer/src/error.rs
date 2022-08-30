@@ -3,7 +3,7 @@ use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 use errno::set_errno;
 use kube::config::InferConfigError;
 use libc::FILE;
-use mirrord_protocol::{tcp::LayerTcp, ResponseError};
+use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, warn};
@@ -12,22 +12,29 @@ use super::HookMessage;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
+    #[error("mirrord-layer: Failed while getting a response!")]
+    ResponseError(#[from] ResponseError),
+
     #[error("mirrord-layer: DNS does not resolve!")]
     DNSNoName,
+
     #[error("mirrord-layer: Failed to `Lock` resource!")]
     LockError,
 
     #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
     BypassedPort(u16),
 
+    #[error("mirrord-layer: Socket operation called with type `{0}` that is not handled by us!")]
+    BypassedType(i32),
+
+    #[error("mirrord-layer: Socket operation called with domain `{0}` that is not handled by us!")]
+    BypassedDomain(i32),
+
     #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
     SocketInvalidState(RawFd),
 
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
-
-    #[error("mirrord-layer: Failed while getting a response!")]
-    ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Receiver failed with `{0}`!")]
     RecvError(#[from] RecvError),
@@ -62,6 +69,9 @@ pub(crate) enum HookError {
 
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
+    #[error("mirrord-layer: Failed while getting a response!")]
+    ResponseError(#[from] ResponseError),
+
     #[error("mirrord-layer: Frida failed with `{0}`!")]
     Frida(#[from] frida_gum::Error),
 
@@ -80,6 +90,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
     SendErrorLayerTcp(#[from] SendError<LayerTcp>),
 
+    #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
+    SendErrorTcpResponse,
+
     #[error("mirrord-layer: JoinError failed with `{0}`!")]
     Join(#[from] tokio::task::JoinError),
 
@@ -90,13 +103,13 @@ pub(crate) enum LayerError {
     SendErrorGetAddrInfoResponse,
 
     #[error("mirrord-layer: No connection found for id `{0}`!")]
-    NoConnectionId(u16),
+    NoConnectionId(ConnectionId),
 
     #[error("mirrord-layer: Failed to find port `{0}`!")]
     PortNotFound(u16),
 
     #[error("mirrord-layer: Failed to find connection_id `{0}`!")]
-    ConnectionIdNotFound(u16),
+    ConnectionIdNotFound(ConnectionId),
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
@@ -124,8 +137,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
-    // #[error("`{0}`")]
-    // HookError(#[from] HookError),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -138,12 +149,20 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookE
 pub(crate) type Result<T> = std::result::Result<T, LayerError>;
 pub(crate) type HookResult<T> = std::result::Result<T, HookError>;
 
-// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
-
+/// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
+        // TODO: These recoverable errors should probably be a "sub-Error" from `HookError`, so that
+        // we can do a single `match` for them everywhere, and avoid forgetting 1.
+        // To get a better sense of what I mean by this, imagine if we forget to check
+        // `BypassedDomain` in `socket::hooks::socket_detour` (we would error out, instead of
+        // bypassing as expected).
         match fail {
-            HookError::SocketInvalidState(_) | HookError::LocalFDNotFound(_) => {
+            HookError::SocketInvalidState(_)
+            | HookError::LocalFDNotFound(_)
+            | HookError::BypassedType(_)
+            | HookError::BypassedDomain(_)
+            | HookError::BypassedPort(_) => {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
@@ -170,6 +189,8 @@ impl From<HookError> for i64 {
             HookError::AddressConversion => libc::EINVAL,
             HookError::UnsupportedDomain(_) => libc::EINVAL,
             HookError::BypassedPort(_) => libc::EINVAL,
+            HookError::BypassedType(_) => libc::EINVAL,
+            HookError::BypassedDomain(_) => libc::EINVAL,
             HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
         };
