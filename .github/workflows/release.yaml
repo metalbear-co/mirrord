@@ -172,6 +172,7 @@ jobs:
         build_binaries_macos,
         release_docker_image,
         release_vscode_ext,
+        release_intellij_plugin,
       ]
     runs-on: ubuntu-latest
     permissions:
