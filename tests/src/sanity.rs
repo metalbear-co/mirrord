@@ -930,6 +930,7 @@ mod tests {
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
+        print!("test -> result of process is {:#?}", res);
         // assert_eq!(res.success(), false);
         assert_eq!(process.stderr.lock().unwrap().is_empty(), false);
     }

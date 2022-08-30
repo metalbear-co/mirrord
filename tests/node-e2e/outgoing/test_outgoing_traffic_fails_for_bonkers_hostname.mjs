@@ -1,34 +1,44 @@
 import https from "node:https";
 
-console.log(">> test_outgoing_traffic_fails_for_bonkers_hostname");
+function main() {
+  return new Promise((resolve, reject) => {
+    console.log(">> test_outgoing_traffic_fails_for_bonkers_hostname");
 
-const options = {
-  hostname: "www.bonkers1234.com.net",
-  port: 443,
-  path: "/",
-  method: "GET",
-};
+    const options = {
+      hostname: "www.bonkers1234.com.net",
+      port: 443,
+      path: "/",
+      method: "GET",
+    };
 
-const request = https.request(options, (response) => {
-  console.log(`statusCode: ${response.statusCode}`);
+    const request = https.request(options, (response) => {
+      console.log(`statusCode: ${response.statusCode}`);
 
-  response.on("data", (data) => {
-    process.stdout.write(data);
+      response.on("data", (data) => {
+        process.stdout.write(data);
+      });
+
+      response.on("error", (fail) => {
+        process.stderr.write(`>> response failed with ${fail}`);
+        throw fail;
+      });
+
+      response.on("end", () => {
+        resolve(null);
+      });
+
+      if (response.statusCode !== 200) {
+        throw ">> response.statusCode !== 200";
+      }
+    });
+
+    request.on("error", (fail) => {
+      process.stderr.write(`>> request failed with ${fail}`);
+      throw fail;
+    });
+
+    request.end();
   });
+}
 
-  response.on("error", (fail) => {
-    process.stderr.write(`>> response failed with ${fail}`);
-    throw fail;
-  });
-
-  if (response.statusCode !== 200) {
-    throw ">> response.statusCode !== 200";
-  }
-});
-
-request.on("error", (fail) => {
-  process.stderr.write(`>> request failed with ${fail}`);
-  throw fail;
-});
-
-request.end();
+await main();
