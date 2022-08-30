@@ -833,7 +833,6 @@ mod tests {
         process.assert_stderr();
     }
 
-
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_go_remote_env_vars_works(#[future] service: EchoService) {
@@ -844,6 +843,7 @@ mod tests {
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
+    }
 
     // TODO: This is valid for all "outgoing" tests:
     // We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,

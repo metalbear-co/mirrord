@@ -337,7 +337,6 @@ async fn start_layer_thread(
     let _ = tokio::spawn(thread_loop(receiver, codec));
 }
 
-
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
