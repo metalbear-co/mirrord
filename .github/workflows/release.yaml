@@ -188,13 +188,13 @@ jobs:
       - name: Create mirrord linux zip file
       - uses: montudor/action-zip@v1
         run: |
-          zip mirrord_linux_x86_64.zip /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord
-          shasum -a 256 /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip > /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
+          zip mirrord_linux_x86_64.zip mirrord
+          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
         working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
       - name: Create mirrord macos zip file
         run: |
-          zip mirrord_mac_universal.zip /tmp/artifacts/universal-apple-darwin/mirrord
-          shasum -a 256 /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip > /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
+          zip mirrord_mac_universal.zip mirrord
+          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
         working-directory: /tmp/artifacts/universal-apple-darwin
       - name: Prepare binaries for upload
         run: |
@@ -206,8 +206,8 @@ jobs:
 
           mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux.shasum256 /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
+          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
+          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
       # Consider to add changelog generation..
       - name: Release
