@@ -924,13 +924,13 @@ mod tests {
         let service = service.await;
         let node_command = vec![
             "node",
-            "node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname",
+            "node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname.mjs",
         ];
         let mirrord_args = vec!["-d", "true", "-o", "true"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
-        // assert!(!res.success());
+        assert!(!res.success());
         assert!(!process.stderr.lock().unwrap().is_empty());
     }
 }
