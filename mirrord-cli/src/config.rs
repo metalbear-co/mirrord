@@ -14,7 +14,7 @@ pub(super) enum Commands {
         #[clap(value_parser)]
         path: String,
     },
-    Login(LoginArgs),
+    // Login(LoginArgs),
 }
 
 #[derive(Args, Debug)]
