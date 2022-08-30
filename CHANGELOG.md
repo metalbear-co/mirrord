@@ -12,6 +12,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-cli add login command for logging in to metalbear-cloud
 - CI:Release - Provide zip and sha256 sums
 
+### Fixed
+- Environment variables feature on Golang programs. Issue #292 closed in #299
+
 ## 2.9.1
 ### Fixed
 - CI - set typescript version at 4.7.4 to fix broken release action

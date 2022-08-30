@@ -833,6 +833,18 @@ mod tests {
         process.assert_stderr();
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go_remote_env_vars_works(#[future] service: EchoService) {
+        let service = service.await;
+        let command = vec!["go-e2e-env/go-e2e-env"];
+        let mirrord_args = vec!["--override-env-vars-include", "*"];
+        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
     // TODO: This is valid for all "outgoing" tests:
     // We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
     // which is bad.
@@ -896,7 +908,6 @@ mod tests {
         ];
         let mirrord_args = vec!["-o", "true"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
-
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
