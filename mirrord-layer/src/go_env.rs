@@ -1,3 +1,12 @@
+/// Logic for injecting our environment variables to Go program
+/// Go `main` function doesn't do the libc flow, so any environment change we do using
+/// standard library which uses libc will not be reflected in the Go program.
+/// In order to overcome that, we hook the Go function that initializes the environment
+/// variables. The function that does that is `runtime.goenvs_unix` - it does that by
+/// accesssing `argc`/`argv` globals then setting the global `environ` variable that contains
+/// the envs. When we get called from the detour, we replace Go's argv with our own and then
+/// call the original function. This way, the Go program will see our environment variables.
+/// P.S - environment variables at the end of argv, specifically `argv[argc+1]`.
 use std::{ffi::CString, mem::ManuallyDrop};
 
 use frida_gum::interceptor::Interceptor;
@@ -7,16 +16,10 @@ use tracing::trace;
 
 use crate::replace_symbol;
 
-/// Logic for injecting our environment variables to Go program
-/// Go `main` function doesn't do the libc flow, so any environment change we do using
-/// standard library which uses libc will not be reflected in the Go program.
-/// In order to overcome that, we hook the Go function that initializes the environment variables.
-/// The function that does that is `runtime.goenvs_unix` - it does that by accesssing `argc`/`argv`
-/// globals then setting the global `environ` variable that contains the envs.
-/// When we get called from the detour, we replace Go's argv with our own and then call the original
-/// function. This way, the Go program will see our environment variables.
-/// P.S - environment variables at the end of argv, specifically `argv[argc+1]`.
-
+/// Formats an argv as Go (and system) expects it to be which is an array of pointers
+/// to C null terminated strings. The array contains null pointer at the end and as a marker
+/// for dividing the array between arguments and environment variables (arg1, arg2, null, env1=val1,
+/// env2=val2, null) This leaks memory on purpose (should live aslong as the app lives)
 fn make_argv() -> Vec<*mut c_char> {
     let size = std::env::args().len();
     // Add arguments to our new argv
