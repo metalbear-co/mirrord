@@ -7,9 +7,18 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 2.10.1
+### Fixed
+- CI:Release - Fix typo that broke the build
+
+## 2.10.0
 ### Added
 - New feature, [tcp outgoing traffic](https://github.com/metalbear-co/mirrord/issues/27). It's now possible to make requests to a remote host from the staging environment context. You can enable this feature setting the `MIRRORD_TCP_OUTGOING` variable to true, or using the `-o` option in mirrord-cli.
 - mirrord-cli add login command for logging in to metalbear-cloud
+- CI:Release - Provide zip and sha256 sums
+
+### Fixed
+- Environment variables feature on Golang programs. Issue #292 closed in #299
 
 ## 2.9.1
 ### Fixed

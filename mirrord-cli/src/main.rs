@@ -153,6 +153,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+#[allow(dead_code)]
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -182,8 +183,7 @@ fn main() -> Result<()> {
         Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
             extract_library(Some(path))?;
-        }
-        Commands::Login(args) => login(args)?,
+        } // Commands::Login(args) => login(args)?,
     }
     Ok(())
 }

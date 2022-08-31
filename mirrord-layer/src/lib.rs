@@ -45,6 +45,7 @@ mod config;
 mod detour;
 mod error;
 mod file;
+mod go_env;
 mod go_hooks;
 mod macros;
 mod pod_api;
@@ -350,13 +351,16 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
+    let modules = frida_gum::Module::enumerate_modules();
+    let binary = &modules.first().unwrap().name;
+
+    go_env::enable_go_env(&mut interceptor, binary);
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        let modules = frida_gum::Module::enumerate_modules();
-        let binary = &modules.first().unwrap().name;
         go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary, enabled_file_ops);
     }
+
     interceptor.end_transaction();
 }
 
