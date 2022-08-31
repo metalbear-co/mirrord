@@ -6,7 +6,7 @@ use std::{
 
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
-    ConnectionID, Port,
+    ConnectionId, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use streammap_ext::StreamMap;
@@ -111,8 +111,8 @@ pub struct StealWorker {
     iptables: SafeIpTables,
     ports: HashSet<Port>,
     listen_port: Port,
-    write_streams: HashMap<ConnectionID, WriteHalf<TcpStream>>,
-    read_streams: StreamMap<ConnectionID, ReaderStream<ReadHalf<TcpStream>>>,
+    write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+    read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
     connection_index: u64,
 }
 
