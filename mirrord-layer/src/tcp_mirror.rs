@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionID,
+    ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -23,7 +23,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, error, trace, warn};
 
 use crate::{
-    error::LayerError,
+    error::{LayerError, Result},
     tcp::{Listen, TcpHandler},
 };
 
@@ -122,10 +122,7 @@ pub struct TcpMirrorHandler {
 #[async_trait]
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
-    async fn handle_new_connection(
-        &mut self,
-        tcp_connection: NewTcpConnection,
-    ) -> Result<(), LayerError> {
+    async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
@@ -185,20 +182,6 @@ impl TcpHandler for TcpMirrorHandler {
 
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
-    }
-
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError> {
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(close.port)))
-            .await
-            .map_err(From::from)
     }
 
     async fn handle_listen(

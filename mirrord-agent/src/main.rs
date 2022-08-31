@@ -31,9 +31,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
-use util::{ClientID, IndexAllocator};
 
-use crate::{runtime::get_container_pid, util::run_thread};
+use crate::{
+    runtime::get_container_pid,
+    steal::steal_worker,
+    util::{run_thread, ClientID, IndexAllocator},
+};
 
 mod cli;
 mod error;
@@ -43,13 +46,6 @@ mod sniffer;
 mod steal;
 mod tcp;
 mod util;
-
-use cli::parse_args;
-use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use steal::steal_worker;
-use util::{ClientID, IndexAllocator};
-
-use crate::{runtime::get_container_pid, util::run_thread};
 
 trait AddrInfoHintExt {
     fn into_lookup(self) -> dns_lookup::AddrInfoHints;

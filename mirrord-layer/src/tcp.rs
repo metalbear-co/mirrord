@@ -164,14 +164,4 @@ pub(crate) trait TcpHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError>;
-
-    /// Handle when a listen socket closes on layer
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError>;
 }

@@ -18,7 +18,7 @@ use tracing::{debug, error};
 
 use crate::{
     error::LayerError,
-    tcp::{Listen, ListenClose, TcpHandler},
+    tcp::{Listen, TcpHandler},
 };
 
 #[derive(Default)]
@@ -112,22 +112,6 @@ impl TcpHandler for TcpStealHandler {
 
         codec
             .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
-            .await
-            .map_err(From::from)
-    }
-
-    async fn handle_listen_close(
-        &mut self,
-        close: ListenClose,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<(), LayerError> {
-        codec
-            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
-                close.port,
-            )))
             .await
             .map_err(From::from)
     }
