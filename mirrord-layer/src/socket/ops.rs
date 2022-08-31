@@ -33,9 +33,27 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
+    let socket_type = if (type_ & libc::SOCK_STREAM) > 0 {
+        // TODO(alex) [high] 2022-08-31: Mark this socket as `TcpSocket` and insert it into the
+        // `TCP_SOCKETS` static.
+        //
+        // Or maybe just have these in the same place, but as enums inside `SOCKETS` type?
+        //
+        // Lastly, probably don't need to go too deep (like delving too much on working UDP), just
+        // make the DNS feature work.
+        Ok(todo!())
+    } else if (type_ & libc::SOCK_DGRAM) > 0 {
+        // TODO(alex) [high] 2022-08-31: Mark this socket as `UdpSocket` and insert it into the
+        // `UDP_SOCKETS` static.
+        Ok(todo!())
+    } else {
+        todo!()
+    }?;
+
     if (type_ & (libc::SOCK_STREAM | libc::SOCK_DGRAM)) <= 0 {
         Err(HookError::BypassedType(type_))
     } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
+        // TODO(alex) [high] 2022-08-31: go also uses a different `domain`.
         Err(HookError::BypassedDomain(domain))
     } else {
         Ok(())
