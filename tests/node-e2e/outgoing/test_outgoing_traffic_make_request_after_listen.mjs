@@ -33,6 +33,11 @@ const makeRequest = () => {
     throw fail;
   });
 
+  request.on("finish", () => {
+    process.stdout.write(">> success");
+    process.exit();
+  });
+
   request.end();
 };
 
@@ -58,8 +63,6 @@ const listen = () => {
   server.on("connection", (socket) => {
     const remoteAddress = socket.remoteAddress + ":" + socket.remotePort;
     console.log(">> new client connection from %s", remoteAddress);
-
-    makeRequest();
 
     socket.on("data", (data) => {
       console.log(
