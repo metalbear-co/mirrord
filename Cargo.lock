@@ -1124,6 +1124,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptables"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c488ad8e743814579544d5a17bda107cd7a4009ade4d55ce94f4c3ec0281147"
+dependencies = [
+ "lazy_static",
+ "nix 0.23.1",
+ "regex",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1460,11 +1471,14 @@ dependencies = [
  "dns-lookup",
  "faccess",
  "futures",
+ "iptables",
+ "libc",
  "mirrord-protocol",
- "nix",
+ "nix 0.24.2",
  "num-traits",
  "pcap",
  "pnet",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "streammap-ext",
@@ -1495,6 +1509,7 @@ name = "mirrord-layer"
 version = "2.10.1"
 dependencies = [
  "actix-codec",
+ "anyhow",
  "async-trait",
  "bytes",
  "ctor",
@@ -1508,15 +1523,17 @@ dependencies = [
  "libc",
  "mirrord-macro",
  "mirrord-protocol",
- "nix",
+ "nix 0.24.2",
  "rand 0.8.5",
  "regex",
  "serde_json",
  "socket2",
  "stacker",
+ "streammap-ext",
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.3",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1619,6 +1636,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e5a6ae77c8ee183dcbbba6150e2e6b9f3f4196a7666c02a715a95692ec1fa97"
 dependencies = [
  "jni-sys",
+]
+
+[[package]]
+name = "nix"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -2666,9 +2696,9 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 
 [[package]]
 name = "socket2"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10c98bba371b9b22a71a9414e420f92ddeb2369239af08200816169d5e2dd7aa"
+checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
 dependencies = [
  "libc",
  "winapi",
@@ -2779,6 +2809,7 @@ checksum = "8e7a7de15468c6e65dd7db81cf3822c1ec94c71b2a3c1a976ea8e4696c91115c"
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "futures",
  "futures-util",
