@@ -252,7 +252,7 @@ mod tests {
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
         env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", "test");
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-        env.insert("RUST_LOG", "warn,mirrord=debug");
+        env.insert("RUST_LOG", "warn,mirrord=trace");
         let server = Command::new(path)
             .args(args.clone())
             .envs(env)
@@ -933,6 +933,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_fails_for_bonkers_hostname(#[future] service: EchoService) {
         let service = service.await;
+        /*
+               let _ =
+                   include!("../node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname.mjs");
+        */
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname.mjs",
@@ -941,8 +945,7 @@ mod tests {
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
-        print!("test -> result of process is {:#?}", res);
-        // assert_eq!(res.success(), false);
-        assert_eq!(process.stderr.lock().unwrap().is_empty(), false);
+        assert_eq!(res.success(), false);
+        // assert_eq!(process.child.stderr.lock().unwrap().is_empty(), false);
     }
 }
