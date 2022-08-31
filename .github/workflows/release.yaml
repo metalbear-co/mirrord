@@ -104,7 +104,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [ build_binaries, build_binaries_macos, release_docker_image ]
+    needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -139,36 +139,41 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
-
   release_intellij_plugin:
-      needs: [ build_binaries, build_binaries_macos, release_docker_image ]
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v2
-        - uses: actions/download-artifact@v3
-          with:
-            path: /tmp/artifacts
-        - name: Setup Java
-          uses: actions/setup-java@v3
-          with:
-            distribution: zulu
-            java-version: 11
-        - run: cp LICENSE intellij-ext/
-        - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.* intellij-ext/        
-        - name: Publish Plugin
-          env:
-            PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
-            CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
-            PRIVATE_KEY: ${{ secrets.INTELLIJ_PRIVATE_KEY }}
-            PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
-          run: |
-            cd intellij-ext
-            chmod +x ./gradlew
-            ./gradlew publishPlugin
-
+    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v3
+        with:
+          path: /tmp/artifacts
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: zulu
+          java-version: 11
+      - run: cp LICENSE intellij-ext/
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.* intellij-ext/
+      - name: Publish Plugin
+        env:
+          PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
+          CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.INTELLIJ_PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew publishPlugin
 
   release_gh:
-    needs: [ build_binaries, build_binaries_macos, release_docker_image, release_vscode_ext ]
+    needs:
+      [
+        build_binaries,
+        build_binaries_macos,
+        release_docker_image,
+        release_vscode_ext,
+        release_intellij_plugin,
+      ]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -180,13 +185,30 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
+      - uses: montudor/action-zip@v1
+      - name: Create mirrord linux zip file        
+        run: |
+          zip mirrord_linux_x86_64.zip mirrord
+          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
+        working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
+      - name: Create mirrord macos zip file        
+        run: |
+          zip mirrord_mac_universal.zip mirrord
+          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
+        working-directory: /tmp/artifacts/universal-apple-darwin
       - name: Prepare binaries for upload
         run: |
           mkdir /tmp/release
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
-          mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib
+          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
+          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
+
+          mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
+          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
+          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
