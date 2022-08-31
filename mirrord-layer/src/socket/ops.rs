@@ -33,7 +33,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
-    if type_ & libc::SOCK_STREAM <= 0 {
+    if (type_ & (libc::SOCK_STREAM | libc::SOCK_DGRAM)) <= 0 {
         Err(HookError::BypassedType(type_))
     } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
         Err(HookError::BypassedDomain(domain))
