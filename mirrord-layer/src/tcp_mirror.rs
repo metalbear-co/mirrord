@@ -8,8 +8,8 @@ use std::{
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionId,
+    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, ClientMessage, ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -173,7 +173,7 @@ impl TcpHandler for TcpMirrorHandler {
         self.connections
             .remove(&connection_id)
             .then_some(())
-            .ok_or(LayerError::ConnectionIdNotFound(connection_id))
+            .ok_or(LayerError::NoConnectionId(connection_id))
     }
 
     fn ports(&self) -> &HashSet<Listen> {
@@ -191,10 +191,10 @@ impl TcpHandler for TcpMirrorHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         debug!("handle_listen -> listen {:#?}", listen);
 
-        let port = listen.real_port;
+        let port = listen.requested_port;
 
         self.ports_mut()
             .insert(listen)

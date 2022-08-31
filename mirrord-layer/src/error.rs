@@ -114,12 +114,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed inserting listen, already exists!")]
     ListenAlreadyExists,
 
-    #[error("mirrord-layer: Failed to `Lock` resource!")]
-    LockError,
-
-    #[error("mirrord-layer: Failed while getting a response!")]
-    ResponseError(#[from] ResponseError),
-
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
 
@@ -140,12 +134,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
     ContainerNotFound(String, String, String),
-
-    #[error("mirrord-layer: IO failed with `{0}`!")]
-    IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: Failed inserting listen, already exists!")]
-    ListenAlreadyExists,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

@@ -10,7 +10,7 @@ use std::{
 
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData, TcpNewConnection},
+    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ClientCodec, Port,
 };
 use tokio::net::TcpStream;

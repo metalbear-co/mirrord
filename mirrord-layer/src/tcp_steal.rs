@@ -4,8 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, TcpClose, TcpData, TcpNewConnection},
-    ClientCodec, ClientMessage, ConnectionID,
+    tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
 use tokio::{
@@ -24,15 +24,15 @@ use crate::{
 #[derive(Default)]
 pub struct TcpStealHandler {
     ports: HashSet<Listen>,
-    write_streams: HashMap<ConnectionID, WriteHalf<TcpStream>>,
-    read_streams: StreamMap<ConnectionID, ReaderStream<ReadHalf<TcpStream>>>,
+    write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+    read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
 }
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
     async fn handle_new_connection(
         &mut self,
-        tcp_connection: TcpNewConnection,
+        tcp_connection: NewTcpConnection,
     ) -> Result<(), LayerError> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
@@ -103,7 +103,7 @@ impl TcpHandler for TcpStealHandler {
     ) -> Result<(), LayerError> {
         debug!("handle_listen -> listen {:#?}", listen);
 
-        let port = listen.real_port;
+        let port = listen.requested_port;
 
         self.ports_mut()
             .insert(listen)
