@@ -1,11 +1,12 @@
 import assert from "assert";
 import https from "node:https";
-const dns = require("node:dns");
+import dns from "node:dns";
 const dnsPromises = dns.promises;
 
 console.log(">> test_remote_remote_dns_lookup_google");
 
-dnsPromises.lookup("google.com")
+dnsPromises
+  .lookup("google.com")
   .then((resolved) => {
     console.log(">> resolved ", resolved);
 

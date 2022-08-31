@@ -1,4 +1,4 @@
-const dns = require("node:dns");
+import dns from "node:dns";
 const dnsPromises = dns.promises;
 
 console.log(">> test_remote_remote_dns_lookup_pod_service");
