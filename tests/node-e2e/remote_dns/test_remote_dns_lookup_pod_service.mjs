@@ -1,8 +1,10 @@
-import { lookup } from "dns/promises";
+const dns = require("node:dns");
+const dnsPromises = dns.promises;
 
 console.log(">> test_remote_remote_dns_lookup_pod_service");
 
-lookup("nginx")
+dnsPromises
+  .lookup("nginx")
   .then((resolved) => {
     console.log(">> resolved ", resolved);
 
