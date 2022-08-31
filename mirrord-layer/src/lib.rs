@@ -5,6 +5,7 @@
 #![feature(naked_functions)]
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
+#![feature(let_chains)]
 
 use std::{
     collections::{HashSet, VecDeque},
