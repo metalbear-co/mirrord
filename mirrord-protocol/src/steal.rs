@@ -10,7 +10,7 @@ pub enum StealClientMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum StealDaemonMessage {
-    NewConnection(TcpNewConnection),
+    NewConnection(NewTcpConnection),
     TCPData(TCPData),
     TCPClose(TCPClose),
 }

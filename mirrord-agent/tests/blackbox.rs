@@ -5,7 +5,7 @@ mod tests {
     use actix_codec::Framed;
     use futures::SinkExt;
     use mirrord_protocol::{
-        tcp::{DaemonTcp, LayerTcp, TcpClose, TcpData, TcpNewConnection},
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
         ClientCodec, ClientMessage, DaemonMessage,
     };
     use test_bin::get_test_bin;
@@ -103,7 +103,7 @@ mod tests {
             .expect("got invalid message");
         assert_eq!(
             new_conn_msg,
-            DaemonMessage::Tcp(DaemonTcp::NewConnection(TcpNewConnection {
+            DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id: 0,
                 address: IpAddr::V4("127.0.0.1".parse().unwrap()),
                 destination_port: 1337,

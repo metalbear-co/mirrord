@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcpSteal, TcpClose, TcpData, TcpNewConnection},
+    tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionID, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -229,7 +229,7 @@ impl StealWorker {
         self.read_streams
             .insert(connection_id, ReaderStream::new(read_half));
 
-        let new_connection = DaemonTcp::NewConnection(TcpNewConnection {
+        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
             connection_id,
             destination_port: real_addr.port(),
             source_port: address.port(),

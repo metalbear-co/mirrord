@@ -506,7 +506,7 @@ impl TCPConnectionSniffer {
                     client_ids
                 );
 
-                let message = DaemonTcp::NewConnection(TcpNewConnection {
+                let message = DaemonTcp::NewConnection(NewTcpConnection {
                     destination_port: dest_port,
                     source_port,
                     connection_id: id,
