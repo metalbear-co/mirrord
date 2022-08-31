@@ -40,14 +40,16 @@ fn make_argv() -> Vec<*mut c_char> {
 
 #[hook_fn]
 unsafe extern "C" fn goenvs_unix_detour() {
-    trace!("hook goenvs_unix");
-    let modules = frida_gum::Module::enumerate_modules();
-    let binary = &modules.first().unwrap().name;
-    if let Some(argv) = frida_gum::Module::find_symbol_by_name(binary, "runtime.argv") {
-        let mut new_argv = ManuallyDrop::new(make_argv());
-        let argv_ptr: *mut *mut *mut i8 = argv.0.cast();
-        std::ptr::replace(argv_ptr, new_argv.as_mut_ptr());
-    }
+    stacker::grow(32 * 1024 * 1024, || {
+        trace!("hook goenvs_unix");
+        let modules = frida_gum::Module::enumerate_modules();
+        let binary = &modules.first().unwrap().name;
+        if let Some(argv) = frida_gum::Module::find_symbol_by_name(binary, "runtime.argv") {
+            let mut new_argv = ManuallyDrop::new(make_argv());
+            let argv_ptr: *mut *mut *mut i8 = argv.0.cast();
+            std::ptr::replace(argv_ptr, new_argv.as_mut_ptr());
+        }
+    });
     FN_GOENVS_UNIX();
 }
 
