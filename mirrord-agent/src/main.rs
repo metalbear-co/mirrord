@@ -8,6 +8,7 @@ use std::{
 };
 
 use actix_codec::Framed;
+use cli::parse_args;
 use error::AgentError;
 use file::FileManager;
 use futures::{
@@ -19,6 +20,8 @@ use mirrord_protocol::{
     AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage, GetAddrInfoRequest,
     GetEnvVarsRequest, RemoteResult, ResponseError,
 };
+use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
+use tcp::outgoing::TcpOutgoingApi;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
@@ -28,6 +31,9 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
+use util::{ClientID, IndexAllocator};
+
+use crate::{runtime::get_container_pid, util::run_thread};
 
 mod cli;
 mod error;
@@ -35,6 +41,7 @@ mod file;
 mod runtime;
 mod sniffer;
 mod steal;
+mod tcp;
 mod util;
 
 use cli::parse_args;
@@ -173,6 +180,8 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
 }
 
 struct ClientConnectionHandler {
+    /// Used to prevent closing the main loop (`handle_loop`) when any request is done (tcp
+    /// outgoing feature). Stays `true` until `agent` receives an `ExitRequest`.
     id: ClientID,
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
@@ -180,10 +189,11 @@ struct ClientConnectionHandler {
     tcp_sniffer_api: TCPSnifferAPI,
     tcp_stealer_sender: Sender<LayerTcpSteal>,
     tcp_stealer_receiver: Receiver<DaemonTcp>,
+    tcp_outgoing_api: TcpOutgoingApi,
 }
 
 impl ClientConnectionHandler {
-    /// A loop that handles client connection and state. Brekas upon receiver/sender drop.
+    /// A loop that handles client connection and state. Breaks upon receiver/sender drop.
     pub async fn start(
         id: ClientID,
         stream: TcpStream,
@@ -211,6 +221,8 @@ impl ClientConnectionHandler {
             pid,
         ));
 
+        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
+
         let mut client_handler = ClientConnectionHandler {
             id,
             file_manager,
@@ -219,10 +231,17 @@ impl ClientConnectionHandler {
             tcp_sniffer_api,
             tcp_stealer_receiver: tcp_steal_daemon_receiver,
             tcp_stealer_sender: tcp_steal_layer_sender,
+            tcp_outgoing_api,
         };
 
         client_handler.handle_loop(cancel_token).await?;
         Ok(())
+    }
+
+    async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
+        trace!("respond -> response {:#?}", response);
+
+        Ok(self.stream.send(response).await?)
     }
 
     async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
@@ -234,12 +253,12 @@ impl ClientConnectionHandler {
                         running = self.handle_client_message(message?).await?;
                     } else {
                         debug!("Client {} disconnected", self.id);
-                            break;
+                        break;
                     }
                 },
                 message = self.tcp_sniffer_api.recv() => {
                     if let Some(message) = message {
-                        self.stream.send(DaemonMessage::Tcp(message)).await?;
+                        self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
                         error!("tcp sniffer stopped?");
                         break;
@@ -252,6 +271,9 @@ impl ClientConnectionHandler {
                         error!("tcp stealer stopped?");
                         break;
                     }
+                },
+                message = self.tcp_outgoing_api.daemon_message() => {
+                    self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
                 },
                 _ = token.cancelled() => {
                     break;
@@ -268,7 +290,10 @@ impl ClientConnectionHandler {
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
-                self.stream.send(DaemonMessage::File(response)).await?
+                self.respond(DaemonMessage::File(response)).await?
+            }
+            ClientMessage::TcpOutgoing(layer_message) => {
+                self.tcp_outgoing_api.layer_message(layer_message).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
@@ -288,8 +313,7 @@ impl ClientConnectionHandler {
                 let env_vars_result =
                     select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
 
-                self.stream
-                    .send(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
@@ -297,11 +321,10 @@ impl ClientConnectionHandler {
 
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
-                self.stream
-                    .send(DaemonMessage::GetAddrInfoResponse(response))
+                self.respond(DaemonMessage::GetAddrInfoResponse(response))
                     .await?
             }
-            ClientMessage::Ping => self.stream.send(DaemonMessage::Pong).await?,
+            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
             ClientMessage::TcpSteal(message) => self.tcp_stealer_sender.send(message).await?,
             ClientMessage::Close => {
@@ -380,8 +403,7 @@ async fn start_agent() -> Result<(), AgentError> {
 
                     });
                     clients.push(client);
-                }
-                else {
+                } else {
                     error!("start_client -> Ran out of connections, dropping new connection");
                 }
 

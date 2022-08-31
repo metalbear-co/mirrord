@@ -23,7 +23,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { version = "0.7", features = ["auto-download"] }
+frida-gum = { version = "0.8", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
@@ -45,6 +45,7 @@ async-trait = "0.1"
 socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
+stacker = "0.1"
 
 [lib]
 crate_type = ["cdylib"]

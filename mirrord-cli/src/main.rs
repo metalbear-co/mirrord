@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use exec::execvp;
+use mirrord_auth::AuthConfig;
 use semver::Version;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -141,6 +142,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
+    if args.enable_tcp_outgoing {
+        std::env::set_var("MIRRORD_TCP_OUTGOING", true.to_string());
+    }
+
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
@@ -150,6 +155,23 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let err = execvp(args.binary.clone(), binary_args);
     error!("Couldn't execute {:?}", err);
     Err(anyhow!("Failed to execute binary"))
+}
+
+#[allow(dead_code)]
+fn login(args: LoginArgs) -> Result<()> {
+    match &args.token {
+        Some(token) => AuthConfig::from_input(token)?.save()?,
+        None => {
+            AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?.save()?
+        }
+    }
+
+    println!(
+        "Config succesfuly saved at {}",
+        AuthConfig::config_path().display()
+    );
+
+    Ok(())
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -165,7 +187,7 @@ fn main() -> Result<()> {
         Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
             extract_library(Some(path))?;
-        }
+        } // Commands::Login(args) => login(args)?,
     }
     Ok(())
 }

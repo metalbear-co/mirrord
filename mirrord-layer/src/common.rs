@@ -1,13 +1,22 @@
+use std::collections::VecDeque;
+
 use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
 use tokio::sync::oneshot;
 
-use crate::{error::LayerError, file::HookMessageFile, tcp::HookMessageTcp, HOOK_SENDER};
+use crate::{
+    error::{HookError, HookResult},
+    file::HookMessageFile,
+    tcp::{outgoing::TcpOutgoing, HookMessageTcp},
+    HOOK_SENDER,
+};
 
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> Result<(), LayerError> {
+pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
+
+pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
     unsafe {
         HOOK_SENDER
             .as_ref()
-            .ok_or(LayerError::EmptyHookSender)
+            .ok_or(HookError::EmptyHookSender)
             .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
     }
 }
@@ -24,8 +33,9 @@ pub struct GetAddrInfoHook {
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
-pub enum HookMessage {
+pub(crate) enum HookMessage {
     Tcp(HookMessageTcp),
+    TcpOutgoing(TcpOutgoing),
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
 }

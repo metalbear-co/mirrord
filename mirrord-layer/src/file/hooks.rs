@@ -11,7 +11,7 @@ use super::{
     OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
 };
 use crate::{
-    error::LayerError,
+    error::HookError,
     file::ops::{access, lseek, open, read, write},
     replace,
 };
@@ -30,7 +30,7 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
         .map(PathBuf::from)
     {
         Ok(path) => path,
@@ -61,7 +61,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 
     let path = match CStr::from_ptr(raw_path)
         .to_str()
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
         .map(PathBuf::from)
     {
         Ok(path) => path,
@@ -71,7 +71,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
     let mode = match CStr::from_ptr(raw_mode)
         .to_str()
         .map(String::from)
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
     {
         Ok(mode) => mode,
         Err(fail) => return fail.into(),
@@ -99,7 +99,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
     let mode = match CStr::from_ptr(raw_mode)
         .to_str()
         .map(String::from)
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
     {
         Ok(mode) => mode,
         Err(fail) => return fail.into(),
@@ -125,7 +125,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn openat_detour(
+pub(crate) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
@@ -138,7 +138,7 @@ pub(super) unsafe extern "C" fn openat_detour(
 
     let path = match CStr::from_ptr(raw_path)
         .to_str()
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
         .map(PathBuf::from)
     {
         Ok(path) => path,
@@ -355,7 +355,7 @@ pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_i
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
-        .map_err(LayerError::from)
+        .map_err(HookError::from)
         .map(PathBuf::from)
     {
         Ok(path) => path,
@@ -389,7 +389,7 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
         flags
     );
 
-    if dirfd == AT_FDCWD && flags == AT_EACCESS {
+    if dirfd == AT_FDCWD && (flags == AT_EACCESS || flags == 0) {
         access_logic(pathname, mode)
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)

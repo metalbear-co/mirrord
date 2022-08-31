@@ -11,12 +11,12 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
 
-use crate::error::LayerError;
+use crate::error::{HookError, HookResult as Result};
 
 pub(super) mod hooks;
-mod ops;
+pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<MirrorSocket>>>> =
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
@@ -66,11 +66,12 @@ pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
     /// Local address it's connected from
-    local_address: SocketAddr,
+    mirror_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
+    requested_port: Port,
     address: SocketAddr,
 }
 
@@ -90,7 +91,7 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct MirrorSocket {
+pub struct UserSocket {
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -108,11 +109,11 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     if address.is_null() {
         Ok(())
     } else if address_len.is_null() {
-        Err(LayerError::NullPointer)
+        Err(HookError::NullPointer)
     } else {
         let os_address = SockAddr::from(new_address);
 
@@ -124,7 +125,6 @@ fn fill_address(
                 address as *mut u8,
                 len,
             );
-
             *address_len = os_address.len();
         }
 

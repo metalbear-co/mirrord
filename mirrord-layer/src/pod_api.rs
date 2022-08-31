@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
@@ -14,7 +13,10 @@ use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, info, warn};
 
-use crate::{config::LayerConfig, error::LayerError};
+use crate::{
+    config::LayerConfig,
+    error::{LayerError, Result},
+};
 
 struct RuntimeData {
     container_id: String,
@@ -38,10 +40,11 @@ impl RuntimeData {
             &container_statuses
                 .iter()
                 .find(|&status| &status.name == container_name)
-                .with_context(|| {
-                    format!(
-                        "no container named {} found in namespace={}, pod={}",
-                        &container_name, &pod_namespace, &pod_name
+                .ok_or_else(|| {
+                    LayerError::ContainerNotFound(
+                        container_name.clone(),
+                        pod_namespace.to_string(),
+                        pod_name.to_string(),
                     )
                 })?
                 .container_id
@@ -76,7 +79,7 @@ impl RuntimeData {
 pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
-) -> Result<Portforwarder, LayerError> {
+) -> Result<Portforwarder> {
     let LayerConfig {
         agent_image,
         agent_namespace,
@@ -163,7 +166,7 @@ async fn wait_for_agent_startup(
     pods_api: &Api<Pod>,
     pod_name: &str,
     container_name: String,
-) -> Result<(), LayerError> {
+) -> Result<()> {
     let mut logs = pods_api
         .log_stream(
             pod_name,
@@ -189,7 +192,7 @@ async fn create_ephemeral_container_agent(
     agent_image: String,
     pods_api: &Api<Pod>,
     connection_port: u16,
-) -> Result<String, LayerError> {
+) -> Result<String> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
 
@@ -279,7 +282,7 @@ async fn create_job_pod_agent(
     runtime_data: RuntimeData,
     job_api: &Api<Job>,
     connection_port: u16,
-) -> Result<String, LayerError> {
+) -> Result<String> {
     let mirrord_agent_job_name = get_agent_name();
 
     let mut agent_command_line = vec![

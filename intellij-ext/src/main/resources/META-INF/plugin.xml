@@ -1,0 +1,34 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>com.metalbear.mirrord</id>
+    <name>mirrord</name>
+    <vendor email="hi@metalbear.co" url="https://metalbear.co/">MetalBear</vendor>
+
+    <description><![CDATA[
+      mirrord works by letting you select a pod to mirror traffic from.
+      It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
+    ]]></description>
+
+    <depends>com.intellij.modules.lang</depends>
+<!--    <depends>com.intellij.modules.python</depends>-->
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="mirrord Notification Handler"
+                           displayType="BALLOON"/>
+    </extensions>
+
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
+
+    <actions>
+        <action id="com.metalbear.mirrord.MirrordEnabler"
+                class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
+                description="Toggle the mirrord plugin"
+                icon="MirrordIcons.mirrordIcon">
+            <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
+        </action>
+    </actions>
+
+</idea-plugin>

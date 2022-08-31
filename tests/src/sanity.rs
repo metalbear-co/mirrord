@@ -84,6 +84,12 @@ mod tests {
         Job,
     }
 
+    #[derive(Debug)]
+    pub enum FileOps {
+        Python,
+        Go,
+    }
+
     struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
@@ -193,6 +199,24 @@ mod tests {
         }
     }
 
+    impl FileOps {
+        fn command(&self) -> Vec<&str> {
+            match self {
+                FileOps::Python => {
+                    vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
+                }
+                FileOps::Go => vec!["go-e2e-fileops/go-e2e-fileops"],
+            }
+        }
+
+        fn assert(&self, process: TestProcess) {
+            match self {
+                FileOps::Python => process.assert_python_fileops_stderr(),
+                FileOps::Go => process.assert_stderr(),
+            }
+        }
+    }
+
     async fn run(
         process_cmd: Vec<&str>,
         pod_name: &str,
@@ -266,7 +290,7 @@ mod tests {
             name: String,
             data: &K,
         ) -> ResourceGuard {
-            api.create(&PostParams::default(), &data).await.unwrap();
+            api.create(&PostParams::default(), data).await.unwrap();
             let cancel_token = CancellationToken::new();
             let resource_token = cancel_token.clone();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -403,10 +427,10 @@ mod tests {
         let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
         watch_resource_exists(&service_api, "default").await;
 
-        let pod_name = get_pod_instance(&kube_client, &name, &namespace)
+        let pod_name = get_pod_instance(&kube_client, &name, namespace)
             .await
             .unwrap();
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
         await_condition(pod_api, &pod_name, is_pod_running())
             .await
             .unwrap();
@@ -598,10 +622,11 @@ mod tests {
         #[notrace]
         service: EchoService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+        #[values(FileOps::Python, FileOps::Go)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
+        let command = ops.command();
 
         let mut args = vec!["--enable-fs"];
 
@@ -610,7 +635,7 @@ mod tests {
         }
 
         let mut process = run(
-            python_command,
+            command,
             &service.pod_name,
             Some(&service.namespace),
             Some(args),
@@ -618,7 +643,7 @@ mod tests {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        ops.assert(process);
     }
 
     #[cfg(target_os = "macos")]
@@ -860,6 +885,86 @@ mod tests {
         let mirrord_args = vec!["--enable-fs"];
         let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
 
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go_remote_env_vars_works(#[future] service: EchoService) {
+        let service = service.await;
+        let command = vec!["go-e2e-env/go-e2e-env"];
+        let mirrord_args = vec!["--override-env-vars-include", "*"];
+        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    // TODO: This is valid for all "outgoing" tests:
+    // We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
+    // which is bad.
+    // An idea to solve this problem would be to have some internal (or test-only) specific messages
+    // that we can pass back and forth between `layer` and `agent`.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
+        ];
+        let mirrord_args = vec!["-d", "true", "-o", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_single_request_disabled(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
+        ];
+        let mirrord_args = vec!["-d", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_single_request_local_dns(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
+        ];
+        let mirrord_args = vec!["-o", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_make_request_after_listen(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
+        ];
+        let mirrord_args = vec!["-o", "true"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();

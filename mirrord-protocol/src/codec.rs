@@ -10,7 +10,10 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
+    tcp::{
+        outgoing::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        DaemonTcp, LayerTcp, LayerTcpSteal,
+    },
     ResponseError,
 };
 
@@ -167,6 +170,7 @@ pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
     TcpSteal(LayerTcpSteal),
+    TcpOutgoing(LayerTcpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -273,6 +277,7 @@ pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
     TcpSteal(DaemonTcp),
+    TcpOutgoing(DaemonTcpOutgoing),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

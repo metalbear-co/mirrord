@@ -7,10 +7,17 @@ node_modules
 **/.DS_Store
 target
 tests/go-e2e/go-e2e
-
+tests/go-e2e-fileops/go-e2e-fileops
 ### VSCode ###
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+### Intellij ###
+intellij-ext/.gradle
+intellij-ext/.idea
+intellij-ext/.qodana
+intellij-ext/build
+intellij-ext/libmirrord_layer.*

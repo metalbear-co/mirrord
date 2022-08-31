@@ -15,16 +15,16 @@
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
 [![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
 
-mirrord lets you easily mirror traffic from your Kubernetes cluster to your development environment. It comes as both a [Visual Studio Code](https://code.visualstudio.com/) extension and a CLI tool.
+mirrord lets developers run local processes in the context of their cloud environment. It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually going through the hassle of deploying it there, and without disrupting the environment by deploying untested code. It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
 
 ## Getting Started
-- [VSCode Extension](#vscode-extension)
+- [VS Code Extension](#vs-code-extension)
+- [IntelliJ Plugin](#intellij-plugin)
 - [CLI Tool](#cli-tool)
 > mirrord uses your machine's default kubeconfig for access to the Kubernetes API.
 
-> Make sure your local process is listening on the same port as the remote pod.
 ---
-## VSCode Extension
+## VS Code Extension
 ### Installation
 Get the extension [here](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord).
 
@@ -33,10 +33,26 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
 * Click "Enable mirrord" on the status bar
 * Start debugging your project
 * Choose pod to mirror traffic from
-* The debugged process will start with mirrord, and receive traffic
+* The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
-  <img src="./images/demo.gif" width="60%">
+  <img src="./images/vscode.gif">
+</p>
+
+---
+## IntelliJ Plugin
+### Installation
+Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
+
+### How To Use
+
+* Click the mirrord icon in the Navigation Toolbar
+* Start debugging your project
+* Choose a namespace and pod to impersonate
+* The debugged process will be plugged into the selected pod by mirrord
+
+<p align="center">
+  <img src="./images/intellij.gif">
 </p>
 
 ---
@@ -61,7 +77,10 @@ mirrord exec node app.js --pod-name my-pod
 ---
 
 ## How It Works
-mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
+When you select a pod to impersonate, mirrord launches a privileged pod on the same node as the pod you selected. The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process, routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
+<p align="center">
+  <img src="./images/how_it_works.svg" alt="How It Works"/>
+</p>
 
 ## Contributing
 Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).

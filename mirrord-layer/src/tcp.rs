@@ -10,39 +10,36 @@ use std::{
 
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, TcpClose, TcpData, TcpNewConnection},
+    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData, TcpNewConnection},
     ClientCodec, Port,
 };
 use tokio::net::TcpStream;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
+    detour::DetourGuard,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
-#[derive(Debug, Clone)]
-pub struct ListenClose {
-    pub port: Port,
-}
+pub(crate) mod outgoing;
 
-#[derive(Debug, Clone)]
-pub enum HookMessageTcp {
+#[derive(Debug)]
+pub(crate) enum HookMessageTcp {
     Listen(Listen),
-    Close(ListenClose),
 }
 
 #[derive(Debug, Clone)]
-pub struct Listen {
-    pub fake_port: Port,
-    pub real_port: Port,
+pub(crate) struct Listen {
+    pub mirror_port: Port,
+    pub requested_port: Port,
     pub ipv6: bool,
     pub fd: RawFd,
 }
 
 impl PartialEq for Listen {
     fn eq(&self, other: &Self) -> bool {
-        self.real_port == other.real_port
+        self.requested_port == other.requested_port
     }
 }
 
@@ -50,25 +47,25 @@ impl Eq for Listen {}
 
 impl Hash for Listen {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.real_port.hash(state);
+        self.requested_port.hash(state);
     }
 }
 
 impl Borrow<Port> for Listen {
     fn borrow(&self) -> &Port {
-        &self.real_port
+        &self.requested_port
     }
 }
 
 impl From<&Listen> for SocketAddr {
     fn from(listen: &Listen) -> Self {
         let address = if listen.ipv6 {
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.fake_port)
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.mirror_port)
         } else {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.fake_port)
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.mirror_port)
         };
 
-        debug_assert_eq!(address.port(), listen.fake_port);
+        debug_assert_eq!(address.port(), listen.mirror_port);
         address
     }
 }
@@ -109,20 +106,23 @@ pub(crate) trait TcpHandler {
         >,
     ) -> Result<(), LayerError> {
         match message {
-            HookMessageTcp::Close(close) => self.handle_listen_close(close, codec).await,
             HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
         }
     }
 
     /// Handle NewConnection messages
-    async fn handle_new_connection(&mut self, conn: TcpNewConnection) -> Result<(), LayerError>;
+    async fn handle_new_connection(&mut self, conn: NewTcpConnection) -> Result<(), LayerError>;
 
     /// Connects to the local listening socket, add it to the queue and return the stream.
     /// Find better name
     async fn create_local_stream(
         &mut self,
-        tcp_connection: &TcpNewConnection,
+        tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
+        trace!(
+            "create_local_stream -> tcp_connection {:#?}",
+            tcp_connection
+        );
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
@@ -140,7 +140,13 @@ pub(crate) trait TcpHandler {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }
 
-        TcpStream::connect(addr).await.map_err(From::from)
+        #[allow(clippy::let_and_return)]
+        let tcp_stream = {
+            let _ = DetourGuard::new();
+            TcpStream::connect(addr).await.map_err(From::from)
+        };
+
+        tcp_stream
     }
 
     /// Handle New Data messages
