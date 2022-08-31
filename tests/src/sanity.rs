@@ -106,6 +106,10 @@ mod tests {
             assert!(self.stderr.lock().unwrap().is_empty());
         }
 
+        fn assert_stderr_not_empty(&self) {
+            assert_eq!(self.stderr.lock().unwrap().is_empty(), false);
+        }
+
         fn assert_python_fileops_stderr(&self) {
             assert!(!self.stderr.lock().unwrap().contains("FAILED"));
         }
@@ -858,7 +862,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec!["-d", "true", "-o", "true"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -874,7 +878,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec!["-d", "true"];
+        let mirrord_args = vec!["-d"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -890,7 +894,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec!["-o", "true"];
+        let mirrord_args = vec!["-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -906,7 +910,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mirrord_args = vec!["-o", "true"];
+        let mirrord_args = vec!["-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -921,7 +925,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mirrord_args = vec!["-d", "true", "-o", "true"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -933,19 +937,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_fails_for_bonkers_hostname(#[future] service: EchoService) {
         let service = service.await;
-        /*
-               let _ =
-                   include!("../node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname.mjs");
-        */
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_fails_for_bonkers_hostname.mjs",
         ];
-        let mirrord_args = vec!["-d", "true", "-o", "true"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert_eq!(res.success(), false);
-        // assert_eq!(process.child.stderr.lock().unwrap().is_empty(), false);
+        process.assert_stderr_not_empty();
     }
 }
