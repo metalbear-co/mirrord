@@ -52,14 +52,14 @@ unsafe extern "C" fn goenvs_unix_detour() {
 }
 
 pub(crate) fn enable_go_env(interceptor: &mut Interceptor, binary: &str) {
-    // unsafe {
-    //     let _ = replace_symbol!(
-    //         interceptor,
-    //         "runtime.goenvs_unix",
-    //         goenvs_unix_detour,
-    //         FnGoenvs_unix,
-    //         FN_GOENVS_UNIX,
-    //         binary
-    //     );
-    // }
+    unsafe {
+        let _ = replace_symbol!(
+            interceptor,
+            "runtime.goenvs_unix",
+            goenvs_unix_detour,
+            FnGoenvs_unix,
+            FN_GOENVS_UNIX,
+            binary
+        );
+    }
 }
