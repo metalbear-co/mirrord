@@ -1,0 +1,5 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.goide">
+        <executorExtension implementation="com.metalbear.mirrord.MirrordGoExecListener" order="first" />
+    </extensions>
+</idea-plugin>

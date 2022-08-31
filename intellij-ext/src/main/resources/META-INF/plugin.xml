@@ -10,7 +10,10 @@
     ]]></description>
 
     <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.modules.platform</depends>
+<!--    <depends>com.intellij.modules.goland</depends>-->
 <!--    <depends>com.intellij.modules.python</depends>-->
+    <depends optional="true" config-file="goland.xml">com.intellij.modules.goland</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="mirrord Notification Handler"

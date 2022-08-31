@@ -61,6 +61,7 @@ class MirrordListener : ExecutionListener {
                     mirrordEnv["MIRRORD_FILE_OPS"] = fileOpsCheckbox.isSelected.toString()
                     mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
                     mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDnsCheckbox.isSelected.toString()
+                    mirrordEnv["RUST_LOG"] = rustLog.text.toString()
                     mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
 
                     val envMap = getRunConfigEnv(env)
@@ -90,6 +91,8 @@ class MirrordListener : ExecutionListener {
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
+        var fields1 = env.javaClass.fields
+        var fields2 = env.javaClass.declaredFields
         val method = when (env.runProfile::class.simpleName) {
             "GoApplicationConfiguration" -> "getCustomEnvironment"
             else -> "getEnvs"
