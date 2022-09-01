@@ -9,10 +9,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, Port,
+    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, Port,
 };
 use tokio::net::TcpStream;
 use tracing::{debug, trace};
@@ -164,19 +163,5 @@ pub(crate) trait TcpHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
-        debug!("handle_listen -> listen {:#?}", listen);
-
-        let port = listen.requested_port;
-
-        self.ports_mut()
-            .insert(listen)
-            .then_some(())
-            .ok_or(LayerError::ListenAlreadyExists)?;
-
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
-            .await
-            .map_err(From::from)
-    }
+    ) -> Result<(), LayerError>;
 }

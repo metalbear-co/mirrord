@@ -29,6 +29,9 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_TTL", default = "0")]
     pub agent_ttl: u16,
 
+    #[envconfig(from = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "false")]
+    pub agent_tcp_steal_traffic: bool,
+
     #[envconfig(from = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub agent_communication_timeout: Option<u16>,
 
