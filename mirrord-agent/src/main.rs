@@ -16,8 +16,9 @@ use futures::{
     SinkExt,
 };
 use mirrord_protocol::{
-    tcp::LayerTcp, AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage,
-    GetAddrInfoRequest, GetEnvVarsRequest, RemoteResult, ResponseError,
+    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
+    AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage, GetAddrInfoRequest,
+    GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use tcp::outgoing::TcpOutgoingApi;
@@ -25,20 +26,24 @@ use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
-use util::{ClientID, IndexAllocator};
 
-use crate::{runtime::get_container_pid, util::run_thread};
+use crate::{
+    runtime::get_container_pid,
+    steal::steal_worker,
+    util::{run_thread, ClientID, IndexAllocator},
+};
 
 mod cli;
 mod error;
 mod file;
 mod runtime;
 mod sniffer;
+mod steal;
 mod tcp;
 mod util;
 
@@ -178,6 +183,8 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
+    tcp_stealer_sender: Sender<LayerTcpSteal>,
+    tcp_stealer_receiver: Receiver<DaemonTcp>,
     tcp_outgoing_api: TcpOutgoingApi,
 }
 
@@ -201,6 +208,14 @@ impl ClientConnectionHandler {
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
+        let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
+        let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
+
+        let _ = run_thread(steal_worker(
+            tcp_steal_layer_receiver,
+            tcp_steal_daemon_sender,
+            pid,
+        ));
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
@@ -210,11 +225,12 @@ impl ClientConnectionHandler {
             stream,
             pid,
             tcp_sniffer_api,
+            tcp_stealer_receiver: tcp_steal_daemon_receiver,
+            tcp_stealer_sender: tcp_steal_layer_sender,
             tcp_outgoing_api,
         };
 
         client_handler.handle_loop(cancel_token).await?;
-
         Ok(())
     }
 
@@ -243,10 +259,18 @@ impl ClientConnectionHandler {
                         error!("tcp sniffer stopped?");
                         break;
                     }
-                }
+                },
+                message = self.tcp_stealer_receiver.recv() => {
+                    if let Some(message) = message {
+                        self.stream.send(DaemonMessage::TcpSteal(message)).await?;
+                    } else {
+                        error!("tcp stealer stopped?");
+                        break;
+                    }
+                },
                 message = self.tcp_outgoing_api.daemon_message() => {
                     self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
-                }
+                },
                 _ = token.cancelled() => {
                     break;
                 }
@@ -298,6 +322,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
+            ClientMessage::TcpSteal(message) => self.tcp_stealer_sender.send(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }

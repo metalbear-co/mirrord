@@ -7,6 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- New feature: mirrord now supports TCP traffic stealing instead of mirroring. You can enable it by passing `--tcp-steal` flag to cli.
+
+### Fixed
+- mirrord-layer: Go environment variables crash - run Go env setup in a different stack (should fix [#292](https://github.com/metalbear-co/mirrord/issues/292))
+
+### Changed
+- mirrord-layer: Add `#![feature(let_chains)]` to `lib.rs` to support new compiler version.
+
 ## 2.10.1
 ### Fixed
 - CI:Release - Fix typo that broke the build

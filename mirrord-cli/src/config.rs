@@ -83,6 +83,10 @@ pub(super) struct ExecArgs {
     #[clap(short, long, value_parser)]
     pub ephemeral_container: bool,
 
+    /// Steal TCP instead of mirroring
+    #[clap(long, value_parser)]
+    pub tcp_steal: bool,
+
     /// Enable tcp outgoing feature.
     #[clap(short = 'o', long, value_parser)]
     pub enable_tcp_outgoing: bool,
