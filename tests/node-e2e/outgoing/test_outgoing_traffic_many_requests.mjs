@@ -10,7 +10,7 @@ const hostList = [
   "www.github.com",
 ];
 
-for (let host in hostList) {
+hostList.forEach((host) => {
   const options = {
     hostname: host,
     port: 443,
@@ -18,21 +18,19 @@ for (let host in hostList) {
     method: "GET",
   };
 
+  console.log(`>> host ${host}`);
+
   const request = https.request(options, (response) => {
     console.log(`>> ${host} statusCode ${response.statusCode}`);
 
     response.on("data", (data) => {
-      process.stdout.write(data);
+      process.stdout.write(`>> received ${data.slice(0, 16)}`);
     });
 
     response.on("error", (fail) => {
       process.stderr.write(`>> response from ${host} failed with ${fail}`);
       throw fail;
     });
-
-    if (response.statusCode !== 200) {
-      throw ">> response.statusCode !== 200";
-    }
   });
 
   request.on("error", (fail) => {
@@ -41,4 +39,4 @@ for (let host in hostList) {
   });
 
   request.end();
-}
+});

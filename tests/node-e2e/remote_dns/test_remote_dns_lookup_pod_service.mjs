@@ -1,3 +1,4 @@
+import assert from "node:assert";
 import dns from "node:dns";
 const dnsPromises = dns.promises;
 
