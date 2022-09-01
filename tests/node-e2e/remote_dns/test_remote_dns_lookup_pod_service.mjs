@@ -4,7 +4,7 @@ const dnsPromises = dns.promises;
 console.log(">> test_remote_remote_dns_lookup_pod_service");
 
 dnsPromises
-  .lookup("nginx")
+  .lookup("http-echo")
   .then((resolved) => {
     console.log(">> resolved ", resolved);
 
