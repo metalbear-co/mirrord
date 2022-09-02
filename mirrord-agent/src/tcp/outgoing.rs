@@ -15,7 +15,11 @@ use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
-use crate::{error::AgentError, runtime::set_namespace, util::run_thread};
+use crate::{
+    error::AgentError,
+    runtime::set_namespace,
+    util::{run_thread, IndexAllocator},
+};
 
 type Layer = LayerTcpOutgoing;
 type Daemon = DaemonTcpOutgoing;
@@ -61,6 +65,8 @@ impl TcpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
+        let mut allocator = IndexAllocator::default();
+
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
         let mut writers: HashMap<ConnectionId, OwnedWriteHalf> = HashMap::default();
@@ -83,12 +89,10 @@ impl TcpOutgoingApi {
                                     .await
                                     .map_err(From::from)
                                     .map(|remote_stream| {
-                                        let connection_id = writers
-                                            .keys()
-                                            .last()
-                                            .copied()
-                                            .map(|last| last + 1)
-                                            .unwrap_or_default();
+                                        let connection_id = allocator
+                                            .next_index()
+                                            .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
+                                            .unwrap() as ConnectionId;
 
                                         // Split the `remote_stream` so we can keep reading
                                         // and writing from multiple hosts without blocking.
