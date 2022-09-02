@@ -3,8 +3,6 @@ import { createServer } from "net";
 
 console.log(">> test_outgoing_traffic_make_request_after_listen");
 
-let totalRequests = 0;
-
 const makeRequest = () => {
   const options = {
     hostname: "www.rust-lang.org",
