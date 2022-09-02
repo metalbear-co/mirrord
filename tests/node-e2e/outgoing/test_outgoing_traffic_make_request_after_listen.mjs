@@ -37,11 +37,6 @@ const makeRequest = () => {
 
   request.on("finish", () => {
     process.stdout.write(">> success");
-    totalRequests += 1;
-
-    if (totalRequests > 1) {
-      process.exit();
-    }
   });
 
   request.end();
