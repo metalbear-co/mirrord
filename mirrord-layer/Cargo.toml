@@ -34,6 +34,7 @@ serde_json.workspace = true
 actix-codec.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
 rand = "0.8"
@@ -42,6 +43,9 @@ regex = "1"
 errno = "0.2"
 async-trait = "0.1"
 socket2 = "0.4"
+anyhow.workspace = true
+streammap-ext.workspace = true
+stacker = "0.1"
 
 [lib]
 crate_type = ["cdylib"]

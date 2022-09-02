@@ -138,6 +138,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
     };
 
+    if args.tcp_steal {
+        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
+    };
+
     if args.enable_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", true.to_string());
     }

@@ -138,7 +138,7 @@ where
     T::Output: Send + 'static,
 {
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();

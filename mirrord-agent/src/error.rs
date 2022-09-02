@@ -1,9 +1,9 @@
 use mirrord_protocol::{
     tcp::{
         outgoing::{DaemonTcpOutgoing, LayerConnect, LayerTcpOutgoing},
-        DaemonTcp,
+        DaemonTcp, LayerTcpSteal,
     },
-    FileRequest, FileResponse,
+    FileRequest, FileResponse, Port,
 };
 use thiserror::Error;
 
@@ -68,6 +68,17 @@ pub enum AgentError {
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
 
+    #[error("Connection received from unexepcted port `{0}`")]
+    UnexpectedConnection(Port),
+
+    #[error("LayerTcpSteal sender failed with `{0}`")]
+    SendLayerTcpSteal(#[from] tokio::sync::mpsc::error::SendError<LayerTcpSteal>),
+
+    #[error("IPTables failed with `{0}`")]
+    IPTablesError(String),
+
     #[error("Join task failed")]
     JoinTask,
 }
+
+pub type Result<T> = std::result::Result<T, AgentError>;

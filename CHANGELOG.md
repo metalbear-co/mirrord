@@ -6,6 +6,20 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Fixed
+- mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
+- tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
+
+
+## 2.11.0
+### Added
+- New feature: mirrord now supports TCP traffic stealing instead of mirroring. You can enable it by passing `--tcp-steal` flag to cli.
+
+### Fixed
+- mirrord-layer: Go environment variables crash - run Go env setup in a different stack (should fix [#292](https://github.com/metalbear-co/mirrord/issues/292))
+
+### Changed
+- mirrord-layer: Add `#![feature(let_chains)]` to `lib.rs` to support new compiler version.
 
 ## 2.10.1
 ### Fixed
