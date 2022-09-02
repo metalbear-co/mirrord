@@ -58,6 +58,8 @@ const listen = () => {
       console.log(">> server listening to %j", server.address());
 
       makeRequest();
+
+      server.close();
     }
   );
 
@@ -79,7 +81,7 @@ const listen = () => {
       socket.write(d);
     });
 
-    socket.once("close", () => {
+    socket.on("close", () => {
       console.log(">> connection from %s closed", remoteAddress);
     });
 
