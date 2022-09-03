@@ -3,13 +3,14 @@ package com.metalbear.mirrord
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import javax.swing.JCheckBox
 import javax.swing.JTextField
 
 
-@Suppress("UNCHECKED_CAST", "NAME_SHADOWING")
+@Suppress("UNCHECKED_CAST", "NAME_SHADOWING", "DialogTitleCapitalization")
 class MirrordListener : ExecutionListener {
     private val mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
 
@@ -35,15 +36,30 @@ class MirrordListener : ExecutionListener {
             val customDialogBuilder = MirrordDialogBuilder()
             val kubeDataProvider = KubeDataProvider()
 
-            // Prompt the user to choose a namespace
-            val namespaces = JBList(kubeDataProvider.getNamespaces())
+            val namespaces = try {
+                JBList(kubeDataProvider.getNamespaces())
+            } catch (e: Exception) {
+                MirrordEnabler
+                        .notificationManager
+                        .createNotification("mirrord", "Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR)
+                        .notify(env.project)
+                return super.processStarting(executorId, env)
+            }
             val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
             val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
             // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
             if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE) {
                 val choseNamespace = namespaces.selectedValue
-                val pods = JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
+                val pods = try {
+                    JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
+                } catch (e: Exception) {
+                    MirrordEnabler
+                            .notificationManager
+                            .createNotification("mirrord", "Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR)
+                            .notify(env.project)
+                    return super.processStarting(executorId, env)
+                }
 
                 val fileOpsCheckbox = JCheckBox("Enable File Operations")
                 val remoteDnsCheckbox = JCheckBox("Enable Remote DNS")
@@ -91,8 +107,6 @@ class MirrordListener : ExecutionListener {
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
-        var fields1 = env.javaClass.fields
-        var fields2 = env.javaClass.declaredFields
         val method = when (env.runProfile::class.simpleName) {
             "GoApplicationConfiguration" -> "getCustomEnvironment"
             else -> "getEnvs"
