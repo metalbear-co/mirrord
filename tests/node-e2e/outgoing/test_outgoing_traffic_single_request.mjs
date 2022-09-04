@@ -10,14 +10,14 @@ const options = {
 };
 
 const request = https.request(options, (response) => {
-  console.log(`statusCode: ${response.statusCode}`);
+  console.log(`>> statusCode: ${response.statusCode}`);
 
   response.on("data", (data) => {
-    process.stdout.write(data);
+    console.log(`>> response data ${data}`);
   });
 
   response.on("error", (fail) => {
-    process.stderr.write(`>> response failed with ${fail}`);
+    console.error(`>> response failed with ${fail}`);
     throw fail;
   });
 
@@ -27,7 +27,7 @@ const request = https.request(options, (response) => {
 });
 
 request.on("error", (fail) => {
-  process.stderr.write(`>> request failed with ${fail}`);
+  console.error(`>> request failed with ${fail}`);
   throw fail;
 });
 

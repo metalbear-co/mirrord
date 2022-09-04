@@ -12,14 +12,14 @@ const makeRequest = () => {
   };
 
   const request = https.request(options, (response) => {
-    console.log(`statusCode: ${response.statusCode}`);
+    console.log(`>> statusCode: ${response.statusCode}`);
 
     response.on("data", (data) => {
-      process.stdout.write(data);
+      console.log(`>> response data ${data}`);
     });
 
     response.on("error", (fail) => {
-      process.stderr.write(`>> response failed with ${fail}`);
+      console.error(`>> response failed with ${fail}`);
       throw fail;
     });
 
@@ -29,12 +29,12 @@ const makeRequest = () => {
   });
 
   request.on("error", (fail) => {
-    process.stderr.write(`>> request failed with ${fail}`);
+    console.error(`>> request failed with ${fail}`);
     throw fail;
   });
 
   request.on("finish", () => {
-    process.stdout.write(">> success");
+    console.log(">> success");
   });
 
   request.end();
@@ -57,7 +57,7 @@ const listen = () => {
   );
 
   server.on("error", (fail) => {
-    process.stderr.write(`>> createServer failed with ${fail}`);
+    console.error(`>> createServer failed with ${fail}`);
     throw fail;
   });
 
@@ -79,8 +79,8 @@ const listen = () => {
     });
 
     socket.on("error", (fail) => {
-      process.stderr.write(
-        `>> failed connectio to ${remoteAddress} with ${err.message}`
+      console.error(
+        `>> failed connection to ${remoteAddress} with ${err.message}`
       );
 
       throw fail;
