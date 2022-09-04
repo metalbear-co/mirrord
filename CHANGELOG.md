@@ -6,8 +6,13 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- Add more configuration values to the VS Code extension.
+
 ### Fixed
 - VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
+- Fixed DNS feature causing crash on macOS on invalid DNS name due to mismatch of return codes. [#321](https://github.com/metalbear-co/mirrord/issues/321).
+- Fixed DNS feature not using impersonated container namespace, resulting with incorrect resolved DNS names.
 - mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
 - tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
 

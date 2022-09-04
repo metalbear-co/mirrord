@@ -307,12 +307,11 @@ mod tests {
                     .unwrap();
                 barrier.wait();
             });
-            let guard = Self {
+            Self {
                 guard: Some(resource_token.drop_guard()),
                 barrier: guard_barrier,
                 handle,
-            };
-            guard
+            }
         }
     }
 
