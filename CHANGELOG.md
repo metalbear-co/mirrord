@@ -7,11 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Fixed
+- VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
 - mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
 - tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
-
-### Fixed
-- VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
 
 ## 2.11.0
 ### Added
