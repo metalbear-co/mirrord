@@ -1,7 +1,9 @@
 use std::{
     clone::Clone,
     collections::{HashMap, HashSet},
+    future::Future,
     hash::Hash,
+    thread::JoinHandle,
 };
 
 use num_traits::{zero, CheckedAdd, Num};
@@ -128,6 +130,20 @@ impl Default for IndexAllocator<usize> {
     fn default() -> Self {
         IndexAllocator::new()
     }
+}
+
+pub fn run_thread<T>(future: T) -> JoinHandle<T::Output>
+where
+    T: Future + Send + 'static,
+    T::Output: Send + 'static,
+{
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(future)
+    })
 }
 
 #[cfg(test)]

@@ -6,11 +6,12 @@ use std::{
     path::PathBuf,
 };
 
+use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    CloseFileRequest, CloseFileResponse, FileRequest, FileResponse, OpenFileRequest,
-    OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest,
-    ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest,
+    SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
 
@@ -69,6 +70,17 @@ impl FileManager {
             FileRequest::Close(CloseFileRequest { fd }) => {
                 let close_result = self.close(fd);
                 Ok(FileResponse::Close(close_result))
+            }
+            FileRequest::Access(AccessFileRequest { pathname, mode }) => {
+                let pathname = pathname
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                // Should be something like `/proc/{pid}/root/{path}`
+                let full_path = root_path.as_path().join(pathname);
+
+                let access_result = self.access(full_path, mode);
+                Ok(FileResponse::Access(access_result))
             }
         }
     }
@@ -253,5 +265,27 @@ impl FileManager {
         self.index_allocator.free_index(fd);
 
         Ok(CloseFileResponse)
+    }
+
+    pub(crate) fn access(
+        &mut self,
+        pathname: PathBuf,
+        mode: u8,
+    ) -> RemoteResult<AccessFileResponse> {
+        trace!(
+            "FileManager::access -> pathname {:#?} | mode {:#?}",
+            pathname,
+            mode,
+        );
+
+        // Mirror bit representation of flags to support how the flags are represented in the
+        // faccess library
+        let mode =
+            AccessMode::from_bits((mode << 4).reverse_bits() | 1).unwrap_or(AccessMode::EXISTS);
+
+        pathname
+            .access(mode)
+            .map(|_| AccessFileResponse)
+            .map_err(ResponseError::from)
     }
 }

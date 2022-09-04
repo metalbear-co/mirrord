@@ -1,4 +1,10 @@
-use mirrord_protocol::{tcp::DaemonTcp, FileRequest, FileResponse};
+use mirrord_protocol::{
+    tcp::{
+        outgoing::{DaemonTcpOutgoing, LayerConnect, LayerTcpOutgoing},
+        DaemonTcp, LayerTcpSteal,
+    },
+    FileRequest, FileResponse, Port,
+};
 use thiserror::Error;
 
 use crate::sniffer::SnifferCommand;
@@ -19,6 +25,18 @@ pub enum AgentError {
 
     #[error("DaemonTcp sender failed with `{0}`")]
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
+
+    #[error("ConnectRequest sender failed with `{0}`")]
+    SendConnectRequest(#[from] tokio::sync::mpsc::error::SendError<LayerConnect>),
+
+    #[error("OutgoingTrafficRequest sender failed with `{0}`")]
+    SendOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerTcpOutgoing>),
+
+    #[error("Receiver channel is closed!")]
+    ReceiverClosed,
+
+    #[error("ConnectRequest sender failed with `{0}`")]
+    SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
 
     #[error("task::Join failed with `{0}`")]
     Join(#[from] tokio::task::JoinError),
@@ -49,4 +67,18 @@ pub enum AgentError {
 
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
+
+    #[error("Connection received from unexepcted port `{0}`")]
+    UnexpectedConnection(Port),
+
+    #[error("LayerTcpSteal sender failed with `{0}`")]
+    SendLayerTcpSteal(#[from] tokio::sync::mpsc::error::SendError<LayerTcpSteal>),
+
+    #[error("IPTables failed with `{0}`")]
+    IPTablesError(String),
+
+    #[error("Join task failed")]
+    JoinTask,
 }
+
+pub type Result<T> = std::result::Result<T, AgentError>;

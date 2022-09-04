@@ -77,17 +77,13 @@ jobs:
   test_mirrord_layer_cli:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-18.04, macos-12, macos-11]
+        os: [ubuntu-latest, macos-12, macos-11]
         target:
           [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
         exclude:
           - os: ubuntu-latest
             target: x86_64-apple-darwin
           - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: ubuntu-18.04
-            target: x86_64-apple-darwin
-          - os: ubuntu-18.04
             target: aarch64-apple-darwin
           - os: macos-12
             target: x86_64-unknown-linux-gnu
@@ -157,8 +153,13 @@ jobs:
           go-version: "1.18.0"
       - run: |
           cd tests/go-e2e
-          go build 
-          cd ../..
+          go build
+      - run: |
+          cd tests/go-e2e-fileops
+          go build
+      - run: |
+          cd tests/go-e2e-env
+          go build
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
@@ -180,7 +181,9 @@ jobs:
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
-        run: for FILE in $(docker exec minikube ls /var/log/containers); do docker exec minikube cat /var/log/containers/$FILE; done
+        run: |
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   e2e_macos:
     runs-on: macos-12
@@ -199,23 +202,13 @@ jobs:
         with:
           key: macos-latest
           cache-on-failure: true
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 14
       - run: npm install express
       - uses: actions/setup-python@v3
       - run: pip3 install flask
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.18.0"
-      - run: |
-          cd tests/go-e2e
-          go build 
-          cd ../..
       - name: setup cluster requirements
         run: brew install docker colima kubectl
       - name: create cluster
-        run: colima start --kubernetes --network-address
+        run: colima start --kubernetes --network-address --cpu 3 --memory 8
       - name: download image
         uses: actions/download-artifact@v2
         with:
@@ -224,7 +217,22 @@ jobs:
       - name: load image
         run: docker load --input /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests
+        run: cargo test -p tests test_mirror_http_traffic
       - name: Collect container logs
         if: ${{ failure() }}
-        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do docker logs $CONTAINER; done
+        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
+
+  build_intellij_plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: zulu
+          java-version: 11
+      - name: Build Plugin
+        run: |
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew buildPlugin

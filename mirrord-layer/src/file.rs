@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
@@ -10,15 +10,18 @@ use std::{
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    ClientCodec, ClientMessage, CloseFileRequest, CloseFileResponse, FileRequest, FileResponse,
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
+    CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
+    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
 
-use crate::{common::ResponseChannel, error::LayerError};
+use crate::{
+    common::{ResponseChannel, ResponseDeque},
+    error::{LayerError, Result},
+};
 
 pub(crate) mod hooks;
 pub(crate) mod ops;
@@ -29,7 +32,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
 
-    let set = RegexSet::new(&[
+    let set = RegexSet::new([
         r".*\.so",
         r".*\.d",
         r".*\.pyc",
@@ -56,7 +59,6 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
-type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -126,10 +128,11 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
+    access_queue: ResponseDeque<AccessFileResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
-fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(), LayerError> {
+fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<()> {
     deque
         .pop_front()
         .ok_or(LayerError::SendErrorFileResponse)?
@@ -138,7 +141,7 @@ fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<(
 }
 
 impl FileHandler {
-    pub async fn handle_daemon_message(&mut self, message: FileResponse) -> Result<(), LayerError> {
+    pub(crate) async fn handle_daemon_message(&mut self, message: FileResponse) -> Result<()> {
         use FileResponse::*;
         match message {
             Open(open) => {
@@ -167,17 +170,21 @@ impl FileHandler {
                 debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
                 pop_send(&mut self.close_queue, close)
             }
+            Access(access) => {
+                debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
+                pop_send(&mut self.access_queue, access)
+            }
         }
     }
 
-    pub async fn handle_hook_message(
+    pub(crate) async fn handle_hook_message(
         &mut self,
         message: HookMessageFile,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         use HookMessageFile::*;
         match message {
             Open(open) => self.handle_hook_open(open, codec).await,
@@ -189,6 +196,7 @@ impl FileHandler {
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
+            Access(access) => self.handle_hook_access(access, codec).await,
         }
     }
 
@@ -199,7 +207,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Open {
             file_channel_tx,
             path,
@@ -224,7 +232,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let OpenRelative {
             relative_fd,
             path,
@@ -256,7 +264,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Read {
             fd,
             buffer_size,
@@ -287,7 +295,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Seek {
             fd,
             seek_from,
@@ -316,7 +324,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Write {
             fd,
             write_bytes,
@@ -343,7 +351,7 @@ impl FileHandler {
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
-    ) -> Result<(), LayerError> {
+    ) -> Result<()> {
         let Close {
             fd,
             file_channel_tx,
@@ -355,6 +363,33 @@ impl FileHandler {
         let close_file_request = CloseFileRequest { fd };
 
         let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
+
+    async fn handle_hook_access(
+        &mut self,
+        access: Access,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let Access {
+            pathname,
+            mode,
+            file_channel_tx,
+        } = access;
+
+        debug!(
+            "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
+            pathname, mode
+        );
+
+        self.access_queue.push_back(file_channel_tx);
+
+        let access_file_request = AccessFileRequest { pathname, mode };
+
+        let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
         codec.send(request).await.map_err(From::from)
     }
 }
@@ -402,6 +437,13 @@ pub struct Close {
 }
 
 #[derive(Debug)]
+pub struct Access {
+    pub(crate) pathname: PathBuf,
+    pub(crate) mode: u8,
+    pub(crate) file_channel_tx: ResponseChannel<AccessFileResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -409,4 +451,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Write(Write),
     Close(Close),
+    Access(Access),
 }

@@ -1,5 +1,3 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
 name = "mirrord-agent"
 version.workspace = true
@@ -21,7 +19,7 @@ containerd-client = {git = "https://github.com/containerd/rust-extensions", rev=
 tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
-pcap = { git = "https://github.com/aviramha/pcap.git", branch="make_codec_public", features =["capture-stream"] }
+pcap = { version = "0.10", features =["capture-stream"] }
 pnet = "0.31"
 nix.workspace = true
 clap.workspace = true
@@ -35,7 +33,12 @@ thiserror.workspace = true
 dns-lookup.workspace = true
 num-traits = "0.2"
 bollard = "0.13"
-tokio-util = "0.7"
+tokio-util.workspace = true
+rand.workspace = true
+streammap-ext.workspace = true
+iptables = "0.5"
+libc = "0.2"
+faccess = "0.2"
 
 [dev-dependencies]
 test_bin = "0.4"

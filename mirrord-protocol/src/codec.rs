@@ -10,7 +10,10 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    tcp::{DaemonTcp, LayerTcp},
+    tcp::{
+        outgoing::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        DaemonTcp, LayerTcp, LayerTcpSteal,
+    },
     ResponseError,
 };
 
@@ -128,6 +131,12 @@ pub struct CloseFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AccessFileRequest {
+    pub pathname: PathBuf,
+    pub mode: u8,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetEnvVarsRequest {
     pub env_vars_filter: HashSet<String>,
     pub env_vars_select: HashSet<String>,
@@ -141,6 +150,7 @@ pub enum FileRequest {
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
+    Access(AccessFileRequest),
 }
 
 /// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
@@ -159,6 +169,8 @@ pub struct GetAddrInfoRequest {
 pub enum ClientMessage {
     Close,
     Tcp(LayerTcp),
+    TcpSteal(LayerTcpSteal),
+    TcpOutgoing(LayerTcpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
@@ -189,6 +201,9 @@ pub struct WriteFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileResponse;
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AccessFileResponse;
+
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
 
@@ -199,6 +214,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
+    Access(RemoteResult<AccessFileResponse>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -260,6 +276,8 @@ impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
 pub enum DaemonMessage {
     Close,
     Tcp(DaemonTcp),
+    TcpSteal(DaemonTcp),
+    TcpOutgoing(DaemonTcpOutgoing),
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,

@@ -10,6 +10,93 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
 
+## 2.11.0
+### Added
+- New feature: mirrord now supports TCP traffic stealing instead of mirroring. You can enable it by passing `--tcp-steal` flag to cli.
+
+### Fixed
+- mirrord-layer: Go environment variables crash - run Go env setup in a different stack (should fix [#292](https://github.com/metalbear-co/mirrord/issues/292))
+
+### Changed
+- mirrord-layer: Add `#![feature(let_chains)]` to `lib.rs` to support new compiler version.
+
+## 2.10.1
+### Fixed
+- CI:Release - Fix typo that broke the build
+
+## 2.10.0
+### Added
+- New feature, [tcp outgoing traffic](https://github.com/metalbear-co/mirrord/issues/27). It's now possible to make requests to a remote host from the staging environment context. You can enable this feature setting the `MIRRORD_TCP_OUTGOING` variable to true, or using the `-o` option in mirrord-cli.
+- mirrord-cli add login command for logging in to metalbear-cloud
+- CI:Release - Provide zip and sha256 sums
+
+### Fixed
+- Environment variables feature on Golang programs. Issue #292 closed in #299
+
+## 2.9.1
+### Fixed
+- CI - set typescript version at 4.7.4 to fix broken release action
+
+## 2.9.0
+### Added
+- Support for Golang fileops
+- IntelliJ Extension for mirrord
+
+### Changed
+- mirrord-layer: Added common `Result` type to to reduce boilerplate, removed dependency of `anyhow` crate.
+- mirrord-layer: Split `LayerError` into `LayerError` and `HookError` to distinguish between errors that can be handled by the layer and errors that can be handled by the hook. (no more requiring libc errno for each error!). Closes [#247](https://github.com/metalbear-co/mirrord/issues/247)
+
+## 2.8.1
+
+### Fixed
+- CI - remove usage of ubuntu-18.04 machines (deprecated)
+
+## 2.8.0
+
+### Added
+- E2E - add basic env tests for bash scripts
+
+### Fixed
+- mirrord-agent - Update pcap library, hopefully will fix dropped packets (syn sometimes missed in e2e).
+- mirrord-agent/layer - Sometimes layer tries to connect to agent before it finsihed loading, even though pod is running. Added watching the log stream for a "ready" log message before attempting to connect.
+
+### Changed
+- E2E - describe all pods on failure and add file name to print of logs.
+- E2E - print timestamp of stdout/stderr of `TestProcess`.
+- E2E - Don't delete pod/service on failure, instead leave them for debugging.
+- mirrord-agent - Don't use `tokio::spawn` for spawning `sniffer` (or any other namespace changing task) to avoid namespace-clashing/undefined behavior. Possibly fixing bugs.
+- Change the version check on the VS Code extension to happen when mirrord is enabled rather than when the IDE starts up.
+
+
+## 2.7.0
+
+### Added
+- mirrord-layer: You can now pass `MIRRORD_AGENT_COMMUNICATION_TIMEOUT` as environment variable to control agent timeout.
+- Expand file system operations with `access` and `faccessat` hooks for absolute paths
+
+### Fixed
+- Ephemeral Containers didn't wait for the right condition, leading to timeouts in many cases.
+- mirrord-layer: Wait for the correct condition in job creation, resolving startup/timeout issues.
+- mirrord-layer: Add a sleep on closing local socket after receiving close to let local application respond before closing.
+- mirrord-layer: Fix DNS issue where `ai_addr` would not live long enough (breaking the remote DNS feature).
+
+### Changed
+- Removed unused dependencies from `mirrord-layer/Cargo.toml`. (Closes #220)
+- reduce e2e flakiness (add message sent on tcp listen subscription, wait for that message)
+- reduce e2e flakiness - increase timeout time
+- mirrord-layer - increase agent creation timeout (to reduce e2e flakiness on macOS)
+- E2E - Don't do file stuff on http traffic to reduce flakiness (doesn't add any coverage value..)
+- mirrord-layer - Change tcp mirror tunnel `select` to be biased so it flushes all data before closing it (better testing, reduces e2e flakiness)
+- E2E - unify resolve_node_host for linux and macOS with support for wsl provided Docker & Kubernetes
+- E2E - add `trace` for tests to have paramaterized arguments printed
+- mirrord-agent - add debug print of args to identify runs
+- E2E - remove double `--extract-path` parameter in tests
+- E2E - macOS colima start with 3 cores and 8GB of RAM.
+- E2E - Increase agent communication timeout to reduce flakiness.
+- mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
+- mirrord-layer - extract reused detours to seperate logic functions
+- E2E - macOS run only sanity http mirror traffic with Python
+
 ## 2.6.0
 
 ### Added
@@ -42,6 +129,7 @@ Use Kubernetes beta feature `Ephemeral Containers` to mirror traffic with the `-
 - E2E: Collect minikube logs and fix collecting container logs
 - E2E: macOS use colima instead of minikube.
 - Refactored `mirrord-layer/lib.rs` - no more passing many arguments! :)
+- Refactored `mirrord-layer/lib.rs` - remove `unwrap()` and propagate error using `Result`
 
 ### Fixed
 - Handle unwraps in fileops to gracefully exit and enable python fileops tests.

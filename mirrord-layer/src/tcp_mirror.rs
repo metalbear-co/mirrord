@@ -2,13 +2,14 @@ use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
+    time::Duration,
 };
 
-use anyhow::Result;
 use async_trait::async_trait;
+use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionID,
+    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, ClientMessage, ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,35 +17,24 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
-    error::LayerError,
+    error::{LayerError, Result},
     tcp::{Listen, TcpHandler},
 };
 
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
+    trace!("tcp_tunnel -> local_stream {:#?}", local_stream);
+
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
-
+    let mut remote_stream_closed = false;
     loop {
         select! {
-            bytes = remote_stream.next() => {
-                match bytes {
-                    Some(bytes) => {
-                        if let Err(fail) = local_stream.write_all(&bytes).await {
-                            error!("Failed writing to local_stream with {:#?}!", fail);
-                            break;
-                        }
-                    },
-                    None => {
-                        warn!("tcp_tunnel -> exiting due to remote stream closed!");
-                        break;
-                    }
-                }
-            },
             // Read the application's response from the socket and discard the data, so that the socket doesn't fill up.
             read = local_stream.read(&mut buffer) => {
                 match read {
@@ -61,7 +51,26 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                     },
                     Ok(_) => {}
                 }
+            },
+            bytes = remote_stream.next(), if !remote_stream_closed => {
+                match bytes {
+                    Some(bytes) => {
+                        if let Err(fail) = local_stream.write_all(&bytes).await {
+                            error!("Failed writing to local_stream with {:#?}!", fail);
+                            break;
+                        }
+                    },
+                    None => {
+                        // The remote stream has closed, sleep 1 second to let the local stream drain (i.e if a response is being sent)
+                        debug!("remote stream closed");
+                        remote_stream_closed = true;
 
+                    }
+                }
+            },
+            _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
+                warn!("tcp_tunnel -> exiting due to remote stream closed!");
+                break;
             }
         }
     }
@@ -70,7 +79,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
 
 struct Connection {
     writer: Sender<Vec<u8>>,
-    id: ConnectionID,
+    id: ConnectionId,
 }
 
 impl Eq for Connection {}
@@ -88,17 +97,17 @@ impl Hash for Connection {
 }
 
 impl Connection {
-    pub fn new(id: ConnectionID, writer: Sender<Vec<u8>>) -> Self {
+    pub fn new(id: ConnectionId, writer: Sender<Vec<u8>>) -> Self {
         Self { id, writer }
     }
 
-    pub async fn write(&mut self, data: Vec<u8>) -> Result<(), LayerError> {
+    pub async fn write(&mut self, data: Vec<u8>) -> Result<()> {
         self.writer.send(data).await.map_err(From::from)
     }
 }
 
-impl Borrow<ConnectionID> for Connection {
-    fn borrow(&self) -> &ConnectionID {
+impl Borrow<ConnectionId> for Connection {
+    fn borrow(&self) -> &ConnectionId {
         &self.id
     }
 }
@@ -113,10 +122,7 @@ pub struct TcpMirrorHandler {
 #[async_trait]
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
-    async fn handle_new_connection(
-        &mut self,
-        tcp_connection: NewTcpConnection,
-    ) -> Result<(), LayerError> {
+    async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
         debug!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
@@ -132,8 +138,8 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle New Data messages
-    async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        debug!("handle_new_data -> id {:#?}", data.connection_id);
+    async fn handle_new_data(&mut self, data: TcpData) -> Result<()> {
+        trace!("handle_new_data -> id {:#?}", data.connection_id);
 
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
@@ -158,8 +164,8 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle connection close
-    fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
-        debug!("handle_close -> close {:#?}", close);
+    fn handle_close(&mut self, close: TcpClose) -> Result<()> {
+        trace!("handle_close -> close {:#?}", close);
 
         let TcpClose { connection_id } = close;
 
@@ -167,7 +173,7 @@ impl TcpHandler for TcpMirrorHandler {
         self.connections
             .remove(&connection_id)
             .then_some(())
-            .ok_or(LayerError::ConnectionIdNotFound(connection_id))
+            .ok_or(LayerError::NoConnectionId(connection_id))
     }
 
     fn ports(&self) -> &HashSet<Listen> {
@@ -176,5 +182,28 @@ impl TcpHandler for TcpMirrorHandler {
 
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
+    }
+
+    async fn handle_listen(
+        &mut self,
+        listen: Listen,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        debug!("handle_listen -> listen {:#?}", listen);
+
+        let port = listen.requested_port;
+
+        self.ports_mut()
+            .insert(listen)
+            .then_some(())
+            .ok_or(LayerError::ListenAlreadyExists)?;
+
+        codec
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+            .await
+            .map_err(From::from)
     }
 }

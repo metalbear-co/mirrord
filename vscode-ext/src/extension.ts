@@ -12,6 +12,7 @@ const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = 
 	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
 };
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
+const versionCheckInterval = 1000 * 60 * 3;
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
@@ -58,12 +59,19 @@ async function changeSettings() {
 	});
 }
 
-async function toggle(state: vscode.Memento, button: vscode.StatusBarItem) {
+
+async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBarItem) {
+	let state = context.globalState;
 	if (state.get('enabled')) {
 		// vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 		state.update('enabled', false);
 		button.text = 'Enable mirrord';
 	} else {
+		let lastChecked = state.get('lastChecked', 0);
+		if (lastChecked < Date.now() - versionCheckInterval) {
+			checkVersion(context.extension.packageJSON.version);
+			state.update('lastChecked', Date.now());
+		}
 		state.update('enabled', true);
 		button.text = 'Disable mirrord';
 	}
@@ -96,8 +104,6 @@ async function checkVersion(version: string) {
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-	// TODO: Download mirrord according to platform
-	checkVersion(context.extension.packageJSON.version);
 	globalContext = context;
 
 	context.globalState.update('enabled', false);
@@ -106,7 +112,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	const toggleCommandId = 'mirrord.toggleMirroring';
 	context.subscriptions.push(vscode.commands.registerCommand(toggleCommandId, async function () {
-		toggle(context.globalState, buttons.toggle);
+		toggle(context, buttons.toggle);
 	}));
 
 	buttons.toggle.text = 'Enable mirrord';

@@ -1,5 +1,3 @@
-cargo-features = ["workspace-inheritance"]
-
 [package]
 name = "tests"
 version = "0.1.0"
@@ -24,3 +22,6 @@ tokio-util = "0.7"
 rand = "*"
 futures-util = "*"
 tempdir = "*"
+wsl = "0.1"
+chrono = "0.4"
+bytes = "1"

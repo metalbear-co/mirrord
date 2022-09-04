@@ -7,15 +7,16 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use errno::{set_errno, Errno};
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
 
-pub(super) mod hooks;
-mod ops;
+use crate::error::{HookError, HookResult as Result};
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<Socket>>>> =
+pub(super) mod hooks;
+pub(crate) mod ops;
+
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
@@ -65,11 +66,12 @@ pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
     /// Local address it's connected from
-    local_address: SocketAddr,
+    mirror_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
+    requested_port: Port,
     address: SocketAddr,
 }
 
@@ -89,7 +91,7 @@ impl Default for SocketState {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct Socket {
+pub struct UserSocket {
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -97,7 +99,7 @@ pub struct Socket {
 }
 
 #[inline]
-fn is_ignored_port(port: Port) -> bool {
+const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 
@@ -107,21 +109,27 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> c_int {
+) -> Result<()> {
     if address.is_null() {
-        return 0;
+        Ok(())
+    } else if address_len.is_null() {
+        Err(HookError::NullPointer)
+    } else {
+        let os_address = SockAddr::from(new_address);
+
+        unsafe {
+            let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
+
+            std::ptr::copy_nonoverlapping(
+                os_address.as_ptr() as *const u8,
+                address as *mut u8,
+                len,
+            );
+            *address_len = os_address.len();
+        }
+
+        Ok(())
     }
-    if address_len.is_null() {
-        set_errno(Errno(libc::EINVAL));
-        return -1;
-    }
-    let os_address = SockAddr::from(new_address);
-    unsafe {
-        let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
-        std::ptr::copy_nonoverlapping(os_address.as_ptr() as *const u8, address as *mut u8, len);
-        *address_len = os_address.len();
-    }
-    0
 }
 
 pub(crate) trait AddrInfoHintExt {

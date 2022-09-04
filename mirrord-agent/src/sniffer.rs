@@ -8,12 +8,9 @@ use std::{
 use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionID, Port,
+    ConnectionId, Port,
 };
-use pcap::{
-    stream::{PacketCodec, PacketStream},
-    Active, Capture, Device, Linktype,
-};
+use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -26,7 +23,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -80,7 +77,7 @@ impl Hash for TcpSessionIdentifier {
 
 #[derive(Debug)]
 struct TCPSession {
-    id: ConnectionID,
+    id: ConnectionId,
     clients: HashSet<ClientID>,
 }
 
@@ -98,10 +95,10 @@ fn is_closed_connection(flags: u16) -> bool {
 pub struct TcpManagerCodec;
 
 impl PacketCodec for TcpManagerCodec {
-    type Type = Vec<u8>;
+    type Item = Vec<u8>;
 
-    fn decode(&mut self, packet: pcap::Packet) -> Result<Self::Type, pcap::Error> {
-        Ok(packet.data.to_vec())
+    fn decode(&mut self, packet: pcap::Packet) -> Self::Item {
+        packet.data.to_vec()
     }
 }
 
@@ -128,6 +125,7 @@ fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
     Ok(capture)
 }
 
+#[derive(Debug)]
 struct TcpPacketData {
     bytes: Vec<u8>,
     flags: u16,
@@ -181,7 +179,7 @@ enum SnifferCommands {
     NewAgent(Sender<DaemonTcp>),
     Subscribe(Port),
     UnsubscribePort(Port),
-    UnsubscribeConnection(ConnectionID),
+    UnsubscribeConnection(ConnectionId),
     AgentClosed,
 }
 
@@ -229,7 +227,7 @@ impl TCPSnifferAPI {
 
     pub async fn connection_unsubscribe(
         &mut self,
-        connection_id: ConnectionID,
+        connection_id: ConnectionId,
     ) -> Result<(), AgentError> {
         self.sender
             .send(SnifferCommand {
@@ -273,8 +271,8 @@ pub struct TCPConnectionSniffer {
     stream: PacketStream<Active, TcpManagerCodec>,
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
-    connection_id_to_tcp_identifier: HashMap<ConnectionID, TcpSessionIdentifier>,
-    index_allocator: IndexAllocator<ConnectionID>,
+    connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
+    index_allocator: IndexAllocator<ConnectionId>,
 }
 
 impl TCPConnectionSniffer {
@@ -343,9 +341,15 @@ impl TCPConnectionSniffer {
         self.client_senders.insert(client_id, sender);
     }
 
-    fn handle_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
+    async fn handle_subscribe(
+        &mut self,
+        client_id: ClientID,
+        port: Port,
+    ) -> Result<(), AgentError> {
         self.port_subscriptions.subscribe(client_id, port);
-        self.update_sniffer()
+        self.update_sniffer()?;
+        self.send_message_to_client(&client_id, DaemonTcp::Subscribed)
+            .await
     }
 
     fn handle_client_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
@@ -356,7 +360,7 @@ impl TCPConnectionSniffer {
 
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
-        let sniffer = self.stream.inner_mut();
+        let sniffer = self.stream.capture_mut();
 
         if ports.is_empty() {
             debug!("packet_worker -> empty ports, setting dummy bpf");
@@ -388,7 +392,7 @@ impl TCPConnectionSniffer {
                 client_id,
                 command: SnifferCommands::Subscribe(port),
             } => {
-                self.handle_subscribe(client_id, port)?;
+                self.handle_subscribe(client_id, port).await?;
             }
             SnifferCommand {
                 client_id,
@@ -424,20 +428,38 @@ impl TCPConnectionSniffer {
         clients: impl Iterator<Item = &ClientID>,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
+        trace!(
+            "TcpConnectionSniffer::send_message_to_clients -> message {:#?}",
+            message
+        );
+
         for client_id in clients {
-            if let Some(sender) = self.client_senders.get(client_id) {
-                sender.send(message.clone()).await.map_err(|err| {
-                    warn!("failed to send message to client {}", client_id);
-                    let _ = self.handle_client_closed(*client_id);
-                    err
-                })?;
-            }
+            self.send_message_to_client(client_id, message.clone())
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn send_message_to_client(
+        &mut self,
+        client_id: &ClientID,
+        message: DaemonTcp,
+    ) -> Result<(), AgentError> {
+        if let Some(sender) = self.client_senders.get(client_id) {
+            sender.send(message).await.map_err(|err| {
+                warn!("failed to send message to client {}", client_id);
+                let _ = self.handle_client_closed(*client_id);
+                err
+            })?;
         }
         Ok(())
     }
 
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        debug!("handle_packet -> handling eth_packet");
+        trace!(
+            "TcpConnectionSniffer::handle_packet -> eth_packet {:#?}",
+            eth_packet.len()
+        );
 
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,
@@ -447,16 +469,25 @@ impl TCPConnectionSniffer {
         let dest_port = identifier.dest_port;
         let source_port = identifier.source_port;
         let tcp_flags = tcp_packet.flags;
-        debug!("handle_packet");
+        debug!("TcpConnectionSniffer::handle_packet -> dest_port {:#?} | source_port {:#?} | tcp_flags {:#?}", dest_port, source_port, tcp_flags);
+
         let is_client_packet = self.qualified_port(dest_port);
-        debug!("qualified {is_client_packet:?}");
+        debug!(
+            "TcpConnectionSniffer::handle_packet -> is_client_packet {:#?}",
+            is_client_packet
+        );
+
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
+                    if tcp_flags == 24 {
+                        debug!("handle_packet -> wiwiwi {:?}", &tcp_packet);
+                    }
                     debug!("not new connection {tcp_flags:?}");
                     return Ok(());
                 }
+
                 if !is_client_packet {
                     return Ok(());
                 }
@@ -470,6 +501,10 @@ impl TCPConnectionSniffer {
                 };
 
                 let client_ids = self.port_subscriptions.get_topic_subscribers(dest_port);
+                debug!(
+                    "TcpConnectionSniffer::handle_packet -> client_ids {:#?}",
+                    client_ids
+                );
 
                 let message = DaemonTcp::NewConnection(NewTcpConnection {
                     destination_port: dest_port,
@@ -477,22 +512,38 @@ impl TCPConnectionSniffer {
                     connection_id: id,
                     address: IpAddr::V4(identifier.source_addr),
                 });
-                debug!("send message {client_ids:?}");
+                debug!(
+                    "TcpConnectionSniffer::handle_packet -> message {:#?}",
+                    message
+                );
+
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
+
                 self.connection_id_to_tcp_identifier.insert(id, identifier);
+
                 TCPSession {
                     id,
                     clients: client_ids.into_iter().collect(),
                 }
             }
         };
-        debug!("tcp session {session:?}");
+        debug!(
+            "TcpConnectionSniffer::handle_packet -> session {:#?}",
+            session
+        );
+
         if is_client_packet && !tcp_packet.bytes.is_empty() {
             let message = DaemonTcp::Data(TcpData {
                 bytes: tcp_packet.bytes,
                 connection_id: session.id,
             });
+
+            debug!(
+                "TcpConnectionSniffer::handle_packet -> message {:#?}",
+                message
+            );
+
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;
         }
@@ -503,12 +554,19 @@ impl TCPConnectionSniffer {
             let message = DaemonTcp::Close(TcpClose {
                 connection_id: session.id,
             });
+
+            debug!(
+                "TcpConnectionSniffer::handle_packet -> message {:#?}",
+                message
+            );
+
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;
         } else {
             self.sessions.insert(identifier, session);
         }
 
+        trace!("TcpConnectionSniffer::handle_packet -> finished");
         Ok(())
     }
 }
