@@ -16,7 +16,12 @@ const versionCheckInterval = 1000 * 60 * 3;
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-let k8sApi: CoreV1Api;
+
+function getK8sApi(): CoreV1Api {
+	let k8sConfig = new k8s.KubeConfig();
+	k8sConfig.loadFromDefault();
+	return k8sConfig.makeApiClient(k8s.CoreV1Api);
+}
 
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
@@ -38,7 +43,7 @@ async function changeSettings() {
 			const namespaces: {
 				response: any;
 				body: V1NamespaceList;
-			} = await k8sApi.listNamespace();
+			} = await getK8sApi().listNamespace();
 			const namespaceNames = namespaces.body.items.map(namespace => namespace.metadata!.name!);
 			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
 				if (namespaceName === undefined) {
@@ -100,9 +105,6 @@ async function checkVersion(version: string) {
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 	globalContext = context;
-	let k8sConfig = new k8s.KubeConfig();
-	k8sConfig.loadFromDefault();
-	k8sApi = k8sConfig.makeApiClient(k8s.CoreV1Api);
 
 	context.globalState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
@@ -142,6 +144,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
+		let k8sApi = getK8sApi();
 		// Get pods from kubectl and let user select one to mirror
 		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
 		let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
