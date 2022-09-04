@@ -21,7 +21,7 @@ pub enum ResponseError {
     RemoteIO(RemoteIOError),
 
     #[error("DNS resolve failed with return code`{0}`")]
-    DNSFailure(i32)
+    DnsFailure(i32),
 }
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
@@ -44,7 +44,7 @@ impl From<io::Error> for ResponseError {
 
 impl From<dns_lookup::LookupError> for ResponseError {
     fn from(error: dns_lookup::LookupError) -> Self {
-        Self::DNSFailure(error.error_num())
+        Self::DnsFailure(error.error_num())
     }
 }
 
