@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
 
 ## 2.11.0
 ### Added
@@ -94,7 +96,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
 - mirrord-layer - extract reused detours to seperate logic functions
 - E2E - macOS run only sanity http mirror traffic with Python
-
 
 ## 2.6.0
 
