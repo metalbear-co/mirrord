@@ -9,7 +9,7 @@ use std::{
 
 use actix_codec::Framed;
 use cli::parse_args;
-use dns::dns_worker;
+use dns::{dns_worker, DnsRequest};
 use error::AgentError;
 use file::FileManager;
 use futures::{
@@ -18,8 +18,7 @@ use futures::{
 };
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
-    AddrInfoHint, AddrInfoInternal, ClientMessage, DaemonCodec, DaemonMessage, GetAddrInfoRequest,
-    GetEnvVarsRequest, RemoteResult, ResponseError,
+    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, RemoteResult,
 };
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
 use tcp::outgoing::TcpOutgoingApi;
@@ -143,8 +142,7 @@ struct ClientConnectionHandler {
     tcp_stealer_sender: Sender<LayerTcpSteal>,
     tcp_stealer_receiver: Receiver<DaemonTcp>,
     tcp_outgoing_api: TcpOutgoingApi,
-    dns_sender: Sender<GetAddrInfoRequest>,
-    dns_receiver: Receiver<RemoteResult<Vec<AddrInfoInternal>>>,
+    dns_sender: Sender<DnsRequest>,
 }
 
 impl ClientConnectionHandler {
@@ -156,6 +154,7 @@ impl ClientConnectionHandler {
         ephemeral: bool,
         sniffer_command_sender: Sender<SnifferCommand>,
         cancel_token: CancellationToken,
+        dns_sender: Sender<DnsRequest>,
     ) -> Result<(), AgentError> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
@@ -169,15 +168,12 @@ impl ClientConnectionHandler {
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
-        let (dns_request_sender, dns_request_receiver) = mpsc::channel(CHANNEL_SIZE);
-        let (dns_response_sender, dns_response_receiver) = mpsc::channel(CHANNEL_SIZE);
+
         let _ = run_thread(steal_worker(
             tcp_steal_layer_receiver,
             tcp_steal_daemon_sender,
             pid,
         ));
-
-        let _ = run_thread(dns_worker(dns_request_receiver, dns_response_receiver, pid));
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
@@ -190,8 +186,7 @@ impl ClientConnectionHandler {
             tcp_stealer_receiver: tcp_steal_daemon_receiver,
             tcp_stealer_sender: tcp_steal_layer_sender,
             tcp_outgoing_api,
-            dns_receiver: dns_response_receiver,
-            dns_sender: dns_request_sender,
+            dns_sender,
         };
 
         client_handler.handle_loop(cancel_token).await?;
@@ -277,7 +272,12 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
-                let response = get_addr_info(request);
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let dns_request = DnsRequest::new(request, tx);
+                self.dns_sender.send(dns_request).await?;
+
+                trace!("waiting for answer from dns thread");
+                let response = async move { rx.blocking_recv() }.await?;
 
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
@@ -330,7 +330,8 @@ async fn start_agent() -> Result<(), AgentError> {
     // Cancel all other tasks on exit
     let cancel_guard = cancellation_token.clone().drop_guard();
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
-
+    let (dns_sender, dns_receiver) = mpsc::channel(1000);
+    let _ = run_thread(dns_worker(dns_receiver, pid));
     let sniffer_task = run_thread(TCPConnectionSniffer::start(
         sniffer_command_rx,
         pid,
@@ -350,8 +351,9 @@ async fn start_agent() -> Result<(), AgentError> {
                     state.clients.insert(client_id);
                     let sniffer_command_tx = sniffer_command_tx.clone();
                     let cancellation_token = cancellation_token.clone();
+                    let dns_sender = dns_sender.clone();
                     let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::start(client_id, stream, pid, args.ephemeral_container, sniffer_command_tx, cancellation_token).await {
+                        match ClientConnectionHandler::start(client_id, stream, pid, args.ephemeral_container, sniffer_command_tx, cancellation_token, dns_sender).await {
                             Ok(_) => {
                                 debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
                             }

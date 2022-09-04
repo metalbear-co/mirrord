@@ -1,4 +1,27 @@
-use mirrord_protocol::GetAddrInfoRequest;
+use std::path::PathBuf;
+
+use mirrord_protocol::{
+    AddrInfoHint, AddrInfoInternal, GetAddrInfoRequest, RemoteResult, ResponseError,
+};
+use tokio::sync::{mpsc::Receiver, oneshot::Sender};
+use tracing::{error, trace};
+
+use crate::{error::AgentError, runtime::set_namespace};
+
+#[derive(Debug)]
+pub struct DnsRequest {
+    request: GetAddrInfoRequest,
+    tx: Sender<RemoteResult<Vec<AddrInfoInternal>>>,
+}
+
+impl DnsRequest {
+    pub fn new(
+        request: GetAddrInfoRequest,
+        tx: Sender<RemoteResult<Vec<AddrInfoInternal>>>,
+    ) -> Self {
+        Self { request, tx }
+    }
+}
 
 trait AddrInfoHintExt {
     fn into_lookup(self) -> dns_lookup::AddrInfoHints;
@@ -45,11 +68,7 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
     .and_then(std::convert::identity)
 }
 
-pub async fn dns_worker(
-    rx: Receiver<GetAddrInfoRequest>,
-    tx: Sender<RemoteResult<Vec<AddrInfoInternal>>>,
-    pid: Option<u64>,
-) -> Result<()> {
+pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<(), AgentError> {
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
             .join(PathBuf::from(pid.to_string()))
@@ -58,10 +77,11 @@ pub async fn dns_worker(
         set_namespace(namespace)?;
     };
 
-    loop {
-        let request = rx.recv().await?;
+    while let Some(DnsRequest { request, tx }) = rx.recv().await {
         let result = get_addr_info(request);
-        tx.send(result).await?;
+        if let Err(result) = tx.send(result) {
+            error!("couldn't send result to caller {result:?}");
+        }
     }
 
     Ok(())
