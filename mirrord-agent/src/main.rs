@@ -277,7 +277,7 @@ impl ClientConnectionHandler {
                 self.dns_sender.send(dns_request).await?;
 
                 trace!("waiting for answer from dns thread");
-                let response = async move { rx.blocking_recv() }.await?;
+                let response = rx.await?;
 
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
