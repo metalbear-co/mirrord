@@ -63,7 +63,9 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
             // Now we can flatten and transpose the whole thing into this.
             .collect::<Result<Vec<AddrInfoInternal>, _>>()
     })
-    .map_err(|fail| ResponseError::from(std::io::Error::from(fail)))
+    // We can't use the generic `io::Error` since it doesn't return the correct error code to the
+    // layer.
+    .map_err(ResponseError::from)
     // Stable rust equivalent to `Result::flatten`.
     .and_then(std::convert::identity)
 }
