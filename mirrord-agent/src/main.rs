@@ -9,6 +9,7 @@ use std::{
 
 use actix_codec::Framed;
 use cli::parse_args;
+use dns::dns_worker;
 use error::AgentError;
 use file::FileManager;
 use futures::{
@@ -39,6 +40,7 @@ use crate::{
 };
 
 mod cli;
+mod dns;
 mod error;
 mod file;
 mod runtime;
@@ -46,21 +48,6 @@ mod sniffer;
 mod steal;
 mod tcp;
 mod util;
-
-trait AddrInfoHintExt {
-    fn into_lookup(self) -> dns_lookup::AddrInfoHints;
-}
-
-impl AddrInfoHintExt for AddrInfoHint {
-    fn into_lookup(self) -> dns_lookup::AddrInfoHints {
-        dns_lookup::AddrInfoHints {
-            socktype: self.ai_socktype,
-            protocol: self.ai_protocol,
-            address: self.ai_family,
-            flags: self.ai_flags,
-        }
-    }
-}
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -145,36 +132,6 @@ async fn select_env_vars(
     Ok(env_vars)
 }
 
-/// Handles the `getaddrinfo` call from mirrord-layer.
-fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoInternal>> {
-    trace!("get_addr_info -> request {:#?}", request);
-
-    let GetAddrInfoRequest {
-        node,
-        service,
-        hints,
-    } = request;
-
-    dns_lookup::getaddrinfo(
-        node.as_deref(),
-        service.as_deref(),
-        hints.map(|h| h.into_lookup()),
-    )
-    .map(|addrinfo_iter| {
-        addrinfo_iter
-            .map(|result| {
-                // Each element in the iterator is actually a `Result<AddrInfo, E>`, so
-                // we have to `map` individually, then convert to one of our errors.
-                result.map(Into::into).map_err(From::from)
-            })
-            // Now we can flatten and transpose the whole thing into this.
-            .collect::<Result<Vec<AddrInfoInternal>, _>>()
-    })
-    .map_err(|fail| ResponseError::from(std::io::Error::from(fail)))
-    // Stable rust equivalent to `Result::flatten`.
-    .and_then(std::convert::identity)
-}
-
 struct ClientConnectionHandler {
     /// Used to prevent closing the main loop (`handle_loop`) when any request is done (tcp
     /// outgoing feature). Stays `true` until `agent` receives an `ExitRequest`.
@@ -186,6 +143,8 @@ struct ClientConnectionHandler {
     tcp_stealer_sender: Sender<LayerTcpSteal>,
     tcp_stealer_receiver: Receiver<DaemonTcp>,
     tcp_outgoing_api: TcpOutgoingApi,
+    dns_sender: Sender<GetAddrInfoRequest>,
+    dns_receiver: Receiver<RemoteResult<Vec<AddrInfoInternal>>>,
 }
 
 impl ClientConnectionHandler {
@@ -210,12 +169,15 @@ impl ClientConnectionHandler {
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
-
+        let (dns_request_sender, dns_request_receiver) = mpsc::channel(CHANNEL_SIZE);
+        let (dns_response_sender, dns_response_receiver) = mpsc::channel(CHANNEL_SIZE);
         let _ = run_thread(steal_worker(
             tcp_steal_layer_receiver,
             tcp_steal_daemon_sender,
             pid,
         ));
+
+        let _ = run_thread(dns_worker(dns_request_receiver, dns_response_receiver, pid));
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
 
@@ -228,6 +190,8 @@ impl ClientConnectionHandler {
             tcp_stealer_receiver: tcp_steal_daemon_receiver,
             tcp_stealer_sender: tcp_steal_layer_sender,
             tcp_outgoing_api,
+            dns_receiver: dns_response_receiver,
+            dns_sender: dns_request_sender,
         };
 
         client_handler.handle_loop(cancel_token).await?;
