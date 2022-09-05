@@ -445,18 +445,7 @@ pub(crate) mod hooks {
     /// Refer:
     ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
     ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-    pub(crate) fn enable_socket_hooks(
-        interceptor: &mut Interceptor,
-        binary: &str,
-        enabled_file_ops: bool,
-    ) {
-        ENABLED_FILE_OPS
-            .set(enabled_file_ops)
-            .map_err(|err| {
-                error!("Error setting ENABLED_FILE_OPS: {}", err);
-            })
-            .unwrap();
-
+    pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",
