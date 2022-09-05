@@ -1,14 +1,15 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod hooks {
-    use std::{arch::asm, sync::OnceLock};
+    use std::arch::asm;
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
     use tracing::{error, trace};
 
-    use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*};
-    static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+    use crate::{
+        close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*, ENABLED_FILE_OPS,
+    };
     /*
      * Reference for which syscalls are managed by the handlers:
      * SYS_openat: Syscall6
