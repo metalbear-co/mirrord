@@ -6,9 +6,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures::SinkExt;
 use mirrord_protocol::{
-    tcp::{NewTcpConnection, TcpClose, TcpData},
-    ConnectionId,
+    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    ClientCodec, ClientMessage, ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -122,7 +123,7 @@ pub struct TcpMirrorHandler {
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
-        trace!("handle_new_connection -> {:#?}", tcp_connection);
+        debug!("handle_new_connection -> {:#?}", tcp_connection);
 
         let stream = self.create_local_stream(&tcp_connection).await?;
 
@@ -172,7 +173,7 @@ impl TcpHandler for TcpMirrorHandler {
         self.connections
             .remove(&connection_id)
             .then_some(())
-            .ok_or(LayerError::ConnectionIdNotFound(connection_id))
+            .ok_or(LayerError::NoConnectionId(connection_id))
     }
 
     fn ports(&self) -> &HashSet<Listen> {
@@ -181,5 +182,28 @@ impl TcpHandler for TcpMirrorHandler {
 
     fn ports_mut(&mut self) -> &mut HashSet<Listen> {
         &mut self.ports
+    }
+
+    async fn handle_listen(
+        &mut self,
+        listen: Listen,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        debug!("handle_listen -> listen {:#?}", listen);
+
+        let port = listen.requested_port;
+
+        self.ports_mut()
+            .insert(listen)
+            .then_some(())
+            .ok_or(LayerError::ListenAlreadyExists)?;
+
+        codec
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+            .await
+            .map_err(From::from)
     }
 }

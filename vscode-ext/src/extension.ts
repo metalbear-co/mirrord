@@ -16,29 +16,72 @@ const versionCheckInterval = 1000 * 60 * 3;
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-let k8sApi: CoreV1Api;
+
+function getK8sApi(): CoreV1Api {
+	let k8sConfig = new k8s.KubeConfig();
+	k8sConfig.loadFromDefault();
+	return k8sConfig.makeApiClient(k8s.CoreV1Api);
+}
 
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
 	let impersonatedPodNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
 	let fileOps = globalContext.workspaceState.get<boolean>('fileOps', false);
+	let invalidCertificates = globalContext.workspaceState.get<boolean>('invalidCertificates', false);
+	let trafficStealing = globalContext.workspaceState.get<boolean>('trafficStealing', false);
+	let remoteDNS = globalContext.workspaceState.get<boolean>('remoteDNS', false);
+	let outgoingTraffic = globalContext.workspaceState.get<boolean>('outgoingTraffic', false);
+	let includeEnvironmentVariables = globalContext.workspaceState.get<string>('includeEnvironmentVariables', '');
+	let excludeEnvironmentVariables = globalContext.workspaceState.get<string>('excludeEnvironmentVariables', '');
+
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
 	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')',
-	'Toggle file operations (current: ' + (fileOps ? 'enabled' : 'disabled') + ')'];
+	'Toggle file operations (current: ' + (fileOps ? 'enabled' : 'disabled') + ')',
+	'Toggle invalid certificates (current: ' + (invalidCertificates ? 'enabled' : 'disabled') + ')',
+	'Toggle traffic stealing (current: ' + (trafficStealing ? 'enabled' : 'disabled') + ')',
+	'Toggle remote DNS (current: ' + (remoteDNS ? 'enabled' : 'disabled') + ')',
+	'Toggle outgoing traffic (current: ' + (outgoingTraffic ? 'enabled' : 'disabled') + ')',
+	'Include environment variables (current: ' + includeEnvironmentVariables + ')',
+	'Exclude environment variables (current: ' + excludeEnvironmentVariables + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
 			return;
 		}
-
-		if (setting.startsWith('Toggle file')) {
+		else if (setting.startsWith('Toggle file')) {
 			globalContext.workspaceState.update('fileOps', !fileOps);
 		}
-
-		if (setting.startsWith('Change namespace')) {
+		else if (setting.startsWith('Toggle invalid certificates')) {
+			globalContext.workspaceState.update('invalidCertificates', !invalidCertificates);
+		} 
+		else if (setting.startsWith('Toggle traffic stealing')) {
+			globalContext.workspaceState.update('trafficStealing', !trafficStealing);
+		}
+		else if (setting.startsWith('Toggle remote DNS')) {
+			globalContext.workspaceState.update('remoteDNS', !remoteDNS);
+		}
+		else if (setting.startsWith('Toggle outgoing traffic')) {
+			globalContext.workspaceState.update('outgoingTraffic', !outgoingTraffic);
+		}
+		else if (setting.startsWith('Include environment variables')) {
+			vscode.window.showInputBox({ prompt: 'Enter environment variables to include (separated by commas, * for all)', value: includeEnvironmentVariables }).then(async value => {
+				if (value === undefined) {
+					return;
+				}
+				globalContext.workspaceState.update('includeEnvironmentVariables', value);
+			});
+		}
+		else if (setting.startsWith('Exclude environment variables')) {
+			vscode.window.showInputBox({ prompt: 'Enter environment variables to exclude', value: excludeEnvironmentVariables }).then(async value => {
+				if (value === undefined) {
+					return;
+				}
+				globalContext.workspaceState.update('excludeEnvironmentVariables', value);
+			});
+		} else if (setting.startsWith('Change namespace')) {
 			const namespaces: {
 				response: any;
 				body: V1NamespaceList;
-			} = await k8sApi.listNamespace();
+			} = await getK8sApi().listNamespace();
 			const namespaceNames = namespaces.body.items.map(namespace => namespace.metadata!.name!);
 			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
 				if (namespaceName === undefined) {
@@ -100,9 +143,6 @@ async function checkVersion(version: string) {
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 	globalContext = context;
-	let k8sConfig = new k8s.KubeConfig();
-	k8sConfig.loadFromDefault();
-	k8sApi = k8sConfig.makeApiClient(k8s.CoreV1Api);
 
 	context.globalState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
@@ -142,6 +182,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
+		let k8sApi = getK8sApi();
 		// Get pods from kubectl and let user select one to mirror
 		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
 		let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
@@ -171,7 +212,20 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false')
+						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_ACCEPT_INVALID_CERTIFICATES': globalContext.workspaceState.get('acceptInvalidCertificates', 'false'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', 'false'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', 'false'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', 'false'),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_OVERRIDE_ENV_VARS_INCLUDE': globalContext.workspaceState.get('includeEnvironmentVariables', ''),
+						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE': globalContext.workspaceState.get('excludeEnvironmentVariables', ''),
+
 					}
 				};
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);

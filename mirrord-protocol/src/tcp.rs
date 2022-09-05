@@ -52,3 +52,12 @@ pub enum DaemonTcp {
     /// flakiness.
     Subscribed,
 }
+
+/// Messages related to Steal Tcp handler from client.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum LayerTcpSteal {
+    PortSubscribe(Port),
+    ConnectionUnsubscribe(ConnectionId),
+    PortUnsubscribe(Port),
+    Data(TcpData),
+}

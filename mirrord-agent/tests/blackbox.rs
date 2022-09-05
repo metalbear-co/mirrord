@@ -68,7 +68,7 @@ mod tests {
             .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
             .await
             .expect("port subscribe failed");
-        let _ = assert!(matches!(
+        assert!(matches!(
             codec
                 .next()
                 .await
@@ -82,7 +82,7 @@ mod tests {
         let port = test_conn.local_addr().unwrap().port();
         let test_data = [0, 3, 5];
         test_conn
-            .write(&test_data)
+            .write_all(&test_data)
             .await
             .expect("couldn't write test data");
         drop(test_conn);

@@ -1124,6 +1124,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptables"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c488ad8e743814579544d5a17bda107cd7a4009ade4d55ce94f4c3ec0281147"
+dependencies = [
+ "lazy_static",
+ "nix 0.23.1",
+ "regex",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1436,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "anyhow",
  "clap 3.2.19",
@@ -1451,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1460,11 +1471,14 @@ dependencies = [
  "dns-lookup",
  "faccess",
  "futures",
+ "iptables",
+ "libc",
  "mirrord-protocol",
- "nix",
+ "nix 0.24.2",
  "num-traits",
  "pcap",
  "pnet",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "streammap-ext",
@@ -1479,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1492,9 +1506,10 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "actix-codec",
+ "anyhow",
  "async-trait",
  "bytes",
  "ctor",
@@ -1508,21 +1523,24 @@ dependencies = [
  "libc",
  "mirrord-macro",
  "mirrord-protocol",
- "nix",
+ "nix 0.24.2",
  "rand 0.8.5",
  "regex",
  "serde_json",
  "socket2",
+ "stacker",
+ "streammap-ext",
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.3",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "mirrord-macro"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1531,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "2.9.1"
+version = "2.11.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1618,6 +1636,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e5a6ae77c8ee183dcbbba6150e2e6b9f3f4196a7666c02a715a95692ec1fa97"
 dependencies = [
  "jni-sys",
+]
+
+[[package]]
+name = "nix"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -2136,6 +2167,15 @@ checksum = "534b7a0e836e3c482d2693070f982e39e7611da9695d4d1f5a4b186b51faef0a"
 dependencies = [
  "bytes",
  "prost",
+]
+
+[[package]]
+name = "psm"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f446d0a6efba22928558c4fb4ce0b3fd6c89b0061343e390bf01a703742b8125"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -2671,6 +2711,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
+name = "stacker"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c886bd4480155fd3ef527d45e9ac8dd7118a898a46530b7b94c3e21866259fce"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "winapi",
+]
+
+[[package]]
 name = "streammap-ext"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2756,6 +2809,7 @@ checksum = "8e7a7de15468c6e65dd7db81cf3822c1ec94c71b2a3c1a976ea8e4696c91115c"
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "futures",
  "futures-util",
