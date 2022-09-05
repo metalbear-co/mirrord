@@ -686,10 +686,16 @@ mod tests {
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/files_ro.py"];
+        let python_command = vec![
+            "python3",
+            "-B",
+            "-m",
+            "unittest",
+            "-f",
+            "python-e2e/files_ro.py",
+        ];
 
         let mut args = vec!["--enable-ro-fs"];
-
 
         let mut process = run(
             python_command,
