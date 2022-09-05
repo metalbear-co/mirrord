@@ -4,6 +4,7 @@ import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import javax.swing.JCheckBox
@@ -39,10 +40,7 @@ class MirrordListener : ExecutionListener {
             val namespaces = try {
                 JBList(kubeDataProvider.getNamespaces())
             } catch (e: Exception) {
-                MirrordEnabler
-                        .notificationManager
-                        .createNotification("mirrord", "Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR)
-                        .notify(env.project)
+                notify("Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR, env.project)
                 return super.processStarting(executorId, env)
             }
             val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
@@ -50,14 +48,12 @@ class MirrordListener : ExecutionListener {
 
             // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
             if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE) {
-                val choseNamespace = namespaces.selectedValue
+                val choseNamespace = namespaces.selectedValue ?: return super.processStarting(executorId, env)
+
                 val pods = try {
                     JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
                 } catch (e: Exception) {
-                    MirrordEnabler
-                            .notificationManager
-                            .createNotification("mirrord", "Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR)
-                            .notify(env.project)
+                    notify("Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR, env.project)
                     return super.processStarting(executorId, env)
                 }
 
@@ -113,5 +109,12 @@ class MirrordListener : ExecutionListener {
         }
         val envMethod = env.runProfile.javaClass.getMethod(method)
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+    }
+
+    private fun notify(message: String, type: NotificationType, project: Project) {
+        MirrordEnabler
+                .notificationManager
+                .createNotification("mirrord", message, type)
+                .notify(project)
     }
 }
