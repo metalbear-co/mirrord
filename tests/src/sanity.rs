@@ -662,9 +662,34 @@ mod tests {
 
         let mut args = vec!["--enable-fs"];
 
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
-        }
+        let mut process = run(
+            python_command,
+            &service.pod_name,
+            Some(&service.namespace),
+            Some(args),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_python_fileops_stderr();
+    }
+
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn test_file_ops_ro(
+        #[future]
+        #[notrace]
+        service: EchoService,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/files_ro.py"];
+
+        let mut args = vec!["--enable-ro-fs"];
+
 
         let mut process = run(
             python_command,
