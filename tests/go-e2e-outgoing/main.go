@@ -1,6 +1,7 @@
 package main
 
 import (
+	"C"
 	"fmt"
 	"io"
 	"log"
@@ -8,6 +9,8 @@ import (
 )
 
 func main() {
+	fmt.Println(">> starting go")
+
 	res, err := http.Get("http://www.google.com/robots.txt")
 	if err != nil {
 		log.Fatal(err)

@@ -5,24 +5,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Launch golang file",
-      "type": "go",
-      "request": "launch",
-      "mode": "debug",
-      "program": "${file}",
-      "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
-        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        // "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
-        "MIRRORD_TCP_OUTGOING": "true",
-        "RUST_BACKTRACE": "short"
-      }
-    },
-    {
       "name": "Launch index.ts",
       "type": "node",
       "request": "launch",
@@ -41,20 +23,54 @@
       "type": "extensionHost"
     },
     {
+      "name": "main.go: Debug mirrord-layer",
+      "type": "lldb",
+      // "type": "go",
+      "request": "launch",
+      "program": "${fileDirname}/go-e2e-outgoing",
+      "env": {
+        // "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
+        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        "RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "http-echo-croetnr-5865796d4-spk8g",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "py-serv-deployment-686578cbfb-bh58v",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_TCP_OUTGOING": "true",
+        "RUST_BACKTRACE": "short"
+      }
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/node/app.mjs"],
+      // "args": ["${workspaceFolder}/tests/node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs"],
+      "args": ["${file}"],
       "sourceMap": {},
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "http-echo-croetnr-5865796d4-spk8g",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "py-serv-deployment-686578cbfb-bh58v",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
         "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_TCP_OUTGOING": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -65,15 +81,44 @@
       "program": "${workspaceFolder}/target/debug/sample-rust",
       "args": [],
       "cwd": "${workspaceFolder}",
-      "sourceMap": {},
+      "sourceMap": {
+        "/rustc/bb8c2f41174caceec00c28bc6c5c20ae9f9a175c": "/home/lanedraex/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust"
+      },
       "sourceLanguages": ["rust"],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
+        "RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
+        // "MIRRORD_REMOTE_DNS": "true",
+        "RUST_BACKTRACE": "short"
+      }
+    },
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "app.py: Debug mirrord-layer",
+      "program": "${workspaceFolder}/tests/python-e2e/app.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
+        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
+        "RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "nginx-deployment-66b6c48dd5-ggd9n",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_OVERRIDE_ENV_VARS": "true",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        // "MIRRORD_FILE_OPS": "true",
         "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }

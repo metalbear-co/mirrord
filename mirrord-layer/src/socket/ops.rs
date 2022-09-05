@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd> {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
     trace!(
         "socket -> domain {:#?} | type:{:#?} | protocol {:#?}",
         domain,
@@ -33,27 +33,9 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
-    let socket_type = if (type_ & libc::SOCK_STREAM) > 0 {
-        // TODO(alex) [high] 2022-08-31: Mark this socket as `TcpSocket` and insert it into the
-        // `TCP_SOCKETS` static.
-        //
-        // Or maybe just have these in the same place, but as enums inside `SOCKETS` type?
-        //
-        // Lastly, probably don't need to go too deep (like delving too much on working UDP), just
-        // make the DNS feature work.
-        Ok(todo!())
-    } else if (type_ & libc::SOCK_DGRAM) > 0 {
-        // TODO(alex) [high] 2022-08-31: Mark this socket as `UdpSocket` and insert it into the
-        // `UDP_SOCKETS` static.
-        Ok(todo!())
-    } else {
-        todo!()
-    }?;
+    let socket_kind = type_.try_into()?;
 
-    if (type_ & (libc::SOCK_STREAM | libc::SOCK_DGRAM)) <= 0 {
-        Err(HookError::BypassedType(type_))
-    } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
-        // TODO(alex) [high] 2022-08-31: go also uses a different `domain`.
+    if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(HookError::BypassedDomain(domain))
     } else {
         Ok(())
@@ -72,6 +54,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         type_,
         protocol,
         state: SocketState::default(),
+        kind: socket_kind,
     };
     debug!(
         "socket -> socket_fd {:#?} | new_socket {:#?}",
@@ -86,8 +69,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
-    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
+    debug!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
     let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
@@ -163,7 +146,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
     debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
@@ -216,11 +199,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
 /// that will be handled by `TcpOutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
-    trace!(
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
+    debug!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
-        sockfd,
-        remote_address
+        sockfd, remote_address
     );
 
     let mut user_socket_info = {
@@ -360,7 +342,7 @@ pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<()> {
+) -> HookResult<()> {
     trace!("getpeername -> sockfd {:#?}", sockfd);
 
     let remote_address = {
@@ -383,7 +365,7 @@ pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<()> {
+) -> HookResult<()> {
     trace!("getsockname -> sockfd {:#?}", sockfd);
 
     let local_address = {
@@ -412,7 +394,7 @@ pub(super) fn accept(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
-) -> Result<RawFd> {
+) -> HookResult<RawFd> {
     let (local_address, domain, protocol, type_) = {
         SOCKETS
             .lock()?
@@ -442,6 +424,7 @@ pub(super) fn accept(
             remote_address,
             mirror_address: local_address,
         }),
+        kind: type_.try_into()?,
     };
     fill_address(address, address_len, remote_address)?;
 
@@ -450,14 +433,14 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<()> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> HookResult<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
@@ -484,12 +467,10 @@ pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     hints: Option<AddrInfoHint>,
-) -> Result<*mut libc::addrinfo> {
-    trace!(
+) -> HookResult<*mut libc::addrinfo> {
+    debug!(
         "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
-        node,
-        service,
-        hints
+        node, service, hints
     );
 
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();

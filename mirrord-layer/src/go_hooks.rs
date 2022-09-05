@@ -449,6 +449,12 @@ pub(crate) mod hooks {
         binary: &str,
         enabled_file_ops: bool,
     ) {
+        trace!("ENABLE SOCKET HOOKS {:#?}", binary);
+        let symbols = frida_gum::Module::enumerate_symbols(binary);
+        symbols
+            .into_iter()
+            .for_each(|symbol| trace!("symbol {:#?}", symbol.name));
+
         ENABLED_FILE_OPS
             .set(enabled_file_ops)
             .map_err(|err| {
