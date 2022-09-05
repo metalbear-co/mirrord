@@ -6,6 +6,27 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- Add more configuration values to the VS Code extension.
+- Warning when using remote tcp without remote DNS (can cause ipv6/v4 issues). Closes [#327](https://github.com/metalbear-co/mirrord/issues/327)
+
+
+### Fixed
+- VS Code needed restart to apply kubectl config/context change. Closes [316](https://github.com/metalbear-co/mirrord/issues/316).
+- Fixed DNS feature causing crash on macOS on invalid DNS name due to mismatch of return codes. [#321](https://github.com/metalbear-co/mirrord/issues/321).
+- Fixed DNS feature not using impersonated container namespace, resulting with incorrect resolved DNS names.
+- mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
+- tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
+
+## 2.11.0
+### Added
+- New feature: mirrord now supports TCP traffic stealing instead of mirroring. You can enable it by passing `--tcp-steal` flag to cli.
+
+### Fixed
+- mirrord-layer: Go environment variables crash - run Go env setup in a different stack (should fix [#292](https://github.com/metalbear-co/mirrord/issues/292))
+
+### Changed
+- mirrord-layer: Add `#![feature(let_chains)]` to `lib.rs` to support new compiler version.
 
 ## 2.10.1
 ### Fixed
@@ -83,7 +104,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer - add `DetourGuard` to prevent unwanted calls to detours from our code.
 - mirrord-layer - extract reused detours to seperate logic functions
 - E2E - macOS run only sanity http mirror traffic with Python
-
 
 ## 2.6.0
 

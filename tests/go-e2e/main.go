@@ -28,7 +28,7 @@ func main() {
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
 		fmt.Println("GET: Request completed")
-		c.String(http.StatusOK, "OK")
+		c.String(http.StatusOK, "GET")
 	})
 
 	r.POST("/", func(c *gin.Context) {
@@ -37,18 +37,20 @@ func main() {
 			fmt.Printf("POST: Error getting raw data: %v\n", err)
 		}
 		fmt.Println("POST: Request completed")
-		c.String(http.StatusOK, "OK")
+		c.String(http.StatusOK, "POST")
 	})
 
 	r.PUT("/", func(c *gin.Context) {
 		fmt.Println("PUT: Request completed")
-		c.String(http.StatusOK, "OK")
+		c.String(http.StatusOK, "PUT")
 	})
 
 	r.DELETE("/", func(c *gin.Context) {
 		fmt.Println("DELETE: Request completed")
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		c.String(http.StatusOK, "OK")
+		defer func() {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}()
+		c.String(http.StatusOK, "DELETE")
 	})
 
 	fmt.Println("Server listening on port 80")

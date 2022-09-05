@@ -5,6 +5,7 @@
 #![feature(naked_functions)]
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
+#![feature(let_chains)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -29,6 +30,7 @@ use rand::Rng;
 use socket::SOCKETS;
 use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
 use tcp_mirror::TcpMirrorHandler;
+use tcp_steal::TcpStealHandler;
 use tokio::{
     runtime::Runtime,
     select,
@@ -52,6 +54,7 @@ mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
+mod tcp_steal;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -125,13 +128,17 @@ where
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+
+    pub tcp_steal_handler: TcpStealHandler,
+
+    steal: bool,
 }
 
 impl<T> Layer<T>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
-    fn new(codec: actix_codec::Framed<T, ClientCodec>) -> Layer<T> {
+    fn new(codec: actix_codec::Framed<T, ClientCodec>, steal: bool) -> Layer<T> {
         Self {
             codec,
             ping: false,
@@ -139,6 +146,8 @@ where
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
+            tcp_steal_handler: TcpStealHandler::default(),
+            steal,
         }
     }
 
@@ -150,10 +159,17 @@ where
 
         match hook_message {
             HookMessage::Tcp(message) => {
-                self.tcp_mirror_handler
-                    .handle_hook_message(message, &mut self.codec)
-                    .await
-                    .unwrap();
+                if self.steal {
+                    self.tcp_steal_handler
+                        .handle_hook_message(message, &mut self.codec)
+                        .await
+                        .unwrap();
+                } else {
+                    self.tcp_mirror_handler
+                        .handle_hook_message(message, &mut self.codec)
+                        .await
+                        .unwrap();
+                }
             }
             HookMessage::File(message) => {
                 self.file_handler
@@ -191,6 +207,9 @@ where
         match daemon_message {
             DaemonMessage::Tcp(message) => {
                 self.tcp_mirror_handler.handle_daemon_message(message).await
+            }
+            DaemonMessage::TcpSteal(message) => {
+                self.tcp_steal_handler.handle_daemon_message(message).await
             }
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::TcpOutgoing(message) => {
@@ -232,8 +251,9 @@ async fn thread_loop(
         impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
         ClientCodec,
     >,
+    steal: bool,
 ) {
-    let mut layer = Layer::new(codec);
+    let mut layer = Layer::new(codec, steal);
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -265,6 +285,9 @@ async fn thread_loop(
                         break;
                     }
                 }
+            },
+            Some(message) = layer.tcp_steal_handler.next() => {
+                layer.codec.send(message).await.unwrap();
             },
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
@@ -331,10 +354,10 @@ async fn start_layer_thread(
             } else {
                 panic!("unexpected response - expected env vars response {msg:?}");
             }
-        }
+        };
     }
 
-    let _ = tokio::spawn(thread_loop(receiver, codec));
+    let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.

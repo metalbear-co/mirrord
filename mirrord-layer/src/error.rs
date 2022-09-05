@@ -6,7 +6,7 @@ use libc::FILE;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::{error, warn};
+use tracing::{error, log::trace, warn};
 
 use super::HookMessage;
 
@@ -102,14 +102,17 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
     SendErrorGetAddrInfoResponse,
 
+    #[error("mirrord-layer: IO failed with `{0}`!")]
+    IO(#[from] std::io::Error),
+
     #[error("mirrord-layer: No connection found for id `{0}`!")]
     NoConnectionId(ConnectionId),
 
     #[error("mirrord-layer: Failed to find port `{0}`!")]
     PortNotFound(u16),
 
-    #[error("mirrord-layer: Failed to find connection_id `{0}`!")]
-    ConnectionIdNotFound(ConnectionId),
+    #[error("mirrord-layer: Failed inserting listen, already exists!")]
+    ListenAlreadyExists,
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
@@ -131,12 +134,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
     ContainerNotFound(String, String, String),
-
-    #[error("mirrord-layer: IO failed with `{0}`!")]
-    IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: Failed inserting listen, already exists!")]
-    ListenAlreadyExists,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -165,6 +162,18 @@ impl From<HookError> for i64 {
             | HookError::BypassedPort(_) => {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
+            HookError::ResponseError(ResponseError::DnsFailure(code)) => {
+                use dns_lookup::{LookupError, LookupErrorKind};
+                trace!("dns failed with code {}", code);
+                // Some of the codes of Unix doesn't match FreeBSD/macOS so we re-use the library
+                // to return valid codes.
+                let error = LookupError::new(code);
+                let code = match error.kind() {
+                    LookupErrorKind::IO => libc::EAI_SYSTEM,
+                    _ => error.error_num(),
+                };
+                return code.into();
+            }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
 
@@ -183,6 +192,7 @@ impl From<HookError> for i64 {
                 ResponseError::NotDirectory(_) => libc::ENOTDIR,
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
+                ResponseError::DnsFailure(_) => libc::EIO,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

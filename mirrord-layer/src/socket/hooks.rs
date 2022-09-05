@@ -398,6 +398,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         })
         .map_err(From::from);
 
+    trace!("result: {result:?}");
     result
 }
 
