@@ -5,7 +5,7 @@ pub(crate) mod hooks {
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
-    use tracing::{error, trace};
+    use tracing::trace;
 
     use crate::{
         close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*, ENABLED_FILE_OPS,
