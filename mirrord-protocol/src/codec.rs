@@ -53,8 +53,7 @@ pub struct OpenOptionsInternal {
 
 impl OpenOptionsInternal {
     pub fn is_read_only(&self) -> bool {
-        return self.read
-            && !(self.write || self.append || self.truncate || self.create || self.create_new);
+        self.read && !(self.write || self.append || self.truncate || self.create || self.create_new)
     }
 }
 
