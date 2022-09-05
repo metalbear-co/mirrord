@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Fixed DNS feature not using impersonated container namespace, resulting with incorrect resolved DNS names.
 - mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
 - tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
+- Go Hooks - use global ENABLED_FILE_OPS
 
 ## 2.11.0
 ### Added
