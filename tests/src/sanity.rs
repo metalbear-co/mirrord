@@ -923,29 +923,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_outgoing_traffic_single_request_local_dns(#[future] service: EchoService) {
-        let service = service.await;
-        let node_command = vec![
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
-        ];
-        let mirrord_args = vec!["-o"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
-
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_make_request_after_listen(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mirrord_args = vec!["-o"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
