@@ -9,13 +9,15 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 class FileOpsTest(unittest.TestCase):
     def test_read_only(self):
         """
-        Overwrite a file that exists in the container, then read it verifying we didn't actually overwrite it.
+        Check that we can't open the file for writing because it opens it locally and it doesn't exist
+        then make sure we can still read it remotely.
         """
-        with open("/app/test.txt", "wb") as f:
-            f.write(b"nothing")
+        self.assertRaises(FileNotFoundError, open("/app/test.txt", "wb"))
         with open("/app/test.txt", "r") as f:
             f.seek(0)
             self.assertEqual(f.readline(), TEXT)
+        self.assertRaises(FileNotFoundError, open("/app/test.txt", "wb"))
+
 
 
 if __name__ == "__main__":
