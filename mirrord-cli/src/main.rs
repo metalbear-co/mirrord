@@ -6,7 +6,7 @@ use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use semver::Version;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
@@ -76,6 +76,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
+    if args.enable_tcp_outgoing && !args.remote_dns {
+        warn!("TCP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
+    }
+
     std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.pod_name.clone());
 
     if let Some(namespace) = &args.pod_namespace {
