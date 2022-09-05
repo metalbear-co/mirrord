@@ -43,7 +43,7 @@ pub(super) struct ExecArgs {
     #[clap(short = 'f', long, value_parser)]
     pub enable_fs: bool,
 
-    /// Enable file read only
+    /// Enable file read only - writes will occur locally
     #[clap(long, value_parser)]
     pub enable_ro_fs: bool,
 
