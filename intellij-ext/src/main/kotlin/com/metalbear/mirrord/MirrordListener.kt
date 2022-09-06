@@ -4,7 +4,6 @@ import com.intellij.execution.ExecutionListener
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import javax.swing.JCheckBox
@@ -40,20 +39,20 @@ class MirrordListener : ExecutionListener {
             val namespaces = try {
                 JBList(kubeDataProvider.getNamespaces())
             } catch (e: Exception) {
-                notify("Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR, env.project)
+                MirrordEnabler.notify("Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR, env.project)
                 return super.processStarting(executorId, env)
             }
             val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
             val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
             // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
-            if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE) {
-                val choseNamespace = namespaces.selectedValue ?: return super.processStarting(executorId, env)
+            if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
+                val choseNamespace = namespaces.selectedValue
 
                 val pods = try {
                     JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
                 } catch (e: Exception) {
-                    notify("Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR, env.project)
+                    MirrordEnabler.notify("Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR, env.project)
                     return super.processStarting(executorId, env)
                 }
 
@@ -68,7 +67,7 @@ class MirrordListener : ExecutionListener {
                 val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
                 // SUCCESS: set the respective environment variables
-                if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && pods.selectedValue != null) {
+                if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
                     mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = pods.selectedValue as String
                     mirrordEnv["MIRRORD_FILE_OPS"] = fileOpsCheckbox.isSelected.toString()
                     mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
@@ -105,12 +104,5 @@ class MirrordListener : ExecutionListener {
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
         val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
-    }
-
-    private fun notify(message: String, type: NotificationType, project: Project) {
-        MirrordEnabler
-                .notificationManager
-                .createNotification("mirrord", message, type)
-                .notify(project)
     }
 }

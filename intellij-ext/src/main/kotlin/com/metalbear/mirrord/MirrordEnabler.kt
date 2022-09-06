@@ -5,13 +5,20 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.project.Project
 
 @Suppress("DialogTitleCapitalization")
 class MirrordEnabler : ToggleAction() {
     companion object {
-        val notificationManager: NotificationGroup = NotificationGroupManager
-                    .getInstance()
-                    .getNotificationGroup("mirrord Notification Handler")
+        private val notificationManager: NotificationGroup = NotificationGroupManager
+                .getInstance()
+                .getNotificationGroup("mirrord Notification Handler")
+
+        fun notify(message: String, type: NotificationType, project: Project?) {
+            notificationManager
+                    .createNotification("mirrord", message, type)
+                    .notify(project)
+        }
     }
 
 
@@ -21,14 +28,9 @@ class MirrordEnabler : ToggleAction() {
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
         if (state) {
-            notificationManager
-                    .createNotification("mirrord", "mirrord enabled", NotificationType.INFORMATION)
-                    .notify(e.project)
-
+            notify("mirrord enabled", NotificationType.INFORMATION, e.project)
         } else {
-            notificationManager
-                    .createNotification("mirrord", "mirrord disabled", NotificationType.INFORMATION)
-                    .notify(e.project)
+            notify("mirrord disabled", NotificationType.INFORMATION, e.project)
         }
 
         MirrordListener.enabled = state
