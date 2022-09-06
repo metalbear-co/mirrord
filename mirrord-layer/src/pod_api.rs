@@ -21,6 +21,7 @@ use crate::{
 struct EnvVarGuard {
     library: String,
 }
+
 impl EnvVarGuard {
     #[cfg(target_os = "linux")]
     const ENV_VAR: &str = "LD_PRELOAD";
@@ -33,6 +34,7 @@ impl EnvVarGuard {
         Self { library }
     }
 }
+
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
