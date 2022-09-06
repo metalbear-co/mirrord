@@ -40,7 +40,12 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("MIRRORD_LAYER_FILE");
     let library_path = std::path::Path::new(library_file);
 
-    let extension = library_path.extension().unwrap().to_str().unwrap().trim_matches(['"', '\"'].as_ref());
+    let extension = library_path
+        .extension()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .trim_matches(['"', '\"'].as_ref());
     let file_name = format!(
         "{}-libmirrord_layer.{extension:?}",
         Alphanumeric
