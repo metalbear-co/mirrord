@@ -3,7 +3,7 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::ReadFileResponse;
+use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse};
 use tracing::{error, trace};
 
 use super::{
@@ -13,7 +13,7 @@ use super::{
 use crate::{
     error::HookError,
     file::ops::{access, lseek, open, read, write},
-    replace,
+    replace, ENABLED_FILE_RO_OPS,
 };
 
 /// Hook for `libc::open`.
@@ -41,7 +41,13 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         FN_OPEN(raw_path, open_flags)
     } else {
-        let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+        let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+        let read_only = ENABLED_FILE_RO_OPS
+            .get()
+            .expect("Should be set during initialization!");
+        if *read_only && !open_options.is_read_only() {
+            return FN_OPEN(raw_path, open_flags);
+        }
         let open_result = open(path, open_options);
 
         let (Ok(result) | Err(result)) = open_result.map_err(From::from);
@@ -80,7 +86,14 @@ pub(super) unsafe extern "C" fn fopen_detour(
     if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
         FN_FOPEN(raw_path, raw_mode)
     } else {
-        let open_options = OpenOptionsInternalExt::from_mode(mode);
+        let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
+
+        let read_only = ENABLED_FILE_RO_OPS
+            .get()
+            .expect("Should be set during initialization!");
+        if *read_only && !open_options.is_read_only() {
+            return FN_FOPEN(raw_path, raw_mode);
+        }
         let fopen_result = fopen(path, open_options);
 
         let (Ok(result) | Err(result)) = fopen_result.map_err(From::from);
@@ -110,6 +123,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 
     if let Some((local_fd, remote_fd)) = open_file {
         let open_options = OpenOptionsInternalExt::from_mode(mode);
+
         let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
 
         let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
