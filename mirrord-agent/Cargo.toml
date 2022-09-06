@@ -39,6 +39,7 @@ streammap-ext.workspace = true
 iptables = "0.5"
 libc = "0.2"
 faccess = "0.2"
+bytes = "1.2"
 
 [dev-dependencies]
 test_bin = "0.4"

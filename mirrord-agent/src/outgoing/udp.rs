@@ -5,13 +5,19 @@ use std::{
     thread,
 };
 
+use bytes::BytesMut;
+use futures::{
+    prelude::*,
+    stream::{SplitSink, SplitStream},
+};
 use mirrord_protocol::{
     outgoing::{udp::*, *},
     ConnectionId, ResponseError,
 };
 use streammap_ext::StreamMap;
 use tokio::{
-    io::AsyncWriteExt,
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         UdpSocket,
@@ -19,9 +25,12 @@ use tokio::{
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tokio_stream::StreamExt;
-use tokio_util::io::ReaderStream;
-use tracing::{trace, warn};
+use tokio_util::{
+    codec::{BytesCodec, Decoder, Encoder},
+    io::ReaderStream,
+    udp::UdpFramed,
+};
+use tracing::{debug, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -46,13 +55,47 @@ pub(crate) struct UdpOutgoingApi {
 }
 
 async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+    trace!("connect -> remote_address {:#?}", remote_address);
+
+    let mut resolv_conf_contents = String::with_capacity(1024);
+    let mut resolv_conf = File::open("/etc/resolv.conf").await.unwrap();
+    debug!("connect -> resolv_conf {:#?}", resolv_conf);
+    resolv_conf
+        .read_to_string(&mut resolv_conf_contents)
+        .await
+        .unwrap();
+
+    debug!(
+        "connect -> resolv_conf_contents {:#?}",
+        resolv_conf_contents
+    );
+    let nameserver = resolv_conf_contents
+        .lines()
+        .last()
+        .unwrap()
+        .split_whitespace()
+        .last()
+        .unwrap();
+
+    // let dns_address = match remote_address {
+    //     std::net::SocketAddr::V4(_) => {
+    //         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), remote_address.port())
+    //     }
+    //     std::net::SocketAddr::V6(_) => {
+    //         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), remote_address.port())
+    //     }
+    // };
+
     let mirror_address = match remote_address {
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
     };
 
     let mirror_socket = UdpSocket::bind(mirror_address).await?;
-    mirror_socket.connect(remote_address).await?;
+    // mirror_socket.connect(dns_address).await?;
+    mirror_socket
+        .connect(format!("{nameserver}:{}", remote_address.port()))
+        .await?;
 
     Ok(mirror_socket)
 }
@@ -89,7 +132,16 @@ impl UdpOutgoingApi {
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
-        let mut mirrors: HashMap<ConnectionId, UdpSocket> = HashMap::default();
+        let mut writers: HashMap<
+            ConnectionId,
+            (
+                SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
+                SocketAddr,
+            ),
+        > = HashMap::default();
+
+        let mut readers: StreamMap<ConnectionId, SplitStream<UdpFramed<BytesCodec>>> =
+            StreamMap::default();
 
         loop {
             select! {
@@ -97,7 +149,7 @@ impl UdpOutgoingApi {
 
                 // [layer] -> [agent]
                 Some(layer_message) = layer_rx.recv() => {
-                    trace!("interceptor_task -> layer_message {:?}", layer_message);
+                    trace!("udp: interceptor_task -> layer_message {:?}", layer_message);
                     match layer_message {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
@@ -110,7 +162,16 @@ impl UdpOutgoingApi {
                                             .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
                                             .unwrap() as ConnectionId;
 
-                                        mirrors.insert(connection_id, mirror_socket);
+                                        let peer_address = mirror_socket.peer_addr().unwrap();
+
+                                        let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
+                                        let (sink, stream): (
+                                            SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
+                                            SplitStream<UdpFramed<BytesCodec>>,
+                                        ) = framed.split();
+
+                                        writers.insert(connection_id, (sink, peer_address));
+                                        readers.insert(connection_id, stream);
 
                                         DaemonConnect {
                                             connection_id,
@@ -127,12 +188,12 @@ impl UdpOutgoingApi {
                             connection_id,
                             bytes,
                         }) => {
-                            let daemon_write = match mirrors
+                            let daemon_write = match writers
                                 .get_mut(&connection_id)
                                 .ok_or(ResponseError::NotFound(connection_id as usize))
                             {
-                                Ok(mirror) => mirror
-                                    .send(&bytes)
+                                Ok((mirror, remote_address)) => mirror
+                                    .send((BytesMut::from(bytes.as_slice()), *remote_address))
                                     .await
                                     .map_err(ResponseError::from),
                                 Err(fail) => Err(fail),
@@ -140,7 +201,8 @@ impl UdpOutgoingApi {
 
                             if let Err(fail) = daemon_write {
                                 warn!("LayerUdpOutgoing::Write -> Failed with {:#?}", fail);
-                                mirrors.remove(&connection_id);
+                                writers.remove(&connection_id);
+                                readers.remove(&connection_id);
 
                                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                                 daemon_tx.send(daemon_message).await?
@@ -149,7 +211,8 @@ impl UdpOutgoingApi {
                         // [layer] -> [agent]
                         // `layer` closed their interceptor stream.
                         LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
-                            mirrors.remove(connection_id);
+                            writers.remove(&connection_id);
+                            readers.remove(&connection_id);
                         }
                     }
                 }
@@ -166,14 +229,15 @@ impl UdpOutgoingApi {
                         Some(read) => {
                             let daemon_read = read
                                 .map_err(ResponseError::from)
-                                .map(|bytes| DaemonRead { connection_id, bytes: bytes.to_vec() });
+                                .map(|(bytes, remote_address)| DaemonRead { connection_id, bytes: bytes.to_vec() });
 
                             let daemon_message = DaemonUdpOutgoing::Read(daemon_read);
                             daemon_tx.send(daemon_message).await?
                         }
                         None => {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
-                            mirrors.remove(&connection_id);
+                            writers.remove(&connection_id);
+                            readers.remove(&connection_id);
 
                             let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?

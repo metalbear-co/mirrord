@@ -216,6 +216,13 @@ impl UdpOutgoingHandler {
                 remote_address,
                 channel_tx,
             }) => {
+                // TODO(alex) [mid] 2022-09-06: We need to check if this `remote_address` is
+                // actually a local address! If it is, then the `agent` won't be able to reach it.
+                // Right now we're sidestepping this issue by just changing the address in `agent`
+                // to be a "local-agent" address.
+                //
+                // Have to be careful, as this is rather finnicky behavior when the user wants to
+                // make a request to their own local address.
                 trace!("Connect -> remote_address {:#?}", remote_address);
 
                 // TODO: We could be losing track of the proper order to respond to these (aviram

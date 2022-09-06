@@ -1466,6 +1466,7 @@ version = "2.11.0"
 dependencies = [
  "actix-codec",
  "bollard",
+ "bytes",
  "clap 3.2.20",
  "containerd-client",
  "dns-lookup",
