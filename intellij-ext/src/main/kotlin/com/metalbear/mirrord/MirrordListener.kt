@@ -103,11 +103,7 @@ class MirrordListener : ExecutionListener {
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
-        val method = when (env.runProfile::class.simpleName) {
-            "GoApplicationConfiguration" -> "getCustomEnvironment"
-            else -> "getEnvs"
-        }
-        val envMethod = env.runProfile.javaClass.getMethod(method)
+        val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
         return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
     }
 

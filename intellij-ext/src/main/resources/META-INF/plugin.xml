@@ -10,7 +10,6 @@
     ]]></description>
 
     <depends>com.intellij.modules.lang</depends>
-<!--    <depends>com.intellij.modules.platform</depends>-->
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="mirrord Notification Handler"
