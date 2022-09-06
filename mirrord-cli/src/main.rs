@@ -5,6 +5,7 @@ use clap::Parser;
 use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
+use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -39,11 +40,18 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("MIRRORD_LAYER_FILE");
     let library_path = std::path::Path::new(library_file);
 
-    let file_name = library_path.components().last().unwrap();
+    let extension = library_path.extension().unwrap();
+    let file_name = format!(
+        "{}-libmirrord_layer.{extension:?}",
+        Alphanumeric
+            .sample_string(&mut rand::thread_rng(), 10)
+            .to_lowercase()
+    );
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
+
     let mut file = File::create(&file_path)
         .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
     let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
