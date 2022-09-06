@@ -36,7 +36,7 @@ pub struct LayerConfig {
     pub agent_communication_timeout: Option<u16>,
 
     /// Enable file ops read/write
-    #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
+    #[envconfig(from = "MIRRORD_FILE_OPS", default = "true")]
     pub enabled_file_ops: bool,
 
     /// Enable file ops ready only (write will happen locally)
@@ -55,9 +55,9 @@ pub struct LayerConfig {
     pub ephemeral_container: bool,
 
     /// Enables resolving a remote DNS.
-    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
+    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "true")]
     pub remote_dns: bool,
 
-    #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "false")]
+    #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub enabled_tcp_outgoing: bool,
 }

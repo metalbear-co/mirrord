@@ -5,7 +5,6 @@
 #![feature(naked_functions)]
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
-#![feature(let_chains)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -100,8 +99,8 @@ fn init() {
 
     let enabled_file_ops =
         ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
-    let _ = ENABLED_FILE_RO_OPS
-        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
+    let _ =
+        ENABLED_FILE_RO_OPS.get_or_init(|| (config.enabled_file_ro_ops && config.enabled_file_ops));
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
