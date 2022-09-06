@@ -19,27 +19,25 @@ use crate::{
 };
 
 struct EnvVarGuard {
-    env_var: String,
     library: String,
 }
 impl EnvVarGuard {
+    #[cfg(target_os = "linux")]
+    const ENV_VAR: &str = "LD_PRELOAD";
+    #[cfg(target_os = "macos")]
+    const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
     fn new() -> Self {
-        let env_var = match std::env::consts::OS {
-            "linux" => "LD_PRELOAD",
-            "macos" => "DYLD_INSERT_LIBRARIES",
-            _ => panic!("Unsupported OS"),
-        };
-        let library = std::env::var(env_var).unwrap_or_default();
-        std::env::remove_var(env_var);
+        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
+        std::env::remove_var(EnvVarGuard::ENV_VAR);
         Self {
             library,
-            env_var: env_var.to_string(),
         }
     }
 }
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
-        std::env::set_var(&self.env_var, &self.library);
+        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
     }
 }
 
