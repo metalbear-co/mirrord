@@ -307,12 +307,11 @@ mod tests {
                     .unwrap();
                 barrier.wait();
             });
-            let guard = Self {
+            Self {
                 guard: Some(resource_token.drop_guard()),
                 barrier: guard_barrier,
                 handle,
-            };
-            guard
+            }
         }
     }
 
@@ -663,9 +662,39 @@ mod tests {
 
         let mut args = vec!["--enable-fs"];
 
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
-        }
+        let mut process = run(
+            python_command,
+            &service.pod_name,
+            Some(&service.namespace),
+            Some(args),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_python_fileops_stderr();
+    }
+
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn test_file_ops_ro(
+        #[future]
+        #[notrace]
+        service: EchoService,
+    ) {
+        let service = service.await;
+        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
+        let python_command = vec![
+            "python3",
+            "-B",
+            "-m",
+            "unittest",
+            "-f",
+            "python-e2e/files_ro.py",
+        ];
+
+        let args = vec!["--enable-ro-fs"];
 
         let mut process = run(
             python_command,
@@ -739,24 +768,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mirrord_args = vec!["-d", "true"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
-
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
-    pub async fn test_remote_dns_lookup_pod_service(#[future] service: EchoService) {
-        let service = service.await;
-        let node_command = vec![
-            "node",
-            "node-e2e/remote_dns/test_remote_dns_lookup_pod_service.mjs",
-        ];
-        let mirrord_args = vec!["-d", "true"];
+        let mirrord_args = vec!["-d"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -915,7 +927,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec!["-d", "true", "-o", "true"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -931,23 +943,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec!["-d", "true"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
-
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_outgoing_traffic_single_request_local_dns(#[future] service: EchoService) {
-        let service = service.await;
-        let node_command = vec![
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
-        ];
-        let mirrord_args = vec!["-o", "true"];
+        let mirrord_args = vec!["-d"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -963,7 +959,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mirrord_args = vec!["-o", "true"];
+        let mirrord_args = vec!["-d", "-o"];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());

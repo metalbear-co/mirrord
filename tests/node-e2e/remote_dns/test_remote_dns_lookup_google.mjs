@@ -1,10 +1,12 @@
 import assert from "assert";
-import { lookup } from "dns/promises";
-const https = require('node:https');
+import https from "node:https";
+import dns from "node:dns";
+const dnsPromises = dns.promises;
 
 console.log(">> test_remote_remote_dns_lookup_google");
 
-lookup("google.com")
+dnsPromises
+  .lookup("google.com")
   .then((resolved) => {
     console.log(">> resolved ", resolved);
 
@@ -15,12 +17,12 @@ lookup("google.com")
     );
 
     const req = https.request("https://google.com", (res) => {
-      res.on('data', (d) => {
+      res.on("data", (d) => {
         process.exit(0);
       });
     });
 
-    req.on('error', (fail) => {
+    req.on("error", (fail) => {
       console.error(">> failed with ", fail);
       process.exit(-1);
     });

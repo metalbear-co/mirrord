@@ -79,6 +79,12 @@ pub enum AgentError {
 
     #[error("Join task failed")]
     JoinTask,
+
+    #[error("DNS request send failed with `{0}`")]
+    DnsRequestSendError(#[from] tokio::sync::mpsc::error::SendError<crate::dns::DnsRequest>),
+
+    #[error("DNS response receive failed with `{0}`")]
+    DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;

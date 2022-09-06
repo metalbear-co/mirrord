@@ -332,9 +332,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.19"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -1450,7 +1450,7 @@ name = "mirrord"
 version = "2.11.0"
 dependencies = [
  "anyhow",
- "clap 3.2.19",
+ "clap 3.2.20",
  "exec",
  "mirrord-auth",
  "mirrord-layer",
@@ -1466,7 +1466,7 @@ version = "2.11.0"
 dependencies = [
  "actix-codec",
  "bollard",
- "clap 3.2.19",
+ "clap 3.2.20",
  "containerd-client",
  "dns-lookup",
  "faccess",
@@ -1799,9 +1799,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.13.1"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "074864da206b4973b84eb91683020dbefd6a8c3f0f38e054d93954e891935e4e"
+checksum = "2f7254b99e31cad77da24b08ebf628882739a608578bb1bcdfc1f9c21260d7c0"
 
 [[package]]
 name = "openssl"
@@ -2404,7 +2404,7 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.20.6"
-source = "git+https://github.com/rustls/rustls#162bea2f41d08613ee5e6cdafb0b257d4ea0633e"
+source = "git+https://github.com/rustls/rustls#4fa7a9f59ac81ca057b2149e4d2ce648b5f8f0eb"
 dependencies = [
  "log",
  "ring",
@@ -2899,9 +2899,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.20.1"
+version = "1.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
+checksum = "89797afd69d206ccd11fb0ea560a44bbb87731d020670e79416d442919257d42"
 dependencies = [
  "autocfg",
  "bytes",
