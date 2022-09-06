@@ -30,9 +30,7 @@ impl EnvVarGuard {
     fn new() -> Self {
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
-        Self {
-            library,
-        }
+        Self { library }
     }
 }
 impl Drop for EnvVarGuard {
