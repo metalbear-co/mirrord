@@ -39,6 +39,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r".*\.py",
         r".*\.js",
         r".*\.pth",
+        r"^/home/.*venv\.cfg",
         r"^/proc/.*",
         r"^/sys/.*",
         r"^/lib/.*",
