@@ -25,7 +25,7 @@ repositories {
 }
 dependencies {
     implementation("io.kubernetes:client-java:16.0.0") {
-        exclude(group="org.slf4j", module = "slf4j-api")
+        exclude(group = "org.slf4j", module = "slf4j-api")
     }
 }
 
@@ -69,31 +69,26 @@ tasks {
 
         // Extract the <!-- Plugin description --> section from README.md and provide for the plugin's manifest
         pluginDescription.set(
-            projectDir.resolve("README.md").readText().lines().run {
-                val start = "<!-- Plugin description -->"
-                val end = "<!-- Plugin description end -->"
+                projectDir.resolve("README.md").readText().lines().run {
+                    val start = "<!-- Plugin description -->"
+                    val end = "<!-- Plugin description end -->"
 
-                if (!containsAll(listOf(start, end))) {
-                    throw GradleException("Plugin description section not found in README.md:\n$start ... $end")
-                }
-                subList(indexOf(start) + 1, indexOf(end))
-            }.joinToString("\n").run { markdownToHTML(this) }
+                    if (!containsAll(listOf(start, end))) {
+                        throw GradleException("Plugin description section not found in README.md:\n$start ... $end")
+                    }
+                    subList(indexOf(start) + 1, indexOf(end))
+                }.joinToString("\n").run { markdownToHTML(this) }
         )
     }
 
     prepareSandbox {
-        doLast {
-            copy {
-                from(file("$projectDir/libmirrord_layer.dylib"))
-                into(file("$buildDir/idea-sandbox/config"))
-            }
-            copy {
-                from(file("$projectDir/libmirrord_layer.so"))
-                into(file("$buildDir/idea-sandbox/config"))
-            }
+        from(file("$projectDir/libmirrord_layer.dylib")) {
+            into(pluginName.get())
+        }
+        from(file("$projectDir/libmirrord_layer.so")) {
+            into(pluginName.get())
         }
     }
-
     // Configure UI tests plugin
     // Read more: https://github.com/JetBrains/intellij-ui-test-robot
     runIdeForUiTests {
