@@ -6,6 +6,8 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+## 2.12.0
 ### Added
 - Add more configuration values to the VS Code extension.
 - Warning when using remote tcp without remote DNS (can cause ipv6/v4 issues). Closes [#327](https://github.com/metalbear-co/mirrord/issues/327)
