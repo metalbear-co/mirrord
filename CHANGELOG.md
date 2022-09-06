@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Change all functionality (incoming traffic mirroring, remote DNS outgoing traffic, environment variables, file reads and writes) to be enabled by default. ***Note that flags now disable functionality***
+
 ### Fixed
 - Unset DYLD_INSERT_LIBRARIES/LD_PRELOAD when creating the agent. Closes [[#330](https://github.com/metalbear-co/mirrord/issues/330)].
 
