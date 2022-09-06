@@ -1,5 +1,6 @@
 #![feature(result_option_inspect)]
 #![feature(hash_drain_filter)]
+#![feature(once_cell)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -232,6 +233,9 @@ impl ClientConnectionHandler {
                 },
                 message = self.tcp_outgoing_api.daemon_message() => {
                     self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
+                },
+                message = self.udp_outgoing_api.daemon_message() => {
+                    self.respond(DaemonMessage::UdpOutgoing(message?)).await?;
                 },
                 _ = token.cancelled() => {
                     break;

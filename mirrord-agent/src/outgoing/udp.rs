@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
+    convert::{TryFrom, TryInto},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
+    sync::LazyLock,
     thread,
 };
 
@@ -14,6 +16,8 @@ use mirrord_protocol::{
     outgoing::{udp::*, *},
     ConnectionId, ResponseError,
 };
+use regex::Regex;
+use socket2::{Domain, Protocol, SockAddr, Type};
 use streammap_ext::StreamMap;
 use tokio::{
     fs::File,
@@ -41,6 +45,8 @@ use crate::{
 type Layer = LayerUdpOutgoing;
 type Daemon = DaemonUdpOutgoing;
 
+static NAMESERVER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^nameserver.*").unwrap());
+
 /// Handles (briefly) the `UdpOutgoingRequest` and `UdpOutgoingResponse` messages, mostly the
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct UdpOutgoingApi {
@@ -54,7 +60,12 @@ pub(crate) struct UdpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
-async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+async fn connect(
+    domain: i32,
+    type_: i32,
+    protocol: i32,
+    remote_address: SocketAddr,
+) -> Result<UdpSocket, ResponseError> {
     trace!("connect -> remote_address {:#?}", remote_address);
 
     let mut resolv_conf_contents = String::with_capacity(1024);
@@ -71,11 +82,27 @@ async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError>
     );
     let nameserver = resolv_conf_contents
         .lines()
-        .last()
+        .filter(|line| NAMESERVER.is_match(line))
+        .next()
         .unwrap()
         .split_whitespace()
         .last()
         .unwrap();
+
+    debug!("connect -> nameserver {:#?}", nameserver);
+
+    let dns_socket = socket2::Socket::new_raw(
+        Domain::from(domain),
+        Type::from(type_),
+        Some(Protocol::from(protocol)),
+    )
+    .unwrap();
+    debug!("connect -> dns_socket {:#?}", dns_socket);
+
+    let address: SocketAddr = format!("{}:{}", nameserver, remote_address.port())
+        .parse()
+        .unwrap();
+    dns_socket.connect(&SockAddr::from(address));
 
     // let dns_address = match remote_address {
     //     std::net::SocketAddr::V4(_) => {
@@ -86,16 +113,26 @@ async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError>
     //     }
     // };
 
-    let mirror_address = match remote_address {
-        std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-        std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
-    };
+    // let mirror_address = match remote_address {
+    //     std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53),
+    //     std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 53),
+    // };
 
-    let mirror_socket = UdpSocket::bind(mirror_address).await?;
-    // mirror_socket.connect(dns_address).await?;
-    mirror_socket
-        .connect(format!("{nameserver}:{}", remote_address.port()))
-        .await?;
+    // debug!("connect -> binding to {:#?}", mirror_address);
+    // let mirror_socket = UdpSocket::bind(mirror_address).await?;
+    // // mirror_socket.connect(dns_address).await?;
+    // debug!(
+    //     "connect -> connecting to {}:{}",
+    //     nameserver,
+    //     remote_address.port()
+    // );
+    // mirror_socket
+    //     // .connect(format!("{nameserver}:{}", remote_address.port()))
+    //     .connect(mirror_address)
+    //     .await?;
+
+    debug!("connect -> connected!");
+    let mirror_socket = UdpSocket::from_std(dns_socket.into()).unwrap();
 
     Ok(mirror_socket)
 }
@@ -153,8 +190,8 @@ impl UdpOutgoingApi {
                     match layer_message {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
-                        LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
-                            let daemon_connect = connect(remote_address)
+                        LayerUdpOutgoing::Connect(LayerUdpConnect { domain, type_, protocol, remote_address }) => {
+                            let daemon_connect = connect(domain, type_, protocol, remote_address)
                                     .await
                                     .map(|mirror_socket| {
                                         let connection_id = allocator
@@ -162,9 +199,11 @@ impl UdpOutgoingApi {
                                             .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
                                             .unwrap() as ConnectionId;
 
+                                        debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
                                         let peer_address = mirror_socket.peer_addr().unwrap();
 
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
+                                        debug!("interceptor_task -> framed {:#?}", framed);
                                         let (sink, stream): (
                                             SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
                                             SplitStream<UdpFramed<BytesCodec>>,
@@ -180,6 +219,7 @@ impl UdpOutgoingApi {
                                     });
 
                             let daemon_message = DaemonUdpOutgoing::Connect(daemon_connect);
+                            debug!("interceptor_task -> daemon_message {:#?}", daemon_message);
                             daemon_tx.send(daemon_message).await?
                         }
                         // [user] -> [layer] -> [agent] -> [remote]

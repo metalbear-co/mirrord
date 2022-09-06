@@ -8,7 +8,7 @@ use std::{
 
 use futures::SinkExt;
 use mirrord_protocol::{
-    outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    outgoing::udp::{DaemonUdpOutgoing, LayerUdpConnect, LayerUdpOutgoing},
     ClientCodec, ClientMessage, ConnectionId,
 };
 use tokio::{
@@ -31,6 +31,9 @@ use crate::{
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
     pub(crate) channel_tx: ResponseChannel<MirrorAddress>,
+    pub(crate) protocol: i32,
+    pub(crate) domain: i32,
+    pub(crate) type_: i32,
 }
 
 pub(crate) struct Write {
@@ -215,6 +218,9 @@ impl UdpOutgoingHandler {
             UdpOutgoing::Connect(Connect {
                 remote_address,
                 channel_tx,
+                protocol,
+                domain,
+                type_,
             }) => {
                 // TODO(alex) [mid] 2022-09-06: We need to check if this `remote_address` is
                 // actually a local address! If it is, then the `agent` won't be able to reach it.
@@ -231,7 +237,12 @@ impl UdpOutgoingHandler {
 
                 Ok(codec
                     .send(ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(
-                        LayerConnect { remote_address },
+                        LayerUdpConnect {
+                            remote_address,
+                            domain,
+                            type_,
+                            protocol,
+                        },
                     )))
                     .await?)
             }

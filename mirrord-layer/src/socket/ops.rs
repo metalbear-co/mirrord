@@ -225,7 +225,14 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         );
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
+        let domain = user_socket_info.domain;
+        let type_ = user_socket_info.type_;
+        let protocol = user_socket_info.protocol;
+
         let connect = udp::Connect {
+            domain,
+            type_,
+            protocol,
             remote_address,
             channel_tx: mirror_tx,
         };
