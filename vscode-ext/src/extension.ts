@@ -212,15 +212,15 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false'),
+						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', 'false').toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_ACCEPT_INVALID_CERTIFICATES': globalContext.workspaceState.get('acceptInvalidCertificates', 'false'),
+						'MIRRORD_ACCEPT_INVALID_CERTIFICATES': globalContext.workspaceState.get('invalidCertificates', 'false').toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', 'false'),
+						'MIRRORD_MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', 'false').toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', 'false'),
+						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', 'false').toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', 'false'),
+						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', 'false').toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_OVERRIDE_ENV_VARS_INCLUDE': globalContext.workspaceState.get('includeEnvironmentVariables', ''),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
