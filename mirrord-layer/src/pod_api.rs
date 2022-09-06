@@ -20,21 +20,20 @@ use crate::{
 
 struct EnvVarGuard {
     env_var: String,
-    library: String
+    library: String,
 }
 impl EnvVarGuard {
     fn new() -> Self {
-        let env_var = match std::env::consts::OS
-        {
+        let env_var = match std::env::consts::OS {
             "linux" => "LD_PRELOAD",
             "macos" => "DYLD_INSERT_LIBRARIES",
-            _ => panic!("Unsupported OS")
+            _ => panic!("Unsupported OS"),
         };
         let library = std::env::var(env_var).unwrap_or_default();
         std::env::remove_var(env_var);
         Self {
             library,
-            env_var: env_var.to_string()
+            env_var: env_var.to_string(),
         }
     }
 }
