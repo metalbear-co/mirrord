@@ -385,7 +385,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary, enabled_file_ops);
+        go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();
