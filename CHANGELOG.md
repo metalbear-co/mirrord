@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
 - tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
 - Go Hooks - use global ENABLED_FILE_OPS
+- Support macOS with apple chip in the IntelliJ plugin. Closes [#337](https://github.com/metalbear-co/mirrord/issues/337).
 
 ## 2.11.0
 ### Added
