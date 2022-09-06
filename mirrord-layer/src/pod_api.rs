@@ -18,6 +18,24 @@ use crate::{
     error::{LayerError, Result},
 };
 
+struct EnvVarGuard {
+    library: String
+}
+impl EnvVarGuard {
+    fn new() -> Self {
+        let library = std::env::var("DYLD_INSERT_LIBRARIES").unwrap_or_default();
+        std::env::remove_var("DYLD_INSERT_LIBRARIES");
+        Self {
+            library
+        }
+    }
+}
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        std::env::set_var("DYLD_INSERT_LIBRARIES", &self.library);
+    }
+}
+
 struct RuntimeData {
     container_id: String,
     container_runtime: String,
@@ -80,6 +98,7 @@ pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
 ) -> Result<Portforwarder> {
+    let _guard = EnvVarGuard::new();
     let LayerConfig {
         agent_image,
         agent_namespace,
