@@ -112,8 +112,16 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
 
+    if args.enable_fs && args.enable_ro_fs {
+        warn!("Both filesystem read write and read only enabled - RW will take precedence");
+    }
+
     if args.enable_fs {
         std::env::set_var("MIRRORD_FILE_OPS", true.to_string());
+    }
+
+    if args.enable_ro_fs {
+        std::env::set_var("MIRRORD_FILE_RO_OPS", true.to_string());
     }
 
     if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {

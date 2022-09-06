@@ -6,6 +6,11 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+### Fixed
+- Unset DYLD_INSERT_LIBRARIES/LD_PRELOAD when creating the agent. Closes [[#330](https://github.com/metalbear-co/mirrord/issues/330)].
+
+## 2.12.0
 ### Added
 - Add more configuration values to the VS Code extension.
 - Warning when using remote tcp without remote DNS (can cause ipv6/v4 issues). Closes [#327](https://github.com/metalbear-co/mirrord/issues/327)
@@ -17,6 +22,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Fixed DNS feature not using impersonated container namespace, resulting with incorrect resolved DNS names.
 - mirrord-agent: Use `IndexAllocator` to properly generate `ConnectionId`s for the tcp outgoing feature.
 - tests: Fix outgoing and DNS tests that were passing invalid flags to mirrord.
+- Go Hooks - use global ENABLED_FILE_OPS
+- Support macOS with apple chip in the IntelliJ plugin. Closes [#337](https://github.com/metalbear-co/mirrord/issues/337).
 
 ## 2.11.0
 ### Added

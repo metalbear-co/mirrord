@@ -70,6 +70,7 @@ static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
@@ -97,7 +98,10 @@ fn init() {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.enabled_file_ops);
+    let enabled_file_ops =
+        ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
+    let _ = ENABLED_FILE_RO_OPS
+        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
@@ -381,7 +385,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary, enabled_file_ops);
+        go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();
