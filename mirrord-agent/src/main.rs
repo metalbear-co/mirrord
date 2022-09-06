@@ -20,8 +20,8 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, RemoteResult,
 };
+use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
-use tcp::outgoing::TcpOutgoingApi;
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, TcpStream},
@@ -42,10 +42,10 @@ mod cli;
 mod dns;
 mod error;
 mod file;
+mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
-mod tcp;
 mod util;
 
 const CHANNEL_SIZE: usize = 1024;
@@ -142,6 +142,7 @@ struct ClientConnectionHandler {
     tcp_stealer_sender: Sender<LayerTcpSteal>,
     tcp_stealer_receiver: Receiver<DaemonTcp>,
     tcp_outgoing_api: TcpOutgoingApi,
+    udp_outgoing_api: UdpOutgoingApi,
     dns_sender: Sender<DnsRequest>,
 }
 
@@ -176,6 +177,7 @@ impl ClientConnectionHandler {
         ));
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
+        let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
         let mut client_handler = ClientConnectionHandler {
             id,
@@ -186,6 +188,7 @@ impl ClientConnectionHandler {
             tcp_stealer_receiver: tcp_steal_daemon_receiver,
             tcp_stealer_sender: tcp_steal_layer_sender,
             tcp_outgoing_api,
+            udp_outgoing_api,
             dns_sender,
         };
 
@@ -249,6 +252,9 @@ impl ClientConnectionHandler {
             }
             ClientMessage::TcpOutgoing(layer_message) => {
                 self.tcp_outgoing_api.layer_message(layer_message).await?
+            }
+            ClientMessage::UdpOutgoing(layer_message) => {
+                self.udp_outgoing_api.layer_message(layer_message).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,

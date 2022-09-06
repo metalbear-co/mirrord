@@ -324,6 +324,7 @@ pub(crate) mod hooks {
             libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_close => close_detour(param1 as _) as i64,
 
@@ -449,12 +450,6 @@ pub(crate) mod hooks {
         binary: &str,
         enabled_file_ops: bool,
     ) {
-        trace!("ENABLE SOCKET HOOKS {:#?}", binary);
-        let symbols = frida_gum::Module::enumerate_symbols(binary);
-        symbols
-            .into_iter()
-            .for_each(|symbol| trace!("symbol {:#?}", symbol.name));
-
         ENABLED_FILE_OPS
             .set(enabled_file_ops)
             .map_err(|err| {

@@ -17,10 +17,11 @@ use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::HookError,
-    tcp::{
-        outgoing::{Connect, MirrorAddress, TcpOutgoing},
-        HookMessageTcp, Listen,
+    outgoing::{
+        udp::{self, UdpOutgoing},
+        Connect, MirrorAddress, TcpOutgoing,
     },
+    tcp::{HookMessageTcp, Listen},
     ENABLED_TCP_OUTGOING,
 };
 
@@ -215,6 +216,52 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
         .expect("Should be set during initialization!");
+
+    if let SocketKind::Udp(kind) = user_socket_info.kind {
+        // Prepare this socket to be intercepted.
+        trace!(
+            "connect -> SocketState::Initialized {:#?}",
+            user_socket_info
+        );
+        let (mirror_tx, mirror_rx) = oneshot::channel();
+
+        let connect = udp::Connect {
+            remote_address,
+            channel_tx: mirror_tx,
+        };
+
+        let connect_hook = UdpOutgoing::Connect(connect);
+
+        blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
+        let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+
+        let connect_to = SockAddr::from(mirror_address);
+
+        // Connect to the interceptor socket that is listening.
+        let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+        debug!("connect -> connect_result {:#?}", connect_result);
+
+        let err_code = errno::errno().0;
+        if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+            error!(
+                "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+                connect_result,
+                errno::errno()
+            );
+            return Err(io::Error::last_os_error())?;
+        }
+
+        // Warning: We're treating `EINPROGRESS` as `Connected`!
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
+
+        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+
+        return Ok::<(), HookError>(());
+    }
 
     match user_socket_info.state {
         SocketState::Initialized if !(*enabled_tcp_outgoing) => {

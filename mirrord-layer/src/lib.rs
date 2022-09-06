@@ -26,9 +26,10 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use outgoing::{udp::UdpOutgoingHandler, TcpOutgoingHandler};
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
+use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
 use tokio::{
@@ -50,6 +51,7 @@ mod file;
 mod go_env;
 mod go_hooks;
 mod macros;
+mod outgoing;
 mod pod_api;
 mod socket;
 mod tcp;
@@ -117,6 +119,7 @@ where
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
     tcp_outgoing_handler: TcpOutgoingHandler,
+    udp_outgoing_handler: UdpOutgoingHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -144,6 +147,7 @@ where
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
+            udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::default(),
@@ -200,6 +204,11 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
+            HookMessage::UdpOutgoing(message) => self
+                .udp_outgoing_handler
+                .handle_hook_message(message, &mut self.codec)
+                .await
+                .unwrap(),
         }
     }
 
@@ -214,6 +223,11 @@ where
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::TcpOutgoing(message) => {
                 self.tcp_outgoing_handler
+                    .handle_daemon_message(message)
+                    .await
+            }
+            DaemonMessage::UdpOutgoing(message) => {
+                self.udp_outgoing_handler
                     .handle_daemon_message(message)
                     .await
             }
@@ -401,7 +415,8 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
+    if let Some(_) = SOCKETS.lock().unwrap().remove(&fd) {
+        debug!("close_detour -> closing socket {:#?}", fd);
         FN_CLOSE(fd)
     } else if *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
