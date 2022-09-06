@@ -44,12 +44,12 @@ pub struct LayerConfig {
     pub enabled_file_ro_ops: bool,
 
     /// Filters out these env vars when overriding is enabled.
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", default = "")]
-    pub override_env_vars_exclude: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
+    pub override_env_vars_exclude: Option<String>,
 
     /// Selects these env vars when overriding is enabled.
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", default = "")]
-    pub override_env_vars_include: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
+    pub override_env_vars_include: Option<String>,
 
     #[envconfig(from = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral_container: bool,

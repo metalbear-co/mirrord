@@ -751,7 +751,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mirrord_args = vec!["-d"];
+        let mirrord_args = vec![];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
@@ -768,7 +768,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mirrord_args = vec!["-d"];
+        let mirrord_args = vec![];
         let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();

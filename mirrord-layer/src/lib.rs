@@ -318,8 +318,7 @@ async fn start_layer_thread(
     // -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
 
-    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
-    {
+    if config.override_env_vars_exclude.is_some() && config.override_env_vars_include.is_some() {
         panic!(
             r#"mirrord-layer encountered an issue:
 
@@ -330,8 +329,22 @@ async fn start_layer_thread(
             >> If you want to include all, use `--override_env_vars_include="*"`."#
         );
     } else {
-        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
-        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
+        let env_vars_filter = HashSet::from(EnvVars(
+            config
+                .override_env_vars_exclude
+                .clone()
+                .unwrap_or_else(|| "".to_owned()),
+        ));
+        let env_vars_select = HashSet::from(EnvVars(
+            config.override_env_vars_include.unwrap_or_else(|| {
+                if config.override_env_vars_exclude.is_none() {
+                    "*"
+                } else {
+                    ""
+                }
+                .to_owned()
+            }),
+        ));
 
         if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
             // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
