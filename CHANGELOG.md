@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Unset DYLD_INSERT_LIBRARIES/LD_PRELOAD when creating the agent. Closes [[#330](https://github.com/metalbear-co/mirrord/issues/330)].
+- Fix NullPointerException in IntelliJ Extension. Closes [[#335](https://github.com/metalbear-co/mirrord/issues/335)].
 
 ## 2.12.0
 ### Added
