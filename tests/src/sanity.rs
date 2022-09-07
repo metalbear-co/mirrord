@@ -560,7 +560,12 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::Go18HTTP, , Application::Go19HTTP)]
+        #[values(
+            Application::PythonHTTP,
+            Application::NodeHTTP,
+            Application::Go18HTTP,
+            Application::Go19HTTP
+        )]
         application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
