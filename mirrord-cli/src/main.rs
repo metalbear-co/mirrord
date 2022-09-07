@@ -1,4 +1,9 @@
-use std::{fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
@@ -38,25 +43,29 @@ use mac::temp_dir;
 
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("MIRRORD_LAYER_FILE");
-    let library_path = std::path::Path::new(library_file);
+    let library_path = Path::new(library_file);
 
     let extension = library_path
-        .extension()
+        .components()
+        .last()
         .unwrap()
+        .as_os_str()
         .to_str()
         .unwrap()
-        .trim_matches(['"', '\"'].as_ref());
+        .split(".")
+        .collect::<Vec<&str>>()[1];
+
     let file_name = format!(
-        "{}-libmirrord_layer.{extension:?}",
+        "{}-libmirrord_layer.{extension}",
         Alphanumeric
             .sample_string(&mut rand::thread_rng(), 10)
             .to_lowercase()
     );
+
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
-
     let mut file = File::create(&file_path)
         .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
     let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
