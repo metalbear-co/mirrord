@@ -8,8 +8,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Fixed
-- Unset DYLD_INSERT_LIBRARIES/LD_PRELOAD when creating the agent. Closes [[#330](https://github.com/metalbear-co/mirrord/issues/330)].
+- mirrord-layer: User-friendly error for invalid kubernetes api certificate 
 
+## 2.13.0
+### Added
+- Release arm64 agent image.
+
+### Fixed
+- Use selected namespace in IntelliJ plugin instead of always using default namespace.
+
+## 2.12.1
+### Fixed
+- Fix bug where VS Code extension would crash on startup due to new configuration values not being the correct type.
+- Unset DYLD_INSERT_LIBRARIES/LD_PRELOAD when creating the agent. Closes [[#330](https://github.com/metalbear-co/mirrord/issues/330)].
+- Fix NullPointerException in IntelliJ Extension. Closes [[#335](https://github.com/metalbear-co/mirrord/issues/335)].
+- FIx dylib/so paths for the IntelliJ Extension. Closes [[#337](https://github.com/metalbear-co/mirrord/pull/352)].
 ## 2.12.0
 ### Added
 - Add more configuration values to the VS Code extension.
