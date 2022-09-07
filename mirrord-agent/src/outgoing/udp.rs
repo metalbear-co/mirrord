@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::LazyLock,
     thread,
@@ -14,7 +14,7 @@ use futures::{
 };
 use mirrord_protocol::{
     outgoing::{udp::*, *},
-    ConnectionId, ResponseError,
+    ConnectionId, RemoteError, ResponseError,
 };
 use regex::Regex;
 use socket2::{Domain, Protocol, SockAddr, Type};
@@ -34,7 +34,7 @@ use tokio_util::{
     io::ReaderStream,
     udp::UdpFramed,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -60,82 +60,92 @@ pub(crate) struct UdpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
+const DNS_PORT: u16 = 53;
+
+async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
+    trace!("resolve_dns -> ");
+
+    let mut resolv_conf_contents = String::with_capacity(1024);
+    let mut resolv_conf = File::open("/etc/resolv.conf").await?;
+
+    resolv_conf
+        .read_to_string(&mut resolv_conf_contents)
+        .await?;
+
+    let nameserver = resolv_conf_contents
+        .lines()
+        .filter(|line| NAMESERVER.is_match(line))
+        .next()
+        .ok_or(RemoteError::NameserverNotFound)?
+        .split_whitespace()
+        .last()
+        .ok_or(RemoteError::NameserverNotFound)?;
+
+    let dns_address: SocketAddr = format!("{}:{}", nameserver, DNS_PORT)
+        .parse()
+        .map_err(|fail: AddrParseError| RemoteError::from(fail))?;
+
+    info!("resolve_dns -> dns_address {:#?}", dns_address);
+
+    Ok(dns_address)
+}
+
 // TODO(alex) [high] 2022-09-07: Special-case the port 53 DNS request, otherwise we don't need most
 // of what is going on here.
-async fn connect(
+async fn connect_clean(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+    trace!("connect -> remote_address {:#?}", remote_address);
+
+    let remote_address = if remote_address.port() == 53 {
+        resolve_dns().await?
+    } else {
+        remote_address
+    };
+
+    let mirror_address = match remote_address {
+        std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+        std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+    };
+    info!("connect_clean -> mirror_address {:#?}", mirror_address);
+
+    let mirror_socket = UdpSocket::bind(mirror_address).await;
+    info!("connect -> bind {:#?}", mirror_socket);
+    let mirror_socket = mirror_socket?;
+
+    info!(
+        "connect_clean -> connect {:#?}",
+        mirror_socket.connect(remote_address).await
+    );
+
+    info!("connect_clean -> connected to {:#?}", remote_address);
+
+    Ok(mirror_socket)
+}
+
+// TODO(alex) [high] 2022-09-07: Special-case the port 53 DNS request, otherwise we don't need most
+// of what is going on here.
+async fn connect_dirty(
     domain: i32,
     type_: i32,
     protocol: i32,
     remote_address: SocketAddr,
 ) -> Result<UdpSocket, ResponseError> {
-    trace!("connect -> remote_address {:#?}", remote_address);
+    trace!("connect_dirty -> remote_address {:#?}", remote_address);
 
-    let mut resolv_conf_contents = String::with_capacity(1024);
-    let mut resolv_conf = File::open("/etc/resolv.conf").await.unwrap();
-    debug!("connect -> resolv_conf {:#?}", resolv_conf);
-    resolv_conf
-        .read_to_string(&mut resolv_conf_contents)
-        .await
-        .unwrap();
+    let remote_address = if remote_address.port() == 53 {
+        resolve_dns().await?
+    } else {
+        remote_address
+    };
 
-    debug!(
-        "connect -> resolv_conf_contents {:#?}",
-        resolv_conf_contents
-    );
-    let nameserver = resolv_conf_contents
-        .lines()
-        .filter(|line| NAMESERVER.is_match(line))
-        .next()
-        .unwrap()
-        .split_whitespace()
-        .last()
-        .unwrap();
-
-    debug!("connect -> nameserver {:#?}", nameserver);
-
-    let dns_socket = socket2::Socket::new_raw(
+    let raw_socket = socket2::Socket::new_raw(
         Domain::from(domain),
         Type::from(type_),
         Some(Protocol::from(protocol)),
-    )
-    .unwrap();
-    debug!("connect -> dns_socket {:#?}", dns_socket);
+    )?;
 
-    let address: SocketAddr = format!("{}:{}", nameserver, remote_address.port())
-        .parse()
-        .unwrap();
-    dns_socket.connect(&SockAddr::from(address));
+    raw_socket.connect(&SockAddr::from(remote_address))?;
 
-    // let dns_address = match remote_address {
-    //     std::net::SocketAddr::V4(_) => {
-    //         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), remote_address.port())
-    //     }
-    //     std::net::SocketAddr::V6(_) => {
-    //         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), remote_address.port())
-    //     }
-    // };
-
-    // let mirror_address = match remote_address {
-    //     std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53),
-    //     std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 53),
-    // };
-
-    // debug!("connect -> binding to {:#?}", mirror_address);
-    // let mirror_socket = UdpSocket::bind(mirror_address).await?;
-    // // mirror_socket.connect(dns_address).await?;
-    // debug!(
-    //     "connect -> connecting to {}:{}",
-    //     nameserver,
-    //     remote_address.port()
-    // );
-    // mirror_socket
-    //     // .connect(format!("{nameserver}:{}", remote_address.port()))
-    //     .connect(mirror_address)
-    //     .await?;
-
-    debug!("connect -> connected!");
-    let mirror_socket = UdpSocket::from_std(dns_socket.into()).unwrap();
-
+    let mirror_socket = UdpSocket::from_std(raw_socket.into())?;
     Ok(mirror_socket)
 }
 
@@ -193,7 +203,11 @@ impl UdpOutgoingApi {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
                         LayerUdpOutgoing::Connect(LayerUdpConnect { domain, type_, protocol, remote_address }) => {
-                            let daemon_connect = connect(domain, type_, protocol, remote_address)
+
+                            // info!("connect_clean result {:#?}", connect_clean(remote_address).await);
+
+                            let daemon_connect = connect_dirty(domain, type_, protocol, remote_address)
+                            // let daemon_connect = connect_clean(remote_address)
                                     .await
                                     .map(|mirror_socket| {
                                         let connection_id = allocator

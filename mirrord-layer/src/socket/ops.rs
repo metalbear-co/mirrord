@@ -218,6 +218,10 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         .get()
         .expect("Should be set during initialization!");
 
+    (!is_ignored_port(remote_address.port()))
+        .then_some(())
+        .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
+
     if let SocketKind::Udp(kind) = user_socket_info.kind {
         // Prepare this socket to be intercepted.
         trace!(

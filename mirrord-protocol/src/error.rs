@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, net::AddrParseError};
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
@@ -22,6 +22,26 @@ pub enum ResponseError {
 
     #[error("DNS resolve failed with return code`{0}`")]
     DnsFailure(i32),
+
+    #[error("Remote operation failed with `{0}`")]
+    Remote(#[from] RemoteError),
+}
+
+/// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
+/// mirrord-agent.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+pub enum RemoteError {
+    #[error("Failed to find a nameserver when resolving DNS!")]
+    NameserverNotFound,
+
+    #[error("Failed parsing address into a `SocketAddr` with `{0}`!")]
+    AddressParsing(String),
+}
+
+impl From<AddrParseError> for RemoteError {
+    fn from(fail: AddrParseError) -> Self {
+        Self::AddressParsing(fail.to_string())
+    }
 }
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and

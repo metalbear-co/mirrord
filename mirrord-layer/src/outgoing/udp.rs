@@ -351,18 +351,6 @@ impl UdpOutgoingHandler {
                         .send(Ok(mirror_address))
                         .map_err(|_| LayerError::SendErrorUdpResponse)?;
 
-                    // let user_address = unsafe {
-                    //     SockAddr::init(|storage, len| {
-                    //         if FN_GETSOCKNAME(user_fd, storage.cast(), len) == -1 {
-                    //             Err(io::Error::last_os_error())
-                    //         } else {
-                    //             Ok(())
-                    //         }
-                    //     })
-                    // }
-                    // .map(|((), address)| address.as_socket())?
-                    // .unwrap();
-
                     mirror_socket
                 };
 

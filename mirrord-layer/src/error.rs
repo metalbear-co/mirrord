@@ -196,6 +196,7 @@ impl From<HookError> for i64 {
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
+                ResponseError::Remote(_) => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
