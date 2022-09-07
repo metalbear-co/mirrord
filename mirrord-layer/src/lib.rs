@@ -26,7 +26,7 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
-use outgoing::{udp::UdpOutgoingHandler, TcpOutgoingHandler};
+use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;

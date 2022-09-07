@@ -2,7 +2,7 @@ use std::{
     ffi::CString,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::{io::RawFd, prelude::FromRawFd},
+    os::unix::io::RawFd,
     ptr,
     sync::Arc,
 };
@@ -16,12 +16,8 @@ use tracing::{debug, error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
-    detour::DetourGuard,
     error::HookError,
-    outgoing::{
-        udp::{self, UdpOutgoing},
-        Connect, MirrorAddress, TcpOutgoing,
-    },
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
     ENABLED_TCP_OUTGOING,
 };
@@ -222,7 +218,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         .then_some(())
         .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
 
-    if let SocketKind::Udp(kind) = user_socket_info.kind {
+    if let SocketKind::Udp(_) = user_socket_info.kind {
         // Prepare this socket to be intercepted.
         trace!(
             "connect -> SocketState::Initialized {:#?}",
@@ -230,14 +226,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         );
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
-        let domain = user_socket_info.domain;
-        let type_ = user_socket_info.type_;
-        let protocol = user_socket_info.protocol;
-
-        let connect = udp::Connect {
-            domain,
-            type_,
-            protocol,
+        let connect = Connect {
             remote_address,
             channel_tx: mirror_tx,
         };

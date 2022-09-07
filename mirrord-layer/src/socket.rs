@@ -9,7 +9,7 @@ use std::{
 
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
-use socket2::{SockAddr, Type};
+use socket2::SockAddr;
 
 use crate::error::{HookError, HookResult};
 

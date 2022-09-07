@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    convert::{TryFrom, TryInto},
     net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::LazyLock,
@@ -17,24 +16,16 @@ use mirrord_protocol::{
     ConnectionId, RemoteError, ResponseError,
 };
 use regex::Regex;
-use socket2::{Domain, Protocol, SockAddr, Type};
 use streammap_ext::StreamMap;
 use tokio::{
     fs::File,
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        UdpSocket,
-    },
+    io::AsyncReadExt,
+    net::UdpSocket,
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tokio_util::{
-    codec::{BytesCodec, Decoder, Encoder},
-    io::ReaderStream,
-    udp::UdpFramed,
-};
-use tracing::{debug, info, trace, warn};
+use tokio_util::{codec::BytesCodec, udp::UdpFramed};
+use tracing::{debug, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -85,14 +76,10 @@ async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
         .parse()
         .map_err(|fail: AddrParseError| RemoteError::from(fail))?;
 
-    info!("resolve_dns -> dns_address {:#?}", dns_address);
-
     Ok(dns_address)
 }
 
-// TODO(alex) [high] 2022-09-07: Special-case the port 53 DNS request, otherwise we don't need most
-// of what is going on here.
-async fn connect_clean(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
     trace!("connect -> remote_address {:#?}", remote_address);
 
     let remote_address = if remote_address.port() == 53 {
@@ -105,47 +92,10 @@ async fn connect_clean(remote_address: SocketAddr) -> Result<UdpSocket, Response
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
         std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
     };
-    info!("connect_clean -> mirror_address {:#?}", mirror_address);
 
-    let mirror_socket = UdpSocket::bind(mirror_address).await;
-    info!("connect -> bind {:#?}", mirror_socket);
-    let mirror_socket = mirror_socket?;
+    let mirror_socket = UdpSocket::bind(mirror_address).await?;
+    mirror_socket.connect(remote_address).await?;
 
-    info!(
-        "connect_clean -> connect {:#?}",
-        mirror_socket.connect(remote_address).await
-    );
-
-    info!("connect_clean -> connected to {:#?}", remote_address);
-
-    Ok(mirror_socket)
-}
-
-// TODO(alex) [high] 2022-09-07: Special-case the port 53 DNS request, otherwise we don't need most
-// of what is going on here.
-async fn connect_dirty(
-    domain: i32,
-    type_: i32,
-    protocol: i32,
-    remote_address: SocketAddr,
-) -> Result<UdpSocket, ResponseError> {
-    trace!("connect_dirty -> remote_address {:#?}", remote_address);
-
-    let remote_address = if remote_address.port() == 53 {
-        resolve_dns().await?
-    } else {
-        remote_address
-    };
-
-    let raw_socket = socket2::Socket::new_raw(
-        Domain::from(domain),
-        Type::from(type_),
-        Some(Protocol::from(protocol)),
-    )?;
-
-    raw_socket.connect(&SockAddr::from(remote_address))?;
-
-    let mirror_socket = UdpSocket::from_std(raw_socket.into())?;
     Ok(mirror_socket)
 }
 
@@ -202,12 +152,8 @@ impl UdpOutgoingApi {
                     match layer_message {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
-                        LayerUdpOutgoing::Connect(LayerUdpConnect { domain, type_, protocol, remote_address }) => {
-
-                            // info!("connect_clean result {:#?}", connect_clean(remote_address).await);
-
-                            let daemon_connect = connect_dirty(domain, type_, protocol, remote_address)
-                            // let daemon_connect = connect_clean(remote_address)
+                        LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
+                            let daemon_connect = connect(remote_address)
                                     .await
                                     .map(|mirror_socket| {
                                         let connection_id = allocator
@@ -283,7 +229,7 @@ impl UdpOutgoingApi {
                         Some(read) => {
                             let daemon_read = read
                                 .map_err(ResponseError::from)
-                                .map(|(bytes, remote_address)| DaemonRead { connection_id, bytes: bytes.to_vec() });
+                                .map(|(bytes, _)| DaemonRead { connection_id, bytes: bytes.to_vec() });
 
                             let daemon_message = DaemonUdpOutgoing::Read(daemon_read);
                             daemon_tx.send(daemon_message).await?

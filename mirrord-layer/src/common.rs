@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use crate::{
     error::{HookError, HookResult},
     file::HookMessageFile,
-    outgoing::{udp::UdpOutgoing, TcpOutgoing},
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
     tcp::HookMessageTcp,
     HOOK_SENDER,
 };

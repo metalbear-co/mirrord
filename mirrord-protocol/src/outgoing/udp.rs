@@ -1,18 +1,9 @@
 use super::*;
 use crate::RemoteResult;
 
-/// `user` wants to connect to `remote_address`.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct LayerUdpConnect {
-    pub domain: i32,
-    pub type_: i32,
-    pub protocol: i32,
-    pub remote_address: SocketAddr,
-}
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerUdpOutgoing {
-    Connect(LayerUdpConnect),
+    Connect(LayerConnect),
     Write(LayerWrite),
     Close(LayerClose),
 }
