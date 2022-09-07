@@ -1,14 +1,15 @@
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod hooks {
-    use std::{arch::asm, sync::OnceLock};
+    use std::arch::asm;
 
     use errno::errno;
     use frida_gum::interceptor::Interceptor;
-    use tracing::{error, trace};
+    use tracing::trace;
 
-    use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*};
-    static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
+    use crate::{
+        close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*, ENABLED_FILE_OPS,
+    };
     /*
      * Reference for which syscalls are managed by the handlers:
      * SYS_openat: Syscall6
@@ -445,18 +446,7 @@ pub(crate) mod hooks {
     /// Refer:
     ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
     ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-    pub(crate) fn enable_socket_hooks(
-        interceptor: &mut Interceptor,
-        binary: &str,
-        enabled_file_ops: bool,
-    ) {
-        ENABLED_FILE_OPS
-            .set(enabled_file_ops)
-            .map_err(|err| {
-                error!("Error setting ENABLED_FILE_OPS: {}", err);
-            })
-            .unwrap();
-
+    pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
         hook_symbol!(
             interceptor,
             "syscall.RawSyscall.abi0",

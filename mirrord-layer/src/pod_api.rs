@@ -18,6 +18,29 @@ use crate::{
     error::{LayerError, Result},
 };
 
+struct EnvVarGuard {
+    library: String,
+}
+
+impl EnvVarGuard {
+    #[cfg(target_os = "linux")]
+    const ENV_VAR: &str = "LD_PRELOAD";
+    #[cfg(target_os = "macos")]
+    const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
+    fn new() -> Self {
+        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
+        std::env::remove_var(EnvVarGuard::ENV_VAR);
+        Self { library }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
+    }
+}
+
 struct RuntimeData {
     container_id: String,
     container_runtime: String,
@@ -80,6 +103,7 @@ pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
 ) -> Result<Portforwarder> {
+    let _guard = EnvVarGuard::new();
     let LayerConfig {
         agent_image,
         agent_namespace,
@@ -115,14 +139,16 @@ pub(crate) async fn create_agent(
             &impersonated_pod_namespace,
             &impersonated_container_name,
         )
-        .await;
+        .await
+        .map_err(LayerError::from)?;
+
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
         create_job_pod_agent(
             &config,
             agent_image,
             &pods_api,
-            runtime_data.unwrap(),
+            runtime_data,
             &jobs_api,
             connection_port,
         )
@@ -248,7 +274,7 @@ async fn create_ephemeral_container_agent(
             "ephemeralcontainers",
             &config.impersonated_pod_name,
             &PostParams::default(),
-            to_vec(&ephemeral_containers_subresource).unwrap(),
+            to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
         .await
         .map_err(LayerError::KubeError)?;
