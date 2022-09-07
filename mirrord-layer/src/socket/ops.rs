@@ -202,6 +202,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         "connect -> sockfd {:#?} | remote_address {:#?}",
         sockfd, remote_address
     );
+    let (ip, port) = (remote_address.ip(), remote_address.port());
 
     let mut user_socket_info = {
         SOCKETS
@@ -302,7 +303,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
                 Ok::<_, HookError>(())
             }
         }
-        SocketState::Initialized => {
+        SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
             // Prepare this socket to be intercepted.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",

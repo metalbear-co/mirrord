@@ -49,7 +49,6 @@ mod detour;
 mod error;
 mod file;
 mod go_env;
-mod go_hooks;
 mod macros;
 mod outgoing;
 mod pod_api;
@@ -57,6 +56,10 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
+
+#[cfg(target_os = "linux")]
+#[cfg(target_arch = "x86_64")]
+mod go_hooks;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -414,7 +417,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::hooks::enable_socket_hooks(&mut interceptor, binary);
+        go_hooks::enable_socket_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();

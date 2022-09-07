@@ -72,9 +72,11 @@ mod tests {
 
     #[derive(Debug)]
     enum Application {
-        PythonHTTP,
+        PythonFlaskHTTP,
+        PythonFastApiHTTP,
         NodeHTTP,
-        GoHTTP,
+        Go18HTTP,
+        Go19HTTP,
     }
 
     #[derive(Debug)]
@@ -87,7 +89,8 @@ mod tests {
     #[derive(Debug)]
     pub enum FileOps {
         Python,
-        Go,
+        Go18,
+        Go19,
     }
 
     struct TestProcess {
@@ -105,6 +108,14 @@ mod tests {
 
         fn assert_stderr(&self) {
             assert!(self.stderr.lock().unwrap().is_empty());
+        }
+
+        fn assert_log_level(&self, stderr: bool, level: &str) {
+            if stderr {
+                assert!(!self.stderr.lock().unwrap().contains(level));
+            } else {
+                assert!(!self.stdout.lock().unwrap().contains(level));
+            }
         }
 
         fn assert_python_fileops_stderr(&self) {
@@ -179,13 +190,35 @@ mod tests {
             args: Option<Vec<&str>>,
         ) -> TestProcess {
             let process_cmd = match self {
-                Application::PythonHTTP => {
-                    vec!["python3", "-u", "python-e2e/app.py"]
+                Application::PythonFlaskHTTP => {
+                    vec!["python3", "-u", "python-e2e/app_flask.py"]
+                }
+                Application::PythonFastApiHTTP => {
+                    vec![
+                        "uvicorn",
+                        "--port=80",
+                        "--host=0.0.0.0",
+                        "--app-dir=./python-e2e/",
+                        "app_fastapi:app",
+                    ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
-                Application::GoHTTP => vec!["go-e2e/go-e2e"],
+                Application::Go18HTTP => vec!["go-e2e/18"],
+                Application::Go19HTTP => vec!["go-e2e/19"],
             };
             run(process_cmd, pod_name, namespace, args).await
+        }
+
+        fn assert(&self, process: &TestProcess) {
+            match self {
+                Application::PythonFastApiHTTP => {
+                    process.assert_log_level(true, "ERROR");
+                    process.assert_log_level(false, "ERROR");
+                    process.assert_log_level(true, "CRITICAL");
+                    process.assert_log_level(false, "CRITICAL");
+                }
+                _ => process.assert_stderr(),
+            }
         }
     }
 
@@ -205,14 +238,16 @@ mod tests {
                 FileOps::Python => {
                     vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
                 }
-                FileOps::Go => vec!["go-e2e-fileops/go-e2e-fileops"],
+                FileOps::Go18 => vec!["go-e2e-fileops/18"],
+                FileOps::Go19 => vec!["go-e2e-fileops/19"],
             }
         }
 
         fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                FileOps::Go => process.assert_stderr(),
+                FileOps::Go18 => process.assert_stderr(),
+                FileOps::Go19 => process.assert_stderr(),
             }
         }
     }
@@ -555,7 +590,14 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(
+            Application::NodeHTTP,
+            Application::Go18HTTP,
+            Application::Go19HTTP,
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP
+        )]
+        application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -574,7 +616,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "macos")]
@@ -589,7 +632,8 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)]
+        application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -608,7 +652,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "linux")]
@@ -621,7 +666,7 @@ mod tests {
         #[notrace]
         service: EchoService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go)] ops: FileOps,
+        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -783,7 +828,12 @@ mod tests {
     async fn test_steal_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::NodeHTTP
+        )]
+        application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -801,7 +851,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[rstest]
@@ -904,9 +955,21 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go_remote_env_vars_works(#[future] service: EchoService) {
+    pub async fn test_go18_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
-        let command = vec!["go-e2e-env/go-e2e-env"];
+        let command = vec!["go-e2e-env/18"];
+        let mirrord_args = vec!["--override-env-vars-include", "*"];
+        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go19_remote_env_vars_works(#[future] service: EchoService) {
+        let service = service.await;
+        let command = vec!["go-e2e-env/19"];
         let mirrord_args = vec!["--override-env-vars-include", "*"];
         let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
         let res = process.child.wait().await.unwrap();
