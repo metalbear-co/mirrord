@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - mirrord-layer: User-friendly error for invalid kubernetes api certificate 
+- Support for Go 1.19>= syscall hooking
 
 ## 2.13.0
 ### Added
