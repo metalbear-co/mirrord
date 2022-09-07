@@ -1,6 +1,6 @@
 import time
 import threading
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from os import getpid, kill
 from signal import SIGTERM
 
@@ -15,20 +15,20 @@ def kill_later():
 @app.get("/")
 def get():
     print("GET: Request completed")
-    return "GET"
+    return Response(content = "GET", media_type="text/plain")
 
 @app.post("/")
 def post():
     print("POST: Request completed")
-    return "POST"
+    return Response(content = "POST", media_type="text/plain")
 
 @app.put("/")
 def put():
     print("PUT: Request completed")
-    return "PUT"
+    return Response(content = "PUT", media_type="text/plain")
 
 @app.delete("/")
 def delete():
     print("DELETE: Request completed")
     kill_later()
-    return "DELETE"
+    return Response(content = "DELETE", media_type="text/plain")
