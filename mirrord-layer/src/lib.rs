@@ -437,8 +437,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if let Some(_) = SOCKETS.lock().unwrap().remove(&fd) {
-        debug!("close_detour -> closing socket {:#?}", fd);
+    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
         FN_CLOSE(fd)
     } else if *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {

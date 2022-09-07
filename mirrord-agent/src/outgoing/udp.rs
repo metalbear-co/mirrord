@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::LazyLock,
     thread,
@@ -64,8 +64,7 @@ async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
 
     let nameserver = resolv_conf_contents
         .lines()
-        .filter(|line| NAMESERVER.is_match(line))
-        .next()
+        .find(|line| NAMESERVER.is_match(line))
         .ok_or(RemoteError::NameserverNotFound)?
         .split_whitespace()
         .last()
@@ -73,7 +72,7 @@ async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
 
     let dns_address: SocketAddr = format!("{}:{}", nameserver, DNS_PORT)
         .parse()
-        .map_err(|fail: AddrParseError| RemoteError::from(fail))?;
+        .map_err(RemoteError::from)?;
 
     Ok(dns_address)
 }
@@ -113,6 +112,7 @@ impl UdpOutgoingApi {
     }
 
     /// Does the actual work for `Request`s and prepares the `Responses:
+    #[allow(clippy::type_complexity)]
     async fn interceptor_task(
         pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
@@ -212,8 +212,8 @@ impl UdpOutgoingApi {
                         // [layer] -> [agent]
                         // `layer` closed their interceptor stream.
                         LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
-                            writers.remove(&connection_id);
-                            readers.remove(&connection_id);
+                            writers.remove(connection_id);
+                            readers.remove(connection_id);
                         }
                     }
                 }
