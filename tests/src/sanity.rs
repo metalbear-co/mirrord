@@ -184,7 +184,7 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app_flask.py"]
                 }
                 Application::PythonFastApiHTTP => {
-                    vec!["uvicorn", "--port=80", "--host=0.0.0.0", "--app-dir=./python-e2e/", "app_fastapi:main"]
+                    vec!["uvicorn", "--port=80", "--host=0.0.0.0", "--app-dir=./python-e2e/", "app_fastapi:app"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
