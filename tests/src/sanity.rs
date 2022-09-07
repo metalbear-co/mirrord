@@ -660,13 +660,11 @@ mod tests {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
 
-        let mut args = vec![];
-
         let mut process = run(
             python_command,
             &service.pod_name,
             Some(&service.namespace),
-            Some(args),
+            None,
         )
         .await;
         let res = process.child.wait().await.unwrap();
@@ -751,8 +749,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mirrord_args = vec![];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -768,8 +765,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mirrord_args = vec![];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -811,8 +807,7 @@ mod tests {
     pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
-        let mirrord_args = vec![];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -859,8 +854,7 @@ mod tests {
     pub async fn test_bash_file_exists(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mirrord_args = vec![];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -878,8 +872,7 @@ mod tests {
     pub async fn test_bash_file_read(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mirrord_args = vec![];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -894,8 +887,7 @@ mod tests {
     pub async fn test_bash_file_write(#[future] service: EchoService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
-        let mirrord_args = vec![];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -907,8 +899,7 @@ mod tests {
     pub async fn test_go_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
         let command = vec!["go-e2e-env/go-e2e-env"];
-        let mirrord_args = vec![];
-        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(command, &service.pod_name, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -927,8 +918,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec![];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -943,8 +933,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mirrord_args = vec![];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.pod_name, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -959,8 +948,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mirrord_args = vec![];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.pod_name, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
