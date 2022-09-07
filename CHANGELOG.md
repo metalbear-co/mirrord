@@ -8,12 +8,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
+
 - E2E: add tests for python's fastapi with uvicorn
+- Socket ops - `connect`: ignore localhost and ports 50000 - 60000 (reserved for debugger)
+- Add "*.plist" to `IGNORE_REGEX`, refer [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
 
 ### Fixed
+
 - mirrord-layer: User-friendly error for invalid kubernetes api certificate
 - mirrord-cli: Add random prefix to the generated shared lib to prevent Bus Error/EXC_BAD_ACCESS
 - Support for Go 1.19>= syscall hooking
+- Fix Python debugger crash in VS Code Extension. Closes [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
 
 ## 2.13.0
 ### Added
