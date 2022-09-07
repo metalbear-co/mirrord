@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- E2E: add tests for python's fastapi with uvicorn
+
 ### Fixed
 - mirrord-layer: User-friendly error for invalid kubernetes api certificate 
 
