@@ -273,9 +273,16 @@ async fn thread_loop(
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
-            Some(outgoing_message) = layer.tcp_outgoing_handler.recv() => {
+            Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::TcpOutgoing(outgoing_message)).await {
+                    layer.codec.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
+                        error!("Error sending client message: {:#?}", fail);
+                        break;
+                    }
+            }
+            Some(udp_outgoing_message) = layer.udp_outgoing_handler.recv() => {
+                if let Err(fail) =
+                    layer.codec.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }

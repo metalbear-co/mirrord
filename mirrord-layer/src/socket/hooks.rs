@@ -157,20 +157,36 @@ pub(crate) unsafe extern "C" fn recvfrom_detour(
 ) -> ssize_t {
     trace!("recvfrom_detour -> fd {:#?} | flags {:#?}", fd, flags);
 
-    let result = FN_RECVFROM(fd, buffer, len, flags, from, from_len);
-    // let addr = socket2::SockAddr::init(|storage, len| {
-    //     storage.copy_from(from.cast(), 1);
-    //     len.copy_from(from_len.cast(), 1);
+    FN_RECVFROM(fd, buffer, len, flags, from, from_len)
+}
 
-    //     Ok(())
-    // });
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn recvmsg_detour(
+    fd: RawFd,
+    msg: *mut libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    trace!("recvmsg_detour -> fd {:#?} | flags {:#?}", fd, flags);
 
-    // debug!(
-    //     "recvfrom_detour -> address {:#?}",
-    //     addr.unwrap().1.as_socket()
-    // );
+    FN_RECVMSG(fd, msg, flags)
+}
 
-    result
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn recvmmsg_detour(
+    fd: RawFd,
+    msgvec: *mut libc::mmsghdr,
+    v_len: size_t,
+    flags: c_int,
+    timeout: *const libc::timespec,
+) -> ssize_t {
+    trace!(
+        "recvmsg_detour -> fd {:#?} | flags {:#?} | timeout {:#?}",
+        fd,
+        flags,
+        *timeout
+    );
+
+    FN_RECVMMSG(fd, msgvec, v_len, flags, timeout)
 }
 
 #[hook_guard_fn]
@@ -193,7 +209,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
 }
 
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn getsockname_detour(
+pub(crate) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
@@ -494,6 +510,20 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         recvfrom_detour,
         FnRecvfrom,
         FN_RECVFROM
+    );
+    let _ = replace!(
+        interceptor,
+        "recvmsg",
+        recvmsg_detour,
+        FnRecvmsg,
+        FN_RECVMSG
+    );
+    let _ = replace!(
+        interceptor,
+        "recvmmsg",
+        recvmmsg_detour,
+        FnRecvmmsg,
+        FN_RECVMMSG
     );
 
     let _ = replace!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);

@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     collections::HashMap,
     future::Future,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Deref, DerefMut},
 };
@@ -11,6 +12,7 @@ use mirrord_protocol::{
     outgoing::udp::{DaemonUdpOutgoing, LayerUdpConnect, LayerUdpOutgoing},
     ClientCodec, ClientMessage, ConnectionId,
 };
+use socket2::SockAddr;
 use tokio::{
     net::UdpSocket,
     select,
@@ -18,13 +20,14 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{
     common::{ResponseChannel, ResponseDeque},
     detour::DetourGuard,
     error::LayerError,
+    socket::hooks::FN_GETSOCKNAME,
 };
 
 #[derive(Debug)]
@@ -118,7 +121,8 @@ impl UdpOutgoingHandler {
         remote_rx: Receiver<Vec<u8>>,
     ) {
         let mut remote_stream = ReceiverStream::new(remote_rx);
-        let mut buffer = vec![0; 1024];
+        let mut recv_buffer = vec![0; 1500];
+        let mut recv_from_buffer = vec![0; 1500];
 
         // Sends a message to close the remote stream in `agent`, when it's
         // being closed in `layer`.
@@ -134,13 +138,58 @@ impl UdpOutgoingHandler {
             }
         };
 
+        // TODO(alex) [high] 2022-09-07: Connect this socket to the user socket.
+        {
+            let _ = DetourGuard::new();
+            debug!(
+                "mirror socket local {:#?} | peer {:#?}",
+                mirror_socket.local_addr(),
+                mirror_socket.peer_addr()
+            );
+        }
+
+        let mut user_address: Option<SocketAddr> = None;
+
         loop {
             select! {
                 biased; // To allow local socket to be read before being closed
 
                 // Reads data that the user is sending from their socket to mirrord's interceptor
                 // socket.
-                read = mirror_socket.recv(&mut buffer) => {
+                // read = mirror_socket.recv(&mut recv_buffer) => {
+                //     debug!("read from recv");
+                //     match read {
+                //         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                //             continue;
+                //         },
+                //         Err(fail) => {
+                //             error!("Failed reading mirror_stream with {:#?}", fail);
+                //             close_remote_stream(layer_tx.clone()).await;
+
+                //             break;
+                //         }
+                //         Ok(read_amount) if read_amount == 0 => {
+                //             info!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                //             close_remote_stream(layer_tx.clone()).await;
+
+                //             break;
+                //         },
+                //         Ok(read_amount) => {
+                //             // Sends the message that the user wrote to our interceptor socket to
+                //             // be handled on the `agent`, where it'll be forwarded to the remote.
+                //             let write = LayerWrite { connection_id, bytes: recv_buffer[..read_amount].to_vec() };
+                //             let outgoing_write = LayerUdpOutgoing::Write(write);
+
+                //             if let Err(fail) = layer_tx.send(outgoing_write).await {
+                //                 error!("Failed sending write message with {:#?}!", fail);
+
+                //                 break;
+                //             }
+                //         }
+                //     }
+                // },
+                read = mirror_socket.recv_from(&mut recv_from_buffer) => {
+                    debug!("read from recv_from");
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
@@ -151,16 +200,18 @@ impl UdpOutgoingHandler {
 
                             break;
                         }
-                        Ok(read_amount) if read_amount == 0 => {
+                        Ok((read_amount, _)) if read_amount == 0 => {
                             info!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
                         },
-                        Ok(read_amount) => {
+                        Ok((read_amount, from)) => {
+                            debug!("from {:#?}", from);
+                            user_address = Some(from);
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = LayerWrite { connection_id, bytes: buffer[..read_amount].to_vec() };
+                            let write = LayerWrite { connection_id, bytes: recv_from_buffer[..read_amount].to_vec() };
                             let outgoing_write = LayerUdpOutgoing::Write(write);
 
                             if let Err(fail) = layer_tx.send(outgoing_write).await {
@@ -177,7 +228,7 @@ impl UdpOutgoingHandler {
                             // Writes the data sent by `agent` (that came from the actual remote
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.
-                            if let Err(fail) = mirror_socket.send(&bytes).await {
+                            if let Err(fail) = mirror_socket.send_to(&bytes, user_address.unwrap()).await {
                                 error!("Failed writing to mirror_stream with {:#?}!", fail);
                                 break;
                             }
@@ -299,6 +350,18 @@ impl UdpOutgoingHandler {
                         .ok_or(LayerError::SendErrorUdpResponse)?
                         .send(Ok(mirror_address))
                         .map_err(|_| LayerError::SendErrorUdpResponse)?;
+
+                    // let user_address = unsafe {
+                    //     SockAddr::init(|storage, len| {
+                    //         if FN_GETSOCKNAME(user_fd, storage.cast(), len) == -1 {
+                    //             Err(io::Error::last_os_error())
+                    //         } else {
+                    //             Ok(())
+                    //         }
+                    //     })
+                    // }
+                    // .map(|((), address)| address.as_socket())?
+                    // .unwrap();
 
                     mirror_socket
                 };

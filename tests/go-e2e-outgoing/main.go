@@ -29,8 +29,10 @@ func request() {
 
 	if err != nil {
 		log.Fatal(err)
+		panic(err)
 	}
 
+	fmt.Printf("body: %s", body)
 	fmt.Printf("done")
 }
 
@@ -48,6 +50,6 @@ func lookup() {
 func main() {
 	fmt.Println(">> starting go")
 
-	// request()
-	lookup()
+	request()
+	// lookup()
 }

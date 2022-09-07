@@ -2,7 +2,7 @@ use std::{
     ffi::CString,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, prelude::FromRawFd},
     ptr,
     sync::Arc,
 };
@@ -16,6 +16,7 @@ use tracing::{debug, error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    detour::DetourGuard,
     error::HookError,
     outgoing::{
         udp::{self, UdpOutgoing},
