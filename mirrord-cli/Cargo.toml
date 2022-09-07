@@ -20,6 +20,7 @@ mirrord-auth = { path="../mirrord-auth", features = ["webbrowser"] }
 
 clap.workspace = true
 tracing.workspace = true
+rand.workspace = true
 tracing-subscriber.workspace = true
 exec = "0.3"
 anyhow.workspace = true
