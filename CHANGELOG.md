@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - mirrord-layer: User-friendly error for invalid kubernetes api certificate
 - mirrord-cli: Add random prefix to the generated shared lib to prevent Bus Error/EXC_BAD_ACCESS
+- Support for Go 1.19>= syscall hooking
 
 ## 2.13.0
 ### Added
