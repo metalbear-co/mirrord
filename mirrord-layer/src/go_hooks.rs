@@ -301,32 +301,6 @@ unsafe extern "C" fn go_runtime_abort() {
     asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
 }
 
-<<<<<<< HEAD
-    /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
-    /// bind, listen, and accept
-    /// Note: Depending on success/failure Syscall may or may not call this handler
-    #[no_mangle]
-    unsafe extern "C" fn c_abi_syscall_handler(
-        syscall: i64,
-        param1: i64,
-        param2: i64,
-        param3: i64,
-    ) -> i64 {
-        trace!(
-            "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
-            syscall,
-            param1,
-            param2,
-            param3
-        );
-        let res = match syscall {
-            libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_close => close_detour(param1 as _) as i64,
-=======
 /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
 /// bind, listen, and accept
 /// Note: Depending on success/failure Syscall may or may not call this handler
@@ -348,9 +322,9 @@ unsafe extern "C" fn c_abi_syscall_handler(
         libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
+        libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_close => close_detour(param1 as _) as i64,
->>>>>>> e46f449ed6b1ad810f3e99a716d3fd2b2273c1cc
 
         _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
             libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
