@@ -72,7 +72,8 @@ mod tests {
 
     #[derive(Debug)]
     enum Application {
-        PythonHTTP,
+        PythonFlaskHTTP,
+        PythonFastApiHTTP,
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
@@ -107,6 +108,14 @@ mod tests {
 
         fn assert_stderr(&self) {
             assert!(self.stderr.lock().unwrap().is_empty());
+        }
+
+        fn assert_log_level(&self, stderr: bool, level: &str) {
+            if stderr {
+                assert!(!self.stderr.lock().unwrap().contains(level));
+            } else {
+                assert!(!self.stdout.lock().unwrap().contains(level));
+            }
         }
 
         fn assert_python_fileops_stderr(&self) {
@@ -181,14 +190,35 @@ mod tests {
             args: Option<Vec<&str>>,
         ) -> TestProcess {
             let process_cmd = match self {
-                Application::PythonHTTP => {
-                    vec!["python3", "-u", "python-e2e/app.py"]
+                Application::PythonFlaskHTTP => {
+                    vec!["python3", "-u", "python-e2e/app_flask.py"]
+                }
+                Application::PythonFastApiHTTP => {
+                    vec![
+                        "uvicorn",
+                        "--port=80",
+                        "--host=0.0.0.0",
+                        "--app-dir=./python-e2e/",
+                        "app_fastapi:app",
+                    ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
             };
             run(process_cmd, pod_name, namespace, args).await
+        }
+
+        fn assert(&self, process: &TestProcess) {
+            match self {
+                Application::PythonFastApiHTTP => {
+                    process.assert_log_level(true, "ERROR");
+                    process.assert_log_level(false, "ERROR");
+                    process.assert_log_level(true, "CRITICAL");
+                    process.assert_log_level(false, "CRITICAL");
+                }
+                _ => process.assert_stderr(),
+            }
         }
     }
 
@@ -561,10 +591,11 @@ mod tests {
         #[notrace]
         kube_client: Client,
         #[values(
-            Application::PythonHTTP,
             Application::NodeHTTP,
             Application::Go18HTTP,
-            Application::Go19HTTP
+            Application::Go19HTTP,
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP
         )]
         application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
@@ -585,7 +616,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "macos")]
@@ -600,7 +632,8 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)]
+        application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -619,7 +652,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "linux")]
@@ -794,7 +828,12 @@ mod tests {
     async fn test_steal_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::NodeHTTP
+        )]
+        application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -812,7 +851,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[rstest]

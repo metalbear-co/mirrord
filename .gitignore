@@ -1,6 +1,7 @@
 out
 dist
 node_modules
+__pycache__
 .vscode-test/
 *.vsix
 .DS_Store
