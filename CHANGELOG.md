@@ -9,6 +9,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Release arm64 agent image.
 
+### Fixed
+- Use selected namespace in IntelliJ plugin instead of always using default namespace.
+
 ## 2.12.1
 ### Fixed
 - Fix bug where VS Code extension would crash on startup due to new configuration values not being the correct type.
