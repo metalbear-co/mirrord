@@ -37,6 +37,7 @@ type Layer = LayerUdpOutgoing;
 type Daemon = DaemonUdpOutgoing;
 
 static NAMESERVER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^nameserver.*").unwrap());
+const DNS_PORT: u16 = 53;
 
 /// Handles (briefly) the `UdpOutgoingRequest` and `UdpOutgoingResponse` messages, mostly the
 /// passing of these messages to the `interceptor_task` thread.
@@ -50,8 +51,6 @@ pub(crate) struct UdpOutgoingApi {
     /// Reads the `Daemon` message from the `interceptor_task`.
     daemon_rx: Receiver<Daemon>,
 }
-
-const DNS_PORT: u16 = 53;
 
 async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
     trace!("resolve_dns -> ");
