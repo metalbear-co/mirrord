@@ -1,7 +1,8 @@
 import time
 import threading
-from os import getpid, kill
 from fastapi import FastAPI
+from os import getpid, kill
+from signal import SIGTERM
 
 app = FastAPI()
 
