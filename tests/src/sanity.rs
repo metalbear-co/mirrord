@@ -108,6 +108,14 @@ mod tests {
             assert!(self.stderr.lock().unwrap().is_empty());
         }
 
+        fn assert_log_level(&self, stderr: bool, level: &str) {
+            if stderr {
+                assert!(!self.stderr.lock().unwrap().contains(level));
+            } else {
+                assert!(!self.stdout.lock().unwrap().contains(level));
+            }
+        }
+
         fn assert_python_fileops_stderr(&self) {
             assert!(!self.stderr.lock().unwrap().contains("FAILED"));
         }
@@ -196,6 +204,18 @@ mod tests {
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
             };
             run(process_cmd, pod_name, namespace, args).await
+        }
+
+        fn assert(&self, process: &TestProcess) {
+            match self {
+                Application::PythonFastApiHTTP => {
+                    process.assert_log_level(true, "ERROR");
+                    process.assert_log_level(false, "ERROR");
+                    process.assert_log_level(true, "CRITICAL");
+                    process.assert_log_level(false, "CRITICAL");
+                }
+                _ => process.assert_stderr(),
+            }
         }
     }
 
@@ -590,7 +610,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "macos")]
@@ -625,7 +646,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[cfg(target_os = "linux")]
@@ -823,7 +845,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        process.assert_stderr();
+
+        application.assert(&process);
     }
 
     #[rstest]
