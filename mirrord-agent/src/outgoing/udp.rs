@@ -60,6 +60,8 @@ pub(crate) struct UdpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
+// TODO(alex) [high] 2022-09-07: Special-case the port 53 DNS request, otherwise we don't need most
+// of what is going on here.
 async fn connect(
     domain: i32,
     type_: i32,
