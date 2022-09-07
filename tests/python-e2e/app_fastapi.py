@@ -1,8 +1,15 @@
-from typing import Union
-
+import time
+import threading
+from os import getpid, kill
 from fastapi import FastAPI
 
 app = FastAPI()
+
+def kill_later():
+    def kill_thread():
+        time.sleep(1)
+        kill(getpid(), SIGTERM)
+    threading.Thread(target=kill_thread).start()
 
 @app.get("/")
 def get():
@@ -22,4 +29,5 @@ def put():
 @app.delete("/")
 def delete():
     print("DELETE: Request completed")
+    kill_later()
     return "DELETE"
