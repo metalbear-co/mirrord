@@ -1,7 +1,7 @@
 use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
@@ -132,6 +132,45 @@ pub(crate) unsafe extern "C" fn connect_detour(
             FN_CONNECT(sockfd, raw_address, address_length)
         }
     }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn recv_detour(
+    fd: RawFd,
+    buffer: *mut c_void,
+    len: size_t,
+    flags: c_int,
+) -> ssize_t {
+    trace!("recv_detour -> fd {:#?} | flags {:#?}", fd, flags);
+
+    FN_RECV(fd, buffer, len, flags)
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn recvfrom_detour(
+    fd: RawFd,
+    buffer: *mut c_void,
+    len: size_t,
+    flags: c_int,
+    from: *mut libc::sockaddr,
+    from_len: *mut libc::socklen_t,
+) -> ssize_t {
+    trace!("recvfrom_detour -> fd {:#?} | flags {:#?}", fd, flags);
+
+    let result = FN_RECVFROM(fd, buffer, len, flags, from, from_len);
+    // let addr = socket2::SockAddr::init(|storage, len| {
+    //     storage.copy_from(from.cast(), 1);
+    //     len.copy_from(from_len.cast(), 1);
+
+    //     Ok(())
+    // });
+
+    // debug!(
+    //     "recvfrom_detour -> address {:#?}",
+    //     addr.unwrap().1.as_socket()
+    // );
+
+    result
 }
 
 #[hook_guard_fn]
@@ -446,6 +485,15 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
         connect_detour,
         FnConnect,
         FN_CONNECT
+    );
+
+    let _ = replace!(interceptor, "recv", recv_detour, FnRecv, FN_RECV);
+    let _ = replace!(
+        interceptor,
+        "recvfrom",
+        recvfrom_detour,
+        FnRecvfrom,
+        FN_RECVFROM
     );
 
     let _ = replace!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
