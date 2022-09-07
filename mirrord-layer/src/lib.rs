@@ -89,8 +89,21 @@ fn init() {
 
     let port_forwarder = RUNTIME
         .block_on(pod_api::create_agent(config.clone(), connection_port))
-        .unwrap_or_else(|e| {
-            panic!("failed to create agent: {}", e);
+        .unwrap_or_else(|err| match err {
+            LayerError::KubeError(kube::Error::HyperError(err)) => {
+                eprintln!(
+                    r#"
+    mirrord encountered error accessing KubernetesApi, 
+    it might be because of tls consider passing -c or --accept-invalid-certificates
+                "#
+                );
+
+                match err.into_cause() {
+                    Some(cause) => panic!("mirrord error cause: {}", cause),
+                    None => panic!("mirrord got KubeError::HyperError"),
+                }
+            }
+            _ => panic!("failed to create agent: {}", err),
         });
 
     let (sender, receiver) = channel::<HookMessage>(1000);
