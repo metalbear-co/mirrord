@@ -8,5 +8,5 @@ data class MirrordDefaultData(val ldPreloadPath: String, val dylibPath: String, 
 }
 
 private fun getSharedLibPath(libName: String): String {
-    return Paths.get(PathManager.getConfigPath(), libName).toString()
+    return Paths.get(PathManager.getPluginsPath(), "mirrord", libName).toString()
 }

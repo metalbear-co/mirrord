@@ -22,3 +22,4 @@ intellij-ext/.idea
 intellij-ext/.qodana
 intellij-ext/build
 intellij-ext/libmirrord_layer.*
+.idea/
