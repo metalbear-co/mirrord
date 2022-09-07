@@ -91,7 +91,7 @@ fn init() {
         .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|err| match err {
             LayerError::KubeError(kube::Error::HyperError(err)) => {
-                eprintln!("mirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.");
+                eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
 
                 match err.into_cause() {
                     Some(cause) => panic!("{}", cause),
