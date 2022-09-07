@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - E2E: add tests for python's fastapi with uvicorn
 - Socket ops - `connect`: ignore localhost and ports 50000 - 60000 (reserved for debugger)
+- Add "*.plist" to `IGNORE_REGEX`, refer [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
 
 ### Fixed
 

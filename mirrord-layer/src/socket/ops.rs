@@ -255,7 +255,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
                 Ok::<_, HookError>(())
             }
         }
-        SocketState::Initialized if !(is_ignored_port(port)) && !(is_ignored_ip(ip)) => {
+        SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
             // Prepare this socket to be intercepted.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",
