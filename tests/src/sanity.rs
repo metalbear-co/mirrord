@@ -72,7 +72,8 @@ mod tests {
 
     #[derive(Debug)]
     enum Application {
-        PythonHTTP,
+        PythonFlaskHTTP,
+        PythonFastApiHTTP,
         NodeHTTP,
         GoHTTP,
     }
@@ -179,8 +180,11 @@ mod tests {
             args: Option<Vec<&str>>,
         ) -> TestProcess {
             let process_cmd = match self {
-                Application::PythonHTTP => {
-                    vec!["python3", "-u", "python-e2e/app.py"]
+                Application::PythonFlaskHTTP => {
+                    vec!["python3", "-u", "python-e2e/app_flask.py"]
+                }
+                Application::PythonFastApiHTTP => {
+                    vec!["uvicorn", "--app-dir=./python-e2e/", "app_fastapi:main"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
@@ -555,7 +559,7 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP, Application::NodeHTTP, Application::GoHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -589,7 +593,7 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -783,7 +787,7 @@ mod tests {
     async fn test_steal_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
