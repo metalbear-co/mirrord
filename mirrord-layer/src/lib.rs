@@ -91,15 +91,10 @@ fn init() {
         .block_on(pod_api::create_agent(config.clone(), connection_port))
         .unwrap_or_else(|err| match err {
             LayerError::KubeError(kube::Error::HyperError(err)) => {
-                eprintln!(
-                    r#"
-    mirrord encountered error accessing KubernetesApi, 
-    it might be because of tls consider passing -c or --accept-invalid-certificates
-                "#
-                );
+                eprintln!("mirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.");
 
                 match err.into_cause() {
-                    Some(cause) => panic!("mirrord error cause: {}", cause),
+                    Some(cause) => panic!("{}", cause),
                     None => panic!("mirrord got KubeError::HyperError"),
                 }
             }
