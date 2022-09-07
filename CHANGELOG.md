@@ -8,7 +8,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Fixed
-- mirrord-layer: User-friendly error for invalid kubernetes api certificate 
+- mirrord-layer: User-friendly error for invalid kubernetes api certificate
+- mirrord-cli: Add random prefix to the generated shared lib to prevent Bus Error/EXC_BAD_ACCESS
 
 ## 2.13.0
 ### Added

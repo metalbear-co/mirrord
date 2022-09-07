@@ -52,7 +52,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
         .as_os_str()
         .to_str()
         .unwrap()
-        .split(".")
+        .split('.')
         .collect::<Vec<&str>>()[1];
 
     let file_name = format!(
