@@ -184,7 +184,7 @@ mod tests {
                     vec!["python3", "-u", "python-e2e/app_flask.py"]
                 }
                 Application::PythonFastApiHTTP => {
-                    vec!["uvicorn", "--port=80", "--app-dir=./python-e2e/", "app_fastapi:main"]
+                    vec!["uvicorn", "--port=80", "--host=0.0.0.0", "--app-dir=./python-e2e/", "app_fastapi:main"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::GoHTTP => vec!["go-e2e/go-e2e"],
@@ -593,7 +593,7 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonFlaskHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -787,7 +787,7 @@ mod tests {
     async fn test_steal_http_traffic(
         #[future] service: EchoService,
         #[future] kube_client: Client,
-        #[values(Application::PythonFlaskHTTP, Application::NodeHTTP)] application: Application,
+        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
