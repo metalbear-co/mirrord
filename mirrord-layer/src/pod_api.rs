@@ -139,14 +139,16 @@ pub(crate) async fn create_agent(
             &impersonated_pod_namespace,
             &impersonated_container_name,
         )
-        .await;
+        .await
+        .map_err(LayerError::from)?;
+
         let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
 
         create_job_pod_agent(
             &config,
             agent_image,
             &pods_api,
-            runtime_data.unwrap(),
+            runtime_data,
             &jobs_api,
             connection_port,
         )
@@ -272,7 +274,7 @@ async fn create_ephemeral_container_agent(
             "ephemeralcontainers",
             &config.impersonated_pod_name,
             &PostParams::default(),
-            to_vec(&ephemeral_containers_subresource).unwrap(),
+            to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
         .await
         .map_err(LayerError::KubeError)?;

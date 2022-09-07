@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- mirrord-layer: User-friendly error for invalid kubernetes api certificate 
+
 ## 2.13.0
 ### Added
 - Release arm64 agent image.
