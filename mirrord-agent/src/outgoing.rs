@@ -1,6 +1,9 @@
 use std::{collections::HashMap, path::PathBuf, thread};
 
-use mirrord_protocol::{tcp::outgoing::*, ConnectionId, ResponseError};
+use mirrord_protocol::{
+    outgoing::{tcp::*, *},
+    ConnectionId, ResponseError,
+};
 use streammap_ext::StreamMap;
 use tokio::{
     io::AsyncWriteExt,
@@ -20,6 +23,8 @@ use crate::{
     runtime::set_namespace,
     util::{run_thread, IndexAllocator},
 };
+
+pub(crate) mod udp;
 
 type Layer = LayerTcpOutgoing;
 type Daemon = DaemonTcpOutgoing;

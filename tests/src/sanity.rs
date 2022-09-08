@@ -1028,4 +1028,28 @@ mod tests {
         assert!(res.success());
         process.assert_stderr();
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+        let service = service.await;
+        let command = vec!["go-e2e-outgoing/18"];
+        let mirrord_args = vec!["-d", "-o", "-u"];
+        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+        let service = service.await;
+        let command = vec!["go-e2e-outgoing/19"];
+        let mirrord_args = vec!["-d", "-o", "-u"];
+        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
 }

@@ -26,9 +26,10 @@ use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
     GetEnvVarsRequest,
 };
+use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
 use socket::SOCKETS;
-use tcp::{outgoing::TcpOutgoingHandler, TcpHandler};
+use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
 use tokio::{
@@ -49,6 +50,7 @@ mod error;
 mod file;
 mod go_env;
 mod macros;
+mod outgoing;
 mod pod_api;
 mod socket;
 mod tcp;
@@ -75,6 +77,7 @@ pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
+pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
@@ -114,6 +117,8 @@ fn init() {
     let _ = ENABLED_FILE_RO_OPS
         .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
+    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
+
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(
@@ -132,6 +137,7 @@ where
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
     tcp_outgoing_handler: TcpOutgoingHandler,
+    udp_outgoing_handler: UdpOutgoingHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
     // a `FakeFile`, and implement `std::io` traits on it.
@@ -159,6 +165,7 @@ where
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
+            udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::default(),
@@ -215,6 +222,11 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
+            HookMessage::UdpOutgoing(message) => self
+                .udp_outgoing_handler
+                .handle_hook_message(message, &mut self.codec)
+                .await
+                .unwrap(),
         }
     }
 
@@ -229,6 +241,11 @@ where
             DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
             DaemonMessage::TcpOutgoing(message) => {
                 self.tcp_outgoing_handler
+                    .handle_daemon_message(message)
+                    .await
+            }
+            DaemonMessage::UdpOutgoing(message) => {
+                self.udp_outgoing_handler
                     .handle_daemon_message(message)
                     .await
             }
@@ -274,9 +291,16 @@ async fn thread_loop(
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
-            Some(outgoing_message) = layer.tcp_outgoing_handler.recv() => {
+            Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::TcpOutgoing(outgoing_message)).await {
+                    layer.codec.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
+                        error!("Error sending client message: {:#?}", fail);
+                        break;
+                    }
+            }
+            Some(udp_outgoing_message) = layer.udp_outgoing_handler.recv() => {
+                if let Err(fail) =
+                    layer.codec.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }
