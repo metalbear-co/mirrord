@@ -14,7 +14,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add "*.plist" to `IGNORE_REGEX`, refer [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
 
 ### Changed
-- Change all functionality (incoming traffic mirroring, remote DNS outgoing traffic, environment variables, file reads and writes) to be enabled by default. ***Note that flags now disable functionality***
+
+- Change all functionality (incoming traffic mirroring, remote DNS outgoing traffic, environment variables, file reads) to be enabled by default. ***Note that flags now disable functionality***
 
 
 ### Fixed
