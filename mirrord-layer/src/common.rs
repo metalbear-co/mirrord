@@ -6,7 +6,8 @@ use tokio::sync::oneshot;
 use crate::{
     error::{HookError, HookResult},
     file::HookMessageFile,
-    tcp::{outgoing::TcpOutgoing, HookMessageTcp},
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
+    tcp::HookMessageTcp,
     HOOK_SENDER,
 };
 
@@ -36,6 +37,7 @@ pub struct GetAddrInfoHook {
 pub(crate) enum HookMessage {
     Tcp(HookMessageTcp),
     TcpOutgoing(TcpOutgoing),
+    UdpOutgoing(UdpOutgoing),
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
 }

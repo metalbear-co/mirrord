@@ -94,6 +94,10 @@ pub(super) struct ExecArgs {
     /// Disable tcp outgoing feature.
     #[clap(long = "no-outgoing", value_parser)]
     pub no_tcp_outgoing: bool,
+
+    /// Enable udp outgoing feature.
+    #[clap(long = "no-udp-outgoing", value_parser)]
+    pub no_udp_outgoing: bool,
 }
 
 #[derive(Args, Debug)]

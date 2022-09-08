@@ -60,4 +60,7 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub enabled_tcp_outgoing: bool,
+
+    #[envconfig(from = "MIRRORD_UDP_OUTGOING", default = "true")]
+    pub enabled_udp_outgoing: bool,
 }
