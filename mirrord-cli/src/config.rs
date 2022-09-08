@@ -43,7 +43,7 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub no_fs: bool,
 
-    /// Disable file hooking (Both R/W)
+    /// Enable file hooking (Both R/W)
     #[clap(long = "rw", value_parser)]
     pub enable_rw_fs: bool,
 
