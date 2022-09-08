@@ -77,6 +77,7 @@ mod tests {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        DenoHTTP,
     }
 
     #[derive(Debug)]
@@ -202,6 +203,7 @@ mod tests {
                         "app_fastapi:app",
                     ]
                 }
+                Application::DenoHTTP => vec!["deno", "run", "--allow-net", "deno-e2e/app.ts"],
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
@@ -595,7 +597,8 @@ mod tests {
             Application::Go18HTTP,
             Application::Go19HTTP,
             Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP
+            Application::PythonFastApiHTTP,
+            Application::DenoHTTP
         )]
         application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
@@ -632,7 +635,11 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)]
+        #[values(
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::DenoHTTP
+        )]
         application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
@@ -831,7 +838,8 @@ mod tests {
         #[values(
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
-            Application::NodeHTTP
+            Application::NodeHTTP,
+            Application::DenoHTTP
         )]
         application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
