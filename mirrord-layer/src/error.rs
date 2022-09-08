@@ -177,7 +177,12 @@ impl From<HookError> for i64 {
                 };
                 return code.into();
             }
-            _ => trace!("Error occured in Layer >> {:?}", fail),
+            HookError::ResponseError(ResponseError::NotFound(_))
+            | HookError::ResponseError(ResponseError::NotFile(_))
+            | HookError::ResponseError(ResponseError::NotDirectory(_)) => {
+                trace!("Error occured in Layer >> {:?}", fail)
+            }
+            _ => error!("Error occured in Layer >> {:?}", fail),
         };
 
         let libc_error = match fail {
