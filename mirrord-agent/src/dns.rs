@@ -70,6 +70,10 @@ fn get_addr_info(request: GetAddrInfoRequest) -> RemoteResult<Vec<AddrInfoIntern
     .and_then(std::convert::identity)
 }
 
+pub(crate) unsafe fn pifd_open(pid: u64, flags: u32) -> i64 {
+    libc::syscall(libc::SYS_pidfd_open, pid, flags)
+}
+
 pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<(), AgentError> {
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
@@ -77,6 +81,11 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
             .join(PathBuf::from("ns/net"));
 
         set_namespace(namespace)?;
+
+        unsafe {
+            let pid_fd = pifd_open(pid, 0);
+            nix::sched::setns(pid_fd as i32, nix::sched::CloneFlags::CLONE_NEWNET)?;
+        }
     };
 
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
