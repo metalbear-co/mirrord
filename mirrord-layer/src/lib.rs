@@ -38,7 +38,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::prelude::*;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
@@ -379,14 +379,9 @@ async fn start_layer_thread(
 
             let msg = codec.next().await;
             if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
-                debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
                 for (key, value) in remote_env_vars.into_iter() {
-                    debug!(
-                        "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
-                        key, value
-                    );
-
                     std::env::set_var(&key, &value);
                     debug_assert_eq!(std::env::var(key), Ok(value));
                 }

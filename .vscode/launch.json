@@ -34,16 +34,22 @@
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/node/app.mjs"],
+      "args": ["${file}"],
       "sourceMap": {},
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE": "*",
         "MIRRORD_FILE_OPS": "true",
         "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_TCP_OUTGOING": "true",
+        "MIRRORD_UDP_OUTGOING": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -59,11 +65,17 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
+        "RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
+        "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE": "*",
         "MIRRORD_FILE_OPS": "true",
         "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_TCP_OUTGOING": "true",
+        "MIRRORD_UDP_OUTGOING": "true",
         "RUST_BACKTRACE": "short"
       }
     }
