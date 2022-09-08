@@ -114,8 +114,8 @@ fn init() {
 
     let enabled_file_ops =
         ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
-    let _ =
-        ENABLED_FILE_RO_OPS.get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
+    let _ = ENABLED_FILE_RO_OPS
+        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
     let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
 
