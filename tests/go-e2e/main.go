@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,7 @@ func RandStringRunes(n int) string {
 }
 
 func main() {
+	fmt.Println(os.Environ())
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
