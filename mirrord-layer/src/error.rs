@@ -179,8 +179,9 @@ impl From<HookError> for i64 {
             }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
-            | HookError::ResponseError(ResponseError::NotDirectory(_)) => {
-                trace!("Error occured in Layer >> {:?}", fail)
+            | HookError::ResponseError(ResponseError::NotDirectory(_))
+            | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
+                trace!("Filesystem Error occured in Layer >> {:?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
