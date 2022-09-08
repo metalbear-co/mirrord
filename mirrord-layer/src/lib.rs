@@ -353,9 +353,11 @@ async fn start_layer_thread(
     // -layer)
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
 
-    if !config.override_env_vars_exclude.is_empty() && !config.override_env_vars_include.is_empty()
-    {
-        panic!(
+    let (env_vars_filter, env_vars_select) = match (
+        config.override_env_vars_exclude,
+        config.override_env_vars_include,
+    ) {
+        (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
 
             mirrord doesn't support specifying both
@@ -363,38 +365,38 @@ async fn start_layer_thread(
 
             > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
             >> If you want to include all, use `--override_env_vars_include="*"`."#
-        );
-    } else {
-        let env_vars_filter = HashSet::from(EnvVars(config.override_env_vars_exclude));
-        let env_vars_select = HashSet::from(EnvVars(config.override_env_vars_include));
+        ),
+        (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+        (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+        (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+    };
 
-        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
-            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-            let _codec_result = codec
-                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                    env_vars_filter,
-                    env_vars_select,
-                }))
-                .await;
+    if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+        // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
+        let _codec_result = codec
+            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                env_vars_filter,
+                env_vars_select,
+            }))
+            .await;
 
-            let msg = codec.next().await;
-            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
-                debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+        let msg = codec.next().await;
+        if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+            debug!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
-                for (key, value) in remote_env_vars.into_iter() {
-                    debug!(
-                        "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
-                        key, value
-                    );
+            for (key, value) in remote_env_vars.into_iter() {
+                debug!(
+                    "DaemonMessage::GetEnvVarsResponse set key {:#?} value {:#?}",
+                    key, value
+                );
 
-                    std::env::set_var(&key, &value);
-                    debug_assert_eq!(std::env::var(key), Ok(value));
-                }
-            } else {
-                panic!("unexpected response - expected env vars response {msg:?}");
+                std::env::set_var(&key, &value);
+                debug_assert_eq!(std::env::var(key), Ok(value));
             }
-        };
-    }
+        } else {
+            panic!("unexpected response - expected env vars response {msg:?}");
+        }
+    };
 
     let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
 }

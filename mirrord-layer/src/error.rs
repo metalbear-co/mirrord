@@ -177,6 +177,13 @@ impl From<HookError> for i64 {
                 };
                 return code.into();
             }
+            HookError::ResponseError(ResponseError::NotFound(_))
+            | HookError::ResponseError(ResponseError::NotFile(_))
+            | HookError::ResponseError(ResponseError::NotDirectory(_))
+            | HookError::ResponseError(ResponseError::Remote(_))
+            | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
+                trace!("Error occured in Layer >> {:?}", fail)
+            }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
 

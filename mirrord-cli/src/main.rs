@@ -98,7 +98,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
-    if (args.enable_tcp_outgoing || args.enable_udp_outgoing) && !args.remote_dns {
+    if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
@@ -134,16 +134,16 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
 
-    if args.enable_fs && args.enable_ro_fs {
-        warn!("Both filesystem read write and read only enabled - RW will take precedence");
+    if args.enable_rw_fs && args.no_fs {
+        warn!("fs was both enabled and disabled - disabling will take precedence.");
     }
 
-    if args.enable_fs {
-        std::env::set_var("MIRRORD_FILE_OPS", true.to_string());
+    if !args.no_fs && args.enable_rw_fs {
+        std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
-    if args.enable_ro_fs {
-        std::env::set_var("MIRRORD_FILE_RO_OPS", true.to_string());
+    if args.no_fs || args.enable_rw_fs {
+        std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
     if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
@@ -160,8 +160,8 @@ fn exec(args: &ExecArgs) -> Result<()> {
         );
     }
 
-    if args.remote_dns {
-        std::env::set_var("MIRRORD_REMOTE_DNS", true.to_string());
+    if args.no_remote_dns {
+        std::env::set_var("MIRRORD_REMOTE_DNS", "false");
     }
 
     if args.accept_invalid_certificates {
@@ -176,12 +176,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
-    if args.enable_tcp_outgoing {
-        std::env::set_var("MIRRORD_TCP_OUTGOING", true.to_string());
+    if args.no_outgoing || args.no_tcp_outgoing {
+        std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
     }
 
-    if args.enable_udp_outgoing {
-        std::env::set_var("MIRRORD_UDP_OUTGOING", true.to_string());
+    if args.no_outgoing || args.no_udp_outgoing {
+        std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
     let library_path = extract_library(args.extract_path.clone())?;
