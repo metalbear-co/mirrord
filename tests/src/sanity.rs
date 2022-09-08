@@ -949,8 +949,7 @@ mod tests {
     pub async fn test_go18_remote_env_vars_works(#[future] service: EchoService) {
         let service = service.await;
         let command = vec!["go-e2e-env/18"];
-        let mirrord_args = vec!["--override-env-vars-include", "*"];
-        let mut process = run(command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(command, &service.pod_name, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
