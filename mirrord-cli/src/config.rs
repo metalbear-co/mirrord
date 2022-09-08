@@ -39,13 +39,13 @@ pub(super) struct ExecArgs {
     #[clap(short = 'i', long, value_parser)]
     pub agent_image: Option<String>,
 
+    /// Disable file read only
+    #[clap(long, value_parser)]
+    pub no_fs: bool,
+
     /// Disable file hooking (Both R/W)
     #[clap(long = "rw", value_parser)]
     pub enable_rw_fs: bool,
-
-    /// Force file read only - writes will occur locally
-    #[clap(long, value_parser)]
-    pub no_ro_fs: bool,
 
     /// The env vars to filter out
     #[clap(short = 'x', long, value_parser)]

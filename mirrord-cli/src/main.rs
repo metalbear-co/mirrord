@@ -134,15 +134,15 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
 
-    if args.no_fs && args.ro_fs {
-        warn!("Both filesystem read write and disabled fs - Disabling will take precedence");
+    if args.enable_rw_fs && args.no_fs {
+        warn!("Both fs flags Read/Write and disabled Writes - Disabling will take precedence");
     }
 
-    if args.enable_rw_fs {
+    if !args.no_fs && args.enable_rw_fs {
         std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
-    if args.no_ro_fs {
+    if args.no_fs {
         std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
