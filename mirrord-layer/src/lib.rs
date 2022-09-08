@@ -77,6 +77,7 @@ pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
+pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
@@ -116,6 +117,8 @@ fn init() {
     let _ = ENABLED_FILE_RO_OPS
         .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
+    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
+
     enable_hooks(*enabled_file_ops, config.remote_dns);
 
     RUNTIME.block_on(start_layer_thread(

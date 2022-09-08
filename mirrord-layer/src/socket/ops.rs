@@ -19,7 +19,7 @@ use crate::{
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
-    ENABLED_TCP_OUTGOING,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
@@ -213,13 +213,19 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    let enabled_udp_outgoing = ENABLED_UDP_OUTGOING
+        .get()
+        .copied()
         .expect("Should be set during initialization!");
 
     (!is_ignored_port(remote_address.port()))
         .then_some(())
         .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
 
-    if let SocketKind::Udp(_) = user_socket_info.kind {
+    if let SocketKind::Udp(_) = user_socket_info.kind && enabled_udp_outgoing {
         // Prepare this socket to be intercepted.
         trace!(
             "connect -> SocketState::Initialized {:#?}",
@@ -266,7 +272,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
     }
 
     match user_socket_info.state {
-        SocketState::Initialized if !(*enabled_tcp_outgoing) => {
+        SocketState::Initialized if !enabled_tcp_outgoing => {
             // Just call `libc::connect`.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",

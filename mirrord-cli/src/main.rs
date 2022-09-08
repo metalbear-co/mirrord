@@ -98,8 +98,8 @@ fn exec(args: &ExecArgs) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
-    if args.enable_tcp_outgoing && !args.remote_dns {
-        warn!("TCP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
+    if (args.enable_tcp_outgoing || args.enable_udp_outgoing) && !args.remote_dns {
+        warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
     std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.pod_name.clone());
@@ -178,6 +178,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if args.enable_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", true.to_string());
+    }
+
+    if args.enable_udp_outgoing {
+        std::env::set_var("MIRRORD_UDP_OUTGOING", true.to_string());
     }
 
     let library_path = extract_library(args.extract_path.clone())?;
