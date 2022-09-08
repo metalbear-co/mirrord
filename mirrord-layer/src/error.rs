@@ -177,7 +177,7 @@ impl From<HookError> for i64 {
                 };
                 return code.into();
             }
-            _ => error!("Error occured in Layer >> {:?}", fail),
+            _ => trace!("Error occured in Layer >> {:?}", fail),
         };
 
         let libc_error = match fail {
