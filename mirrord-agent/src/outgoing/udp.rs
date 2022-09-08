@@ -80,7 +80,7 @@ async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
 async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
     trace!("connect -> remote_address {:#?}", remote_address);
 
-    let remote_address = if remote_address.port() == 53 {
+    let remote_address = if remote_address.port() == DNS_PORT {
         resolve_dns().await?
     } else {
         remote_address
