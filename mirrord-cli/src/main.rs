@@ -138,12 +138,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
         warn!("Both filesystem read write and disabled fs - Disabling will take precedence");
     }
 
-    if args.no_fs {
-        std::env::set_var("MIRRORD_FILE_OPS", "false");
+    if args.enable_rw_fs {
+        std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
-    if args.ro_fs {
-        std::env::set_var("MIRRORD_FILE_RO_OPS", "true");
+    if args.no_ro_fs {
+        std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
     if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {

@@ -40,12 +40,12 @@ pub(super) struct ExecArgs {
     pub agent_image: Option<String>,
 
     /// Disable file hooking (Both R/W)
-    #[clap(long, value_parser)]
-    pub no_fs: bool,
+    #[clap(long = "rw", value_parser)]
+    pub enable_rw_fs: bool,
 
     /// Force file read only - writes will occur locally
-    #[clap(long = "ro", value_parser)]
-    pub ro_fs: bool,
+    #[clap(long, value_parser)]
+    pub no_ro_fs: bool,
 
     /// The env vars to filter out
     #[clap(short = 'x', long, value_parser)]
@@ -95,7 +95,7 @@ pub(super) struct ExecArgs {
     #[clap(long = "no-outgoing", value_parser)]
     pub no_tcp_outgoing: bool,
 
-    /// Enable udp outgoing feature.
+    /// Disable udp outgoing feature.
     #[clap(long = "no-udp-outgoing", value_parser)]
     pub no_udp_outgoing: bool,
 }

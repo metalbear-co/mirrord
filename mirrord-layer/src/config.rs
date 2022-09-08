@@ -36,11 +36,11 @@ pub struct LayerConfig {
     pub agent_communication_timeout: Option<u16>,
 
     /// Enable file ops read/write
-    #[envconfig(from = "MIRRORD_FILE_OPS", default = "true")]
+    #[envconfig(from = "MIRRORD_FILE_OPS", default = "false")]
     pub enabled_file_ops: bool,
 
     /// Enable file ops ready only (write will happen locally)
-    #[envconfig(from = "MIRRORD_FILE_RO_OPS", default = "false")]
+    #[envconfig(from = "MIRRORD_FILE_RO_OPS", default = "true")]
     pub enabled_file_ro_ops: bool,
 
     /// Filters out these env vars when overriding is enabled.
