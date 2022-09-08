@@ -40,27 +40,27 @@ pub struct LayerConfig {
     pub enabled_file_ops: bool,
 
     /// Enable file ops ready only (write will happen locally)
-    #[envconfig(from = "MIRRORD_FILE_RO_OPS", default = "false")]
+    #[envconfig(from = "MIRRORD_FILE_RO_OPS", default = "true")]
     pub enabled_file_ro_ops: bool,
 
     /// Filters out these env vars when overriding is enabled.
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", default = "")]
-    pub override_env_vars_exclude: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
+    pub override_env_vars_exclude: Option<String>,
 
     /// Selects these env vars when overriding is enabled.
-    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", default = "")]
-    pub override_env_vars_include: String,
+    #[envconfig(from = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
+    pub override_env_vars_include: Option<String>,
 
     #[envconfig(from = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral_container: bool,
 
     /// Enables resolving a remote DNS.
-    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "false")]
+    #[envconfig(from = "MIRRORD_REMOTE_DNS", default = "true")]
     pub remote_dns: bool,
 
-    #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "false")]
+    #[envconfig(from = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub enabled_tcp_outgoing: bool,
 
-    #[envconfig(from = "MIRRORD_UDP_OUTGOING", default = "false")]
+    #[envconfig(from = "MIRRORD_UDP_OUTGOING", default = "true")]
     pub enabled_udp_outgoing: bool,
 }
