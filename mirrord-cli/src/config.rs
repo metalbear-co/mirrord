@@ -91,12 +91,16 @@ pub(super) struct ExecArgs {
     #[clap(long = "steal", value_parser)]
     pub tcp_steal: bool,
 
+    /// Disable tcp/udp outgoing traffic
+    #[clap(long, value_parser)]
+    pub no_outgoing: bool,
+
     /// Disable tcp outgoing feature.
-    #[clap(long = "no-outgoing", value_parser)]
+    #[clap(long, value_parser)]
     pub no_tcp_outgoing: bool,
 
     /// Disable udp outgoing feature.
-    #[clap(long = "no-udp-outgoing", value_parser)]
+    #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
 }
 

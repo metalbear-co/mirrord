@@ -176,11 +176,11 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
-    if args.no_tcp_outgoing {
+    if args.no_outgoing || args.no_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
     }
 
-    if args.no_udp_outgoing {
+    if args.no_outgoing || args.no_udp_outgoing {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
