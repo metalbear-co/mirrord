@@ -135,7 +135,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     }
 
     if args.enable_rw_fs && args.no_fs {
-        warn!("Both fs flags Read/Write and disabled Writes - Disabling will take precedence");
+        warn!("fs was both enabled and disabled - disabling will take precedence.");
     }
 
     if !args.no_fs && args.enable_rw_fs {
