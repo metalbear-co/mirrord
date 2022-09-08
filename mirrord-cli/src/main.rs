@@ -142,7 +142,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
-    if args.no_fs {
+    if args.no_fs || args.enable_rw_fs {
         std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
