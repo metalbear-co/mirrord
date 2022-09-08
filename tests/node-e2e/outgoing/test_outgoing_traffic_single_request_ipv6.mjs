@@ -7,6 +7,7 @@ const options = {
   port: 443,
   path: "/",
   method: "GET",
+  family: 6,
 };
 
 const request = https.request(options, (response) => {
