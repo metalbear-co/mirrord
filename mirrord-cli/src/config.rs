@@ -39,25 +39,25 @@ pub(super) struct ExecArgs {
     #[clap(short = 'i', long, value_parser)]
     pub agent_image: Option<String>,
 
-    /// Enable file hooking (Both R/W)
-    #[clap(short = 'f', long, value_parser)]
-    pub enable_fs: bool,
-
-    /// Enable file read only - writes will occur locally
+    /// Disable file read only
     #[clap(long, value_parser)]
-    pub enable_ro_fs: bool,
+    pub no_fs: bool,
+
+    /// Enable file hooking (Both R/W)
+    #[clap(long = "rw", value_parser)]
+    pub enable_rw_fs: bool,
 
     /// The env vars to filter out
     #[clap(short = 'x', long, value_parser)]
     pub override_env_vars_exclude: Option<String>,
 
-    /// The env vars to select
+    /// The env vars to select. Default is '*'
     #[clap(short = 's', long, value_parser)]
     pub override_env_vars_include: Option<String>,
 
-    /// Enables resolving a remote DNS.
-    #[clap(short = 'd', long, value_parser)]
-    pub remote_dns: bool,
+    /// Disables resolving a remote DNS.
+    #[clap(long, value_parser)]
+    pub no_remote_dns: bool,
 
     /// Binary to execute and mirror traffic into.
     #[clap(value_parser)]
@@ -79,7 +79,7 @@ pub(super) struct ExecArgs {
     #[clap(value_parser)]
     pub(super) binary_args: Vec<String>,
 
-    /// Where to extract the library to (defaults to a temp dir)
+    /// Where to extract the library to. Default is temp dir.
     #[clap(long, value_parser)]
     pub extract_path: Option<String>,
 
@@ -88,16 +88,20 @@ pub(super) struct ExecArgs {
     pub ephemeral_container: bool,
 
     /// Steal TCP instead of mirroring
-    #[clap(long, value_parser)]
+    #[clap(long = "steal", value_parser)]
     pub tcp_steal: bool,
 
-    /// Enable tcp outgoing feature.
-    #[clap(short = 'o', long, value_parser)]
-    pub enable_tcp_outgoing: bool,
+    /// Disable tcp/udp outgoing traffic
+    #[clap(long, value_parser)]
+    pub no_outgoing: bool,
 
-    /// Enable udp outgoing feature.
-    #[clap(short = 'u', long, value_parser)]
-    pub enable_udp_outgoing: bool,
+    /// Disable tcp outgoing feature.
+    #[clap(long, value_parser)]
+    pub no_tcp_outgoing: bool,
+
+    /// Disable udp outgoing feature.
+    #[clap(long, value_parser)]
+    pub no_udp_outgoing: bool,
 }
 
 #[derive(Args, Debug)]
