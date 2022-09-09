@@ -27,6 +27,7 @@ dependencies {
     implementation("io.kubernetes:client-java:16.0.0") {
         exclude(group = "org.slf4j", module = "slf4j-api")
     }
+    implementation("com.github.zafarkhaja:java-semver:0.9.0")
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
