@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -11,7 +11,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
 
-use crate::error::{HookError, HookResult as Result};
+use crate::error::{HookError, HookResult};
 
 pub(super) mod hooks;
 pub(crate) mod ops;
@@ -89,6 +89,35 @@ impl Default for SocketState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SocketKind {
+    Tcp(c_int),
+    Udp(c_int),
+}
+
+impl TryFrom<c_int> for SocketKind {
+    type Error = HookError;
+
+    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+        if (type_ & libc::SOCK_STREAM) > 0 {
+            // TODO(alex) [mid] 2022-08-31: Mark this socket as `TcpSocket` and insert it into the
+            // `TCP_SOCKETS` static.
+            //
+            // Or maybe just have these in the same place, but as enums inside `SOCKETS` type?
+            //
+            // Lastly, probably don't need to go too deep (like delving too much on working UDP),
+            // just make the DNS feature work.
+            Ok(SocketKind::Tcp(type_))
+        } else if (type_ & libc::SOCK_DGRAM) > 0 {
+            // TODO(alex) [mid] 2022-08-31: Mark this socket as `UdpSocket` and insert it into the
+            // `UDP_SOCKETS` static.
+            Ok(SocketKind::Udp(type_))
+        } else {
+            Err(HookError::BypassedType(type_))
+        }
+    }
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct UserSocket {
@@ -96,11 +125,16 @@ pub struct UserSocket {
     type_: c_int,
     protocol: c_int,
     pub state: SocketState,
+    pub(crate) kind: SocketKind,
 }
 
 #[inline]
 const fn is_ignored_port(port: Port) -> bool {
-    port == 0 || (port > 50000 && port < 60000)
+    port == 0 || port == 9 || (port > 50000 && port < 60000)
+}
+#[inline]
+fn is_ignored_ip(ip: IpAddr) -> bool {
+    ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
 }
 
 /// Fill in the sockaddr structure for the given address.
@@ -109,7 +143,7 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> Result<()> {
+) -> HookResult<()> {
     if address.is_null() {
         Ok(())
     } else if address_len.is_null() {

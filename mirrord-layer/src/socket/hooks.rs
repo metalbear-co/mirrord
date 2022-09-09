@@ -100,12 +100,12 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 }
 
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn connect_detour(
+pub(crate) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    trace!("connect_detour -> sockfd {:#?}", sockfd);
+    debug!("connect_detour -> sockfd {:#?}", sockfd);
 
     // TODO: Is this conversion safe?
     let address = SockAddr::new(*(raw_address as *const _), address_length);
@@ -117,7 +117,9 @@ pub(super) unsafe extern "C" fn connect_detour(
                 connect(sockfd, address)
                     .map(|()| 0)
                     .map_err(|fail| match fail {
-                        HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
+                        HookError::LocalFDNotFound(_)
+                        | HookError::SocketInvalidState(_)
+                        | HookError::BypassedPort(_) => {
                             warn!("connect_detour -> bypassed with {:#?}", fail);
                             FN_CONNECT(sockfd, raw_address, address_length)
                         }
@@ -154,7 +156,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
 }
 
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn getsockname_detour(
+pub(crate) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
