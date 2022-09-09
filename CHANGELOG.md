@@ -7,11 +7,24 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.1-alpha
+
+### Fixed
+- Add missing dependency breaking the VS Code release.
+
+## 3.0.0-alpha
+
 ### Added
 
+- New feature: UDP outgoing, mainly for Go DNS but should work for most use cases also!
 - E2E: add tests for python's fastapi with uvicorn
 - Socket ops - `connect`: ignore localhost and ports 50000 - 60000 (reserved for debugger)
 - Add "*.plist" to `IGNORE_REGEX`, refer [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
+
+### Changed
+
+- Change all functionality (incoming traffic mirroring, remote DNS outgoing traffic, environment variables, file reads) to be enabled by default. ***Note that flags now disable functionality***
+
 
 ### Fixed
 

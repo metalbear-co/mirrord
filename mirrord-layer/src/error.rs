@@ -93,6 +93,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
     SendErrorTcpResponse,
 
+    #[error("mirrord-layer: Failed to get `Sender` for sending udp response!")]
+    SendErrorUdpResponse,
+
     #[error("mirrord-layer: JoinError failed with `{0}`!")]
     Join(#[from] tokio::task::JoinError),
 
@@ -174,6 +177,13 @@ impl From<HookError> for i64 {
                 };
                 return code.into();
             }
+            HookError::ResponseError(ResponseError::NotFound(_))
+            | HookError::ResponseError(ResponseError::NotFile(_))
+            | HookError::ResponseError(ResponseError::NotDirectory(_))
+            | HookError::ResponseError(ResponseError::Remote(_))
+            | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
+                trace!("Error occured in Layer >> {:?}", fail)
+            }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
 
@@ -193,6 +203,7 @@ impl From<HookError> for i64 {
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
+                ResponseError::Remote(_) => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

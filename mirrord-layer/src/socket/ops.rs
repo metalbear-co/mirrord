@@ -17,15 +17,13 @@ use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     error::HookError,
-    tcp::{
-        outgoing::{Connect, MirrorAddress, TcpOutgoing},
-        HookMessageTcp, Listen,
-    },
-    ENABLED_TCP_OUTGOING,
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
+    tcp::{HookMessageTcp, Listen},
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<RawFd> {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
     trace!(
         "socket -> domain {:#?} | type:{:#?} | protocol {:#?}",
         domain,
@@ -33,9 +31,9 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         protocol
     );
 
-    if type_ & libc::SOCK_STREAM <= 0 {
-        Err(HookError::BypassedType(type_))
-    } else if !((domain == libc::AF_INET) || (domain == libc::AF_INET6)) {
+    let socket_kind = type_.try_into()?;
+
+    if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(HookError::BypassedDomain(domain))
     } else {
         Ok(())
@@ -54,6 +52,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
         type_,
         protocol,
         state: SocketState::default(),
+        kind: socket_kind,
     };
     debug!(
         "socket -> socket_fd {:#?} | new_socket {:#?}",
@@ -68,8 +67,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Result<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
-    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
+    debug!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
     let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
@@ -145,7 +144,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Result<()> {
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
     debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
@@ -198,11 +197,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Result<()> {
 /// that will be handled by `TcpOutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
-    trace!(
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
+    debug!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
-        sockfd,
-        remote_address
+        sockfd, remote_address
     );
     let (ip, port) = (remote_address.ip(), remote_address.port());
 
@@ -215,10 +213,66 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> Result<()> {
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
+        .copied()
         .expect("Should be set during initialization!");
 
+    let enabled_udp_outgoing = ENABLED_UDP_OUTGOING
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    (!is_ignored_port(remote_address.port()))
+        .then_some(())
+        .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
+
+    if let SocketKind::Udp(_) = user_socket_info.kind && enabled_udp_outgoing {
+        // Prepare this socket to be intercepted.
+        trace!(
+            "connect -> SocketState::Initialized {:#?}",
+            user_socket_info
+        );
+        let (mirror_tx, mirror_rx) = oneshot::channel();
+
+        let connect = Connect {
+            remote_address,
+            channel_tx: mirror_tx,
+        };
+
+        let connect_hook = UdpOutgoing::Connect(connect);
+
+        blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
+        let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+
+        let connect_to = SockAddr::from(mirror_address);
+
+        // Connect to the interceptor socket that is listening.
+        let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+        debug!("connect -> connect_result {:#?}", connect_result);
+
+        let err_code = errno::errno().0;
+        if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+            error!(
+                "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+                connect_result,
+                errno::errno()
+            );
+            return Err(io::Error::last_os_error())?;
+        }
+
+        // Warning: We're treating `EINPROGRESS` as `Connected`!
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
+
+        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+
+        return Ok::<(), HookError>(());
+    }
+
     match user_socket_info.state {
-        SocketState::Initialized if !(*enabled_tcp_outgoing) => {
+        SocketState::Initialized if !enabled_tcp_outgoing => {
             // Just call `libc::connect`.
             trace!(
                 "connect -> SocketState::Initialized {:#?}",
@@ -343,7 +397,7 @@ pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<()> {
+) -> HookResult<()> {
     trace!("getpeername -> sockfd {:#?}", sockfd);
 
     let remote_address = {
@@ -366,7 +420,7 @@ pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> Result<()> {
+) -> HookResult<()> {
     trace!("getsockname -> sockfd {:#?}", sockfd);
 
     let local_address = {
@@ -395,7 +449,7 @@ pub(super) fn accept(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
-) -> Result<RawFd> {
+) -> HookResult<RawFd> {
     let (local_address, domain, protocol, type_) = {
         SOCKETS
             .lock()?
@@ -425,6 +479,7 @@ pub(super) fn accept(
             remote_address,
             mirror_address: local_address,
         }),
+        kind: type_.try_into()?,
     };
     fill_address(address, address_len, remote_address)?;
 
@@ -433,14 +488,14 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<()> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> HookResult<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<()> {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
@@ -467,12 +522,10 @@ pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     hints: Option<AddrInfoHint>,
-) -> Result<*mut libc::addrinfo> {
-    trace!(
+) -> HookResult<*mut libc::addrinfo> {
+    debug!(
         "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
-        node,
-        service,
-        hints
+        node, service, hints
     );
 
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
