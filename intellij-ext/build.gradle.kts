@@ -9,7 +9,7 @@ plugins {
     // Kotlin support
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
     // Gradle IntelliJ Plugin
-    id("org.jetbrains.intellij") version "1.8.1"
+    id("org.jetbrains.intellij") version "1.9.0"
     // Gradle Changelog Plugin
     id("org.jetbrains.changelog") version "1.3.1"
     // Gradle Qodana Plugin
@@ -88,6 +88,7 @@ tasks {
             from(file(lib)) {
                 into(pluginName.get())
             }
+            // NOTE: comment this line when developing locally without either of shared libs
             if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib Not Found")
         }
     }
