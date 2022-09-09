@@ -83,11 +83,13 @@ tasks {
     }
 
     prepareSandbox {
-        from(file("$projectDir/libmirrord_layer.dylib")) {
-            into(pluginName.get())
-        }
-        from(file("$projectDir/libmirrord_layer.so")) {
-            into(pluginName.get())
+        val sharedLibs = mapOf("macos" to "$projectDir/libmirrord_layer.dylib", "linux" to "$projectDir/libmirrord_layer.so")
+        val files = inputs.sourceFiles.files
+        sharedLibs.forEach { (_, lib) ->
+            from(file(lib)) {
+                into(pluginName.get())
+            }
+            if(!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("No files found")
         }
     }
     // Configure UI tests plugin
