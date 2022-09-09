@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.1-alpha
+
+### Fixed
+- Add missing dependency breaking the VS Code release.
+
 ## 3.0.0-alpha
 
 ### Added
