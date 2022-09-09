@@ -3,7 +3,10 @@ use std::net::SocketAddr;
 
 use bincode::{Decode, Encode};
 
-use crate::{ConnectionId, RemoteResult};
+use crate::ConnectionId;
+
+pub mod tcp;
+pub mod udp;
 
 /// `user` wants to connect to `remote_address`.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -34,13 +37,6 @@ pub struct LayerClose {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum LayerTcpOutgoing {
-    Connect(LayerConnect),
-    Write(LayerWrite),
-    Close(LayerClose),
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct DaemonConnect {
     pub connection_id: ConnectionId,
     pub remote_address: SocketAddr,
@@ -59,11 +55,4 @@ impl fmt::Debug for DaemonRead {
             .field("bytes (length)", &self.bytes.len())
             .finish()
     }
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum DaemonTcpOutgoing {
-    Connect(RemoteResult<DaemonConnect>),
-    Read(RemoteResult<DaemonRead>),
-    Close(ConnectionId),
 }

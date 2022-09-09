@@ -1,8 +1,10 @@
 use mirrord_protocol::{
-    tcp::{
-        outgoing::{DaemonTcpOutgoing, LayerConnect, LayerTcpOutgoing},
-        DaemonTcp, LayerTcpSteal,
+    outgoing::{
+        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        LayerConnect,
     },
+    tcp::{DaemonTcp, LayerTcpSteal},
     FileRequest, FileResponse, Port,
 };
 use thiserror::Error;
@@ -32,11 +34,17 @@ pub enum AgentError {
     #[error("OutgoingTrafficRequest sender failed with `{0}`")]
     SendOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerTcpOutgoing>),
 
+    #[error("UdpOutgoingTrafficRequest sender failed with `{0}`")]
+    SendUdpOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerUdpOutgoing>),
+
     #[error("Receiver channel is closed!")]
     ReceiverClosed,
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
+
+    #[error("UdpConnectRequest sender failed with `{0}`")]
+    SendUdpOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonUdpOutgoing>),
 
     #[error("task::Join failed with `{0}`")]
     Join(#[from] tokio::task::JoinError),

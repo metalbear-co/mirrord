@@ -22,8 +22,6 @@ use crate::{
     socket::{SocketInformation, CONNECTION_QUEUE},
 };
 
-pub(crate) mod outgoing;
-
 #[derive(Debug)]
 pub(crate) enum HookMessageTcp {
     Listen(Listen),
