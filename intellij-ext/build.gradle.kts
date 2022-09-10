@@ -89,7 +89,7 @@ tasks {
                 into(pluginName.get())
             }
             // NOTE: comment this line when developing locally without either of shared libs
-            if (System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
                 if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
             }
         }
