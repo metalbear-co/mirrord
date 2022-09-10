@@ -89,7 +89,9 @@ tasks {
                 into(pluginName.get())
             }
             // NOTE: comment this line when developing locally without either of shared libs
-            if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib Not Found")
+            if (System.getenv("CI").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
+            }
         }
     }
     // Configure UI tests plugin
