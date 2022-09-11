@@ -12,6 +12,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Fix Environment parsing error when value contained '='
+- Fix bug in outgoing traffic with multiple requests in quick succession.
+  Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
 
 ## 3.0.1-alpha
 

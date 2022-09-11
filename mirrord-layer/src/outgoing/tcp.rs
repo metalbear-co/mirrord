@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
 };
 
 use futures::SinkExt;
@@ -15,9 +16,10 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -85,6 +87,7 @@ impl TcpOutgoingHandler {
             }
         };
 
+        let mut remote_stream_closed = false;
         loop {
             select! {
                 biased; // To allow local socket to be read before being closed
@@ -122,7 +125,7 @@ impl TcpOutgoingHandler {
                         }
                     }
                 },
-                bytes = remote_stream.next() => {
+                bytes = remote_stream.next(), if !remote_stream_closed => {
                     match bytes {
                         Some(bytes) => {
                             // Writes the data sent by `agent` (that came from the actual remote
@@ -134,11 +137,15 @@ impl TcpOutgoingHandler {
                             }
                         },
                         None => {
-                            warn!("interceptor_task -> exiting due to remote stream closed!");
-                            break;
+                            debug!("interceptor_task -> remote stream closed, letting mirror stream drain before exiting.");
+                            remote_stream_closed = true;
                         }
                     }
                 },
+                _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
+                    warn!("interceptor_task -> exiting due to remote stream closed!");
+                    break;
+                }
             }
         }
 
