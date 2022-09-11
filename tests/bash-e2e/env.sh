@@ -1,9 +1,9 @@
 #!/bin/bash
 
 case $1 in
-  include) first=1; second=0; third=0;
-  exclude) first=0; second=1; third=1;
-  *) first=1; second=1; third=1;
+  include) first=1; second=0; third=0;;
+  exclude) first=0; second=1; third=1;;
+  *) first=1; second=1; third=1;;
 esac
 
 if [ $MIRRORD_FAKE_VAR_FIRST ]; then
