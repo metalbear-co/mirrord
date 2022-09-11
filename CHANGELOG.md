@@ -32,7 +32,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-cli: Add random prefix to the generated shared lib to prevent Bus Error/EXC_BAD_ACCESS
 - Support for Go 1.19>= syscall hooking
 - Fix Python debugger crash in VS Code Extension. Closes [[#350](https://github.com/metalbear-co/mirrord/issues/350)].
-- Fix Environment parsing error when value containd '='
+- Fix Environment parsing error when value contained '='
 
 ## 2.13.0
 ### Added
