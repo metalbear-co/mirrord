@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
 
+### Fixed
+- Fix Environment parsing error when value contained '='
+
 ## 3.0.1-alpha
 
 ### Fixed
