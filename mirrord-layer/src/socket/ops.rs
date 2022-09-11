@@ -231,19 +231,28 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             "connect -> SocketState::Initialized {:#?}",
             user_socket_info
         );
-        let (mirror_tx, mirror_rx) = oneshot::channel();
+        let (connect_tx, connect_rx) = oneshot::channel();
 
         let connect = Connect {
             remote_address,
-            channel_tx: mirror_tx,
+            channel_tx: connect_tx,
         };
 
         let connect_hook = UdpOutgoing::Connect(connect);
 
         blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-        let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+        debug!("connect -> sent hook message");
+        let response = connect_rx.blocking_recv();
+        debug!("connect -> received from daemon {:#?}", response);
+        // let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
+        let MirrorAddress(mirror_address) = response??;
 
         let connect_to = SockAddr::from(mirror_address);
+
+        // TODO(alex) [high] 2022-09-09: Before connecting here, we should check that agent was
+        // actually successful in its remote connection. Otherwise we're telling the user that
+        // the address is valid, and the connection was ok.
+        // In short, must defer the interceptor socket connection, until we have an ok from agent.
 
         // Connect to the interceptor socket that is listening.
         let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };

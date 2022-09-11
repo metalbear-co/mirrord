@@ -130,7 +130,8 @@ pub struct UserSocket {
 
 #[inline]
 const fn is_ignored_port(port: Port) -> bool {
-    port == 0 || port == 9 || (port > 50000 && port < 60000)
+    // port == 0 || port == 9 || (port > 50000 && port < 60000)
+    port == 0 || (port > 50000 && port < 60000)
 }
 #[inline]
 fn is_ignored_ip(ip: IpAddr) -> bool {
