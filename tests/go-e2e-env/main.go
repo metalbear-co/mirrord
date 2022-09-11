@@ -16,4 +16,9 @@ func main() {
 		err := fmt.Errorf("missing env var MIRRORD_FAKE_VAR_SECOND")
 		panic(err)
 	}
+
+	if os.Getenv("MIRRORD_FAKE_VAR_THIRD") != "foo=bar" {
+		err := fmt.Errorf("missing env var MIRRORD_FAKE_VAR_THIRD")
+		panic(err)
+	}
 }
