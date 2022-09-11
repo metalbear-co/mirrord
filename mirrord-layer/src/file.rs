@@ -15,7 +15,7 @@ use mirrord_protocol::{
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
     SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
-use regex::RegexSet;
+use fancy_regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
