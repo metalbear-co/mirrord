@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
+
 ## 3.0.1-alpha
 
 ### Fixed
