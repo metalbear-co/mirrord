@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
@@ -7,7 +7,6 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use fancy_regex::Regex;
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
@@ -16,6 +15,7 @@ use mirrord_protocol::{
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
     SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
+use regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -27,50 +27,36 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 /// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: LazyLock<Regex> = LazyLock::new(|| {
+static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
-    let current_dir = current_dir.to_string_lossy();
 
-    let mut regex_set = HashSet::with_capacity(32);
-    regex_set.insert(r".+\.so");
-    regex_set.insert(r".+\.d");
-    regex_set.insert(r".+\.pyc");
-    regex_set.insert(r".+\.py");
-    regex_set.insert(r".+\.pyc");
-    regex_set.insert(r".+\.js");
-    regex_set.insert(r".+\.pth");
-    regex_set.insert(r".+\.plist");
-    regex_set.insert(r".+venv\.cfg");
-    regex_set.insert(r"^/proc/.+");
-    regex_set.insert(r"^/sys/.+");
-    regex_set.insert(r"^/lib/.+");
-    regex_set.insert(r"^/etc/(?!resolv.conf).+");
-    regex_set.insert(r"^/usr/.+");
-    regex_set.insert(r"^/dev/.+");
-    regex_set.insert(r"^/opt/.+");
-    regex_set.insert(r"^/home/iojs/.+");
-    // TODO: `node` searches for this file in multiple directories, bypassing some of our
-    // ignore regexes, maybe other "project runners" will do the same.
-    regex_set.insert(r".+/package.json");
-    regex_set.insert(&current_dir);
+    let set = RegexSet::new([
+        r".*\.so",
+        r".*\.d",
+        r".*\.pyc",
+        r".*\.py",
+        r".*\.js",
+        r".*\.pth",
+        r".*\.plist",
+        r".*venv\.cfg",
+        r"^/proc/.*",
+        r"^/sys/.*",
+        r"^/lib/.*",
+        r"^/etc/.*",
+        r"^/usr/.*",
+        r"^/dev/.*",
+        r"^/opt/.*",
+        r"^/home/iojs/.*",
+        // TODO: `node` searches for this file in multiple directories, bypassing some of our
+        // ignore regexes, maybe other "project runners" will do the same.
+        r".*/package.json",
+        &current_dir.to_string_lossy(),
+    ])
+    .unwrap();
 
-    let mut unfinished_regex = regex_set
-        .into_iter()
-        .fold("(".to_string(), |mut acc, current| {
-            acc.push_str(&format!("({})|", current));
-
-            acc
-        });
-
-    unfinished_regex.push(')');
-
-    debug!("regex is {:#?}", unfinished_regex);
-
-    let regex = Regex::new(&unfinished_regex).unwrap();
-    debug!("final regex is {:#?}", regex);
-    regex
+    set
 });
 
 type LocalFd = RawFd;

@@ -38,11 +38,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     };
 
     // Calls with non absolute paths are sent to libc::open.
-    if IGNORE_FILES
-        .is_match(path.to_str().unwrap_or_default())
-        .unwrap()
-        || !path.is_absolute()
-    {
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         FN_OPEN(raw_path, open_flags)
     } else {
         let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
@@ -87,7 +83,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
         Err(fail) => return fail.into(),
     };
 
-    if IGNORE_FILES.is_match(path.to_str().unwrap()).unwrap() || !path.is_absolute() {
+    if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
         FN_FOPEN(raw_path, raw_mode)
     } else {
         let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
@@ -381,11 +377,7 @@ unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     };
 
     // Calls with non absolute paths are sent to libc::open.
-    if IGNORE_FILES
-        .is_match(path.to_str().unwrap_or_default())
-        .unwrap()
-        || !path.is_absolute()
-    {
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         FN_ACCESS(raw_path, mode)
     } else {
         let access_result = access(path, mode as u8);
