@@ -240,6 +240,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
         let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
 
+        debug!("connect_rx allowed us to keep going with {:#?}!", mirror_address);
+
         let connect_to = SockAddr::from(mirror_address);
 
         // Connect to the interceptor socket that is listening.
