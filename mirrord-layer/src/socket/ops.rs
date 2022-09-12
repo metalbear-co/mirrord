@@ -245,15 +245,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
 
         let connect_to = SockAddr::from(mirror_address);
 
-        // TODO(alex) [high] 2022-09-09: Before connecting here, we should check that agent was
-        // actually successful in its remote connection. Otherwise we're telling the user that
-        // the address is valid, and the connection was ok.
-        // In short, must defer the interceptor socket connection, until we have an ok from agent.
-
         // Connect to the interceptor socket that is listening.
         let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-        debug!("connect -> connect_result {:#?}", connect_result);
 
         let err_code = errno::errno().0;
         if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
@@ -270,6 +263,8 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             remote_address,
             mirror_address,
         };
+
+        debug!("connected {:#?}", connected);
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
 

@@ -68,11 +68,6 @@ impl TcpOutgoingApi {
                 .join(PathBuf::from("ns/net"));
 
             set_namespace(namespace)?;
-
-            unsafe {
-                let pid_fd = crate::dns::pifd_open(pid, 0);
-                nix::sched::setns(pid_fd as i32, nix::sched::CloneFlags::CLONE_NEWNET)?;
-            }
         }
 
         let mut allocator = IndexAllocator::default();

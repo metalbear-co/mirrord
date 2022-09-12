@@ -11,7 +11,7 @@ use mirrord_protocol::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
@@ -65,9 +65,18 @@ impl TcpOutgoingHandler {
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
-        mut mirror_stream: TcpStream,
+        mirror_listener: TcpListener,
         remote_rx: Receiver<Vec<u8>>,
     ) {
+        trace!(
+            "interceptor_task -> connection_id {:#?} | mirror_listener {:#?}",
+            connection_id,
+            mirror_listener
+        );
+
+        // Accepts the user's socket connection, and finally becomes the interceptor socket.
+        let (mut mirror_stream, _) = mirror_listener.accept().await.unwrap();
+
         let mut remote_stream = ReceiverStream::new(remote_rx);
         let mut buffer = vec![0; 1024];
 
@@ -235,30 +244,25 @@ impl TcpOutgoingHandler {
                                 }
                             };
 
-                            // Accepts the user's socket connection, and finally becomes the
-                            // interceptor socket.
-                            let (mirror_stream, _) = mirror_listener.accept().await?;
-
-                            Ok((connection_id, mirror_stream))
+                            Ok((connection_id, mirror_listener))
                         },
                     )
                     .await
-                    .and_then(|(connection_id, socket)| {
+                    .and_then(|(connection_id, listener)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = MirrorAddress(socket.local_addr()?);
+                        let mirror_address = MirrorAddress(listener.local_addr()?);
 
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
 
-                        // user and interceptor sockets are connected to each other, so now we
-                        // spawn a new task to pair their
-                        // reads/writes.
+                        // `user` and `interceptor` sockets are not yet connected to each other,
+                        // spawn a new task to `accept` the conncetion and pair their reads/writes.
                         task::spawn(TcpOutgoingHandler::interceptor_task(
                             self.layer_tx.clone(),
                             connection_id,
-                            socket,
+                            listener,
                             remote_rx,
                         ));
 

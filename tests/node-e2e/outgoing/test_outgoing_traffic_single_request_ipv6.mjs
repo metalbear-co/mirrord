@@ -7,7 +7,7 @@ const options = {
   port: 443,
   path: "/",
   method: "GET",
-  family: 6,
+  family: 4,
 };
 
 // TODO(alex) [high] 2022-09-08: Ideas for ipv6 fix:
