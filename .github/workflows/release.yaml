@@ -57,7 +57,7 @@ jobs:
         run: cargo +nightly build --release -p mirrord-layer --target=x86_64-apple-darwin
       - name: build mirrord-layer macOS arm
         run: cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
-      - name: sign layer binaries
+      - name: Sign layer binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
@@ -66,7 +66,7 @@ jobs:
         run: mkdir -p /tmp/target/universal-apple-darwin/release
       - name: create universal dylib
         run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
-      - name: sign layer universal
+      - name: Sign layer universal
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
@@ -79,14 +79,14 @@ jobs:
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
         run: cargo +nightly build --release -p mirrord --target=x86_64-apple-darwin
-      - name: sign cli binaries
+      - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: gon -log-level=debug -log-json ./github/workflows/arch_cli_sign.json
       - name: create universal macOS cli
         run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
-      - name: sign universal cli
+      - name: Sign universal cli
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
