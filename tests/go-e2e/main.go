@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"syscall"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,6 +24,7 @@ func RandStringRunes(n int) string {
 }
 
 func main() {
+	fmt.Println(os.Environ())
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
@@ -48,7 +49,7 @@ func main() {
 	r.DELETE("/", func(c *gin.Context) {
 		fmt.Println("DELETE: Request completed")
 		defer func() {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			os.Exit(0)
 		}()
 		c.String(http.StatusOK, "DELETE")
 	})

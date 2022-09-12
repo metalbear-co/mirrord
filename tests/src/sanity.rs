@@ -419,6 +419,10 @@ mod tests {
                                     {
                                       "name": "MIRRORD_FAKE_VAR_SECOND",
                                       "value": "7777"
+                                    },
+                                    {
+                                        "name": "MIRRORD_FAKE_VAR_THIRD",
+                                        "value": "foo=bar"
                                     }
                                   ]
                             }

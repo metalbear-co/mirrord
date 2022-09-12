@@ -7,8 +7,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
+
+### Fixed
+- Fix Environment parsing error when value contained '='
+
+## 3.0.1-alpha
+
+### Fixed
+- Add missing dependency breaking the VS Code release.
+
+## 3.0.0-alpha
+
 ### Added
 
+- New feature: UDP outgoing, mainly for Go DNS but should work for most use cases also!
 - E2E: add tests for python's fastapi with uvicorn
 - Socket ops - `connect`: ignore localhost and ports 50000 - 60000 (reserved for debugger)
 - Add "*.plist" to `IGNORE_REGEX`, refer [[#350](https://github.com/metalbear-co/mirrord/issues/350)].

@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use futures::SinkExt;
+use futures::{SinkExt, TryFutureExt};
 use mirrord_protocol::{
     outgoing::{tcp::*, DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite},
     ClientCodec, ClientMessage, ConnectionId,
@@ -208,19 +208,16 @@ impl TcpOutgoingHandler {
             DaemonTcpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
-                // TODO(alex) [high] 2022-09-09: Related to the `connect` problem, we can't eat this
-                // error up here, we must return it to the user.
-                //
-                // ADD(alex) [high] 2022-09-09: We cannot eat up ANY errors here! They must be
-                // returned to the hook that called!
-                let response = match connect {
-                    Ok(DaemonConnect {
-                        connection_id,
-                        remote_address,
-                    }) => {
-                        let (mirror_address, mirror_stream) = {
+                let response = async move { connect }
+                    .and_then(
+                        |DaemonConnect {
+                             connection_id,
+                             remote_address,
+                         }| async move {
                             let _ = DetourGuard::new();
 
+                            // Creates the listener that will wait for the user's socket
+                            // connection.
                             let mirror_listener = match remote_address {
                                 SocketAddr::V4(_) => {
                                     TcpListener::bind(SocketAddr::new(
@@ -238,33 +235,35 @@ impl TcpOutgoingHandler {
                                 }
                             };
 
-                            // Creates the listener that will wait for the user's socket connection.
-                            let mirror_address = MirrorAddress(mirror_listener.local_addr()?);
-
                             // Accepts the user's socket connection, and finally becomes the
                             // interceptor socket.
                             let (mirror_stream, _) = mirror_listener.accept().await?;
-                            (mirror_address, mirror_stream)
-                        };
 
+                            Ok((connection_id, mirror_stream))
+                        },
+                    )
+                    .await
+                    .and_then(|(connection_id, socket)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
+
+                        let _ = DetourGuard::new();
+                        let mirror_address = MirrorAddress(socket.local_addr()?);
 
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
 
-                        // user and interceptor sockets are connected to each other, so now we spawn
-                        // a new task to pair their reads/writes.
+                        // user and interceptor sockets are connected to each other, so now we
+                        // spawn a new task to pair their
+                        // reads/writes.
                         task::spawn(TcpOutgoingHandler::interceptor_task(
                             self.layer_tx.clone(),
                             connection_id,
-                            mirror_stream,
+                            socket,
                             remote_rx,
                         ));
 
                         Ok(mirror_address)
-                    }
-                    Err(fail) => Err(fail),
-                };
+                    });
 
                 self.connect_queue
                     .pop_front()

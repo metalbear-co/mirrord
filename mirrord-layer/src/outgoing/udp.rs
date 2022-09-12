@@ -5,18 +5,15 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use futures::{FutureExt, SinkExt, TryFutureExt};
+use futures::{SinkExt, TryFutureExt};
 use mirrord_protocol::{
     outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    ClientCodec, ClientMessage, ConnectionId, ResponseError,
+    ClientCodec, ClientMessage, ConnectionId,
 };
 use tokio::{
     net::UdpSocket,
     select,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -226,69 +223,6 @@ impl UdpOutgoingHandler {
         }
     }
 
-    async fn foo(
-        &mut self,
-        response: DaemonUdpOutgoing,
-        connect: Result<DaemonConnect, ResponseError>,
-    ) -> Result<(), LayerError> {
-        let layer_tx = self.layer_tx.clone();
-
-        let response = async move { connect }
-            .and_then(
-                |DaemonConnect {
-                     connection_id,
-                     remote_address,
-                 }| async move {
-                    let _ = DetourGuard::new();
-
-                    let mirror_socket = match remote_address {
-                        SocketAddr::V4(_) => {
-                            UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
-                        }
-                        SocketAddr::V6(_) => {
-                            UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                        }
-                    }
-                    .await?;
-
-                    Ok((connection_id, mirror_socket))
-                },
-            )
-            .and_then(|(connection_id, socket)| async move {
-                let _ = DetourGuard::new();
-
-                let mirror_address = MirrorAddress(socket.local_addr()?);
-
-                Ok((connection_id, mirror_address, socket))
-            })
-            .await;
-
-        if let Ok((connection_id, _, socket)) = response {
-            let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
-            let (user_tx, user_rx) = oneshot::channel::<SocketAddr>();
-
-            self.mirrors
-                .insert(connection_id, ConnectionMirror(remote_tx));
-
-            // user and interceptor sockets are connected to each other, so now we spawn
-            // a new task to pair their reads/writes.
-            task::spawn(UdpOutgoingHandler::interceptor_task(
-                layer_tx,
-                connection_id,
-                socket,
-                remote_rx,
-            ));
-        }
-
-        // TODO(alex) [high] 2022-09-11: Finally managed to chain the results, now I just need to
-        // fix the proper response type here to send it back.
-        self.connect_queue
-            .pop_front()
-            .ok_or(LayerError::SendErrorUdpResponse)?
-            .send(response)
-            .map_err(|_| LayerError::SendErrorUdpResponse)
-    }
-
     /// Handles the following daemon messages:
     ///
     /// - `UdpOutgoingResponse::Connect`: grabs the reply from the connection request that was sent
@@ -312,60 +246,50 @@ impl UdpOutgoingHandler {
             DaemonUdpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
-                // TODO(alex) [high] 2022-09-09: Related to the `connect` problem, we can't eat this
-                // error up here, we must return it to the user.
-                //
-                // ADD(alex) [high] 2022-09-09: We cannot eat up ANY errors here! They must be
-                // returned to the hook that called!
-                let response = match connect {
-                    Ok(DaemonConnect {
-                        connection_id,
-                        remote_address,
-                    }) => {
-                        let (mirror_address, mirror_socket) = {
+                let response = async move { connect }
+                    .and_then(
+                        |DaemonConnect {
+                             connection_id,
+                             remote_address,
+                         }| async move {
                             let _ = DetourGuard::new();
 
                             let mirror_socket = match remote_address {
-                                SocketAddr::V4(_) => {
-                                    UdpSocket::bind(SocketAddr::new(
-                                        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                        0,
-                                    ))
-                                    .await?
-                                }
-                                SocketAddr::V6(_) => {
-                                    UdpSocket::bind(SocketAddr::new(
-                                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                                        0,
-                                    ))
-                                    .await?
-                                }
-                            };
+                                SocketAddr::V4(_) => UdpSocket::bind(SocketAddr::new(
+                                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                    0,
+                                )),
+                                SocketAddr::V6(_) => UdpSocket::bind(SocketAddr::new(
+                                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                                    0,
+                                )),
+                            }
+                            .await?;
 
-                            // Creates the listener that will wait for the user's socket connection.
-                            let mirror_address = MirrorAddress(mirror_socket.local_addr()?);
-                            (mirror_address, mirror_socket)
-                        };
-
+                            Ok((connection_id, mirror_socket))
+                        },
+                    )
+                    .await
+                    .and_then(|(connection_id, socket)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
-                        let (user_tx, user_rx) = oneshot::channel::<SocketAddr>();
 
-                        self.mirrors
-                            .insert(connection_id, ConnectionMirror(remote_tx));
+                        let _ = DetourGuard::new();
+                        let mirror_address = MirrorAddress(socket.local_addr()?);
 
                         // user and interceptor sockets are connected to each other, so now we spawn
                         // a new task to pair their reads/writes.
                         task::spawn(UdpOutgoingHandler::interceptor_task(
                             self.layer_tx.clone(),
                             connection_id,
-                            mirror_socket,
+                            socket,
                             remote_rx,
                         ));
 
+                        self.mirrors
+                            .insert(connection_id, ConnectionMirror(remote_tx));
+
                         Ok(mirror_address)
-                    }
-                    Err(fail) => Err(fail),
-                };
+                    });
 
                 self.connect_queue
                     .pop_front()

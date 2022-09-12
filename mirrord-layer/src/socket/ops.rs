@@ -241,11 +241,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         let connect_hook = UdpOutgoing::Connect(connect);
 
         blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-        debug!("connect -> sent hook message");
-        let response = connect_rx.blocking_recv();
-        debug!("connect -> received from daemon {:#?}", response);
-        // let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
-        let MirrorAddress(mirror_address) = response??;
+        let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
 
         let connect_to = SockAddr::from(mirror_address);
 
