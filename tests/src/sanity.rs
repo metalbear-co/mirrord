@@ -992,7 +992,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[should_panic(expected = "Test designed to run on pod without ipv6 support!")]
+    #[should_panic]
     pub async fn test_outgoing_traffic_single_request_ipv6(#[future] service: EchoService) {
         let service = service.await;
         let node_command = vec![
