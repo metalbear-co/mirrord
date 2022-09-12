@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Code sign Apple binaries.
+
 ### Changed
 - In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
 
