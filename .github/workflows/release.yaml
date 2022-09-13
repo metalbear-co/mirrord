@@ -61,7 +61,7 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json ./github/workflows/arch_dylib_sign.json
+        run: gon -log-level=debug -log-json .github/workflows/arch_dylib_sign.json
       - name: create universal target dir
         run: mkdir -p /tmp/target/universal-apple-darwin/release
       - name: create universal dylib
@@ -70,7 +70,7 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json ./github/workflows/universal_dylib_sign.json
+        run: gon -log-level=debug -log-json .github/workflows/universal_dylib_sign.json
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
@@ -83,14 +83,14 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json ./github/workflows/arch_cli_sign.json
+        run: gon -log-level=debug -log-json .github/workflows/arch_cli_sign.json
       - name: create universal macOS cli
         run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
       - name: Sign universal cli
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json ./github/workflows/universal_cli_sign.json
+        run: gon -log-level=debug -log-json .github/workflows/universal_cli_sign.json
       - name: adjust directory layout for upload
         run: cp -rf /tmp/target .
       - uses: actions/upload-artifact@v3
