@@ -31,7 +31,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     runtime::get_container_pid,
@@ -406,7 +406,11 @@ async fn start_agent() -> Result<(), AgentError> {
 #[tokio::main]
 async fn main() -> Result<(), AgentError> {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::FULL),
+        )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 

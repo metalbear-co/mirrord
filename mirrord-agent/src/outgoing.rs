@@ -1,11 +1,5 @@
-use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
-    thread,
-};
+use std::{collections::HashMap, path::PathBuf, thread};
 
-use futures::TryFutureExt;
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
     ConnectionId, ResponseError,
@@ -15,14 +9,14 @@ use tokio::{
     io::AsyncWriteExt,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpSocket,
+        TcpStream,
     },
     select,
     sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -63,6 +57,7 @@ impl TcpOutgoingApi {
     }
 
     /// Does the actual work for `Request`s and prepares the `Responses:
+    #[tracing::instrument(level = "trace")]
     async fn interceptor_task(
         pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
@@ -96,19 +91,6 @@ impl TcpOutgoingApi {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
                         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                            let (mirror_address, socket) = match remote_address {
-                                std::net::SocketAddr::V4(_) => {
-                                    let mirror_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-                                    (mirror_address, TcpSocket::new_v4())
-                                }
-                                std::net::SocketAddr::V6(_) => {
-                                    let mirror_address = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
-                                    (mirror_address, TcpSocket::new_v6())
-                                }
-                            };
-
-                            debug!("mirror_address {:#?} and socket {:#?}", mirror_address, socket);
-
                             // TODO(alex) [high] 2022-09-12: Switch this back to using `TcpStream::connect`
                             // directly (instead of `TcpSocket`).
                             //
@@ -116,34 +98,30 @@ impl TcpOutgoingApi {
                             // feature and running the go sample (just pass it `no-outgoing`, or whatever the
                             // proper name for disable is) to trace what should happen. Both with DNS on, and
                             // DNS off.
-                            let daemon_connect = async move { socket }
-                                .and_then(|socket| async move {
-                                    debug!("created socket {:#?}", socket);
+                            let daemon_connect =
+                                TcpStream::connect(remote_address)
+                                    .await
+                                    .inspect_err(|fail| warn!("connect failed with {:#?}", fail))
+                                    .map_err(From::from)
+                                    .map(|remote_stream| {
+                                        let connection_id = allocator
+                                            .next_index()
+                                            .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
+                                            .unwrap() as ConnectionId;
 
-                                    socket.bind(mirror_address).map(|_| socket)
-                                })
-                                .and_then(|socket| async move {
-                                    debug!("bound socket {:#?}", socket);
+                                        // Split the `remote_stream` so we can keep reading
+                                        // and writing from multiple hosts without blocking.
+                                        let (read_half, write_half) = remote_stream.into_split();
+                                        writers.insert(connection_id, write_half);
+                                        readers.insert(connection_id, ReaderStream::new(read_half));
 
-                                    socket.connect(remote_address).await
-                                })
-                                .await
-                                .and_then(|remote_stream| {
-                                    let connection_id = allocator
-                                        .next_index()
-                                        .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
-                                        .unwrap() as ConnectionId;
+                                        DaemonConnect {
+                                            connection_id,
+                                            remote_address,
+                                        }
+                                    });
 
-                                    // Split the `remote_stream` so we can keep reading
-                                    // and writing from multiple hosts without blocking.
-                                    let (read_half, write_half) = remote_stream.into_split();
-                                    writers.insert(connection_id, write_half);
-                                    readers.insert(connection_id, ReaderStream::new(read_half));
-
-                                    Ok(DaemonConnect { connection_id, remote_address } )
-                                })
-                                .map_err(From::from);
-
+                            info!("after daemon_connect -> {:#?}", daemon_connect);
 
                             let daemon_message = DaemonTcpOutgoing::Connect(daemon_connect);
                             daemon_tx.send(daemon_message).await?

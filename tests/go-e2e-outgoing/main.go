@@ -15,6 +15,21 @@ import (
 func request() {
 	fmt.Println(">> making request")
 
+	// webClient := http.Client{
+	// 	Transport: &http.Transport{
+	// 		Proxy: http.ProxyFromEnvironment,
+	// 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	// 			dialer := net.Dialer{}
+	// 			return dialer.DialContext(ctx, "tcp6", addr)
+	// 		},
+	// 		MaxIdleConns:          100,
+	// 		IdleConnTimeout:       90 * time.Second,
+	// 		TLSHandshakeTimeout:   10 * time.Second,
+	// 		ExpectContinueTimeout: 1 * time.Second,
+	// 	},
+	// }
+
+	// res, err := webClient.Get("http://www.google.com/robots.txt")
 	res, err := http.Get("http://www.google.com/robots.txt")
 	if err != nil {
 		log.Fatal(err)

@@ -16,6 +16,7 @@ use tracing::{debug, error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    detour::DetourGuard,
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
@@ -185,6 +186,125 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "trace")]
+fn connect_udp(
+    sockfd: RawFd,
+    remote_address: SocketAddr,
+    mut user_socket_info: Arc<UserSocket>,
+) -> HookResult<()> {
+    let (connect_tx, connect_rx) = oneshot::channel();
+
+    let connect = Connect {
+        remote_address,
+        channel_tx: connect_tx,
+    };
+
+    let connect_hook = UdpOutgoing::Connect(connect);
+
+    // TODO(alex) [high] 2022-09-13: tokio console / tokio trace.
+    //
+    // We have a deadlock issue due to trying multiple connections?
+    blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
+    let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
+
+    debug!(
+        "connect_rx allowed us to keep going with {:#?}!",
+        mirror_address
+    );
+
+    let connect_to = SockAddr::from(mirror_address);
+
+    // Connect to the interceptor socket that is listening.
+    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+    let err_code = errno::errno().0;
+    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+        error!(
+            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+            connect_result,
+            errno::errno()
+        );
+        return Err(io::Error::last_os_error())?;
+    }
+
+    let new_state = if connect_result == libc::EINPROGRESS {
+        let in_progress = InProgress {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::InProgress(in_progress)
+    } else {
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::Connected(connected)
+    };
+
+    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+    SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+    return Ok::<(), HookError>(());
+}
+
+#[tracing::instrument(level = "trace")]
+fn connect_tcp(
+    sockfd: RawFd,
+    remote_address: SocketAddr,
+    mut user_socket_info: Arc<UserSocket>,
+) -> HookResult<()> {
+    // Prepare this socket to be intercepted.
+    let (mirror_tx, mirror_rx) = oneshot::channel();
+
+    let connect = Connect {
+        remote_address,
+        channel_tx: mirror_tx,
+    };
+
+    let connect_hook = TcpOutgoing::Connect(connect);
+
+    blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
+    let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+
+    let connect_to = SockAddr::from(mirror_address);
+
+    // Connect to the interceptor socket that is listening.
+    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+    let err_code = errno::errno().0;
+    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+        error!(
+            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+            connect_result,
+            errno::errno()
+        );
+        return Err(io::Error::last_os_error())?;
+    }
+
+    let new_state = if connect_result == libc::EINPROGRESS {
+        let in_progress = InProgress {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::InProgress(in_progress)
+    } else {
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::Connected(connected)
+    };
+
+    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+    SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+    Ok::<(), HookError>(())
+}
+
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
 ///
 /// 1. Outgoing traffic is **disabled**: this just becomes a normal `libc::connect` call, removing
@@ -198,7 +318,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
     let (ip, port) = (remote_address.ip(), remote_address.port());
 
-    let mut user_socket_info = {
+    let user_socket_info = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
@@ -224,200 +344,48 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         .then_some(())
         .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
 
-    if let SocketKind::Udp(_) = user_socket_info.kind && enabled_udp_outgoing {
-        // Prepare this socket to be intercepted.
-        trace!(
-            "connect -> SocketState::Initialized {:#?}",
-            user_socket_info
-        );
-        let (connect_tx, connect_rx) = oneshot::channel();
-
-        let connect = Connect {
-            remote_address,
-            channel_tx: connect_tx,
-        };
-
-        let connect_hook = UdpOutgoing::Connect(connect);
-
-        // TODO(alex) [high] 2022-09-13: tokio console / tokio trace.
-        //
-        // We have a deadlock issue due to trying multiple connections?
-        blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-        let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
-
-        debug!("connect_rx allowed us to keep going with {:#?}!", mirror_address);
-
-        let connect_to = SockAddr::from(mirror_address);
-
-        // Connect to the interceptor socket that is listening.
-        let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-        let err_code = errno::errno().0;
-        if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
-            error!(
-                "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
-                connect_result,
-                errno::errno()
-            );
-            return Err(io::Error::last_os_error())?;
+    match user_socket_info.kind {
+        SocketKind::Udp(_) if enabled_udp_outgoing => {
+            connect_udp(sockfd, remote_address, user_socket_info)
         }
-
-        let new_state =if connect_result == libc::EINPROGRESS {
-            let in_progress = InProgress {
-                remote_address,
-                mirror_address,
-            };
-
-            SocketState::InProgress(in_progress)
-        } else {
-            let connected = Connected {
-                remote_address,
-                mirror_address,
-            };
-
-            SocketState::Connected(connected)
-        };
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-        return Ok::<(), HookError>(());
-    }
-
-    match user_socket_info.state {
-        SocketState::Initialized if !enabled_tcp_outgoing => {
-            // Just call `libc::connect`.
-            trace!(
-                "connect -> SocketState::Initialized {:#?}",
-                user_socket_info
-            );
-
-            let rawish_remote_address = SockAddr::from(remote_address);
-            let result = unsafe {
-                FN_CONNECT(
-                    sockfd,
-                    rawish_remote_address.as_ptr(),
-                    rawish_remote_address.len(),
-                )
-            };
-
-            if result != 0 {
-                let io_error = io::Error::last_os_error();
-
-                match io_error.kind() {
-                    io::ErrorKind::Uncategorized => io_error
-                        .raw_os_error()
-                        .map(|blocking_error| {
-                            if blocking_error == libc::EINPROGRESS || blocking_error == libc::EINTR
-                            {
-                                Ok(())
-                            } else {
-                                Err(io_error)?
-                            }
-                        })
-                        .unwrap(),
-                    _ => Err(io_error)?,
-                }
-            } else {
-                Ok::<_, HookError>(())
+        SocketKind::Tcp(_) => match user_socket_info.state {
+            SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
+            SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
+                connect_tcp(sockfd, remote_address, user_socket_info)
             }
-        }
-        SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
-            // Prepare this socket to be intercepted.
-            trace!(
-                "connect -> SocketState::Initialized {:#?}",
-                user_socket_info
-            );
-            let (mirror_tx, mirror_rx) = oneshot::channel();
+            SocketState::Bound(Bound { address, .. }) => {
+                trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
-            let connect = Connect {
-                remote_address,
-                channel_tx: mirror_tx,
-            };
+                let address = SockAddr::from(address);
+                let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
 
-            let connect_hook = TcpOutgoing::Connect(connect);
-
-            blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
-
-            let mirror_address = match remote_address {
-                SocketAddr::V4(_) => {
-                    TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
-                }
-                SocketAddr::V6(_) => {
-                    TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                }
-            }?;
-
-            let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
-
-            let connect_to = SockAddr::from(mirror_address);
-
-            // Connect to the interceptor socket that is listening.
-            let connect_result =
-                unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-            let err_code = errno::errno().0;
-            if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
-                error!(
-                    "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
-                    connect_result,
-                    errno::errno()
-                );
-                return Err(io::Error::last_os_error())?;
-            }
-
-            let new_state = if connect_result == libc::EINPROGRESS {
-                let in_progress = InProgress {
-                    remote_address,
-                    mirror_address,
-                };
-
-                SocketState::InProgress(in_progress)
-            } else {
-                let connected = Connected {
-                    remote_address,
-                    mirror_address,
-                };
-
-                SocketState::Connected(connected)
-            };
-
-            Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
-            SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-            Ok::<(), HookError>(())
-        }
-        SocketState::Bound(Bound { address, .. }) => {
-            trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-
-            let address = SockAddr::from(address);
-            let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-
-            if bind_result != 0 {
-                error!(
+                if bind_result != 0 {
+                    error!(
                     "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
                     bind_result, address, sockfd
                 );
 
-                Err(io::Error::last_os_error())?
-            } else {
-                let rawish_remote_address = SockAddr::from(remote_address);
-                let result = unsafe {
-                    FN_CONNECT(
-                        sockfd,
-                        rawish_remote_address.as_ptr(),
-                        rawish_remote_address.len(),
-                    )
-                };
-
-                if result != 0 {
                     Err(io::Error::last_os_error())?
                 } else {
-                    Ok::<_, HookError>(())
+                    let rawish_remote_address = SockAddr::from(remote_address);
+                    let result = unsafe {
+                        FN_CONNECT(
+                            sockfd,
+                            rawish_remote_address.as_ptr(),
+                            rawish_remote_address.len(),
+                        )
+                    };
+
+                    if result != 0 {
+                        Err(io::Error::last_os_error())?
+                    } else {
+                        Ok::<_, HookError>(())
+                    }
                 }
             }
-        }
-        _ => Err(HookError::SocketInvalidState(sockfd)),
+            _ => Err(HookError::SocketInvalidState(sockfd)),
+        },
+        _ => Err(HookError::Bypass),
     }?;
 
     Ok(())
