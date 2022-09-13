@@ -4,13 +4,13 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
-pub(crate) struct Cli {
+pub(super) struct Cli {
     #[clap(subcommand)]
-    pub(crate) commands: Commands,
+    pub(super) commands: Commands,
 }
 
 #[derive(Subcommand)]
-pub(crate) enum Commands {
+pub(super) enum Commands {
     Exec(Box<ExecArgs>),
     Extract {
         #[clap(value_parser)]
@@ -20,7 +20,7 @@ pub(crate) enum Commands {
 }
 
 #[derive(Args, Debug)]
-pub(crate) struct ExecArgs {
+pub(super) struct ExecArgs {
     /// Pod name to mirror.
     #[clap(short, long, value_parser)]
     pub pod_name: String,
@@ -79,7 +79,7 @@ pub(crate) struct ExecArgs {
 
     /// Arguments to pass to the binary.
     #[clap(value_parser)]
-    pub(crate) binary_args: Vec<String>,
+    pub(super) binary_args: Vec<String>,
 
     /// Where to extract the library to. Default is temp dir.
     #[clap(long, value_parser)]
@@ -111,7 +111,7 @@ pub(crate) struct ExecArgs {
 }
 
 #[derive(Args, Debug)]
-pub(crate) struct LoginArgs {
+pub(super) struct LoginArgs {
     /// Manualy insert token
     #[clap(long)]
     pub token: Option<String>,
