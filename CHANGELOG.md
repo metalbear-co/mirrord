@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.2-alpha
+
 ### Added
 - Code sign Apple binaries.
 
@@ -15,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Fix Environment parsing error when value contained '='
+  Closes [[#387](https://github.com/metalbear-co/mirrord/issues/387)].
 - Fix bug in outgoing traffic with multiple requests in quick succession. 
   Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
 
