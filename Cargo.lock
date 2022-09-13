@@ -1522,6 +1522,7 @@ dependencies = [
  "nix 0.24.2",
  "rand 0.8.5",
  "regex",
+ "rstest",
  "serde",
  "serde_json",
  "serde_yaml 0.9.11",

@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::config::LayerConfig;
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 struct AgentField {
     log_level: Option<String>,
@@ -15,7 +15,7 @@ struct AgentField {
     ephemeral: Option<bool>,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 struct PodField {
     name: String,
@@ -53,30 +53,28 @@ struct NetworkField {
 }
 
 #[derive(Deserialize, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
-struct TargetField {
-    binary: String,
-    args: Option<String>,
-}
-
-#[derive(Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
 enum ModeField {
     Mirror,
     Steal,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Default, PartialEq, Debug)]
+struct FeatureField {
+    env: Option<FlagField<EnvField>>,
+    fs: Option<FlagField<IOField>>,
+    network: Option<FlagField<NetworkField>>,
+}
+
+#[derive(Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ExecArgFile {
     accept_invalid_certificates: Option<bool>,
-    agent: Option<AgentField>,
-    env: Option<FlagField<EnvField>>,
-    fs: Option<FlagField<IOField>>,
+    agent: AgentField,
     mode: Option<ModeField>,
-    network: Option<FlagField<NetworkField>>,
-    pod: Option<PodField>,
-    target: Option<TargetField>,
+    pod: PodField,
+    #[serde(default)]
+    feature: FeatureField,
 }
 
 impl ExecArgFile {
@@ -106,232 +104,155 @@ impl ExecArgFile {
 #[cfg(test)]
 mod tests {
 
+    use rstest::*;
+
     use super::*;
 
-    #[test]
-    fn json() {
-        let input = r#"
-          {
-            "accept_invalid_certificates": false,
-            "agent": {
-                "log_level": "info",
-                "namespace": "default",
-                "image": "",
-                "image_pull_policy": "",
-                "ttl": 60,
-                "ephemeral": false
-            },
-            "env": true,
-            "fs": "write",
-            "mode": "mirror",
-            "network": {
-                "tcp": "read",
-                "udp": false,
-                "dns": false
-            },
-            "pod": {
-                "name": "test-service-abcdefg-abcd",
-                "namespace": "default",
-                "container": "test"
-            },
-            "target": {
-                "binary": "node",
-                "args": "server.js"
+    #[derive(Debug)]
+    enum ConfigType {
+        Json,
+        Toml,
+        Yaml,
+    }
+
+    impl ConfigType {
+        fn full(&self) -> &'static str {
+            match self {
+                ConfigType::Json => {
+                    r#"
+                    {
+                        "accept_invalid_certificates": false,
+                        "agent": {
+                            "log_level": "info",
+                            "namespace": "default",
+                            "image": "",
+                            "image_pull_policy": "",
+                            "ttl": 60,
+                            "ephemeral": false
+                        },
+                        "mode": "mirror",
+                        "feature": {
+                            "env": true,
+                            "fs": "write",
+                            "network": {
+                                "tcp": "read",
+                                "udp": false,
+                                "dns": false
+                            }
+                        },
+                        "pod": {
+                            "name": "test-service-abcdefg-abcd",
+                            "namespace": "default",
+                            "container": "test"
+                        }
+                    }
+                    "#
+                }
+                ConfigType::Toml => {
+                    r#"
+                    accept_invalid_certificates = false
+                    mode = "mirror"
+
+                    [agent]
+                    log_level = "info"
+                    namespace = "default"
+                    image = ""
+                    image_pull_policy = ""
+                    ttl = 60
+                    ephemeral = false
+
+                    [feature]
+                    env = true
+                    fs = "write"
+
+                    [feature.network]
+                    tcp = "read"
+                    udp = false
+                    dns = false
+
+                    [pod]
+                    name = "test-service-abcdefg-abcd"
+                    namespace = "default"
+                    container = "test"
+                    "#
+                }
+                ConfigType::Yaml => {
+                    r#"
+                    accept_invalid_certificates: false
+                    mode: "mirror"
+
+                    agent:
+                        log_level: "info"
+                        namespace: "default"
+                        image: ""
+                        image_pull_policy: ""
+                        ttl: 60
+                        ephemeral: false
+
+                    feature:
+                        env: true
+                        fs: "write"
+                        network:
+                            tcp: "read"
+                            udp: false
+                            dns: false
+                    pod:
+                        name: "test-service-abcdefg-abcd"
+                        namespace: "default"
+                        container: "test"
+                    "#
+                }
             }
-          }
-        "#;
+        }
 
-        let config = serde_json::from_str::<ExecArgFile>(input).unwrap();
-
-        let expect = ExecArgFile {
-            accept_invalid_certificates: Some(false),
-            agent: Some(AgentField {
-                log_level: Some("info".to_owned()),
-                namespace: Some("default".to_owned()),
-                image: Some("".to_owned()),
-                image_pull_policy: Some("".to_owned()),
-                ttl: Some(60),
-                ephemeral: Some(false),
-            }),
-            env: Some(FlagField::Enabled(true)),
-            fs: Some(FlagField::Config(IOField::Write)),
-            mode: Some(ModeField::Mirror),
-            network: Some(FlagField::Config(NetworkField {
-                tcp: Some(FlagField::Config(IOField::Read)),
-                udp: Some(FlagField::Enabled(false)),
-                dns: Some(false),
-            })),
-            pod: Some(PodField {
-                name: "test-service-abcdefg-abcd".to_owned(),
-                namespace: Some("default".to_owned()),
-                container: Some("test".to_owned()),
-            }),
-            target: Some(TargetField {
-                binary: "node".to_owned(),
-                args: Some("server.js".to_owned()),
-            }),
-        };
-
-        assert_eq!(
-            config.accept_invalid_certificates,
-            expect.accept_invalid_certificates
-        );
-        assert_eq!(config.agent, expect.agent);
-        assert_eq!(config.env, expect.env);
-        assert_eq!(config.fs, expect.fs);
-        assert_eq!(config.mode, expect.mode);
-        assert_eq!(config.network, expect.network);
-        assert_eq!(config.pod, expect.pod);
-        assert_eq!(config.target, expect.target);
+        fn parse(&self, value: &str) -> ExecArgFile {
+            match self {
+                ConfigType::Json => {
+                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                }
+                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err)),
+                ConfigType::Yaml => {
+                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                }
+            }
+        }
     }
 
-    #[test]
-    fn toml() {
-        let input = r#"
-            accept_invalid_certificates = false
-            env = true
-            fs = "write"
-            mode = "mirror"
+    #[rstest]
+    fn full(
+        #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
+    ) {
+        let input = config_type.full();
 
-            [agent]
-            log_level = "info"
-            namespace = "default"
-            image = ""
-            image_pull_policy = ""
-            ttl = 60
-            ephemeral = false
-
-            [network]
-            tcp = "read"
-            udp = false
-            dns = false
-
-            [pod]
-            name = "test-service-abcdefg-abcd"
-            namespace = "default"
-            container = "test"
-
-            [target]
-            binary = "node"
-            args = "server.js"
-        "#;
-
-        let config = toml::from_str::<ExecArgFile>(input).unwrap();
+        let config = config_type.parse(input);
 
         let expect = ExecArgFile {
             accept_invalid_certificates: Some(false),
-            agent: Some(AgentField {
+            agent: AgentField {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
                 image_pull_policy: Some("".to_owned()),
                 ttl: Some(60),
                 ephemeral: Some(false),
-            }),
-            env: Some(FlagField::Enabled(true)),
-            fs: Some(FlagField::Config(IOField::Write)),
+            },
+            feature: FeatureField {
+                env: Some(FlagField::Enabled(true)),
+                fs: Some(FlagField::Config(IOField::Write)),
+                network: Some(FlagField::Config(NetworkField {
+                    tcp: Some(FlagField::Config(IOField::Read)),
+                    udp: Some(FlagField::Enabled(false)),
+                    dns: Some(false),
+                })),
+            },
             mode: Some(ModeField::Mirror),
-            network: Some(FlagField::Config(NetworkField {
-                tcp: Some(FlagField::Config(IOField::Read)),
-                udp: Some(FlagField::Enabled(false)),
-                dns: Some(false),
-            })),
-            pod: Some(PodField {
+            pod: PodField {
                 name: "test-service-abcdefg-abcd".to_owned(),
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),
-            }),
-            target: Some(TargetField {
-                binary: "node".to_owned(),
-                args: Some("server.js".to_owned()),
-            }),
+            },
         };
 
-        assert_eq!(
-            config.accept_invalid_certificates,
-            expect.accept_invalid_certificates
-        );
-        assert_eq!(config.agent, expect.agent);
-        assert_eq!(config.env, expect.env);
-        assert_eq!(config.fs, expect.fs);
-        assert_eq!(config.mode, expect.mode);
-        assert_eq!(config.network, expect.network);
-        assert_eq!(config.pod, expect.pod);
-        assert_eq!(config.target, expect.target);
-    }
-
-    #[test]
-    fn yaml() {
-        let input = r#"
-            accept_invalid_certificates: false
-            env: true
-            fs: "write"
-            mode: "mirror"
-
-            agent:
-              log_level: "info"
-              namespace: "default"
-              image: ""
-              image_pull_policy: ""
-              ttl: 60
-              ephemeral: false
-
-            network:
-              tcp: "read"
-              udp: false
-              dns: false
-
-            pod:
-              name: "test-service-abcdefg-abcd"
-              namespace: "default"
-              container: "test"
-
-            target:
-              binary: "node"
-              args: "server.js"
-        "#;
-
-        let config = serde_yaml::from_str::<ExecArgFile>(input).unwrap();
-
-        let expect = ExecArgFile {
-            accept_invalid_certificates: Some(false),
-            agent: Some(AgentField {
-                log_level: Some("info".to_owned()),
-                namespace: Some("default".to_owned()),
-                image: Some("".to_owned()),
-                image_pull_policy: Some("".to_owned()),
-                ttl: Some(60),
-                ephemeral: Some(false),
-            }),
-            env: Some(FlagField::Enabled(true)),
-            fs: Some(FlagField::Config(IOField::Write)),
-            mode: Some(ModeField::Mirror),
-            network: Some(FlagField::Config(NetworkField {
-                tcp: Some(FlagField::Config(IOField::Read)),
-                udp: Some(FlagField::Enabled(false)),
-                dns: Some(false),
-            })),
-            pod: Some(PodField {
-                name: "test-service-abcdefg-abcd".to_owned(),
-                namespace: Some("default".to_owned()),
-                container: Some("test".to_owned()),
-            }),
-            target: Some(TargetField {
-                binary: "node".to_owned(),
-                args: Some("server.js".to_owned()),
-            }),
-        };
-
-        assert_eq!(
-            config.accept_invalid_certificates,
-            expect.accept_invalid_certificates
-        );
-        assert_eq!(config.agent, expect.agent);
-        assert_eq!(config.env, expect.env);
-        assert_eq!(config.fs, expect.fs);
-        assert_eq!(config.mode, expect.mode);
-        assert_eq!(config.network, expect.network);
-        assert_eq!(config.pod, expect.pod);
-        assert_eq!(config.target, expect.target);
+        assert_eq!(config, expect);
     }
 }
