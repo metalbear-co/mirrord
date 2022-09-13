@@ -79,6 +79,7 @@ pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
+#[cfg(not(test))]
 #[ctor]
 fn init() {
     tracing_subscriber::registry()

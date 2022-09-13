@@ -26,8 +26,6 @@ exec = "0.3"
 anyhow.workspace = true
 reqwest.workspace = true
 semver = "1"
-serde = "1"
-serde_json.workspace = true
 
 
 [build-dependencies]

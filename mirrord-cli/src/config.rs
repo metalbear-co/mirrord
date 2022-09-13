@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-mod file;
-
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 pub(crate) struct Cli {
