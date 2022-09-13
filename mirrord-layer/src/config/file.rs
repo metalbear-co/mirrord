@@ -74,7 +74,7 @@ pub struct ExecArgFile {
     env: Option<FlagField<EnvField>>,
     fs: Option<FlagField<IOField>>,
     mode: Option<ModeField>,
-    network: Option<NetworkField>,
+    network: Option<FlagField<NetworkField>>,
     pod: Option<PodField>,
     target: Option<TargetField>,
 }
@@ -156,11 +156,11 @@ mod tests {
             env: Some(FlagField::Enabled(true)),
             fs: Some(FlagField::Config(IOField::Write)),
             mode: Some(ModeField::Mirror),
-            network: Some(NetworkField {
+            network: Some(FlagField::Config(NetworkField {
                 tcp: Some(FlagField::Config(IOField::Read)),
                 udp: Some(FlagField::Enabled(false)),
                 dns: Some(false),
-            }),
+            })),
             pod: Some(PodField {
                 name: "test-service-abcdefg-abcd".to_owned(),
                 namespace: Some("default".to_owned()),
@@ -231,11 +231,11 @@ mod tests {
             env: Some(FlagField::Enabled(true)),
             fs: Some(FlagField::Config(IOField::Write)),
             mode: Some(ModeField::Mirror),
-            network: Some(NetworkField {
+            network: Some(FlagField::Config(NetworkField {
                 tcp: Some(FlagField::Config(IOField::Read)),
                 udp: Some(FlagField::Enabled(false)),
                 dns: Some(false),
-            }),
+            })),
             pod: Some(PodField {
                 name: "test-service-abcdefg-abcd".to_owned(),
                 namespace: Some("default".to_owned()),
@@ -306,11 +306,11 @@ mod tests {
             env: Some(FlagField::Enabled(true)),
             fs: Some(FlagField::Config(IOField::Write)),
             mode: Some(ModeField::Mirror),
-            network: Some(NetworkField {
+            network: Some(FlagField::Config(NetworkField {
                 tcp: Some(FlagField::Config(IOField::Read)),
                 udp: Some(FlagField::Enabled(false)),
                 dns: Some(false),
-            }),
+            })),
             pod: Some(PodField {
                 name: "test-service-abcdefg-abcd".to_owned(),
                 namespace: Some("default".to_owned()),
