@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - Code sign Apple binaries.
+- CD - Update latest tag after release is published.
 
 ### Changed
 - In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
