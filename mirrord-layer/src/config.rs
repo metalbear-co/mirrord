@@ -6,7 +6,7 @@ pub mod file;
 #[derive(Clone)]
 pub struct LayerConfig {
     pub agent_rust_log: String,
-    pub agent_namespace: String,
+    pub agent_namespace: Option<String>,
     pub agent_image: Option<String>,
     pub image_pull_policy: String,
     pub impersonated_pod_name: String,

@@ -7,13 +7,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.3-alpha
+
+### Changed
+- Changed agent namespace to default to the pod namespace.
+  Closes [[#404](https://github.com/metalbear-co/mirrord/issues/404)].
+
 ## 3.0.2-alpha
 
 ### Added
 - Code sign Apple binaries.
+- CD - Update latest tag after release is published.
 
 ### Changed
 - In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
+- Install script now downloads latest tag instead of main branch to avoid downtime on installs.
 
 ### Fixed
 - Fix Environment parsing error when value contained '='

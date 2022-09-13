@@ -110,10 +110,7 @@ impl LayerFileConfig {
             .or(self.agent.log_level)
             .unwrap_or_else(|| "info".to_owned());
 
-        let agent_namespace = config
-            .agent_namespace
-            .or(self.agent.namespace)
-            .unwrap_or_else(|| "default".to_owned());
+        let agent_namespace = config.agent_namespace.or(self.agent.namespace);
 
         let agent_image = config.agent_image.or(self.agent.image);
 
