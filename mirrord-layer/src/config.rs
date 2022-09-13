@@ -1,6 +1,7 @@
 use envconfig::Envconfig;
 
-mod file;
+pub mod env;
+pub mod file;
 
 #[derive(Envconfig, Clone)]
 pub struct LayerConfig {

@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use serde::Deserialize;
 
-use crate::config::LayerConfig;
+use crate::config::{env::LayerEnvConfig, LayerConfig};
 
 #[derive(Deserialize, Default, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -13,12 +13,13 @@ struct AgentField {
     image_pull_policy: Option<String>,
     ttl: Option<u16>,
     ephemeral: Option<bool>,
+    communication_timeout: Option<u16>,
 }
 
 #[derive(Deserialize, Default, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 struct PodField {
-    name: String,
+    name: Option<String>,
     namespace: Option<String>,
     container: Option<String>,
 }
@@ -66,7 +67,7 @@ struct FeatureField {
     network: Option<FlagField<NetworkField>>,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ExecArgFile {
     accept_invalid_certificates: Option<bool>,
@@ -96,8 +97,95 @@ impl ExecArgFile {
         }
     }
 
-    pub fn merge_with(&self, _config: LayerConfig) -> LayerConfig {
-        todo!();
+    pub fn merge_with(&self, config: LayerEnvConfig) -> LayerConfig {
+        let accept_invalid_certificates = config
+            .accept_invalid_certificates
+            .or(self.accept_invalid_certificates)
+            .unwrap_or(false);
+
+        // Agent
+
+        let agent_rust_log = config
+            .agent_rust_log
+            .or(self.agent.log_level)
+            .unwrap_or_else(|| "info".to_owned());
+
+        let agent_namespace = config
+            .agent_namespace
+            .or(self.agent.namespace)
+            .unwrap_or_else(|| "default".to_owned());
+
+        let agent_image = config.agent_image.or(self.agent.image);
+
+        let image_pull_policy = config
+            .image_pull_policy
+            .or(self.agent.image_pull_policy)
+            .unwrap_or_else(|| "IfNotPresent".to_owned());
+
+        let agent_ttl = config.agent_ttl.or(self.agent.ttl).unwrap_or(0);
+
+        let agent_communication_timeout = config
+            .agent_communication_timeout
+            .or(self.agent.communication_timeout);
+
+        // Pod
+
+        let impersonated_pod_name = config
+            .impersonated_pod_name
+            .or(self.pod.name)
+            .expect("Must set MIRRORD_AGENT_IMPERSONATED_POD_NAME or pod.name value in config");
+
+        let impersonated_pod_namespace = config
+            .impersonated_pod_namespace
+            .or(self.pod.namespace)
+            .unwrap_or_else(|| "default".to_owned());
+
+        let impersonated_container_name = config.impersonated_container_name.or(self.pod.namespace);
+
+        // Mode
+        let agent_tcp_steal_traffic = config
+            .agent_tcp_steal_traffic
+            .unwrap_or_else(|| self.mode == ModeField::Steal);
+
+        // Feature
+
+        let enabled_file_ops = config
+            .enabled_file_ops
+            .or(self.feature.fs.map(|flag| match flag {
+                FlagField::Enabled(val) => val,
+                FlagField::Config(io) => io == IOField::Write,
+            }))
+            .unwrap_or(false);
+
+        let enabled_file_ro_ops = config
+            .enabled_file_ro_ops
+            .or(self.feature.fs.map(|flag| match flag {
+                FlagField::Enabled(_) => false,
+                FlagField::Config(io) => io == IOField::Read,
+            }))
+            .unwrap_or(true);
+
+        LayerConfig {
+            agent_rust_log,
+            agent_namespace,
+            agent_image,
+            image_pull_policy,
+            impersonated_pod_name,
+            impersonated_pod_namespace,
+            impersonated_container_name,
+            accept_invalid_certificates,
+            agent_ttl,
+            agent_tcp_steal_traffic,
+            agent_communication_timeout,
+            enabled_file_ops,
+            enabled_file_ro_ops,
+            override_env_vars_exclude,
+            override_env_vars_include,
+            ephemeral_container,
+            remote_dns,
+            enabled_tcp_outgoing,
+            enabled_udp_outgoing,
+        }
     }
 }
 
@@ -247,7 +335,7 @@ mod tests {
             },
             mode: Some(ModeField::Mirror),
             pod: PodField {
-                name: "test-service-abcdefg-abcd".to_owned(),
+                name: Some("test-service-abcdefg-abcd".to_owned()),
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),
             },
