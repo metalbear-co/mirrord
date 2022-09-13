@@ -124,7 +124,12 @@ pub(crate) async fn create_agent(
         Client::try_default().await.map_err(LayerError::KubeError)?
     };
 
-    let pods_api: Api<Pod> = Api::namespaced(client.clone(), &agent_namespace);
+    let pods_api: Api<Pod> = Api::namespaced(
+        client.clone(),
+        agent_namespace
+            .as_ref()
+            .unwrap_or(&impersonated_pod_namespace),
+    );
 
     let agent_image = agent_image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
@@ -142,7 +147,12 @@ pub(crate) async fn create_agent(
         .await
         .map_err(LayerError::from)?;
 
-        let jobs_api: Api<Job> = Api::namespaced(client.clone(), &agent_namespace);
+        let jobs_api: Api<Job> = Api::namespaced(
+            client.clone(),
+            agent_namespace
+                .as_ref()
+                .unwrap_or(&impersonated_pod_namespace),
+        );
 
         create_job_pod_agent(
             &config,
