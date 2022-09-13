@@ -419,6 +419,10 @@ mod tests {
                                     {
                                       "name": "MIRRORD_FAKE_VAR_SECOND",
                                       "value": "7777"
+                                    },
+                                    {
+                                        "name": "MIRRORD_FAKE_VAR_THIRD",
+                                        "value": "foo=bar"
                                     }
                                   ]
                             }
@@ -994,7 +998,39 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
         let mut process = run(node_command, &service.pod_name, None, None).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());

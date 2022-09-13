@@ -7,6 +7,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Code sign Apple binaries.
+
+### Changed
+- In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
+
+### Fixed
+- Fix Environment parsing error when value contained '='
+- Fix bug in outgoing traffic with multiple requests in quick succession. 
+  Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
+
+## 3.0.1-alpha
+
+### Fixed
+- Add missing dependency breaking the VS Code release.
+
 ## 3.0.0-alpha
 
 ### Added

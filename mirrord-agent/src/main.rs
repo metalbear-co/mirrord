@@ -109,7 +109,7 @@ async fn select_env_vars(
         // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
         .split_terminator(char::from(0))
         // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
+        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
         // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
         .filter_map(
             |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {

@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"syscall"
 
 	"github.com/gin-gonic/gin"
 )
@@ -50,7 +49,7 @@ func main() {
 	r.DELETE("/", func(c *gin.Context) {
 		fmt.Println("DELETE: Request completed")
 		defer func() {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			os.Exit(0)
 		}()
 		c.String(http.StatusOK, "DELETE")
 	})
