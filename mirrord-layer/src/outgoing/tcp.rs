@@ -62,18 +62,13 @@ impl Default for TcpOutgoingHandler {
 }
 
 impl TcpOutgoingHandler {
+    #[tracing::instrument]
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
         mirror_listener: TcpListener,
         remote_rx: Receiver<Vec<u8>>,
     ) {
-        trace!(
-            "interceptor_task -> connection_id {:#?} | mirror_listener {:#?}",
-            connection_id,
-            mirror_listener
-        );
-
         // Accepts the user's socket connection, and finally becomes the interceptor socket.
         let (mut mirror_stream, _) = mirror_listener.accept().await.unwrap();
 
@@ -164,6 +159,7 @@ impl TcpOutgoingHandler {
     ///
     /// - `TcpOutgoing::Write`: sends a `TcpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: TcpOutgoing,
@@ -172,8 +168,6 @@ impl TcpOutgoingHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        trace!("handle_hook_message -> message {:?}", message);
-
         match message {
             TcpOutgoing::Connect(Connect {
                 remote_address,
@@ -207,6 +201,7 @@ impl TcpOutgoingHandler {
     ///
     /// - `TcpOutgoingResponse::Write`: (agent) sent some data to the remote host, currently this
     ///   response is only significant to handle errors when this send failed.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn handle_daemon_message(
         &mut self,
         response: DaemonTcpOutgoing,

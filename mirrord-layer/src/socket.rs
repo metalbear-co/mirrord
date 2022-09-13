@@ -69,6 +69,14 @@ pub struct Connected {
     mirror_address: SocketAddr,
 }
 
+#[derive(Debug)]
+pub struct InProgress {
+    /// Remote address we're connected to
+    remote_address: SocketAddr,
+    /// Local address it's connected from
+    mirror_address: SocketAddr,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
     requested_port: Port,
@@ -81,6 +89,7 @@ pub enum SocketState {
     Bound(Bound),
     Listening(Bound),
     Connected(Connected),
+    InProgress(InProgress),
 }
 
 impl Default for SocketState {

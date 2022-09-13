@@ -39,7 +39,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{error, info, trace};
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 
@@ -82,7 +82,11 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 #[ctor]
 fn init() {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::FULL),
+        )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 

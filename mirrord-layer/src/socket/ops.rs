@@ -1,7 +1,7 @@
 use std::{
     ffi::CString,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
     os::unix::io::RawFd,
     ptr,
     sync::Arc,
@@ -23,6 +23,7 @@ use crate::{
 };
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
+#[tracing::instrument(level = "trace")]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
     trace!(
         "socket -> domain {:#?} | type:{:#?} | protocol {:#?}",
@@ -193,12 +194,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
 /// that will be handled by `TcpOutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
+#[tracing::instrument(level = "trace")]
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
-    trace!(
-        "connect -> sockfd {:#?} | remote_address {:#?}",
-        sockfd,
-        remote_address
-    );
     let (ip, port) = (remote_address.ip(), remote_address.port());
 
     let mut user_socket_info = {
@@ -207,6 +204,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             .remove(&sockfd)
             .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
+
+    // TODO(alex) [mid] 2022-09-13: During initialization, check if the pod supports ipv6.
+    // if ip.is_ipv6() {
+    //     return Err(HookError::NetworkUnreachable);
+    // }
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
@@ -237,6 +239,9 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
 
         let connect_hook = UdpOutgoing::Connect(connect);
 
+        // TODO(alex) [high] 2022-09-13: tokio console / tokio trace.
+        //
+        // We have a deadlock issue due to trying multiple connections?
         blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
         let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
 
@@ -257,14 +262,24 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             return Err(io::Error::last_os_error())?;
         }
 
-        // Warning: We're treating `EINPROGRESS` as `Connected`!
-        let connected = Connected {
-            remote_address,
-            mirror_address,
+        let new_state =if connect_result == libc::EINPROGRESS {
+            let in_progress = InProgress {
+                remote_address,
+                mirror_address,
+            };
+
+            SocketState::InProgress(in_progress)
+        } else {
+            let connected = Connected {
+                remote_address,
+                mirror_address,
+            };
+
+            SocketState::Connected(connected)
         };
 
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+        Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+        SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
         return Ok::<(), HookError>(());
     }
@@ -323,6 +338,16 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             let connect_hook = TcpOutgoing::Connect(connect);
 
             blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
+
+            let mirror_address = match remote_address {
+                SocketAddr::V4(_) => {
+                    TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                }
+                SocketAddr::V6(_) => {
+                    TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                }
+            }?;
+
             let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
 
             let connect_to = SockAddr::from(mirror_address);
@@ -341,13 +366,24 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
                 return Err(io::Error::last_os_error())?;
             }
 
-            // Warning: We're treating `EINPROGRESS` as `Connected`!
-            let connected = Connected {
-                remote_address,
-                mirror_address,
+            let new_state = if connect_result == libc::EINPROGRESS {
+                let in_progress = InProgress {
+                    remote_address,
+                    mirror_address,
+                };
+
+                SocketState::InProgress(in_progress)
+            } else {
+                let connected = Connected {
+                    remote_address,
+                    mirror_address,
+                };
+
+                SocketState::Connected(connected)
             };
 
-            Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+            Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+            SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
             Ok::<(), HookError>(())
         }

@@ -65,6 +65,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
+
+    #[error("mirrord-layer: Tried connecting to ipv6 address (not supported)!")]
+    NetworkUnreachable,
 }
 
 #[derive(Error, Debug)]
@@ -214,6 +217,7 @@ impl From<HookError> for i64 {
             HookError::BypassedDomain(_) => libc::EINVAL,
             HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
+            HookError::NetworkUnreachable => libc::ENETUNREACH,
         };
 
         set_errno(errno::Errno(libc_error));
