@@ -154,74 +154,81 @@ impl LayerFileConfig {
 
         let enabled_file_ops = config
             .enabled_file_ops
-            .or(self.feature.fs.clone().map(|flag| match flag {
-                FlagField::Enabled(val) => val,
-                FlagField::Config(io) => io == IOField::Write,
-            }))
+            .or_else(|| {
+                self.feature.fs.clone().map(|flag| match flag {
+                    FlagField::Enabled(val) => val,
+                    FlagField::Config(io) => io == IOField::Write,
+                })
+            })
             .unwrap_or(false);
 
         let enabled_file_ro_ops = config
             .enabled_file_ro_ops
-            .or(self.feature.fs.clone().map(|flag| match flag {
-                FlagField::Enabled(_) => false,
-                FlagField::Config(io) => io == IOField::Read,
-            }))
+            .or_else(|| {
+                self.feature.fs.clone().map(|flag| match flag {
+                    FlagField::Enabled(_) => false,
+                    FlagField::Config(io) => io == IOField::Read,
+                })
+            })
             .unwrap_or(true);
 
         // Feature env
 
-        let override_env_vars_exclude =
-            config
-                .override_env_vars_exclude
-                .or(self.feature.env.clone().and_then(|flag| match flag {
-                    FlagField::Enabled(true) => None,
-                    FlagField::Enabled(false) => Some("".to_owned()),
-                    FlagField::Config(env) => env.exclude,
-                }));
+        let override_env_vars_exclude = config.override_env_vars_exclude.or_else(|| {
+            self.feature.env.clone().and_then(|flag| match flag {
+                FlagField::Enabled(true) => None,
+                FlagField::Enabled(false) => Some("".to_owned()),
+                FlagField::Config(env) => env.exclude,
+            })
+        });
 
-        let override_env_vars_include =
-            config
-                .override_env_vars_include
-                .or(self.feature.env.clone().and_then(|flag| match flag {
-                    FlagField::Enabled(true) => None,
-                    FlagField::Enabled(false) => Some("".to_owned()),
-                    FlagField::Config(env) => env.include,
-                }));
+        let override_env_vars_include = config.override_env_vars_include.or_else(|| {
+            self.feature.env.clone().and_then(|flag| match flag {
+                FlagField::Enabled(true) => None,
+                FlagField::Enabled(false) => Some("".to_owned()),
+                FlagField::Config(env) => env.include,
+            })
+        });
 
         // Feature network
 
         let remote_dns = config
             .remote_dns
-            .or(self
-                .feature
-                .network
-                .clone()
-                .and_then(|network| match network {
-                    FlagField::Enabled(val) => Some(val),
-                    FlagField::Config(network) => network.dns,
-                }))
+            .or_else(|| {
+                self.feature
+                    .network
+                    .clone()
+                    .and_then(|network| match network {
+                        FlagField::Enabled(val) => Some(val),
+                        FlagField::Config(network) => network.dns,
+                    })
+            })
             .unwrap_or(true);
 
         let enabled_tcp_outgoing = config
             .enabled_tcp_outgoing
-            .or(self.feature.network.clone().map(|network| match network {
-                FlagField::Enabled(val) => val,
-                FlagField::Config(network) => {
-                    network.tcp == Some(FlagField::Config(IOField::Write))
-                        || network.tcp == Some(FlagField::Enabled(true))
-                }
-            }))
+            .or_else(|| {
+                self.feature.network.clone().map(|network| match network {
+                    FlagField::Enabled(val) => val,
+                    FlagField::Config(network) => {
+                        network.tcp == Some(FlagField::Config(IOField::Write))
+                            || network.tcp == Some(FlagField::Enabled(true))
+                    }
+                })
+            })
             .unwrap_or(true);
 
         let enabled_udp_outgoing = config
             .enabled_udp_outgoing
-            .or(self.feature.network.map(|network| match network {
-                FlagField::Enabled(val) => val,
-                FlagField::Config(network) => {
-                    network.udp == Some(FlagField::Config(IOField::Write))
-                        || network.udp == Some(FlagField::Enabled(true))
-                }
-            }))
+            .or_else(|| {
+                self.feature.network.map(|network| match network {
+                    FlagField::Enabled(val) => val,
+                    FlagField::Config(network) => {
+                        network.udp == Some(FlagField::Config(IOField::Write))
+                            || network.udp == Some(FlagField::Enabled(true))
+                    }
+                })
+            })
             .unwrap_or(true);
 
         LayerConfig {
