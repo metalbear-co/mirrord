@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.0-alpha
+
 ### Added
 - Code sign Apple binaries.
 
@@ -14,7 +16,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
 
 ### Fixed
-- Fix Environment parsing error when value contained '='
+- Fix Environment parsing error when value contained '=' 
+  Closes [[#387](https://github.com/metalbear-co/mirrord/issues/387)].
 - Fix bug in outgoing traffic with multiple requests in quick succession. 
   Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
 
