@@ -96,7 +96,7 @@ fn init() {
     let env_config = LayerEnvConfig::init_from_env().unwrap();
 
     let file_config = match env_config.config_file {
-        Some(path) => LayerFileConfig::from_path(path)?,
+        Some(path) => LayerFileConfig::from_path(&path).unwrap(),
         None => LayerFileConfig::default(),
     };
 
