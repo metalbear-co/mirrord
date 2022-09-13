@@ -1,14 +1,18 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
+
+mod file;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
-pub(super) struct Cli {
+pub(crate) struct Cli {
     #[clap(subcommand)]
-    pub(super) commands: Commands,
+    pub(crate) commands: Commands,
 }
 
 #[derive(Subcommand)]
-pub(super) enum Commands {
+pub(crate) enum Commands {
     Exec(Box<ExecArgs>),
     Extract {
         #[clap(value_parser)]
@@ -18,7 +22,7 @@ pub(super) enum Commands {
 }
 
 #[derive(Args, Debug)]
-pub(super) struct ExecArgs {
+pub(crate) struct ExecArgs {
     /// Pod name to mirror.
     #[clap(short, long, value_parser)]
     pub pod_name: String,
@@ -77,7 +81,7 @@ pub(super) struct ExecArgs {
 
     /// Arguments to pass to the binary.
     #[clap(value_parser)]
-    pub(super) binary_args: Vec<String>,
+    pub(crate) binary_args: Vec<String>,
 
     /// Where to extract the library to. Default is temp dir.
     #[clap(long, value_parser)]
@@ -102,10 +106,14 @@ pub(super) struct ExecArgs {
     /// Disable udp outgoing feature.
     #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
+
+    /// Load config from config file
+    #[clap(short = 'f', long, value_parser)]
+    pub config_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
-pub(super) struct LoginArgs {
+pub(crate) struct LoginArgs {
     /// Manualy insert token
     #[clap(long)]
     pub token: Option<String>,
