@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::config::{env::LayerEnvConfig, LayerConfig};
 
-#[derive(Deserialize, Default, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct AgentField {
     log_level: Option<String>,
@@ -16,7 +16,7 @@ struct AgentField {
     communication_timeout: Option<u16>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct PodField {
     name: Option<String>,
@@ -24,28 +24,28 @@ struct PodField {
     container: Option<String>,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct EnvField {
     include: Option<String>,
     exclude: Option<String>,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(untagged)]
 enum FlagField<T> {
     Enabled(bool),
     Config(T),
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 enum IOField {
     Read,
     Write,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct NetworkField {
     tcp: Option<FlagField<IOField>>,
@@ -53,23 +53,23 @@ struct NetworkField {
     dns: Option<bool>,
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 enum ModeField {
     Mirror,
     Steal,
 }
 
-#[derive(Deserialize, Default, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
 struct FeatureField {
     env: Option<FlagField<EnvField>>,
     fs: Option<FlagField<IOField>>,
     network: Option<FlagField<NetworkField>>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Debug)]
+#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct ExecArgFile {
+pub struct LayerFileConfig {
     accept_invalid_certificates: Option<bool>,
     agent: AgentField,
     mode: Option<ModeField>,
@@ -78,7 +78,7 @@ pub struct ExecArgFile {
     feature: FeatureField,
 }
 
-impl ExecArgFile {
+impl LayerFileConfig {
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
         match path.extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => {
@@ -97,7 +97,7 @@ impl ExecArgFile {
         }
     }
 
-    pub fn merge_with(&self, config: LayerEnvConfig) -> LayerConfig {
+    pub fn merge_with(self, config: LayerEnvConfig) -> LayerConfig {
         let accept_invalid_certificates = config
             .accept_invalid_certificates
             .or(self.accept_invalid_certificates)
@@ -128,6 +128,11 @@ impl ExecArgFile {
             .agent_communication_timeout
             .or(self.agent.communication_timeout);
 
+        let ephemeral_container = config
+            .ephemeral_container
+            .or(self.agent.ephemeral)
+            .unwrap_or(false);
+
         // Pod
 
         let impersonated_pod_name = config
@@ -140,18 +145,19 @@ impl ExecArgFile {
             .or(self.pod.namespace)
             .unwrap_or_else(|| "default".to_owned());
 
-        let impersonated_container_name = config.impersonated_container_name.or(self.pod.namespace);
+        let impersonated_container_name = config.impersonated_container_name.or(self.pod.container);
 
         // Mode
+
         let agent_tcp_steal_traffic = config
             .agent_tcp_steal_traffic
-            .unwrap_or_else(|| self.mode == ModeField::Steal);
+            .unwrap_or_else(|| self.mode == Some(ModeField::Steal));
 
-        // Feature
+        // Feature fs
 
         let enabled_file_ops = config
             .enabled_file_ops
-            .or(self.feature.fs.map(|flag| match flag {
+            .or(self.feature.fs.clone().map(|flag| match flag {
                 FlagField::Enabled(val) => val,
                 FlagField::Config(io) => io == IOField::Write,
             }))
@@ -159,9 +165,65 @@ impl ExecArgFile {
 
         let enabled_file_ro_ops = config
             .enabled_file_ro_ops
-            .or(self.feature.fs.map(|flag| match flag {
+            .or(self.feature.fs.clone().map(|flag| match flag {
                 FlagField::Enabled(_) => false,
                 FlagField::Config(io) => io == IOField::Read,
+            }))
+            .unwrap_or(true);
+
+        // Feature env
+
+        let override_env_vars_exclude =
+            config
+                .override_env_vars_exclude
+                .or(self.feature.env.clone().and_then(|flag| match flag {
+                    FlagField::Enabled(true) => None,
+                    FlagField::Enabled(false) => Some("".to_owned()),
+                    FlagField::Config(env) => env.exclude,
+                }));
+
+        let override_env_vars_include =
+            config
+                .override_env_vars_include
+                .or(self.feature.env.clone().and_then(|flag| match flag {
+                    FlagField::Enabled(true) => None,
+                    FlagField::Enabled(false) => Some("".to_owned()),
+                    FlagField::Config(env) => env.include,
+                }));
+
+        // Feature network
+
+        let remote_dns = config
+            .remote_dns
+            .or(self
+                .feature
+                .network
+                .clone()
+                .and_then(|network| match network {
+                    FlagField::Enabled(val) => Some(val),
+                    FlagField::Config(network) => network.dns,
+                }))
+            .unwrap_or(true);
+
+        let enabled_tcp_outgoing = config
+            .enabled_tcp_outgoing
+            .or(self.feature.network.clone().map(|network| match network {
+                FlagField::Enabled(val) => val,
+                FlagField::Config(network) => {
+                    network.tcp == Some(FlagField::Config(IOField::Write))
+                        || network.tcp == Some(FlagField::Enabled(true))
+                }
+            }))
+            .unwrap_or(true);
+
+        let enabled_udp_outgoing = config
+            .enabled_udp_outgoing
+            .or(self.feature.network.map(|network| match network {
+                FlagField::Enabled(val) => val,
+                FlagField::Config(network) => {
+                    network.udp == Some(FlagField::Config(IOField::Write))
+                        || network.udp == Some(FlagField::Enabled(true))
+                }
             }))
             .unwrap_or(true);
 
@@ -293,7 +355,7 @@ mod tests {
             }
         }
 
-        fn parse(&self, value: &str) -> ExecArgFile {
+        fn parse(&self, value: &str) -> LayerFileConfig {
             match self {
                 ConfigType::Json => {
                     serde_json::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
@@ -314,7 +376,7 @@ mod tests {
 
         let config = config_type.parse(input);
 
-        let expect = ExecArgFile {
+        let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
             agent: AgentField {
                 log_level: Some("info".to_owned()),
@@ -323,6 +385,7 @@ mod tests {
                 image_pull_policy: Some("".to_owned()),
                 ttl: Some(60),
                 ephemeral: Some(false),
+                communication_timeout: None,
             },
             feature: FeatureField {
                 env: Some(FlagField::Enabled(true)),

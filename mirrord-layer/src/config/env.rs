@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use envconfig::Envconfig;
 
-#[derive(Envconfig, Clone)]
+#[derive(Envconfig)]
 pub struct LayerEnvConfig {
     #[envconfig(from = "MIRRORD_AGENT_RUST_LOG")]
     pub agent_rust_log: Option<String>,
@@ -58,4 +60,7 @@ pub struct LayerEnvConfig {
 
     #[envconfig(from = "MIRRORD_UDP_OUTGOING")]
     pub enabled_udp_outgoing: Option<bool>,
+
+    #[envconfig(from = "MIRRORD_CONFIG_FILE")]
+    pub config_file: Option<PathBuf>,
 }

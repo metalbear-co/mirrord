@@ -41,7 +41,11 @@ use tokio::{
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::prelude::*;
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
+use crate::{
+    common::HookMessage,
+    config::{env::LayerEnvConfig, file::LayerFileConfig, LayerConfig},
+    file::FileHandler,
+};
 
 mod common;
 mod config;
@@ -89,7 +93,15 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let config = LayerConfig::init_from_env().unwrap();
+    let env_config = LayerEnvConfig::init_from_env().unwrap();
+
+    let file_config = match env_config.config_file {
+        Some(path) => LayerFileConfig::from_path(path)?,
+        None => LayerFileConfig::default(),
+    };
+
+    let config = file_config.merge_with(env_config);
+
     let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
 
     info!("Using port `{connection_port:?}` for communication");
