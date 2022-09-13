@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Add exception to gradle when dylib/so file is not found. Closes [[#345](https://github.com/metalbear-co/mirrord/issues/345)]
+
 ## 3.0.3-alpha
 
 ### Changed
