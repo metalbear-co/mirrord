@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, slice::Join};
 
 use serde::Deserialize;
 
@@ -25,10 +25,29 @@ struct PodField {
 }
 
 #[derive(Deserialize, PartialEq, Clone, Debug)]
+#[serde(untagged)]
+enum VecOrSingle<T> {
+    Single(T),
+    Multiple(Vec<T>),
+}
+
+impl<T> VecOrSingle<T> {
+    fn join<Separator>(self, sep: Separator) -> <[T] as Join<Separator>>::Output
+    where
+        [T]: Join<Separator>,
+    {
+        match self {
+            VecOrSingle::Single(val) => [val].join(sep),
+            VecOrSingle::Multiple(vals) => vals.join(sep),
+        }
+    }
+}
+
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct EnvField {
-    include: Option<String>,
-    exclude: Option<String>,
+    include: Option<VecOrSingle<String>>,
+    exclude: Option<VecOrSingle<String>>,
 }
 
 #[derive(Deserialize, PartialEq, Clone, Debug)]
@@ -218,7 +237,7 @@ impl LayerFileConfig {
             self.feature.env.as_ref().and_then(|flag| {
                 flag.map_or_enabled(
                     |enabled| if enabled { None } else { Some("".to_owned()) },
-                    |env| env.exclude.clone(),
+                    |env| env.exclude.clone().map(|exclude| exclude.join(";")),
                 )
             })
         });
@@ -227,7 +246,7 @@ impl LayerFileConfig {
             self.feature.env.as_ref().and_then(|flag| {
                 flag.map_or_enabled(
                     |enabled| if enabled { None } else { Some("".to_owned()) },
-                    |env| env.include.clone(),
+                    |env| env.include.clone().map(|include| include.join(";")),
                 )
             })
         });
