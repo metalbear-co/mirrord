@@ -176,13 +176,39 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
     Ok(())
 }
 
-#[tracing::instrument(level = "trace")]
-fn connect_shared(
+// TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
+// requires enabling `incomplete_features`.
+type ConnectType = bool;
+const TCP: ConnectType = false;
+const UDP: ConnectType = !TCP;
+
+fn connect_logic<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
-    mirror_address: SocketAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> HookResult<i32> {
+    // Prepare this socket to be intercepted.
+    let (mirror_tx, mirror_rx) = oneshot::channel();
+
+    let connect = Connect {
+        remote_address,
+        channel_tx: mirror_tx,
+    };
+
+    let hook_message = match TYPE {
+        TCP => {
+            let connect_hook = TcpOutgoing::Connect(connect);
+            HookMessage::TcpOutgoing(connect_hook)
+        }
+        UDP => {
+            let connect_hook = UdpOutgoing::Connect(connect);
+            HookMessage::UdpOutgoing(connect_hook)
+        }
+    };
+
+    blocking_send_hook_message(hook_message)?;
+    let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+
     let connect_to = SockAddr::from(mirror_address);
 
     // Connect to the interceptor socket that is listening.
@@ -209,54 +235,6 @@ fn connect_shared(
     SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
     Ok(connect_result)
-}
-
-// TODO(alex) [low] 2022-09-13: Can be made generic to be over UDP/TCP, probably require some trait
-// for `HookMessage` or similar idea, so we take `H: Hook` here.
-#[tracing::instrument(level = "trace")]
-fn connect_udp(
-    sockfd: RawFd,
-    remote_address: SocketAddr,
-    user_socket_info: Arc<UserSocket>,
-) -> HookResult<i32> {
-    let (connect_tx, connect_rx) = oneshot::channel();
-
-    let connect = Connect {
-        remote_address,
-        channel_tx: connect_tx,
-    };
-
-    let connect_hook = UdpOutgoing::Connect(connect);
-
-    // TODO(alex) [high] 2022-09-13: tokio console / tokio trace.
-    //
-    // We have a deadlock issue due to trying multiple connections?
-    blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-    let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
-
-    connect_shared(sockfd, remote_address, mirror_address, user_socket_info)
-}
-
-#[tracing::instrument(level = "trace")]
-fn connect_tcp(
-    sockfd: RawFd,
-    remote_address: SocketAddr,
-    user_socket_info: Arc<UserSocket>,
-) -> HookResult<i32> {
-    // Prepare this socket to be intercepted.
-    let (mirror_tx, mirror_rx) = oneshot::channel();
-
-    let connect = Connect {
-        remote_address,
-        channel_tx: mirror_tx,
-    };
-
-    let connect_hook = TcpOutgoing::Connect(connect);
-
-    blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
-    let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
-
-    connect_shared(sockfd, remote_address, mirror_address, user_socket_info)
 }
 
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
@@ -300,11 +278,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
 
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
-            connect_udp(sockfd, remote_address, user_socket_info)
+            connect_logic::<UDP>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
             SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
-                connect_tcp(sockfd, remote_address, user_socket_info)
+                connect_logic::<TCP>(sockfd, remote_address, user_socket_info)
             }
             SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
             SocketState::Bound(Bound { address, .. }) => {

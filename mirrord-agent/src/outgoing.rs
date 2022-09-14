@@ -17,7 +17,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -100,7 +100,6 @@ impl TcpOutgoingApi {
                                         warn!("interceptor_task -> Elapsed connect error {:#?}", elapsed);
                                         ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address))
                                     })
-                                    .inspect_err(|fail| warn!("connect failed with {:#?}", fail))
                                     .map_err(From::from)
                                     .and_then(|remote_stream| {
                                         let remote_stream = remote_stream?;
@@ -120,8 +119,6 @@ impl TcpOutgoingApi {
                                             remote_address,
                                         })
                                     });
-
-                            info!("after daemon_connect -> {:#?}", daemon_connect);
 
                             let daemon_message = DaemonTcpOutgoing::Connect(daemon_connect);
                             daemon_tx.send(daemon_message).await?
