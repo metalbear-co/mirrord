@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use envconfig::Envconfig;
 
-#[derive(Envconfig)]
+#[derive(Envconfig, Default)]
 pub struct LayerEnvConfig {
     #[envconfig(from = "MIRRORD_AGENT_RUST_LOG")]
     pub agent_rust_log: Option<String>,

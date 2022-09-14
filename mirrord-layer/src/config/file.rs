@@ -79,7 +79,7 @@ impl<T> FlagField<T> {
         }
     }
 
-    fn map_or_enabled<'a, R, E, C>(&'a self, enabled_cb: E, config_cb: C) -> R
+    fn enabled_map<'a, R, E, C>(&'a self, enabled_cb: E, config_cb: C) -> R
     where
         E: FnOnce(bool) -> R,
         C: FnOnce(&'a T) -> R,
@@ -215,7 +215,7 @@ impl LayerFileConfig {
                 self.feature
                     .fs
                     .as_ref()
-                    .map(|flag| flag.enabled_or_equal(&IOField::Write))
+                    .map(|flag| flag.enabled_map(|_| false, |fs| fs == &IOField::Write))
             })
             .unwrap_or(false);
 
@@ -233,7 +233,7 @@ impl LayerFileConfig {
 
         let override_env_vars_exclude = config.override_env_vars_exclude.or_else(|| {
             self.feature.env.as_ref().and_then(|flag| {
-                flag.map_or_enabled(
+                flag.enabled_map(
                     |enabled| if enabled { None } else { Some("".to_owned()) },
                     |env| env.exclude.clone().map(|exclude| exclude.join(";")),
                 )
@@ -242,7 +242,7 @@ impl LayerFileConfig {
 
         let override_env_vars_include = config.override_env_vars_include.or_else(|| {
             self.feature.env.as_ref().and_then(|flag| {
-                flag.map_or_enabled(
+                flag.enabled_map(
                     |enabled| if enabled { None } else { Some("".to_owned()) },
                     |env| env.include.clone().map(|include| include.join(";")),
                 )
@@ -480,5 +480,37 @@ mod tests {
         };
 
         assert_eq!(config, expect);
+    }
+
+    #[rstest]
+    fn merge_fs(
+        #[values(
+            (None, (false, true)),
+            (Some(FlagField::Enabled(true)), (false, true)),
+            (Some(FlagField::Enabled(false)), (false, false)),
+            (Some(FlagField::Config(IOField::Read)), (false, true)),
+            (Some(FlagField::Config(IOField::Write)), (true, false))
+        )]
+        param: (Option<FlagField<IOField>>, (bool, bool)),
+    ) {
+        let (fs, expect) = param;
+
+        let file_config = LayerFileConfig {
+            feature: FeatureField {
+                fs,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let config = file_config.merge_with(LayerEnvConfig {
+            impersonated_pod_name: Some("".to_owned()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            (config.enabled_file_ops, config.enabled_file_ro_ops),
+            expect
+        );
     }
 }
