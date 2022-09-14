@@ -7,7 +7,7 @@
 #  |_| |_| |_|_|_|  |_|  \___/|_|  \__,_|
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/master/scripts/install.sh | sh
+#   curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/scripts/install.sh | sh
 set -e
 
 file_issue_prompt() {
@@ -17,7 +17,7 @@ file_issue_prompt() {
 }
 
 get_latest_version() {
-  VERSION="$(curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/Cargo.toml | grep -m 1 version | cut -d' ' -f3 | tr -d '\"')"
+  VERSION="$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep -m 1 version | cut -d' ' -f3 | tr -d '\"')"
   echo $VERSION
 }
 
