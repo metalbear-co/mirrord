@@ -92,7 +92,7 @@ impl<T> FlagField<T> {
 }
 
 #[derive(Deserialize, PartialEq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 enum IOField {
     Read,
     Write,
@@ -259,7 +259,7 @@ impl LayerFileConfig {
                 self.feature
                     .network
                     .as_ref()
-                    .and_then(|network| network.map(|network| network.dns.clone()))
+                    .and_then(|network| network.map(|network| network.dns))
             })
             .unwrap_or(true);
 
