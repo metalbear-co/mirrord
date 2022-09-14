@@ -5,7 +5,7 @@ mod tests {
     use std::{
         collections::HashMap,
         fmt::Debug,
-        net::Ipv4Addr,
+        net::{Ipv4Addr, UdpSocket},
         process::Stdio,
         sync::{Arc, Mutex},
         time::Duration,
@@ -1046,6 +1046,32 @@ mod tests {
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
         let mut process = run(node_command, &service.pod_name, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(30))]
+    pub async fn test_outgoing_traffic_udp(#[future] service: EchoService) {
+        let service = service.await;
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port().to_string();
+
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_udp_client.mjs",
+            &port,
+        ];
+        let mut process = run(node_command, &service.pod_name, None, None).await;
+
+        // Listen for UDP message from mirrorded app.
+        let mut buf = [0; 27];
+        let amt = socket.recv(&mut buf).unwrap();
+        assert_eq!(amt, 27);
+        assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
+
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
