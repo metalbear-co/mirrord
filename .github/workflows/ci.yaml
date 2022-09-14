@@ -273,6 +273,8 @@ jobs:
           distribution: zulu
           java-version: 11
       - name: Build Plugin
+        env:
+          CI_BUILD_PLUGIN: true
         run: |
           cd intellij-ext
           chmod +x ./gradlew

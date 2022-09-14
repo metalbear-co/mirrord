@@ -54,10 +54,6 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult
         state: SocketState::default(),
         kind: socket_kind,
     };
-    debug!(
-        "socket -> socket_fd {:#?} | new_socket {:#?}",
-        socket_fd, new_socket
-    );
 
     let mut sockets = SOCKETS.lock()?;
     sockets.insert(socket_fd, Arc::new(new_socket));
@@ -68,7 +64,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
-    debug!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
+    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
 
     let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
@@ -103,7 +99,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
         invalid => Err(HookError::UnsupportedDomain(invalid)),
     }?;
 
-    debug!("bind -> unbound_address {:#?}", unbound_address);
+    trace!("bind -> unbound_address {:#?}", unbound_address);
 
     let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
@@ -145,7 +141,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
-    debug!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
+    trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
 
     let mut socket = {
         SOCKETS
@@ -198,9 +194,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
-    debug!(
+    trace!(
         "connect -> sockfd {:#?} | remote_address {:#?}",
-        sockfd, remote_address
+        sockfd,
+        remote_address
     );
     let (ip, port) = (remote_address.ip(), remote_address.port());
 
@@ -231,24 +228,22 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             "connect -> SocketState::Initialized {:#?}",
             user_socket_info
         );
-        let (mirror_tx, mirror_rx) = oneshot::channel();
+        let (connect_tx, connect_rx) = oneshot::channel();
 
         let connect = Connect {
             remote_address,
-            channel_tx: mirror_tx,
+            channel_tx: connect_tx,
         };
 
         let connect_hook = UdpOutgoing::Connect(connect);
 
         blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-        let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+        let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
 
         let connect_to = SockAddr::from(mirror_address);
 
         // Connect to the interceptor socket that is listening.
         let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-        debug!("connect -> connect_result {:#?}", connect_result);
 
         let err_code = errno::errno().0;
         if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
@@ -265,6 +260,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             remote_address,
             mirror_address,
         };
+
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
 
@@ -332,8 +328,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             // Connect to the interceptor socket that is listening.
             let connect_result =
                 unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-            debug!("connect -> connect_result {:#?}", connect_result);
 
             let err_code = errno::errno().0;
             if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
@@ -523,9 +517,11 @@ pub(super) fn getaddrinfo(
     service: Option<String>,
     hints: Option<AddrInfoHint>,
 ) -> HookResult<*mut libc::addrinfo> {
-    debug!(
+    trace!(
         "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
-        node, service, hints
+        node,
+        service,
+        hints
     );
 
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();

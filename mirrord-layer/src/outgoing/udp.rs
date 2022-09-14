@@ -5,7 +5,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use futures::SinkExt;
+use futures::{SinkExt, TryFutureExt};
 use mirrord_protocol::{
     outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     ClientCodec, ClientMessage, ConnectionId,
@@ -246,52 +246,56 @@ impl UdpOutgoingHandler {
             DaemonUdpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
-                let DaemonConnect {
-                    connection_id,
-                    remote_address,
-                } = connect?;
+                let response = async move { connect }
+                    .and_then(
+                        |DaemonConnect {
+                             connection_id,
+                             remote_address,
+                         }| async move {
+                            let _ = DetourGuard::new();
 
-                let mirror_socket = {
-                    let _ = DetourGuard::new();
+                            let mirror_socket = match remote_address {
+                                SocketAddr::V4(_) => UdpSocket::bind(SocketAddr::new(
+                                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                                    0,
+                                )),
+                                SocketAddr::V6(_) => UdpSocket::bind(SocketAddr::new(
+                                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                                    0,
+                                )),
+                            }
+                            .await?;
 
-                    let mirror_socket = match remote_address {
-                        SocketAddr::V4(_) => {
-                            UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-                                .await?
-                        }
-                        SocketAddr::V6(_) => {
-                            UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
-                                .await?
-                        }
-                    };
+                            Ok((connection_id, mirror_socket))
+                        },
+                    )
+                    .await
+                    .and_then(|(connection_id, socket)| {
+                        let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
-                    // Creates the listener that will wait for the user's socket connection.
-                    let mirror_address = MirrorAddress(mirror_socket.local_addr()?);
+                        let _ = DetourGuard::new();
+                        let mirror_address = MirrorAddress(socket.local_addr()?);
 
-                    self.connect_queue
-                        .pop_front()
-                        .ok_or(LayerError::SendErrorUdpResponse)?
-                        .send(Ok(mirror_address))
-                        .map_err(|_| LayerError::SendErrorUdpResponse)?;
+                        // user and interceptor sockets are connected to each other, so now we spawn
+                        // a new task to pair their reads/writes.
+                        task::spawn(UdpOutgoingHandler::interceptor_task(
+                            self.layer_tx.clone(),
+                            connection_id,
+                            socket,
+                            remote_rx,
+                        ));
 
-                    mirror_socket
-                };
+                        self.mirrors
+                            .insert(connection_id, ConnectionMirror(remote_tx));
 
-                let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
+                        Ok(mirror_address)
+                    });
 
-                self.mirrors
-                    .insert(connection_id, ConnectionMirror(remote_tx));
-
-                // user and interceptor sockets are connected to each other, so now we spawn a new
-                // task to pair their reads/writes.
-                task::spawn(UdpOutgoingHandler::interceptor_task(
-                    self.layer_tx.clone(),
-                    connection_id,
-                    mirror_socket,
-                    remote_rx,
-                ));
-
-                Ok(())
+                self.connect_queue
+                    .pop_front()
+                    .ok_or(LayerError::SendErrorUdpResponse)?
+                    .send(response)
+                    .map_err(|_| LayerError::SendErrorUdpResponse)
             }
             DaemonUdpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
