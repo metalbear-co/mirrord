@@ -71,7 +71,7 @@ async fn layer_recv(
                 let remote_stream = remote_stream?;
                 let connection_id = allocator
                     .next_index()
-                    .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
+                    .ok_or_else(|| ResponseError::AllocationFailure("layer_recv".to_string()))
                     .unwrap() as ConnectionId;
 
                 // Split the `remote_stream` so we can keep reading
