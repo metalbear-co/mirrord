@@ -51,8 +51,6 @@ async fn layer_recv(
     readers: &mut StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
 ) -> Result<(), AgentError> {
-    trace!("interceptor_task -> layer_message {:?}", layer_message);
-
     match layer_message {
         // [user] -> [layer] -> [agent] -> [layer]
         // `user` is asking us to connect to some remote host.

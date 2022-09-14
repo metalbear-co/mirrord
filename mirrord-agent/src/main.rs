@@ -409,7 +409,7 @@ async fn main() -> Result<(), AgentError> {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::FULL),
+                .with_span_events(FmtSpan::ACTIVE),
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();

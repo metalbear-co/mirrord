@@ -182,6 +182,10 @@ type ConnectType = bool;
 const TCP: ConnectType = false;
 const UDP: ConnectType = !TCP;
 
+/// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
+///
+/// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
+/// interception procedure.
 fn connect_logic<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
@@ -243,7 +247,7 @@ fn connect_logic<const TYPE: ConnectType>(
 /// the socket from our list of managed sockets.
 ///
 /// 2. Outgoing traffic is **enabled** and `socket.state` is `Initialized`: sends a hook message
-/// that will be handled by `TcpOutgoingHandler`, starting the request interception procedure.
+/// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[tracing::instrument(level = "trace")]
