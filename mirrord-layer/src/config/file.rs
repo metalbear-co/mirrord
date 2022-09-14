@@ -106,7 +106,7 @@ struct OutgoingField {
 #[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct NetworkField {
-    mode: Option<ModeField>,
+    incoming: Option<ModeField>,
     outgoing: Option<FlagField<OutgoingField>>,
     dns: Option<bool>,
 }
@@ -257,7 +257,7 @@ impl LayerFileConfig {
                 self.feature
                     .network
                     .as_ref()
-                    .map(|network| network.mode == Some(ModeField::Steal))
+                    .map(|network| network.incoming == Some(ModeField::Steal))
             })
             .unwrap_or(false);
 
@@ -352,8 +352,8 @@ mod tests {
                             "env": true,
                             "fs": "write",
                             "network": {
-                                "mode": "mirror",
                                 "dns": false,
+                                "incoming": "mirror",
                                 "outgoing": {
                                     "tcp": true,
                                     "udp": false
@@ -385,8 +385,8 @@ mod tests {
                     fs = "write"
 
                     [feature.network]
-                    mode = "mirror"
                     dns = false
+                    incoming = "mirror"
 
                     [feature.network.outgoing]
                     tcp = true
@@ -414,8 +414,8 @@ mod tests {
                         env: true
                         fs: "write"
                         network:
-                            mode: "mirror"
                             dns: false
+                            incoming: "mirror"
                             outgoing:
                                 tcp: true
                                 udp: false
@@ -464,8 +464,8 @@ mod tests {
                 env: Some(FlagField::Enabled(true)),
                 fs: Some(FlagField::Config(IOField::Write)),
                 network: Some(NetworkField {
-                    mode: Some(ModeField::Mirror),
                     dns: Some(false),
+                    incoming: Some(ModeField::Mirror),
                     outgoing: Some(FlagField::Config(OutgoingField {
                         tcp: Some(true),
                         udp: Some(false),
