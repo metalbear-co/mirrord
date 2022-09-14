@@ -7,19 +7,23 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
+
+### Changed
+- mirrord-layer: Use `tracing::instrument` to improve logs.
+
 ## 3.0.4-alpha
 
 ### Fixed
 - Fix crash in VS Code extension happening because the MIRRORD_OVERRIDE_ENV_VARS_INCLUDE and MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE vars being populated with empty values (rather than not being populated at all).Closes [[#413](https://github.com/metalbear-co/mirrord/issues/413)].
 - Add exception to gradle when dylib/so file is not found. Closes [[#345](https://github.com/metalbear-co/mirrord/issues/345)]
-- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
 
 ## 3.0.3-alpha
 
 ### Changed
 - Changed agent namespace to default to the pod namespace.
   Closes [[#404](https://github.com/metalbear-co/mirrord/issues/404)].
-- mirrord-layer: Use `tracing::instrument` to improve logs.
 
 ## 3.0.2-alpha
 
