@@ -67,7 +67,7 @@ impl TcpOutgoingApi {
                 .join(PathBuf::from(pid.to_string()))
                 .join(PathBuf::from("ns/net"));
 
-            set_namespace(namespace).unwrap();
+            set_namespace(namespace)?;
         }
 
         let mut allocator = IndexAllocator::default();

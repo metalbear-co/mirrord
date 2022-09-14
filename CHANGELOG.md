@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Fix crash in VS Code extension happening because the MIRRORD_OVERRIDE_ENV_VARS_INCLUDE and MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE vars being populated with empty values (rather than not being populated at all).Closes [[#413](https://github.com/metalbear-co/mirrord/issues/413)].
 - Add exception to gradle when dylib/so file is not found. Closes [[#345](https://github.com/metalbear-co/mirrord/issues/345)]
+- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
 
 ## 3.0.3-alpha
 
@@ -35,7 +36,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Fix Environment parsing error when value contained '='
   Closes [[#387](https://github.com/metalbear-co/mirrord/issues/387)].
-- Fix bug in outgoing traffic with multiple requests in quick succession. 
+- Fix bug in outgoing traffic with multiple requests in quick succession.
   Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
 
 ## 3.0.1-alpha
