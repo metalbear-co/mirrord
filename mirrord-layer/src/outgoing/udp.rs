@@ -83,6 +83,7 @@ impl Default for UdpOutgoingHandler {
 }
 
 impl UdpOutgoingHandler {
+    #[tracing::instrument(level = "trace", skip(layer_tx, mirror_socket, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerUdpOutgoing>,
         connection_id: ConnectionId,
@@ -186,6 +187,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoing::Write`: sends a `UdpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: UdpOutgoing,
@@ -194,8 +196,6 @@ impl UdpOutgoingHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        trace!("handle_hook_message -> message {:?}", message);
-
         match message {
             UdpOutgoing::Connect(Connect {
                 remote_address,
@@ -236,16 +236,13 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoingResponse::Write`: (agent) sent some data to the remote host, currently this
     ///   response is only significant to handle errors when this send failed.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn handle_daemon_message(
         &mut self,
         response: DaemonUdpOutgoing,
     ) -> Result<(), LayerError> {
-        trace!("handle_daemon_message -> message {:?}", response);
-
         match response {
             DaemonUdpOutgoing::Connect(connect) => {
-                trace!("Connect -> connect {:#?}", connect);
-
                 let response = async move { connect }
                     .and_then(
                         |DaemonConnect {
@@ -299,7 +296,6 @@ impl UdpOutgoingHandler {
             }
             DaemonUdpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
-                trace!("Read -> read {:?}", read);
                 let DaemonRead {
                     connection_id,
                     bytes,
@@ -314,7 +310,6 @@ impl UdpOutgoingHandler {
             }
             DaemonUdpOutgoing::Close(connection_id) => {
                 // (agent) failed to perform some operation.
-                trace!("Close -> connection_id {:?}", connection_id);
                 self.mirrors.remove(&connection_id);
 
                 Ok(())

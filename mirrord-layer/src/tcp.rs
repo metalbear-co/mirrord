@@ -14,7 +14,7 @@ use mirrord_protocol::{
     ClientCodec, Port,
 };
 use tokio::net::TcpStream;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use crate::{
     detour::DetourGuard,
@@ -74,9 +74,8 @@ pub(crate) trait TcpHandler {
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
     /// Returns true to let caller know to keep running
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        debug!("handle_incoming_message -> message {:?}", message);
-
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {
                 self.handle_new_connection(tcp_connection).await
@@ -95,6 +94,7 @@ pub(crate) trait TcpHandler {
         handled
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_message(
         &mut self,
         message: HookMessageTcp,
@@ -113,14 +113,11 @@ pub(crate) trait TcpHandler {
 
     /// Connects to the local listening socket, add it to the queue and return the stream.
     /// Find better name
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn create_local_stream(
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
-        trace!(
-            "create_local_stream -> tcp_connection {:#?}",
-            tcp_connection
-        );
         let destination_port = tcp_connection.destination_port;
 
         let listen = self
