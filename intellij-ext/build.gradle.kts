@@ -9,7 +9,7 @@ plugins {
     // Kotlin support
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
     // Gradle IntelliJ Plugin
-    id("org.jetbrains.intellij") version "1.8.1"
+    id("org.jetbrains.intellij") version "1.9.0"
     // Gradle Changelog Plugin
     id("org.jetbrains.changelog") version "1.3.1"
     // Gradle Qodana Plugin
@@ -69,24 +69,29 @@ tasks {
 
         // Extract the <!-- Plugin description --> section from README.md and provide for the plugin's manifest
         pluginDescription.set(
-                projectDir.resolve("README.md").readText().lines().run {
-                    val start = "<!-- Plugin description -->"
-                    val end = "<!-- Plugin description end -->"
+            projectDir.resolve("README.md").readText().lines().run {
+                val start = "<!-- Plugin description -->"
+                val end = "<!-- Plugin description end -->"
 
-                    if (!containsAll(listOf(start, end))) {
-                        throw GradleException("Plugin description section not found in README.md:\n$start ... $end")
-                    }
-                    subList(indexOf(start) + 1, indexOf(end))
-                }.joinToString("\n").run { markdownToHTML(this) }
+                if (!containsAll(listOf(start, end))) {
+                    throw GradleException("Plugin description section not found in README.md:\n$start ... $end")
+                }
+                subList(indexOf(start) + 1, indexOf(end))
+            }.joinToString("\n").run { markdownToHTML(this) }
         )
     }
 
     prepareSandbox {
-        from(file("$projectDir/libmirrord_layer.dylib")) {
-            into(pluginName.get())
-        }
-        from(file("$projectDir/libmirrord_layer.so")) {
-            into(pluginName.get())
+        val sharedLibs =
+            mapOf("macos" to "$projectDir/libmirrord_layer.dylib", "linux" to "$projectDir/libmirrord_layer.so")
+        sharedLibs.forEach { (_, lib) ->
+            from(file(lib)) {
+                into(pluginName.get())
+            }
+            // NOTE: comment this line when developing locally without either of shared libs
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
+            }
         }
     }
     // Configure UI tests plugin

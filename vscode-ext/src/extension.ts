@@ -221,13 +221,18 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', false).toString(),
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_OVERRIDE_ENV_VARS_INCLUDE': globalContext.workspaceState.get('includeEnvironmentVariables', ''),
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE': globalContext.workspaceState.get('excludeEnvironmentVariables', ''),
-
 					}
 				};
+
+				// mirrord doesn't support specifying both the include and exclude env vars (even if they're empty)
+				let include, exclude;
+				if (include = globalContext.workspaceState.get('includeEnvironmentVariables')){
+					config.env['MIRRORD_OVERRIDE_ENV_VARS_INCLUDE'] = include;
+				}
+				if (exclude = globalContext.workspaceState.get('excludeEnvironmentVariables')){
+					config.env['MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE'] = exclude;
+				}
+
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 				return resolve(config);
 			});
