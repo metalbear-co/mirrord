@@ -97,12 +97,17 @@ enum IOField {
     Read,
     Write,
 }
+#[derive(Deserialize, PartialEq, Clone, Debug)]
+struct OutgoingField {
+    tcp: Option<bool>,
+    udp: Option<bool>,
+}
 
 #[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct NetworkField {
-    tcp: Option<FlagField<IOField>>,
-    udp: Option<FlagField<IOField>>,
+    mode: Option<ModeField>,
+    outgoing: Option<FlagField<OutgoingField>>,
     dns: Option<bool>,
 }
 
@@ -116,10 +121,9 @@ enum ModeField {
 #[derive(Deserialize, Default, PartialEq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct FeatureField {
-    mode: Option<ModeField>,
     env: Option<FlagField<EnvField>>,
     fs: Option<FlagField<IOField>>,
-    network: Option<FlagField<NetworkField>>,
+    network: Option<NetworkField>,
 }
 
 #[derive(Deserialize, Default, PartialEq, Clone, Debug)]
@@ -203,12 +207,6 @@ impl LayerFileConfig {
 
         let impersonated_container_name = config.impersonated_container_name.or(self.pod.container);
 
-        // Feature mode
-
-        let agent_tcp_steal_traffic = config
-            .agent_tcp_steal_traffic
-            .unwrap_or_else(|| self.feature.mode == Some(ModeField::Steal));
-
         // Feature fs
 
         let enabled_file_ops = config
@@ -253,13 +251,23 @@ impl LayerFileConfig {
 
         // Feature network
 
+        let agent_tcp_steal_traffic = config
+            .agent_tcp_steal_traffic
+            .or_else(|| {
+                self.feature
+                    .network
+                    .as_ref()
+                    .map(|network| network.mode == Some(ModeField::Steal))
+            })
+            .unwrap_or(false);
+
         let remote_dns = config
             .remote_dns
             .or_else(|| {
                 self.feature
                     .network
                     .as_ref()
-                    .and_then(|network| network.map(|network| network.dns))
+                    .and_then(|network| network.dns)
             })
             .unwrap_or(true);
 
@@ -267,12 +275,10 @@ impl LayerFileConfig {
             .enabled_tcp_outgoing
             .or_else(|| {
                 self.feature.network.as_ref().and_then(|network| {
-                    network.map(|network| {
-                        network
-                            .tcp
-                            .clone()
-                            .map(|tcp| tcp.enabled_or_equal(&IOField::Write))
-                    })
+                    network
+                        .outgoing
+                        .as_ref()
+                        .and_then(|outgoing| outgoing.map(|outgoing| outgoing.tcp))
                 })
             })
             .unwrap_or(true);
@@ -280,13 +286,11 @@ impl LayerFileConfig {
         let enabled_udp_outgoing = config
             .enabled_udp_outgoing
             .or_else(|| {
-                self.feature.network.and_then(|network| {
-                    network.map(|network| {
-                        network
-                            .udp
-                            .clone()
-                            .map(|udp| udp.enabled_or_equal(&IOField::Write))
-                    })
+                self.feature.network.as_ref().and_then(|network| {
+                    network
+                        .outgoing
+                        .as_ref()
+                        .and_then(|outgoing| outgoing.map(|outgoing| outgoing.udp))
                 })
             })
             .unwrap_or(true);
@@ -345,13 +349,15 @@ mod tests {
                             "ephemeral": false
                         },
                         "feature": {
-                            "mode": "mirror",
                             "env": true,
                             "fs": "write",
                             "network": {
-                                "tcp": "read",
-                                "udp": false,
-                                "dns": false
+                                "mode": "mirror",
+                                "dns": false,
+                                "outgoing": {
+                                    "tcp": true,
+                                    "udp": false
+                                }
                             }
                         },
                         "pod": {
@@ -375,14 +381,16 @@ mod tests {
                     ephemeral = false
 
                     [feature]
-                    mode = "mirror"
                     env = true
                     fs = "write"
 
                     [feature.network]
-                    tcp = "read"
-                    udp = false
+                    mode = "mirror"
                     dns = false
+
+                    [feature.network.outgoing]
+                    tcp = true
+                    udp = false
 
                     [pod]
                     name = "test-service-abcdefg-abcd"
@@ -403,13 +411,14 @@ mod tests {
                         ephemeral: false
 
                     feature:
-                        mode: "mirror"
                         env: true
                         fs: "write"
                         network:
-                            tcp: "read"
-                            udp: false
+                            mode: "mirror"
                             dns: false
+                            outgoing:
+                                tcp: true
+                                udp: false
                     pod:
                         name: "test-service-abcdefg-abcd"
                         namespace: "default"
@@ -454,13 +463,15 @@ mod tests {
             feature: FeatureField {
                 env: Some(FlagField::Enabled(true)),
                 fs: Some(FlagField::Config(IOField::Write)),
-                network: Some(FlagField::Config(NetworkField {
-                    tcp: Some(FlagField::Config(IOField::Read)),
-                    udp: Some(FlagField::Enabled(false)),
+                network: Some(NetworkField {
+                    mode: Some(ModeField::Mirror),
                     dns: Some(false),
-                })),
+                    outgoing: Some(FlagField::Config(OutgoingField {
+                        tcp: Some(true),
+                        udp: Some(false),
+                    })),
+                }),
             },
-            mode: Some(ModeField::Mirror),
             pod: PodField {
                 name: Some("test-service-abcdefg-abcd".to_owned()),
                 namespace: Some("default".to_owned()),
