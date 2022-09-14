@@ -100,32 +100,28 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 }
 
 #[hook_guard_fn]
+#[tracing::instrument(level = "trace")]
 pub(crate) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    debug!("connect_detour -> sockfd {:#?}", sockfd);
-
     // TODO: Is this conversion safe?
     let address = SockAddr::new(*(raw_address as *const _), address_length);
     let address = address.as_socket().ok_or(HookError::AddressConversion);
 
     match address {
         Ok(address) => {
-            let (Ok(result) | Err(result)) =
-                connect(sockfd, address)
-                    .map(|()| 0)
-                    .map_err(|fail| match fail {
-                        HookError::LocalFDNotFound(_)
-                        | HookError::SocketInvalidState(_)
-                        | HookError::BypassedPort(_)
-                        | HookError::Bypass => {
-                            warn!("connect_detour -> bypassed with {:#?}", fail);
-                            FN_CONNECT(sockfd, raw_address, address_length)
-                        }
-                        other => other.into(),
-                    });
+            let (Ok(result) | Err(result)) = connect(sockfd, address).map_err(|fail| match fail {
+                HookError::LocalFDNotFound(_)
+                | HookError::SocketInvalidState(_)
+                | HookError::BypassedPort(_)
+                | HookError::Bypass => {
+                    warn!("connect_detour -> bypassed with {:#?}", fail);
+                    FN_CONNECT(sockfd, raw_address, address_length)
+                }
+                other => other.into(),
+            });
 
             result
         }

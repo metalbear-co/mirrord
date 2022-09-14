@@ -1,8 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, thread};
+use std::{collections::HashMap, path::PathBuf, thread, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
-    ConnectionId, ResponseError,
+    ConnectionId, RemoteError, ResponseError,
 };
 use streammap_ext::StreamMap;
 use tokio::{
@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     error::AgentError,
@@ -57,7 +57,7 @@ impl TcpOutgoingApi {
     }
 
     /// Does the actual work for `Request`s and prepares the `Responses:
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace", skip(layer_rx, daemon_tx))]
     async fn interceptor_task(
         pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
@@ -80,30 +80,29 @@ impl TcpOutgoingApi {
             StreamMap::default();
 
         loop {
+            debug!("looping in interceptor_task {:#?}!", layer_rx);
             select! {
                 biased;
 
                 // [layer] -> [agent]
                 Some(layer_message) = layer_rx.recv() => {
-                    trace!("interceptor_task -> layer_message {:?}", layer_message);
+                    debug!("interceptor_task -> layer_message {:?}", layer_message);
 
                     match layer_message {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
                         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
-                            // TODO(alex) [high] 2022-09-12: Switch this back to using `TcpStream::connect`
-                            // directly (instead of `TcpSocket`).
-                            //
-                            // We're still blocking on `socket.connect`. Try disabling the `outgoing_traffic`
-                            // feature and running the go sample (just pass it `no-outgoing`, or whatever the
-                            // proper name for disable is) to trace what should happen. Both with DNS on, and
-                            // DNS off.
                             let daemon_connect =
-                                TcpStream::connect(remote_address)
+                                tokio::time::timeout(Duration::from_millis(1500), TcpStream::connect(remote_address))
                                     .await
+                                    .map_err(|elapsed| {
+                                        warn!("interceptor_task -> Elapsed connect error {:#?}", elapsed);
+                                        ResponseError::Remote(RemoteError::InvalidAddress(remote_address))
+                                    })
                                     .inspect_err(|fail| warn!("connect failed with {:#?}", fail))
                                     .map_err(From::from)
-                                    .map(|remote_stream| {
+                                    .and_then(|remote_stream| {
+                                        let remote_stream = remote_stream?;
                                         let connection_id = allocator
                                             .next_index()
                                             .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
@@ -115,10 +114,10 @@ impl TcpOutgoingApi {
                                         writers.insert(connection_id, write_half);
                                         readers.insert(connection_id, ReaderStream::new(read_half));
 
-                                        DaemonConnect {
+                                        Ok(DaemonConnect {
                                             connection_id,
                                             remote_address,
-                                        }
+                                        })
                                     });
 
                             info!("after daemon_connect -> {:#?}", daemon_connect);
@@ -165,7 +164,7 @@ impl TcpOutgoingApi {
                 // Read the data from one of the connected remote hosts, and forward the result back
                 // to the `user`.
                 Some((connection_id, remote_read)) = readers.next() => {
-                    trace!("interceptor_task -> read connection_id {:#?}", connection_id);
+                    debug!("interceptor_task -> read connection_id {:#?}", connection_id);
 
                     match remote_read {
                         Some(read) => {
@@ -197,15 +196,17 @@ impl TcpOutgoingApi {
     }
 
     /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn layer_message(
         &mut self,
         message: LayerTcpOutgoing,
     ) -> Result<(), AgentError> {
-        trace!(
-            "TcpOutgoingApi::layer_message -> layer_message {:#?}",
-            message
-        );
-        Ok(self.layer_tx.send(message).await?)
+        // TODO(alex) [high] 2022-09-13: We get stuck here?
+        let debug_timeout =
+            tokio::time::timeout(Duration::from_millis(1500), self.layer_tx.send(message))
+                .await??;
+
+        Ok(debug_timeout)
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.

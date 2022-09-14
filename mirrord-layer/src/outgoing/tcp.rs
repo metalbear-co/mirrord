@@ -17,7 +17,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -62,7 +62,7 @@ impl Default for TcpOutgoingHandler {
 }
 
 impl TcpOutgoingHandler {
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace", skip(layer_tx, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
@@ -145,11 +145,6 @@ impl TcpOutgoingHandler {
                 },
             }
         }
-
-        trace!(
-            "interceptor_task done -> connection_id {:#?}",
-            connection_id
-        );
     }
 
     /// Handles the following hook messages:
@@ -244,6 +239,13 @@ impl TcpOutgoingHandler {
                     )
                     .await
                     .and_then(|(connection_id, listener)| {
+                        // Incoming remote channel (in the direction of agent -> layer).
+                        // When the layer gets data from the agent, it writes it in via the
+                        // remote_tx end. the interceptor_task then reads
+                        // the data via the remote_rx end and writes it to
+                        // mirror_stream.
+                        // Agent ----> layer --> remote_tx=====remote_rx --> interceptor -->
+                        // mirror_stream
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
@@ -283,7 +285,13 @@ impl TcpOutgoingHandler {
                     .get_mut(&connection_id)
                     .ok_or(LayerError::NoConnectionId(connection_id))?;
 
-                Ok(sender.send(bytes).await?)
+                sender.send(bytes).await.unwrap_or_else(|_| {
+                    warn!(
+                        "Got new data from agent after application closed socket. connection_id: \
+                    connection_id: {connection_id}"
+                    );
+                });
+                Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
                 // (agent) failed to perform some operation.

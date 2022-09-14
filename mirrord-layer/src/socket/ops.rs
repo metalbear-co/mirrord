@@ -187,11 +187,57 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
 }
 
 #[tracing::instrument(level = "trace")]
+fn connect_shared(
+    sockfd: RawFd,
+    remote_address: SocketAddr,
+    mirror_address: SocketAddr,
+    mut user_socket_info: Arc<UserSocket>,
+) -> HookResult<i32> {
+    let connect_to = SockAddr::from(mirror_address);
+
+    // Connect to the interceptor socket that is listening.
+    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+    let err_code = errno::errno().0;
+    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+        error!(
+            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+            connect_result,
+            errno::errno()
+        );
+        return Err(io::Error::last_os_error())?;
+    }
+
+    let new_state = if connect_result == libc::EINPROGRESS {
+        let in_progress = InProgress {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::InProgress(in_progress)
+    } else {
+        let connected = Connected {
+            remote_address,
+            mirror_address,
+        };
+
+        SocketState::Connected(connected)
+    };
+
+    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+    SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+    Ok(connect_result)
+}
+
+// TODO(alex) [low] 2022-09-13: Can be made generic to be over UDP/TCP, probably require some trait
+// for `HookMessage` or similar idea, so we take `H: Hook` here.
+#[tracing::instrument(level = "trace")]
 fn connect_udp(
     sockfd: RawFd,
     remote_address: SocketAddr,
-    mut user_socket_info: Arc<UserSocket>,
-) -> HookResult<()> {
+    user_socket_info: Arc<UserSocket>,
+) -> HookResult<i32> {
     let (connect_tx, connect_rx) = oneshot::channel();
 
     let connect = Connect {
@@ -207,54 +253,15 @@ fn connect_udp(
     blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
     let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
 
-    debug!(
-        "connect_rx allowed us to keep going with {:#?}!",
-        mirror_address
-    );
-
-    let connect_to = SockAddr::from(mirror_address);
-
-    // Connect to the interceptor socket that is listening.
-    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-    let err_code = errno::errno().0;
-    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
-        error!(
-            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
-            connect_result,
-            errno::errno()
-        );
-        return Err(io::Error::last_os_error())?;
-    }
-
-    let new_state = if connect_result == libc::EINPROGRESS {
-        let in_progress = InProgress {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::InProgress(in_progress)
-    } else {
-        let connected = Connected {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::Connected(connected)
-    };
-
-    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
-    SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-    return Ok::<(), HookError>(());
+    connect_shared(sockfd, remote_address, mirror_address, user_socket_info)
 }
 
 #[tracing::instrument(level = "trace")]
 fn connect_tcp(
     sockfd: RawFd,
     remote_address: SocketAddr,
-    mut user_socket_info: Arc<UserSocket>,
-) -> HookResult<()> {
+    user_socket_info: Arc<UserSocket>,
+) -> HookResult<i32> {
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -268,41 +275,7 @@ fn connect_tcp(
     blocking_send_hook_message(HookMessage::TcpOutgoing(connect_hook))?;
     let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
 
-    let connect_to = SockAddr::from(mirror_address);
-
-    // Connect to the interceptor socket that is listening.
-    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-    let err_code = errno::errno().0;
-    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
-        error!(
-            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
-            connect_result,
-            errno::errno()
-        );
-        return Err(io::Error::last_os_error())?;
-    }
-
-    let new_state = if connect_result == libc::EINPROGRESS {
-        let in_progress = InProgress {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::InProgress(in_progress)
-    } else {
-        let connected = Connected {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::Connected(connected)
-    };
-
-    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
-    SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-    Ok::<(), HookError>(())
+    connect_shared(sockfd, remote_address, mirror_address, user_socket_info)
 }
 
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
@@ -315,7 +288,7 @@ fn connect_tcp(
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[tracing::instrument(level = "trace")]
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<()> {
+pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i32> {
     let (ip, port) = (remote_address.ip(), remote_address.port());
 
     let user_socket_info = {
@@ -349,10 +322,10 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
             connect_udp(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
-            SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
             SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
                 connect_tcp(sockfd, remote_address, user_socket_info)
             }
+            SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
@@ -367,28 +340,13 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
 
                     Err(io::Error::last_os_error())?
                 } else {
-                    let rawish_remote_address = SockAddr::from(remote_address);
-                    let result = unsafe {
-                        FN_CONNECT(
-                            sockfd,
-                            rawish_remote_address.as_ptr(),
-                            rawish_remote_address.len(),
-                        )
-                    };
-
-                    if result != 0 {
-                        Err(io::Error::last_os_error())?
-                    } else {
-                        Ok::<_, HookError>(())
-                    }
+                    Err(HookError::Bypass)
                 }
             }
             _ => Err(HookError::SocketInvalidState(sockfd)),
         },
         _ => Err(HookError::Bypass),
-    }?;
-
-    Ok(())
+    }
 }
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
