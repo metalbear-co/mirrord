@@ -97,6 +97,7 @@ enum IOField {
     Read,
     Write,
 }
+
 #[derive(Deserialize, PartialEq, Clone, Debug)]
 struct OutgoingField {
     tcp: Option<bool>,
@@ -123,7 +124,7 @@ enum ModeField {
 struct FeatureField {
     env: Option<FlagField<EnvField>>,
     fs: Option<FlagField<IOField>>,
-    network: Option<NetworkField>,
+    network: Option<FlagField<NetworkField>>,
 }
 
 #[derive(Deserialize, Default, PartialEq, Clone, Debug)]
@@ -254,10 +255,9 @@ impl LayerFileConfig {
         let agent_tcp_steal_traffic = config
             .agent_tcp_steal_traffic
             .or_else(|| {
-                self.feature
-                    .network
-                    .as_ref()
-                    .map(|network| network.incoming == Some(ModeField::Steal))
+                self.feature.network.as_ref().map(|network| {
+                    network.map(|network| network.incoming == Some(ModeField::Steal))
+                })
             })
             .unwrap_or(false);
 
@@ -267,7 +267,7 @@ impl LayerFileConfig {
                 self.feature
                     .network
                     .as_ref()
-                    .and_then(|network| network.dns)
+                    .and_then(|network| network.map(|network| network.dns))
             })
             .unwrap_or(true);
 
@@ -275,10 +275,12 @@ impl LayerFileConfig {
             .enabled_tcp_outgoing
             .or_else(|| {
                 self.feature.network.as_ref().and_then(|network| {
-                    network
-                        .outgoing
-                        .as_ref()
-                        .and_then(|outgoing| outgoing.map(|outgoing| outgoing.tcp))
+                    network.map(|network| {
+                        network
+                            .outgoing
+                            .as_ref()
+                            .and_then(|outgoing| outgoing.map(|outgoing| outgoing.tcp))
+                    })
                 })
             })
             .unwrap_or(true);
@@ -287,10 +289,12 @@ impl LayerFileConfig {
             .enabled_udp_outgoing
             .or_else(|| {
                 self.feature.network.as_ref().and_then(|network| {
-                    network
-                        .outgoing
-                        .as_ref()
-                        .and_then(|outgoing| outgoing.map(|outgoing| outgoing.udp))
+                    network.map(|network| {
+                        network
+                            .outgoing
+                            .as_ref()
+                            .and_then(|outgoing| outgoing.map(|outgoing| outgoing.udp))
+                    })
                 })
             })
             .unwrap_or(true);
@@ -463,14 +467,14 @@ mod tests {
             feature: FeatureField {
                 env: Some(FlagField::Enabled(true)),
                 fs: Some(FlagField::Config(IOField::Write)),
-                network: Some(NetworkField {
+                network: Some(FlagField::Config(NetworkField {
                     dns: Some(false),
                     incoming: Some(ModeField::Mirror),
                     outgoing: Some(FlagField::Config(OutgoingField {
                         tcp: Some(true),
                         udp: Some(false),
                     })),
-                }),
+                })),
             },
             pod: PodField {
                 name: Some("test-service-abcdefg-abcd".to_owned()),
@@ -480,6 +484,76 @@ mod tests {
         };
 
         assert_eq!(config, expect);
+    }
+
+    #[test]
+    fn merge() {
+        let file_config = LayerFileConfig {
+            accept_invalid_certificates: Some(true),
+            agent: AgentField {
+                log_level: Some("agent_rust_log".to_owned()),
+                namespace: Some("agent_namespace".to_owned()),
+                image: Some("agent_image".to_owned()),
+                image_pull_policy: Some("image_pull_policy".to_owned()),
+                ttl: Some(32),
+                ephemeral: Some(true),
+                communication_timeout: Some(31),
+            },
+            feature: FeatureField {
+                env: Some(FlagField::Config(EnvField {
+                    include: Some(VecOrSingle::Single("include".to_owned())),
+                    exclude: Some(VecOrSingle::Multiple(vec![
+                        "exclude".to_owned(),
+                        "exclude2".to_owned(),
+                    ])),
+                })),
+                fs: Some(FlagField::Enabled(true)),
+                network: Some(FlagField::Config(NetworkField {
+                    incoming: Some(ModeField::Steal),
+                    dns: Some(false),
+                    outgoing: Some(FlagField::Config(OutgoingField {
+                        tcp: Some(false),
+                        udp: Some(false),
+                    })),
+                })),
+            },
+            pod: PodField {
+                name: Some("impersonated_pod_name".to_owned()),
+                namespace: Some("impersonated_pod_namespace".to_owned()),
+                container: Some("impersonated_container_name".to_owned()),
+            },
+        };
+
+        let config = file_config.merge_with(Default::default());
+
+        assert_eq!(config.agent_rust_log, "agent_rust_log");
+        assert_eq!(config.agent_namespace, Some("agent_namespace".to_owned()));
+        assert_eq!(config.agent_image, Some("agent_image".to_owned()));
+        assert_eq!(config.image_pull_policy, "image_pull_policy");
+        assert_eq!(config.impersonated_pod_name, "impersonated_pod_name");
+        assert_eq!(
+            config.impersonated_pod_namespace,
+            "impersonated_pod_namespace"
+        );
+        assert_eq!(
+            config.impersonated_container_name,
+            Some("impersonated_container_name".to_owned())
+        );
+        assert_eq!(config.accept_invalid_certificates, true);
+        assert_eq!(config.agent_ttl, 32);
+        assert_eq!(config.agent_tcp_steal_traffic, true);
+        assert_eq!(config.agent_communication_timeout, Some(31));
+        assert_eq!(config.enabled_file_ops, false);
+        assert_eq!(config.enabled_file_ro_ops, true);
+        assert_eq!(
+            config.override_env_vars_exclude,
+            Some("exclude;exclude2".to_owned())
+        );
+        assert_eq!(config.override_env_vars_include, Some("include".to_owned()));
+        assert_eq!(config.ephemeral_container, true);
+        assert_eq!(config.remote_dns, false);
+        assert_eq!(config.enabled_tcp_outgoing, false);
+        assert_eq!(config.enabled_udp_outgoing, false);
     }
 
     #[rstest]
