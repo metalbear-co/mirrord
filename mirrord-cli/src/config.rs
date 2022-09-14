@@ -23,7 +23,7 @@ pub(super) enum Commands {
 pub(super) struct ExecArgs {
     /// Pod name to mirror.
     #[clap(short, long, value_parser)]
-    pub pod_name: String,
+    pub pod_name: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
     #[clap(short = 'n', long, value_parser)]

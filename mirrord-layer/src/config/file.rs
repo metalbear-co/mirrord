@@ -38,6 +38,40 @@ enum FlagField<T> {
     Config(T),
 }
 
+impl<T> FlagField<T> {
+    fn enabled_or_equal<'a, Rhs>(&'a self, comp: Rhs) -> bool
+    where
+        &'a T: PartialEq<Rhs>,
+    {
+        match self {
+            FlagField::Enabled(enabled) => *enabled,
+            FlagField::Config(val) => val == comp,
+        }
+    }
+
+    fn map<'a, R, C>(&'a self, config_cb: C) -> R
+    where
+        R: From<bool>,
+        C: FnOnce(&'a T) -> R,
+    {
+        match self {
+            FlagField::Enabled(enabled) => R::from(*enabled),
+            FlagField::Config(val) => config_cb(val),
+        }
+    }
+
+    fn map_or_enabled<'a, R, E, C>(&'a self, enabled_cb: E, config_cb: C) -> R
+    where
+        E: FnOnce(bool) -> R,
+        C: FnOnce(&'a T) -> R,
+    {
+        match self {
+            FlagField::Enabled(enabled) => enabled_cb(*enabled),
+            FlagField::Config(val) => config_cb(val),
+        }
+    }
+}
+
 #[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 enum IOField {
@@ -61,7 +95,9 @@ enum ModeField {
 }
 
 #[derive(Deserialize, Default, PartialEq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 struct FeatureField {
+    mode: Option<ModeField>,
     env: Option<FlagField<EnvField>>,
     fs: Option<FlagField<IOField>>,
     network: Option<FlagField<NetworkField>>,
@@ -71,9 +107,13 @@ struct FeatureField {
 #[serde(deny_unknown_fields)]
 pub struct LayerFileConfig {
     accept_invalid_certificates: Option<bool>,
+
+    #[serde(default)]
     agent: AgentField,
-    mode: Option<ModeField>,
+
+    #[serde(default)]
     pod: PodField,
+
     #[serde(default)]
     feature: FeatureField,
 }
@@ -144,49 +184,51 @@ impl LayerFileConfig {
 
         let impersonated_container_name = config.impersonated_container_name.or(self.pod.container);
 
-        // Mode
+        // Feature mode
 
         let agent_tcp_steal_traffic = config
             .agent_tcp_steal_traffic
-            .unwrap_or_else(|| self.mode == Some(ModeField::Steal));
+            .unwrap_or_else(|| self.feature.mode == Some(ModeField::Steal));
 
         // Feature fs
 
         let enabled_file_ops = config
             .enabled_file_ops
             .or_else(|| {
-                self.feature.fs.clone().map(|flag| match flag {
-                    FlagField::Enabled(val) => val,
-                    FlagField::Config(io) => io == IOField::Write,
-                })
+                self.feature
+                    .fs
+                    .as_ref()
+                    .map(|flag| flag.enabled_or_equal(&IOField::Write))
             })
             .unwrap_or(false);
 
         let enabled_file_ro_ops = config
             .enabled_file_ro_ops
             .or_else(|| {
-                self.feature.fs.clone().map(|flag| match flag {
-                    FlagField::Enabled(_) => false,
-                    FlagField::Config(io) => io == IOField::Read,
-                })
+                self.feature
+                    .fs
+                    .as_ref()
+                    .map(|flag| flag.enabled_or_equal(&IOField::Read))
             })
             .unwrap_or(true);
 
         // Feature env
 
         let override_env_vars_exclude = config.override_env_vars_exclude.or_else(|| {
-            self.feature.env.clone().and_then(|flag| match flag {
-                FlagField::Enabled(true) => None,
-                FlagField::Enabled(false) => Some("".to_owned()),
-                FlagField::Config(env) => env.exclude,
+            self.feature.env.as_ref().and_then(|flag| {
+                flag.map_or_enabled(
+                    |enabled| if enabled { None } else { Some("".to_owned()) },
+                    |env| env.exclude.clone(),
+                )
             })
         });
 
         let override_env_vars_include = config.override_env_vars_include.or_else(|| {
-            self.feature.env.clone().and_then(|flag| match flag {
-                FlagField::Enabled(true) => None,
-                FlagField::Enabled(false) => Some("".to_owned()),
-                FlagField::Config(env) => env.include,
+            self.feature.env.as_ref().and_then(|flag| {
+                flag.map_or_enabled(
+                    |enabled| if enabled { None } else { Some("".to_owned()) },
+                    |env| env.include.clone(),
+                )
             })
         });
 
@@ -197,23 +239,21 @@ impl LayerFileConfig {
             .or_else(|| {
                 self.feature
                     .network
-                    .clone()
-                    .and_then(|network| match network {
-                        FlagField::Enabled(val) => Some(val),
-                        FlagField::Config(network) => network.dns,
-                    })
+                    .as_ref()
+                    .and_then(|network| network.map(|network| network.dns.clone()))
             })
             .unwrap_or(true);
 
         let enabled_tcp_outgoing = config
             .enabled_tcp_outgoing
             .or_else(|| {
-                self.feature.network.clone().map(|network| match network {
-                    FlagField::Enabled(val) => val,
-                    FlagField::Config(network) => {
-                        network.tcp == Some(FlagField::Config(IOField::Write))
-                            || network.tcp == Some(FlagField::Enabled(true))
-                    }
+                self.feature.network.as_ref().and_then(|network| {
+                    network.map(|network| {
+                        network
+                            .tcp
+                            .clone()
+                            .map(|tcp| tcp.enabled_or_equal(&IOField::Write))
+                    })
                 })
             })
             .unwrap_or(true);
@@ -221,12 +261,13 @@ impl LayerFileConfig {
         let enabled_udp_outgoing = config
             .enabled_udp_outgoing
             .or_else(|| {
-                self.feature.network.map(|network| match network {
-                    FlagField::Enabled(val) => val,
-                    FlagField::Config(network) => {
-                        network.udp == Some(FlagField::Config(IOField::Write))
-                            || network.udp == Some(FlagField::Enabled(true))
-                    }
+                self.feature.network.and_then(|network| {
+                    network.map(|network| {
+                        network
+                            .udp
+                            .clone()
+                            .map(|udp| udp.enabled_or_equal(&IOField::Write))
+                    })
                 })
             })
             .unwrap_or(true);
@@ -284,8 +325,8 @@ mod tests {
                             "ttl": 60,
                             "ephemeral": false
                         },
-                        "mode": "mirror",
                         "feature": {
+                            "mode": "mirror",
                             "env": true,
                             "fs": "write",
                             "network": {
@@ -305,7 +346,6 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
-                    mode = "mirror"
 
                     [agent]
                     log_level = "info"
@@ -316,6 +356,7 @@ mod tests {
                     ephemeral = false
 
                     [feature]
+                    mode = "mirror"
                     env = true
                     fs = "write"
 
@@ -333,7 +374,6 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
-                    mode: "mirror"
 
                     agent:
                         log_level: "info"
@@ -344,6 +384,7 @@ mod tests {
                         ephemeral: false
 
                     feature:
+                        mode: "mirror"
                         env: true
                         fs: "write"
                         network:
