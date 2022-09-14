@@ -40,6 +40,9 @@ pub enum RemoteError {
 
     #[error("Failed operation to `SocketAddr` with `{0}`!")]
     InvalidAddress(SocketAddr),
+
+    #[error("Connect call to `SocketAddr` `{0}` timed out!")]
+    ConnectTimedOut(SocketAddr),
 }
 
 impl From<AddrParseError> for RemoteError {

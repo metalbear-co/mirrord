@@ -1,7 +1,7 @@
 use std::{
     ffi::CString,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
     sync::Arc,
@@ -16,7 +16,6 @@ use tracing::{debug, error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
-    detour::DetourGuard,
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
@@ -26,13 +25,6 @@ use crate::{
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[tracing::instrument(level = "trace")]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
-    trace!(
-        "socket -> domain {:#?} | type:{:#?} | protocol {:#?}",
-        domain,
-        type_,
-        protocol
-    );
-
     let socket_kind = type_.try_into()?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
@@ -65,9 +57,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
+#[tracing::instrument(level = "trace")]
 pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
-    trace!("bind -> sockfd {:#?} | address {:#?}", sockfd, address);
-
     let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
 
     let mut socket = {
@@ -142,9 +133,8 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
+#[tracing::instrument(level = "trace")]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
-    trace!("listen -> sockfd {:#?} | backlog {:#?}", sockfd, backlog);
-
     let mut socket = {
         SOCKETS
             .lock()?
@@ -208,21 +198,12 @@ fn connect_shared(
         return Err(io::Error::last_os_error())?;
     }
 
-    let new_state = if connect_result == libc::EINPROGRESS {
-        let in_progress = InProgress {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::InProgress(in_progress)
-    } else {
-        let connected = Connected {
-            remote_address,
-            mirror_address,
-        };
-
-        SocketState::Connected(connected)
+    let connected = Connected {
+        remote_address,
+        mirror_address,
     };
+
+    let new_state = SocketState::Connected(connected);
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
     SOCKETS.lock()?.insert(sockfd, user_socket_info);
@@ -351,13 +332,12 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
+#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
 ) -> HookResult<()> {
-    trace!("getpeername -> sockfd {:#?}", sockfd);
-
     let remote_address = {
         SOCKETS
             .lock()?
@@ -374,6 +354,7 @@ pub(super) fn getpeername(
     fill_address(address, address_len, remote_address)
 }
 /// Resolve the fake local address to the real local address.
+#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -402,6 +383,7 @@ pub(super) fn getsockname(
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock This enables us to have a safe way to get "remote" information
 /// (remote ip, port, etc).
+#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -446,6 +428,7 @@ pub(super) fn accept(
     Ok(new_fd)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> HookResult<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
@@ -453,6 +436,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> HookResult<()>
     }
 }
 
+#[tracing::instrument(level = "trace")]
 pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
     let dup_socket = SOCKETS
         .lock()?
@@ -476,18 +460,12 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
+#[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     hints: Option<AddrInfoHint>,
 ) -> HookResult<*mut libc::addrinfo> {
-    trace!(
-        "getaddrinfo -> node {:#?} | service {:#?} | hints {:#?}",
-        node,
-        service,
-        hints
-    );
-
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,

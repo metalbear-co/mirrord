@@ -68,9 +68,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
-
-    #[error("mirrord-layer: Tried connecting to ipv6 address (not supported)!")]
-    NetworkUnreachable,
 }
 
 #[derive(Error, Debug)]
@@ -210,7 +207,10 @@ impl From<HookError> for i64 {
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
-                ResponseError::Remote(_) => libc::EINVAL,
+                ResponseError::Remote(remote) => match remote {
+                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
+                    _ => libc::EINVAL,
+                },
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
@@ -222,7 +222,6 @@ impl From<HookError> for i64 {
             HookError::Bypass => libc::EINVAL,
             HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
-            HookError::NetworkUnreachable => libc::ENETUNREACH,
         };
 
         set_errno(errno::Errno(libc_error));

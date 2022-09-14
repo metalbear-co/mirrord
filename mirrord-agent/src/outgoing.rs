@@ -13,6 +13,7 @@ use tokio::{
     },
     select,
     sync::mpsc::{self, Receiver, Sender},
+    time::timeout,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -93,11 +94,11 @@ impl TcpOutgoingApi {
                         // `user` is asking us to connect to some remote host.
                         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
                             let daemon_connect =
-                                tokio::time::timeout(Duration::from_millis(1500), TcpStream::connect(remote_address))
+                                timeout(Duration::from_millis(1500), TcpStream::connect(remote_address))
                                     .await
                                     .map_err(|elapsed| {
                                         warn!("interceptor_task -> Elapsed connect error {:#?}", elapsed);
-                                        ResponseError::Remote(RemoteError::InvalidAddress(remote_address))
+                                        ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address))
                                     })
                                     .inspect_err(|fail| warn!("connect failed with {:#?}", fail))
                                     .map_err(From::from)
@@ -201,12 +202,7 @@ impl TcpOutgoingApi {
         &mut self,
         message: LayerTcpOutgoing,
     ) -> Result<(), AgentError> {
-        // TODO(alex) [high] 2022-09-13: We get stuck here?
-        let debug_timeout =
-            tokio::time::timeout(Duration::from_millis(1500), self.layer_tx.send(message))
-                .await??;
-
-        Ok(debug_timeout)
+        Ok(self.layer_tx.send(message).await?)
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.

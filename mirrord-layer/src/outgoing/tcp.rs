@@ -17,7 +17,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -62,7 +62,7 @@ impl Default for TcpOutgoingHandler {
 }
 
 impl TcpOutgoingHandler {
-    #[tracing::instrument(level = "trace", skip(layer_tx, remote_rx))]
+    #[tracing::instrument(level = "trace", skip(layer_tx, mirror_listener, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
@@ -201,8 +201,6 @@ impl TcpOutgoingHandler {
         &mut self,
         response: DaemonTcpOutgoing,
     ) -> Result<(), LayerError> {
-        trace!("handle_daemon_message -> message {:?}", response);
-
         match response {
             DaemonTcpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);

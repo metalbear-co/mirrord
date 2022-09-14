@@ -69,14 +69,6 @@ pub struct Connected {
     mirror_address: SocketAddr,
 }
 
-#[derive(Debug)]
-pub struct InProgress {
-    /// Remote address we're connected to
-    remote_address: SocketAddr,
-    /// Local address it's connected from
-    mirror_address: SocketAddr,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
     requested_port: Port,
@@ -89,7 +81,6 @@ pub enum SocketState {
     Bound(Bound),
     Listening(Bound),
     Connected(Connected),
-    InProgress(InProgress),
 }
 
 impl Default for SocketState {
@@ -141,6 +132,7 @@ pub struct UserSocket {
 const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
+
 #[inline]
 fn is_ignored_ip(ip: IpAddr) -> bool {
     ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)

@@ -6,7 +6,7 @@ use mirrord_protocol::{
     WriteFileResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace};
+use tracing::error;
 
 use crate::{
     common::blocking_send_hook_message,
@@ -31,13 +31,8 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
 ///
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
+#[tracing::instrument(level = "trace")]
 pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd> {
-    trace!(
-        "open -> path {:#?} | open_options {:#?}",
-        path,
-        open_options
-    );
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let requesting_file = Open {
@@ -82,6 +77,7 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
     Ok(local_file_fd)
 }
 
+#[tracing::instrument(level = "error")]
 fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
     // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
@@ -96,14 +92,8 @@ fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
     file_channel_rx.blocking_recv()?.map_err(From::from)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Result<RawFd> {
-    trace!(
-        "openat -> path {:?} | open_flags {:?} | relative_dir {:#?}",
-        path,
-        open_flags,
-        relative_fd
-    );
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -142,24 +132,14 @@ pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Re
         let _ = close_remote_file_on_failure(remote_fd)?;
     }
 
-    debug!(
-        "openat -> local_fd {local_file_fd:#?} | remote_fd {:#?}",
-        remote_fd
-    );
-
     OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
 
     Ok(local_file_fd)
 }
 
 /// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<*mut FILE> {
-    trace!(
-        "fopen -> path {:#?} | open_options {:#?}",
-        path,
-        open_options
-    );
-
     let local_file_fd = open(path, open_options)?;
     let open_files = OPEN_FILES.lock().unwrap();
 
@@ -170,18 +150,12 @@ pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fdopen(
     local_fd: &RawFd,
     remote_fd: usize,
     _open_options: OpenOptionsInternal,
 ) -> Result<*mut FILE> {
-    trace!(
-        "fdopen -> local_fd {:#?} | remoet_fd {:#?} | _open_options {:#?}",
-        local_fd,
-        remote_fd,
-        _open_options
-    );
-
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
     Ok(local_fd as *const _ as *mut _)
@@ -191,9 +165,8 @@ pub(crate) fn fdopen(
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
+#[tracing::instrument(level = "trace")]
 pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse> {
-    trace!("read -> fd {:#?} | read_amount {:#?}", fd, read_amount);
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let reading_file = Read {
@@ -208,9 +181,8 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse> {
     Ok(read_file_response)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
-    trace!("lseek -> fd {:?} | seek_from {:#?}", fd, seek_from);
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let seeking_file = Seek {
@@ -225,13 +197,8 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
     Ok(result_offset)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize> {
-    trace!(
-        "write -> fd {:?} | write_bytes (length) {:#?}",
-        fd,
-        write_bytes.len()
-    );
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let writing_file = Write {
@@ -246,9 +213,8 @@ pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize> {
     Ok(written_amount.try_into()?)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn close(fd: usize) -> Result<c_int> {
-    trace!("close -> fd {:#?}", fd);
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let closing_file = Close {
@@ -262,9 +228,8 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
     Ok(0)
 }
 
+#[tracing::instrument(level = "trace")]
 pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
-    trace!("access -> pathname {:#?} | mode {:?}", pathname, mode,);
-
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let access = Access {
