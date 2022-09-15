@@ -261,11 +261,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
             .ok_or(HookError::LocalFDNotFound(sockfd))?
     };
 
-    // TODO(alex) [mid] 2022-09-13: During initialization, check if the pod supports ipv6.
-    // if ip.is_ipv6() {
-    //     return Err(HookError::NetworkUnreachable);
-    // }
-
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
         .copied()
