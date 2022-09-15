@@ -15,7 +15,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
@@ -33,7 +33,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
@@ -48,7 +48,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
@@ -97,7 +97,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
@@ -113,7 +113,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
@@ -132,7 +132,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
@@ -216,7 +216,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
