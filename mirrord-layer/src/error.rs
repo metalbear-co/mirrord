@@ -208,6 +208,7 @@ impl From<HookError> for i64 {
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
                 ResponseError::Remote(remote) => match remote {
+                    // So far only encountered when trying to make requests from golang.
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },

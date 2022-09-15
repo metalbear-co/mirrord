@@ -41,6 +41,8 @@ pub enum RemoteError {
     #[error("Failed operation to `SocketAddr` with `{0}`!")]
     InvalidAddress(SocketAddr),
 
+    /// Especially relevant for the outgoing traffic feature, when `golang` attempts to connect
+    /// on both IPv6 and IPv4.
     #[error("Connect call to `SocketAddr` `{0}` timed out!")]
     ConnectTimedOut(SocketAddr),
 }
