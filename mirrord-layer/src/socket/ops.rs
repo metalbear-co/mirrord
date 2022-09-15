@@ -186,7 +186,7 @@ const UDP: ConnectType = !TCP;
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
 /// interception procedure.
-fn connect_logic<const TYPE: ConnectType>(
+fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
     mut user_socket_info: Arc<UserSocket>,
@@ -277,11 +277,11 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
 
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
-            connect_logic::<UDP>(sockfd, remote_address, user_socket_info)
+            connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
             SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
-                connect_logic::<TCP>(sockfd, remote_address, user_socket_info)
+                connect_outgoing::<TCP>(sockfd, remote_address, user_socket_info)
             }
             SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
             SocketState::Bound(Bound { address, .. }) => {
