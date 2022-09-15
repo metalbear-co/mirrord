@@ -13,9 +13,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
+- CI: pin rust nightly channel to 2022-09-13.
 - mirrord-layer: Refactor `connect` function to be less bloated.
 - `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
 - mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
+- mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
 
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
