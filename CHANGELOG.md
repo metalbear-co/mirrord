@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
+  call to `connect`) is successfully intercepted and forwarded.
+
 ### Fixed
 - intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
 
