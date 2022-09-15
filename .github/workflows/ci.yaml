@@ -119,7 +119,7 @@ jobs:
         with:
           key: ubuntu-latest
       - run: sudo apt install -y libpcap-dev cmake
-      - run: cargo +nightly build --manifest-path=./Cargo.toml
+      - run: cargo +nightly-2022-09-13 build --manifest-path=./Cargo.toml
 
   e2e:
     runs-on: ubuntu-latest
