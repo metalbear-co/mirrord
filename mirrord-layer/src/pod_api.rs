@@ -1,7 +1,7 @@
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
-    core::v1::{EphemeralContainer, Pod},
+    core::v1::{EphemeralContainer, Pod}, apps::v1::Deployment,
 };
 use kube::{
     api::{Api, ListParams, LogParams, Portforwarder, PostParams},
@@ -51,10 +51,14 @@ struct RuntimeData {
 impl RuntimeData {
     async fn from_k8s(
         client: Client,
+        deployment: &Option<String>,
         pod_name: &str,
         pod_namespace: &str,
         container_name: &Option<String>,
     ) -> Result<Self> {
+        if let Some(deployment) = deployment {
+            let pods_api: Api<Deployment> = Api::namespaced(client, pod_namespace);
+        }
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
@@ -107,6 +111,7 @@ pub(crate) async fn create_agent(
     let LayerConfig {
         agent_image,
         agent_namespace,
+        impersonated_deployment_name,
         impersonated_pod_name,
         impersonated_pod_namespace,
         impersonated_container_name,
@@ -140,8 +145,9 @@ pub(crate) async fn create_agent(
     } else {
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
+            &impersonated_deployment_name,
             &impersonated_pod_name,
-            &impersonated_pod_namespace,
+            &impersonated_pod_namespace,            
             &impersonated_container_name,
         )
         .await

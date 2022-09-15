@@ -104,6 +104,13 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.pod_name.clone());
 
+    if let Some(deployment) = &args.deployment_name {
+        std::env::set_var(
+            "MIRRORD_IMPERSONATED_DEPLOYMENT_NAME",
+            deployment_name.clone(),
+        );
+    }
+
     if let Some(namespace) = &args.pod_namespace {
         std::env::set_var(
             "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",

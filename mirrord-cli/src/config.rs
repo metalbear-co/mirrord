@@ -23,6 +23,10 @@ pub(super) struct ExecArgs {
     #[clap(short, long, value_parser)]
     pub pod_name: String,
 
+    /// Deployment name to mirror.
+    #[clap(short, long, value_parser)]
+    pub deployment_name: Option<String>,
+
     /// Namespace of the pod to mirror. Defaults to "default".
     #[clap(short = 'n', long, value_parser)]
     pub pod_namespace: Option<String>,

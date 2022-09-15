@@ -17,6 +17,9 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub impersonated_pod_name: String,
 
+    #[envconfig(from = "MIRRORD_IMPERSONATED_DEPLOYMENT_NAME")]
+    pub impersonated_deployment_name: Option<String>,
+
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
     pub impersonated_pod_namespace: String,
 
