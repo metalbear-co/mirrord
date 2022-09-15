@@ -2,7 +2,7 @@ use std::slice::Join;
 
 use serde::Deserialize;
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
 pub enum FlagField<T> {
     Enabled(bool),
@@ -43,7 +43,7 @@ impl<T> FlagField<T> {
     }
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
 pub enum VecOrSingle<T> {
     Single(T),

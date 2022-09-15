@@ -8,7 +8,7 @@ use crate::config::{
     LayerConfig,
 };
 
-#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct AgentField {
     log_level: Option<String>,
@@ -20,7 +20,7 @@ struct AgentField {
     communication_timeout: Option<u16>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct PodField {
     name: Option<String>,
@@ -28,27 +28,27 @@ struct PodField {
     container: Option<String>,
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct EnvField {
     include: Option<VecOrSingle<String>>,
     exclude: Option<VecOrSingle<String>>,
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 enum IOField {
     Read,
     Write,
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 struct OutgoingField {
     tcp: Option<bool>,
     udp: Option<bool>,
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct NetworkField {
     incoming: Option<ModeField>,
@@ -56,14 +56,14 @@ struct NetworkField {
     dns: Option<bool>,
 }
 
-#[derive(Deserialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 enum ModeField {
     Mirror,
     Steal,
 }
 
-#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct FeatureField {
     env: Option<FlagField<EnvField>>,
@@ -71,7 +71,7 @@ struct FeatureField {
     network: Option<FlagField<NetworkField>>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Clone, Debug)]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct LayerFileConfig {
     accept_invalid_certificates: Option<bool>,
