@@ -17,6 +17,7 @@ edition.workspace = true
 
 [dependencies]
 mirrord-auth = { path="../mirrord-auth", features = ["webbrowser"] }
+mirrord-common = { version = "0.1.0", path = "../mirrord-common" }
 
 clap.workspace = true
 tracing.workspace = true

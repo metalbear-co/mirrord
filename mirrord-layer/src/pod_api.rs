@@ -11,7 +11,7 @@ use kube::{
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, Instrument};
 
 use crate::{
     config::LayerConfig,
@@ -99,6 +99,10 @@ impl RuntimeData {
     }
 }
 
+#[tracing::instrument(
+    skip_all,
+    fields(term_progress = "agent initializing...", term_done = "agent running")
+)]
 pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
@@ -198,6 +202,7 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
         .unwrap_or(false)
 }
 
+#[tracing::instrument(skip_all, fields(term_progress = "waiting for agent to be ready..."))]
 async fn wait_for_agent_startup(
     pods_api: &Api<Pod>,
     pod_name: &str,
@@ -311,6 +316,7 @@ async fn create_ephemeral_container_agent(
     Ok(config.impersonated_pod_name.clone())
 }
 
+#[tracing::instrument(skip_all, fields(term_progress = "creating agent pod..."))]
 async fn create_job_pod_agent(
     config: &LayerConfig,
     agent_image: String,
@@ -394,7 +400,12 @@ async fn create_job_pod_agent(
     let stream = watcher(pods_api.clone(), params).applied_objects();
     pin!(stream);
 
-    while let Some(Ok(pod)) = stream.next().await {
+    let wait_span = tracing::info_span!(
+        "waiting for pod",
+        term_progress = "waiting for agent pod to be ready..."
+    );
+
+    while let Some(Ok(pod)) = stream.next().instrument(wait_span.clone()).await {
         if let Some(status) = &pod.status && let Some(phase) = &status.phase {
                     debug!("Pod Phase = {phase:?}");
                 if phase == "Running" {
@@ -402,6 +413,8 @@ async fn create_job_pod_agent(
                 }
             }
     }
+
+    drop(wait_span);
 
     let pods = pods_api
         .list(&ListParams::default().labels(&format!("job-name={}", mirrord_agent_job_name)))

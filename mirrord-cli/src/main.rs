@@ -10,6 +10,7 @@ use clap::Parser;
 use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
+use mirrord_common::progress::{PrintProgress, ProgressMode, MIRRORD_PROGRESS_ENV};
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
@@ -41,6 +42,10 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
+#[tracing::instrument(fields(
+    term_progress = "initializing mirrord layer...",
+    term_done = "layer initialized"
+))]
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let library_file = env!("MIRRORD_LAYER_FILE");
     let library_path = Path::new(library_file);
@@ -184,6 +189,8 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
+    std::env::set_var(MIRRORD_PROGRESS_ENV, "standard");
+
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
@@ -215,8 +222,8 @@ fn login(args: LoginArgs) -> Result<()> {
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
+        .with(fmt::layer().with_filter(EnvFilter::from_default_env()))
+        .with(PrintProgress::from_env(ProgressMode::Standard))
         .init();
     prompt_outdated_version();
 

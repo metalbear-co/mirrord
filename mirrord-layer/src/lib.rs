@@ -21,6 +21,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_common::progress::{PrintProgress, ProgressMode};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -85,9 +86,10 @@ fn init() {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE),
+                .with_span_events(FmtSpan::ACTIVE)
+                .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
         )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(PrintProgress::from_env(ProgressMode::Standard))
         .init();
 
     info!("Initializing mirrord-layer!");
