@@ -54,7 +54,10 @@ streammap-ext = "0.1"
 # so we patch crates.io to use the latest commits from rustls
 # this should be changed once a newer version of rustls is ou
 [patch.crates-io]
-rustls = { git = 'https://github.com/rustls/rustls' }
+rustls = { git = "https://github.com/metalbear-co/rustls", branch = "feat-ip-address" }
+
+[patch."https://github.com/ctz/webpki"]
+webpki = { git = "https://github.com/metalbear-co/webpki", branch = "feat-ip-address" }
 
 [profile.release]
 strip = "debuginfo"
