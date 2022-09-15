@@ -2,7 +2,7 @@ pub mod env;
 pub mod file;
 pub mod util;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LayerConfig {
     pub agent_rust_log: String,
     pub agent_namespace: Option<String>,

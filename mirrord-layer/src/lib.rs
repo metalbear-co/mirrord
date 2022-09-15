@@ -40,7 +40,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{error, info, trace};
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::HookMessage,
@@ -88,7 +88,11 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 #[ctor]
 fn init() {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::ACTIVE),
+        )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
@@ -187,12 +191,8 @@ where
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
-        trace!(
-            "Layer::handle_hook_message -> hook_message {:?}",
-            hook_message
-        );
-
         match hook_message {
             HookMessage::Tcp(message) => {
                 if self.steal {
@@ -219,8 +219,6 @@ where
                 hints,
                 hook_channel_tx,
             }) => {
-                trace!("HookMessage::GetAddrInfo");
-
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
 
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
@@ -244,6 +242,7 @@ where
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
@@ -276,15 +275,12 @@ where
             DaemonMessage::GetEnvVarsResponse(_) => {
                 unreachable!("We get env vars only on initialization right now, shouldn't happen")
             }
-            DaemonMessage::GetAddrInfoResponse(get_addr_info) => {
-                trace!("DaemonMessage::GetAddrInfoResponse {:#?}", get_addr_info);
-
-                self.getaddrinfo_handler_queue
-                    .pop_front()
-                    .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
-                    .send(get_addr_info)
-                    .map_err(|_| LayerError::SendErrorGetAddrInfoResponse)
-            }
+            DaemonMessage::GetAddrInfoResponse(get_addr_info) => self
+                .getaddrinfo_handler_queue
+                .pop_front()
+                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
+                .send(get_addr_info)
+                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close => todo!(),
             DaemonMessage::LogMessage(_) => todo!(),
         }
@@ -355,6 +351,7 @@ async fn thread_loop(
     }
 }
 
+#[tracing::instrument(level = "trace", skip(pf, receiver))]
 async fn start_layer_thread(
     mut pf: Portforwarder,
     receiver: Receiver<HookMessage>,
@@ -411,6 +408,7 @@ async fn start_layer_thread(
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
+#[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
@@ -444,9 +442,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 #[hook_guard_fn]
+#[tracing::instrument(level = "trace")]
 unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    trace!("close_detour -> fd {:#?}", fd);
-
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
