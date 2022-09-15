@@ -390,6 +390,18 @@ async fn start_layer_thread(
         }
     };
 
+    codec
+        .send(ClientMessage::SupportsIpv6)
+        .await
+        .expect("Codec failure is fatal!");
+
+    let message = codec.next().await;
+    if let Some(Ok(DaemonMessage::SupportsIpv6(supports_ipv6))) = message {
+        todo!()
+    } else {
+        panic!("unexpected response - expected SupportsIpv6 {message:#?}");
+    }
+
     let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
 }
 

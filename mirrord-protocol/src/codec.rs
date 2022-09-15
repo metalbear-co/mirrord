@@ -193,6 +193,7 @@ pub enum ClientMessage {
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
+    SupportsIpv6,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

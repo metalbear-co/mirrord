@@ -300,6 +300,7 @@ impl ClientConnectionHandler {
             ClientMessage::Close => {
                 return Ok(false);
             }
+            ClientMessage::SupportsIpv6 => todo!(),
         }
         Ok(true)
     }
