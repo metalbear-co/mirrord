@@ -18,13 +18,13 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.target}}-${{matrix.os}}
       - name: build mirrord-layer and cli
-        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cargo +nightly-2022-09-13 build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
@@ -39,7 +39,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v1
       - name: Import Code-Signing Certificates
@@ -54,9 +54,9 @@ jobs:
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
       - name: build mirrord-layer x86-64
-        run: cargo +nightly build --release -p mirrord-layer --target=x86_64-apple-darwin
+        run: cargo +nightly-2022-09-13 build --release -p mirrord-layer --target=x86_64-apple-darwin
       - name: build mirrord-layer macOS arm
-        run: cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
+        run: cargo +nightly-2022-09-13 build --release -p mirrord-layer --target=aarch64-apple-darwin
       - name: Sign layer binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
@@ -74,11 +74,11 @@ jobs:
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly build --release -p mirrord --target=aarch64-apple-darwin
+        run: cargo +nightly-2022-09-13 build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly build --release -p mirrord --target=x86_64-apple-darwin
+        run: cargo +nightly-2022-09-13 build --release -p mirrord --target=x86_64-apple-darwin
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
