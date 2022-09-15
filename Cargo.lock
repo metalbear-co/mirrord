@@ -1557,6 +1557,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
 name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1684,6 +1690,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-common"
+version = "0.1.0"
+dependencies = [
+ "atty",
+ "colored",
+ "spinoff",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "mirrord-config"
 version = "3.0.19-alpha"
 dependencies = [
@@ -1734,6 +1751,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "libc",
+ "mirrord-common",
  "mirrord-config",
  "mirrord-common",
  "mirrord-macro",
