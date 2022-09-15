@@ -11,6 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
+- CI: pin rust nightly channel to 2022-09-13.
+
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 - mirrord-layer: Support config from file alongside environment variables.
