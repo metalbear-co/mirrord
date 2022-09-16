@@ -1069,6 +1069,20 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_make_request_localhost(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
+        ];
+        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn test_outgoing_traffic_udp(#[future] service: EchoService) {
         let service = service.await;

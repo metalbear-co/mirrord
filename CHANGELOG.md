@@ -18,6 +18,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Refactor `connect` function to be less bloated.
 - `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
 - mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
+- mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
+- CI: Use a pinned rust nightly image in `dockerfile`.
 
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]

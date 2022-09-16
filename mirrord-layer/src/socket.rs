@@ -133,11 +133,6 @@ const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
 }
 
-#[inline]
-fn is_ignored_ip(ip: IpAddr) -> bool {
-    ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
-}
-
 /// Fill in the sockaddr structure for the given address.
 #[inline]
 fn fill_address(

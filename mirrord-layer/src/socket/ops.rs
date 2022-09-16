@@ -293,10 +293,9 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
             connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
-            SocketState::Initialized if !is_ignored_ip(remote_address.ip()) => {
+            SocketState::Initialized if enabled_tcp_outgoing => {
                 connect_outgoing::<TCP>(sockfd, remote_address, user_socket_info)
             }
-            SocketState::Initialized if !enabled_tcp_outgoing => raw_connect(remote_address),
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
@@ -314,7 +313,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
                     raw_connect(remote_address)
                 }
             }
-            _ => Err(HookError::SocketInvalidState(sockfd)),
+            _ => raw_connect(remote_address),
         },
         _ => raw_connect(remote_address),
     }
