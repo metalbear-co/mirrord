@@ -273,6 +273,23 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
         .then_some(())
         .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
 
+    let raw_connect = |remote_address| {
+        let rawish_remote_address = SockAddr::from(remote_address);
+        let result = unsafe {
+            FN_CONNECT(
+                sockfd,
+                rawish_remote_address.as_ptr(),
+                rawish_remote_address.len(),
+            )
+        };
+
+        if result != 0 {
+            Err(io::Error::last_os_error())?
+        } else {
+            Ok(result)
+        }
+    };
+
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
             connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)
@@ -281,7 +298,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
             SocketState::Initialized if !((is_ignored_port(port)) && (is_ignored_ip(ip))) => {
                 connect_outgoing::<TCP>(sockfd, remote_address, user_socket_info)
             }
-            SocketState::Initialized if !enabled_tcp_outgoing => Err(HookError::Bypass),
+            SocketState::Initialized if !enabled_tcp_outgoing => raw_connect(remote_address),
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
@@ -296,12 +313,12 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
 
                     Err(io::Error::last_os_error())?
                 } else {
-                    Err(HookError::Bypass)
+                    raw_connect(remote_address)
                 }
             }
             _ => Err(HookError::SocketInvalidState(sockfd)),
         },
-        _ => Err(HookError::Bypass),
+        _ => raw_connect(remote_address),
     }
 }
 

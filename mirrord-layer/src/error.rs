@@ -30,9 +30,6 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Socket operation called with domain `{0}` that is not handled by us!")]
     BypassedDomain(i32),
 
-    #[error("mirrord-layer: Socket operation bypassed!")]
-    Bypass,
-
     #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
     SocketInvalidState(RawFd),
 
@@ -165,8 +162,7 @@ impl From<HookError> for i64 {
             | HookError::LocalFDNotFound(_)
             | HookError::BypassedType(_)
             | HookError::BypassedDomain(_)
-            | HookError::BypassedPort(_)
-            | HookError::Bypass => {
+            | HookError::BypassedPort(_) => {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
             HookError::ResponseError(ResponseError::DnsFailure(code)) => {
@@ -220,7 +216,6 @@ impl From<HookError> for i64 {
             HookError::BypassedPort(_) => libc::EINVAL,
             HookError::BypassedType(_) => libc::EINVAL,
             HookError::BypassedDomain(_) => libc::EINVAL,
-            HookError::Bypass => libc::EINVAL,
             HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
         };

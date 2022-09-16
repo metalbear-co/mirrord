@@ -56,7 +56,7 @@ async fn layer_recv(
         // `user` is asking us to connect to some remote host.
         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
             let daemon_connect = timeout(
-                Duration::from_millis(1500),
+                Duration::from_millis(3000),
                 TcpStream::connect(remote_address),
             )
             .await

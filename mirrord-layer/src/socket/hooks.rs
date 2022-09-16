@@ -100,8 +100,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
             let (Ok(result) | Err(result)) = connect(sockfd, address).map_err(|fail| match fail {
                 HookError::LocalFDNotFound(_)
                 | HookError::SocketInvalidState(_)
-                | HookError::BypassedPort(_)
-                | HookError::Bypass => {
+                | HookError::BypassedPort(_) => {
                     warn!("connect_detour -> bypassed with {:#?}", fail);
                     FN_CONNECT(sockfd, raw_address, address_length)
                 }
