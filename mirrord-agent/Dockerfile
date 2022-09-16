@@ -1,4 +1,5 @@
-FROM rustlang/rust:nightly as build-env
+# FROM rustlang/rust:nightly as build-env
+FROM instrumentisto/rust:nightly-2022-09-13 as build-env
 RUN apt update && apt install -y libpcap-dev cmake
 WORKDIR /app
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
