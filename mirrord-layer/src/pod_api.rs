@@ -55,7 +55,6 @@ impl RuntimeData {
         pod_namespace: &str,
         container_name: &Option<String>,
     ) -> Result<Self> {
-        debug!("here from k8s");
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await?;
         debug!("here from k8s2");
