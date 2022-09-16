@@ -250,8 +250,6 @@ fn connect_outgoing<const TYPE: ConnectType>(
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[tracing::instrument(level = "trace")]
 pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i32> {
-    let (ip, port) = (remote_address.ip(), remote_address.port());
-
     let user_socket_info = {
         SOCKETS
             .lock()?
@@ -295,7 +293,7 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
             connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
-            SocketState::Initialized if !is_ignored_ip(ip) => {
+            SocketState::Initialized if !is_ignored_ip(remote_address.ip()) => {
                 connect_outgoing::<TCP>(sockfd, remote_address, user_socket_info)
             }
             SocketState::Initialized if !enabled_tcp_outgoing => raw_connect(remote_address),
