@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
