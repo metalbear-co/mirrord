@@ -15,7 +15,6 @@ import (
 func request() {
 	fmt.Println(">> making request")
 
-	// res, err := webClient.Get("http://www.google.com/robots.txt")
 	res, err := http.Get("http://www.google.com/robots.txt")
 	if err != nil {
 		log.Fatal(err)
