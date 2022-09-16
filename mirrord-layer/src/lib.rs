@@ -84,10 +84,11 @@ fn init() {
     let config = LayerConfig::init_from_env().unwrap();
 
     if let Some(skip_processes) = &config.skip_processes {
+        let binary = std::env::args().next().unwrap();
         let args = std::env::args().collect::<Vec<_>>().join(" ");
         let processes = skip_processes.split_terminator(";").collect::<Vec<_>>();
         for process in processes {
-            if args.starts_with(process) {
+            if args.starts_with(process) || args.starts_with(&binary) {
                 return;
             }
         }
