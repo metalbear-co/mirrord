@@ -233,9 +233,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
         mirror_address,
     };
 
-    let new_state = SocketState::Connected(connected);
-
-    Arc::get_mut(&mut user_socket_info).unwrap().state = new_state;
+    Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
     SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
     Ok(connect_result)

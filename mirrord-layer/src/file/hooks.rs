@@ -309,7 +309,8 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(buffer))]
+// TODO(alex): `tracing::instrument` here crashes node apps when `fd == 1`.
+// #[tracing::instrument(level = "trace", skip(buffer))]
 pub(crate) unsafe extern "C" fn write_detour(
     fd: RawFd,
     buffer: *const c_void,
