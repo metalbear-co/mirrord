@@ -13,6 +13,7 @@ mod tests {
 
     use bytes::Bytes;
     use chrono::Utc;
+    use futures::Future;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -1107,11 +1108,8 @@ mod tests {
         process.assert_stderr();
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+    pub async fn test_go(service: impl Future<Output = EchoService>, command: Vec<&str>) {
         let service = service.await;
-        let command = vec!["go-e2e-outgoing/18"];
         let mut process = run(command, &service.pod_name, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1120,12 +1118,29 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+        let command = vec!["go-e2e-outgoing/18"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
-        let service = service.await;
         let command = vec!["go-e2e-outgoing/19"];
-        let mut process = run(command, &service.pod_name, None, None).await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_dns_lookup(#[future] service: EchoService) {
+        let command = vec!["go-e2e-dns/18"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go19_dns_lookup(#[future] service: EchoService) {
+        let command = vec!["go-e2e-dns/19"];
+        test_go(service, command).await;
     }
 }
