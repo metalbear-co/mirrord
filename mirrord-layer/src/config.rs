@@ -63,4 +63,7 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_UDP_OUTGOING", default = "true")]
     pub enabled_udp_outgoing: bool,
+
+    #[envconfig(from = "MIRRORD_SKIP_BINARIES")]
+    pub skip_binaries: Option<String>,
 }

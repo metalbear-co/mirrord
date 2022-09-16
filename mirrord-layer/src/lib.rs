@@ -81,6 +81,30 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
+    let config = LayerConfig::init_from_env().unwrap();
+
+    if let Some(skip_binaries) = &config.skip_binaries {
+        let args = std::env::args().collect::<Vec<_>>().join(" ");
+        skip_binaries.split_terminator(";").for_each(|skip_binary| {
+            println!("{} {}", skip_binary, args);
+            println!("{}", args.starts_with(skip_binary));
+            if args.starts_with(skip_binary) {
+                println!("Skipping mirrord-layer");
+                return;
+            }
+        });
+    }
+    // return;
+    println!("init");
+
+    /*
+    skip_binaries            
+            .split_terminator(';')
+            .map(String::from)
+            // .map(|s| s.split_whitespace().map(String::from).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+     */
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
@@ -92,7 +116,6 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let config = LayerConfig::init_from_env().unwrap();
     let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
 
     info!("Using port `{connection_port:?}` for communication");
