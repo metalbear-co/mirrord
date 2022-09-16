@@ -30,4 +30,6 @@
         </action>
     </actions>
 
+    <depends optional="true" config-file="go-plugin.xml">org.jetbrains.plugins.go</depends>
+
 </idea-plugin>
