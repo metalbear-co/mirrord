@@ -1,7 +1,8 @@
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
+    apps::v1::Deployment,
     batch::v1::Job,
-    core::v1::{EphemeralContainer, Pod}, apps::v1::Deployment,
+    core::v1::{EphemeralContainer, Pod},
 };
 use kube::{
     api::{Api, ListParams, LogParams, Portforwarder, PostParams},
@@ -56,11 +57,26 @@ impl RuntimeData {
         pod_namespace: &str,
         container_name: &Option<String>,
     ) -> Result<Self> {
-        if let Some(deployment) = deployment {
-            let pods_api: Api<Deployment> = Api::namespaced(client, pod_namespace);
-        }
+        let deployment_pod_name = if let Some(deployment) = deployment {
+            let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), pod_namespace);
+            let deployment = deployment_api.get(deployment).await?;
+            deployment.spec.unwrap().template.metadata.unwrap().name
+        } else {
+            None
+        };
+        let pod_name = match deployment_pod_name {
+            Some(deployment_pod_name) if deployment_pod_name == pod_name => pod_name.to_string(),
+            Some(deployment_pod_name) => {
+                warn!("Provided pod name does not match pod in given deployment >> using pod name from deployment");
+                deployment_pod_name
+            }
+            None => {
+                warn!("No pod found in given deployment >> using provided pod name");
+                pod_name.to_string()
+            }
+        };
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
-        let pod = pods_api.get(pod_name).await?;
+        let pod = pods_api.get(&pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
@@ -147,7 +163,7 @@ pub(crate) async fn create_agent(
             client.clone(),
             &impersonated_deployment_name,
             &impersonated_pod_name,
-            &impersonated_pod_namespace,            
+            &impersonated_pod_namespace,
             &impersonated_container_name,
         )
         .await
