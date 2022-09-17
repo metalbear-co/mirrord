@@ -30,12 +30,11 @@ pub struct TcpStealHandler {
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
         &mut self,
         tcp_connection: NewTcpConnection,
     ) -> Result<(), LayerError> {
-        debug!("handle_new_connection -> {:#?}", tcp_connection);
-
         let stream = self.create_local_stream(&tcp_connection).await?;
 
         let (read_half, write_half) = tokio::io::split(stream);
@@ -47,9 +46,8 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(data = data.connection_id))]
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        debug!("handle_new_data -> id {:#?}", data.connection_id);
-
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
         let mut connection = self
@@ -67,19 +65,16 @@ impl TcpHandler for TcpStealHandler {
         connection.write_all(&data.bytes[..]).await?;
 
         self.write_streams.insert(data.connection_id, connection);
-        debug!("handle_new_data -> success");
 
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
-        debug!("handle_close -> close {:#?}", close);
-
         let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
         let _ = self.read_streams.remove(&connection_id);
-
         let _ = self.write_streams.remove(&connection_id);
 
         Ok(())
@@ -93,6 +88,7 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_listen(
         &mut self,
         listen: Listen,
@@ -101,8 +97,6 @@ impl TcpHandler for TcpStealHandler {
             ClientCodec,
         >,
     ) -> Result<(), LayerError> {
-        debug!("handle_listen -> listen {:#?}", listen);
-
         let port = listen.requested_port;
 
         self.ports_mut()

@@ -1,6 +1,6 @@
 use envconfig::Envconfig;
 
-#[derive(Envconfig, Clone)]
+#[derive(Envconfig, Debug, Clone)]
 pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub agent_rust_log: String,

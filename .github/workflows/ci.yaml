@@ -15,7 +15,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
@@ -33,7 +33,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
@@ -48,11 +48,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
-      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-2022-09-13-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-2022-09-13-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -97,13 +97,13 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}-${{matrix.target}}
       # For now, just verify it compiles.
-      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+      - run: cargo +nightly-2022-09-13 build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
@@ -113,13 +113,13 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
           key: ubuntu-latest
       - run: sudo apt install -y libpcap-dev cmake
-      - run: cargo +nightly build --manifest-path=./Cargo.toml
+      - run: cargo +nightly-2022-09-13 build --manifest-path=./Cargo.toml
 
   e2e:
     runs-on: ubuntu-latest
@@ -132,7 +132,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
@@ -216,7 +216,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2022-09-13
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
