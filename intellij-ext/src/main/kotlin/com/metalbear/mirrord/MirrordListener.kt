@@ -40,7 +40,11 @@ class MirrordListener : ExecutionListener {
                 val namespaces = try {
                     JBList(kubeDataProvider.getNamespaces())
                 } catch (e: Exception) {
-                    MirrordEnabler.notify("Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR, env.project)
+                    MirrordEnabler.notify(
+                        "Error occurred while fetching namespaces from Kubernetes context",
+                        NotificationType.ERROR,
+                        env.project
+                    )
                     return@invokeLater super.processStarting(executorId, env)
                 }
                 val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
