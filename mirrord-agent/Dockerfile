@@ -11,7 +11,7 @@ COPY mirrord-layer /app/mirrord-layer
 COPY mirrord-cli /app/mirrord-cli
 COPY tests /app/tests
 COPY .cargo /app/.cargo
-RUN cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release
+RUN cargo +nightly-2022-09-13 build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release
 
 FROM debian:stable
 COPY --from=build-env /app/target/release/mirrord-agent /
