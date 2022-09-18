@@ -8,7 +8,7 @@
 #![feature(let_chains)]
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashSet, VecDeque}, 
     sync::{LazyLock, OnceLock},
 };
 
@@ -81,18 +81,13 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
 fn init() {
-    let config = LayerConfig::init_from_env().unwrap();
-
-    if let Some(skip_processes) = &config.skip_processes {
-        let binary = std::env::args().next().unwrap();
-        let args = std::env::args().collect::<Vec<_>>().join(" ");
-        let processes = skip_processes.split_terminator(";").collect::<Vec<_>>();
-        for process in processes {
-            if args.starts_with(process) || args.starts_with(&binary) {
-                return;
-            }
-        }
+    if should_load() {
+        init_detour();
     }
+}
+
+fn init_detour() {
+    let config = LayerConfig::init_from_env().unwrap();
 
     tracing_subscriber::registry()
         .with(
@@ -143,6 +138,17 @@ fn init() {
         config,
         connection_port,
     ));
+}
+
+fn should_load() -> bool {
+    let config = LayerConfig::init_from_env().unwrap();
+    if let Some(avoid_list) = config.skip_processes {
+        let args = std::env::args().collect::<Vec<_>>();
+        let process = args.first().unwrap().split('/').last().unwrap();        
+        !avoid_list.split(';').any(|x| x == process)        
+    } else {
+        true
+    }
 }
 
 struct Layer<T>
