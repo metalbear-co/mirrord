@@ -57,10 +57,8 @@ impl RuntimeData {
     ) -> Result<Self> {
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await?;
-        debug!("here from k8s2");
         let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
-        debug!("here from k8s3");
         let container_info = if let Some(container_name) = container_name {
             &container_statuses
                 .iter()
@@ -126,14 +124,12 @@ pub(crate) async fn create_agent(
         Client::try_default().await.map_err(LayerError::KubeError)?
     };
 
-    debug!("here after stuff");
     let pods_api: Api<Pod> = Api::namespaced(
         client.clone(),
         agent_namespace
             .as_ref()
             .unwrap_or(&impersonated_pod_namespace),
     );
-    debug!("here");
 
     let agent_image = agent_image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
@@ -142,7 +138,6 @@ pub(crate) async fn create_agent(
     let pod_name = if ephemeral_container {
         create_ephemeral_container_agent(&config, agent_image, &pods_api, connection_port).await?
     } else {
-        debug!(".");
         let runtime_data = RuntimeData::from_k8s(
             client.clone(),
             &impersonated_pod_name,
@@ -151,7 +146,6 @@ pub(crate) async fn create_agent(
         )
         .await
         .map_err(LayerError::from)?;
-        debug!("..");
 
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),
@@ -325,7 +319,6 @@ async fn create_job_pod_agent(
     job_api: &Api<Job>,
     connection_port: u16,
 ) -> Result<String> {
-    debug!("here2");
     let mirrord_agent_job_name = get_agent_name();
 
     let mut agent_command_line = vec![
@@ -342,7 +335,6 @@ async fn create_job_pod_agent(
         agent_command_line.push(timeout.to_string());
     }
 
-    debug!("here3");
     let agent_pod: Job =
         serde_json::from_value(json!({ // Only Jobs support self deletion after completion
                 "metadata": {

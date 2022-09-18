@@ -8,7 +8,7 @@
 #![feature(let_chains)]
 
 use std::{
-    collections::{HashSet, VecDeque}, 
+    collections::{HashSet, VecDeque},
     sync::{LazyLock, OnceLock},
 };
 
@@ -144,8 +144,8 @@ fn should_load() -> bool {
     let config = LayerConfig::init_from_env().unwrap();
     if let Some(avoid_list) = config.skip_processes {
         let args = std::env::args().collect::<Vec<_>>();
-        let process = args.first().unwrap().split('/').last().unwrap();        
-        !avoid_list.split(';').any(|x| x == process)        
+        let process = args.first().unwrap().split('/').last().unwrap();
+        !avoid_list.split(';').any(|x| x == process)
     } else {
         true
     }

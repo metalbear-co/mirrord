@@ -20,7 +20,6 @@ use crate::{
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(raw_path))]
 pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     open_logic(raw_path, open_flags)
 }
@@ -258,12 +257,12 @@ pub(crate) unsafe extern "C" fn fread_detour(
 ///
 /// Converts a `*mut FILE` stream into an fd.
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(file_stream))]
 pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     fileno_logic(file_stream)
 }
 
 /// Implementation of fileno_detour, used in fileno_detour and fread_detour
+#[tracing::instrument(level = "trace", skip(file_stream))]
 unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
 
@@ -309,8 +308,21 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(buffer))]
 pub(crate) unsafe extern "C" fn write_detour(
+    fd: RawFd,
+    buffer: *const c_void,
+    count: size_t,
+) -> ssize_t {
+    if fd > 2 {
+        write_logic(fd, buffer, count)
+    } else {
+        FN_WRITE(fd, buffer, count)
+    }
+}
+
+/// Implementation of write_detour, used in  write_detour
+#[tracing::instrument(level = "trace", skip(buffer))]
+pub(crate) unsafe extern "C" fn write_logic(
     fd: RawFd,
     buffer: *const c_void,
     count: size_t,
@@ -338,7 +350,6 @@ pub(crate) unsafe extern "C" fn write_detour(
 
 /// Hook for `libc::access`.
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(raw_path))]
 pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
     access_logic(raw_path, mode)
 }
