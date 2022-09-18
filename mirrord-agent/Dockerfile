@@ -1,5 +1,7 @@
 FROM rustlang/rust:nightly as build-env
 RUN apt update && apt install -y libpcap-dev cmake
+RUN rustup update && \
+    rustup default nightly-2022-09-13
 WORKDIR /app
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 COPY sample/rust /app/sample/rust
