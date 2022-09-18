@@ -29,9 +29,11 @@ use crate::{
 struct SafeIpTables {
     inner: iptables::IPTables,
     chain_name: String,
+    original_chain: Vec<(String, Vec<String>)>,
 }
 
 const IPTABLES_TABLE_NAME: &str = "nat";
+const PRESERVE_CHAINS: [&str; 4] = ["PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"];
 
 fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
     format!(
@@ -48,6 +50,33 @@ fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
 impl SafeIpTables {
     pub fn new() -> Result<Self> {
         let ipt = iptables::new(false).unwrap();
+        let mut original_chain = Vec::new();
+
+        for chain in PRESERVE_CHAINS {
+            let result = ipt
+                .list(IPTABLES_TABLE_NAME, chain)
+                .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+
+            if result.len() > 1 {
+                let to_remove = result
+                    .into_iter()
+                    .skip(1)
+                    .map(|rule| {
+                        rule.strip_prefix(&format!("-A {}", chain))
+                            .unwrap_or(&rule)
+                            .to_owned()
+                    })
+                    .collect::<Vec<_>>();
+
+                for rule in &to_remove {
+                    ipt.delete(IPTABLES_TABLE_NAME, chain, rule)
+                        .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+                }
+
+                original_chain.push((chain.to_owned(), to_remove));
+            }
+        }
+
         let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
         let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
         ipt.new_chain(IPTABLES_TABLE_NAME, &chain_name)
@@ -60,9 +89,11 @@ impl SafeIpTables {
             &format!("-j {}", chain_name),
         )
         .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+
         Ok(Self {
             inner: ipt,
             chain_name,
+            original_chain,
         })
     }
 
@@ -103,6 +134,14 @@ impl Drop for SafeIpTables {
         self.inner
             .delete_chain(IPTABLES_TABLE_NAME, &self.chain_name)
             .unwrap();
+
+        for (chain, rules) in self.original_chain.drain(..) {
+            for rule in &rules {
+                self.inner
+                    .append(IPTABLES_TABLE_NAME, &chain, rule)
+                    .unwrap();
+            }
+        }
     }
 }
 
