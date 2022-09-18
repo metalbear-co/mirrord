@@ -15,8 +15,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
-- CI: pin rust nightly channel to 2022-09-13.
-
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 
