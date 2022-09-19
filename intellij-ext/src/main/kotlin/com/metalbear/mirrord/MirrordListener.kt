@@ -123,7 +123,7 @@ class MirrordListener : ExecutionListener {
                 return super.processTerminating(executorId, env, handler)
             }
             for (key in mirrordEnv.keys) {
-                if (mirrordEnv.containsKey(key)) {
+                if (envMap.containsKey(key)) {
                     envMap.remove(key)
                 }
             }

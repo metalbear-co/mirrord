@@ -10,7 +10,7 @@ class GoRunConfig : GoRunConfigurationExtension() {
     companion object {
         fun clearGoEnv() {
             for (key in MirrordListener.mirrordEnv.keys) {
-                if (MirrordListener.mirrordEnv.containsKey(key)) {
+                if (goCmdLine?.getEnvironmentVariable(key) != null) {
                     goCmdLine?.removeEnvironmentVariable(key)
                 }
             }
