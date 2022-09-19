@@ -286,7 +286,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 .iter()
                 .find(|attr| attr.path.is_ident("mapto"))
                 .and_then(|attr| attr.parse_args().ok())
-                .or(field.ident.clone())
+                .or_else(|| field.ident.clone())
                 .zip(field.ident.clone())
                 .zip(ty)
         })
@@ -311,10 +311,10 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
          }| {
             match mode {
                 FieldDefinitionMode::Option | FieldDefinitionMode::UnwrapOption => {
-                    quote! { #target_ident: #ty }
+                    quote! { #vis #target_ident: #ty }
                 }
                 FieldDefinitionMode::Nested => {
-                    quote! { #target_ident: <#ty as MirrordConfig>::Generated }
+                    quote! { #vis #target_ident: <#ty as MirrordConfig>::Generated }
                 }
             }
         },
@@ -373,8 +373,6 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
     };
-
-    // println!("{}", output);
 
     proc_macro::TokenStream::from(output)
 }

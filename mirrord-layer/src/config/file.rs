@@ -24,7 +24,7 @@ pub enum ConfigError {
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-struct AgentField {
+pub struct AgentField {
     #[default_value("info")]
     #[from_env("MIRRORD_AGENT_RUST_LOG")]
     log_level: Option<String>,
@@ -53,7 +53,7 @@ struct AgentField {
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-struct PodField {
+pub struct PodField {
     #[unwrap_option]
     #[from_env("MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     name: Option<String>,
@@ -68,30 +68,104 @@ struct PodField {
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-struct EnvField {
+pub struct EnvField {
     include: Option<VecOrSingle<String>>,
     exclude: Option<VecOrSingle<String>>,
 }
 
+#[derive(Debug)]
+pub struct MappedEnvField {
+    include: Option<String>,
+    exclude: Option<String>,
+}
+
+impl MirrordConfig for Option<FlagField<EnvField>> {
+    type Generated = MappedEnvField;
+
+    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+        let exclude = std::env::var("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
+            .ok()
+            .or_else(|| {
+                self.as_ref().and_then(|flag| {
+                    flag.enabled_map(
+                        |enabled| if enabled { None } else { Some("".to_owned()) },
+                        |env| env.exclude.clone().map(|exclude| exclude.join(";")),
+                    )
+                })
+            });
+
+        let include = std::env::var("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")
+            .ok()
+            .or_else(|| {
+                self.as_ref().and_then(|flag| {
+                    flag.enabled_map(
+                        |enabled| if enabled { None } else { Some("".to_owned()) },
+                        |env| env.include.clone().map(|include| include.join(";")),
+                    )
+                })
+            });
+
+        Ok(MappedEnvField { include, exclude })
+    }
+}
+
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
-enum IOField {
+enum FsField {
     Read,
     Write,
 }
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-struct OutgoingField {
+#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[mapto(MappedOutgoingField)]
+pub struct OutgoingField {
+    #[default_value("true")]
+    #[from_env("MIRRORD_TCP_OUTGOING")]
     tcp: Option<bool>,
+
+    #[default_value("true")]
+    #[from_env("MIRRORD_TCP_OUTGOING")]
     udp: Option<bool>,
+}
+
+impl MirrordConfig for Option<FlagField<OutgoingField>> {
+    type Generated = MappedOutgoingField;
+
+    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+        match self {
+            Some(FlagField::Enabled(true)) | None => OutgoingField::default().generate_config(),
+            Some(FlagField::Enabled(false)) => Ok(MappedOutgoingField {
+                tcp: false,
+                udp: false,
+            }),
+            Some(FlagField::Config(config)) => config.generate_config(),
+        }
+    }
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-struct NetworkField {
+pub struct NetworkField {
     incoming: Option<ModeField>,
     outgoing: Option<FlagField<OutgoingField>>,
     dns: Option<bool>,
+}
+
+#[derive(Debug)]
+pub struct MappedNetworkField {
+    // pub outgoing: MappedOutgoingField,
+}
+
+impl MirrordConfig for Option<FlagField<NetworkField>> {
+    type Generated = MappedNetworkField;
+
+    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+        // Ok(MappedNetworkField {
+        //     outgoing: self.outgoing.generate_config()?,
+        // })
+
+        Ok(MappedNetworkField)
+    }
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -103,10 +177,29 @@ enum ModeField {
 
 #[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-struct FeatureField {
+pub struct FeatureField {
     env: Option<FlagField<EnvField>>,
-    fs: Option<FlagField<IOField>>,
+
+    fs: Option<FlagField<FsField>>,
+
     network: Option<FlagField<NetworkField>>,
+}
+
+#[derive(Debug)]
+pub struct MappedFeatureField {
+    pub env: MappedEnvField,
+    pub network: MappedNetworkField,
+}
+
+impl MirrordConfig for FeatureField {
+    type Generated = MappedFeatureField;
+
+    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+        Ok(MappedFeatureField {
+            env: self.env.generate_config()?,
+            network: self.network.generate_config()?,
+        })
+    }
 }
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
@@ -124,7 +217,6 @@ pub struct LayerFileConfig {
     pod: PodField,
 
     #[serde(default)]
-    #[skip_config]
     feature: FeatureField,
 }
 
@@ -195,7 +287,7 @@ impl LayerFileConfig {
                 self.feature
                     .fs
                     .as_ref()
-                    .map(|flag| flag.enabled_map(|_| false, |fs| fs == &IOField::Write))
+                    .map(|flag| flag.enabled_map(|_| false, |fs| fs == &FsField::Write))
             })
             .unwrap_or(false);
 
@@ -205,7 +297,7 @@ impl LayerFileConfig {
                 self.feature
                     .fs
                     .as_ref()
-                    .map(|flag| flag.enabled_or_equal(&IOField::Read))
+                    .map(|flag| flag.enabled_or_equal(&FsField::Read))
             })
             .unwrap_or(true);
 
@@ -429,7 +521,19 @@ mod tests {
         println!(
             "{:#?}",
             config_type
-                .parse(r#"{ "pod": { "name": "test" } }"#)
+                .parse(
+                    r#"{ 
+                        "pod": { 
+                            "name": "test"
+                        },
+                        "feature": {
+                            "env": {
+                                "include": ["a", "b"],
+                                "exclude": ["C", "D"]
+                            }
+                        }
+                    }"#
+                )
                 .generate_config()
         );
     }
@@ -455,7 +559,7 @@ mod tests {
             },
             feature: FeatureField {
                 env: Some(FlagField::Enabled(true)),
-                fs: Some(FlagField::Config(IOField::Write)),
+                fs: Some(FlagField::Config(FsField::Write)),
                 network: Some(FlagField::Config(NetworkField {
                     dns: Some(false),
                     incoming: Some(ModeField::Mirror),
@@ -551,10 +655,10 @@ mod tests {
             (None, (false, true)),
             (Some(FlagField::Enabled(true)), (false, true)),
             (Some(FlagField::Enabled(false)), (false, false)),
-            (Some(FlagField::Config(IOField::Read)), (false, true)),
-            (Some(FlagField::Config(IOField::Write)), (true, false))
+            (Some(FlagField::Config(FsField::Read)), (false, true)),
+            (Some(FlagField::Config(FsField::Write)), (true, false))
         )]
-        param: (Option<FlagField<IOField>>, (bool, bool)),
+        param: (Option<FlagField<FsField>>, (bool, bool)),
     ) {
         let (fs, expect) = param;
 
