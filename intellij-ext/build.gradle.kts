@@ -26,6 +26,7 @@ repositories {
 dependencies {
     implementation("io.kubernetes:client-java:16.0.0") {
         exclude(group = "org.slf4j", module = "slf4j-api")
+        exclude(group = "org.yaml", module = "snakeyaml")
     }
 }
 

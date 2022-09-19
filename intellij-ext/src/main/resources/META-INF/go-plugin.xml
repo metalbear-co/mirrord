@@ -1,0 +1,5 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.goide">
+        <runConfigurationExtension implementation="com.metalbear.mirrord.GoRunConfig"/>
+    </extensions>
+</idea-plugin>
