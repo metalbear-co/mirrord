@@ -131,20 +131,20 @@ class MirrordListener : ExecutionListener {
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String>? {
-        val method = when (env.runProfile::class.simpleName) {
-            "GoApplicationConfiguration" -> return null
-            else -> "getEnvs"
-        }
-        return try {
-            val envMethod = env.runProfile.javaClass.getMethod(method)
-            envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
-        } catch (e: Exception) {
-            MirrordEnabler.notify(
-                "Error occurred while substituting provided configuration",
-                NotificationType.ERROR,
-                env.project
-            )
+        return if (env.runProfile::class.simpleName == "GoApplicationConfiguration")
             null
+        else {
+            try {
+                val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
+                envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+            } catch (e: Exception) {
+                MirrordEnabler.notify(
+                    "Error occurred while substituting provided configuration",
+                    NotificationType.ERROR,
+                    env.project
+                )
+                null
+            }
         }
     }
 }
