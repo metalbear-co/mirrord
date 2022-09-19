@@ -47,6 +47,9 @@ anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
 
+[dev-dependencies]
+rstest = "*"
+
 [lib]
 crate_type = ["cdylib"]
 
