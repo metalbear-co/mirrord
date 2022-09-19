@@ -58,8 +58,6 @@ impl SafeIpTables {
         )
         .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
 
-        println!("new {:#?}", ipt.list_table(IPTABLES_TABLE_NAME));
-
         Ok(Self {
             inner: ipt,
             chain_name,
@@ -75,14 +73,7 @@ impl SafeIpTables {
                 &self.formatter.redirect_rule(redirected_port, target_port),
                 1,
             )
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-
-        println!(
-            "add_redirect {:#?}",
-            self.inner.list_table(IPTABLES_TABLE_NAME)
-        );
-
-        Ok(())
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
     pub fn remove_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
@@ -92,14 +83,7 @@ impl SafeIpTables {
                 &self.chain_name,
                 &self.formatter.redirect_rule(redirected_port, target_port),
             )
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-
-        println!(
-            "remove_redirect {:#?}",
-            self.inner.list_table(IPTABLES_TABLE_NAME)
-        );
-
-        Ok(())
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 }
 
@@ -129,12 +113,12 @@ enum IPTableFormatter {
 impl IPTableFormatter {
     fn detect(ipt: &iptables::IPTables) -> Result<Self> {
         let prerouting = ipt
-            .list(IPTABLES_TABLE_NAME, "PREROUTING")
+            .list(IPTABLES_TABLE_NAME, "OUTPUT")
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
 
         if prerouting
             .iter()
-            .any(|rule| rule.contains("-j PROXY_INIT_REDIRECT"))
+            .any(|rule| rule.contains("-j PROXY_INIT_OUTPUT"))
         {
             Ok(IPTableFormatter::Linkerd)
         } else {
