@@ -79,6 +79,7 @@ pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
+#[cfg(not(test))]
 #[ctor]
 fn before_init() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -469,43 +470,22 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
 #[cfg(test)]
 mod tests {
-
-    use rstest::*;
+    use rstest::rstest;
 
     use super::*;
 
     #[rstest]
-    fn test_should_load_true_no_skip_process() {
-        let given_process = "test";
-        let skip_processes = None;
+    #[case("test", Some("foo".to_string()))]
+    #[case("test", None)]
+    #[case("test", Some("foo;bar;baz".to_string()))]
+    fn test_should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_true_skip_process() {
-        let given_process = "test";
-        let skip_processes = Some("foo".to_string());
-        assert!(should_load(given_process, &skip_processes));
-    }
-
-    #[rstest]
-    fn test_should_load_true_multiple_skip_process() {
-        let given_process = "test";
-        let skip_processes = Some("foo;bar;baz".to_string());
-        assert!(should_load(given_process, &skip_processes));
-    }
-
-    #[rstest]
-    fn test_should_load_false_skip_process() {
-        let given_process = "test";
-        let skip_processes = Some("test".to_string());
-        assert!(!should_load(given_process, &skip_processes));
-    }
-
-    #[rstest]
-    fn test_should_load_false_multiple_skip_process() {
-        let given_process = "test";
-        let skip_processes = Some("foo;bar;test;baz".to_string());
+    #[case("test", Some("test".to_string()))]
+    #[case("test", Some("test;foo;bar;baz".to_string()))]
+    fn test_should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
         assert!(!should_load(given_process, &skip_processes));
     }
 }
