@@ -8,20 +8,25 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Fixed
-- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
-- mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
-- mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
 - mirrord-layer: Fix `connect` returning error when called on UDP sockets and the
   outgoing traffic feature of mirrord is disabled.
+- mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
 
 ### Changed
-- mirrord-layer: Use `tracing::instrument` to improve logs.
-- CI: pin rust nightly channel to 2022-09-13.
+- mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
 - mirrord-layer: Refactor `connect` function to be less bloated.
 - `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
 - mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
-- mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
-- CI: Use a pinned rust nightly image in `dockerfile`.
+
+## 3.0.5-alpha
+
+### Fixed
+- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
+- mirrord-layer: instrumenting error when `write_detur` is called to stdout/stderr
+- mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
+
+### Changed
+- mirrord-layer: Use `tracing::instrument` to improve logs.
 
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]

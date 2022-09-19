@@ -3,9 +3,16 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main, v2.0]
+    branches: [main]
+    paths-ignore:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
+
   pull_request:
-    branches: [main, v2.0]
+    branches: [main]
+    paths-ignore:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
 
 jobs:
   lint:
@@ -15,7 +22,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
@@ -33,7 +40,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
@@ -48,11 +55,11 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
-      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-2022-09-13-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-2022-09-13-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -97,13 +104,13 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}-${{matrix.target}}
       # For now, just verify it compiles.
-      - run: cargo +nightly-2022-09-13 build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
@@ -113,13 +120,13 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
           key: ubuntu-latest
       - run: sudo apt install -y libpcap-dev cmake
-      - run: cargo +nightly-2022-09-13 build --manifest-path=./Cargo.toml
+      - run: cargo +nightly build --manifest-path=./Cargo.toml
 
   e2e:
     runs-on: ubuntu-latest
@@ -132,7 +139,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
@@ -222,7 +229,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-09-13
+          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
@@ -249,20 +256,3 @@ jobs:
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
-
-  build_intellij_plugin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - name: Build Plugin
-        env:
-          CI_BUILD_PLUGIN: true
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
