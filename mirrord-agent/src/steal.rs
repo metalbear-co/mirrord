@@ -29,18 +29,10 @@ use crate::{
 struct SafeIpTables {
     inner: iptables::IPTables,
     chain_name: String,
-    original_chain: Vec<(String, Vec<String>)>,
+    formatter: IPTableFormatter,
 }
 
 const IPTABLES_TABLE_NAME: &str = "nat";
-const PRESERVE_CHAINS: [&str; 4] = ["PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"];
-
-fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
-    format!(
-        "-p tcp -m tcp --dport {} -j REDIRECT --to-ports {}",
-        redirected_port, target_port
-    )
-}
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
 /// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
@@ -50,32 +42,8 @@ fn format_redirect_rule(redirected_port: Port, target_port: Port) -> String {
 impl SafeIpTables {
     pub fn new() -> Result<Self> {
         let ipt = iptables::new(false).unwrap();
-        let mut original_chain = Vec::new();
 
-        for chain in PRESERVE_CHAINS {
-            let result = ipt
-                .list(IPTABLES_TABLE_NAME, chain)
-                .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-
-            if result.len() > 1 {
-                let to_remove = result
-                    .into_iter()
-                    .skip(1)
-                    .map(|rule| {
-                        rule.strip_prefix(&format!("-A {}", chain))
-                            .unwrap_or(&rule)
-                            .to_owned()
-                    })
-                    .collect::<Vec<_>>();
-
-                for rule in &to_remove {
-                    ipt.delete(IPTABLES_TABLE_NAME, chain, rule)
-                        .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-                }
-
-                original_chain.push((chain.to_owned(), to_remove));
-            }
-        }
+        let formatter = IPTableFormatter::detect(&ipt)?;
 
         let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
         let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
@@ -85,15 +53,17 @@ impl SafeIpTables {
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
         ipt.append(
             IPTABLES_TABLE_NAME,
-            "PREROUTING",
+            formatter.entrypoint(),
             &format!("-j {}", chain_name),
         )
         .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
 
+        println!("new {:#?}", ipt.list_table(IPTABLES_TABLE_NAME));
+
         Ok(Self {
             inner: ipt,
             chain_name,
-            original_chain,
+            formatter,
         })
     }
 
@@ -102,10 +72,17 @@ impl SafeIpTables {
             .insert(
                 IPTABLES_TABLE_NAME,
                 &self.chain_name,
-                &format_redirect_rule(redirected_port, target_port),
+                &self.formatter.redirect_rule(redirected_port, target_port),
                 1,
             )
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+
+        println!(
+            "add_redirect {:#?}",
+            self.inner.list_table(IPTABLES_TABLE_NAME)
+        );
+
+        Ok(())
     }
 
     pub fn remove_redirect(&mut self, redirected_port: Port, target_port: Port) -> Result<()> {
@@ -113,9 +90,16 @@ impl SafeIpTables {
             .delete(
                 IPTABLES_TABLE_NAME,
                 &self.chain_name,
-                &format_redirect_rule(redirected_port, target_port),
+                &self.formatter.redirect_rule(redirected_port, target_port),
             )
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+
+        println!(
+            "remove_redirect {:#?}",
+            self.inner.list_table(IPTABLES_TABLE_NAME)
+        );
+
+        Ok(())
     }
 }
 
@@ -124,7 +108,7 @@ impl Drop for SafeIpTables {
         self.inner
             .delete(
                 IPTABLES_TABLE_NAME,
-                "PREROUTING",
+                self.formatter.entrypoint(),
                 &format!("-j {}", self.chain_name),
             )
             .unwrap();
@@ -134,13 +118,46 @@ impl Drop for SafeIpTables {
         self.inner
             .delete_chain(IPTABLES_TABLE_NAME, &self.chain_name)
             .unwrap();
+    }
+}
 
-        for (chain, rules) in self.original_chain.drain(..) {
-            for rule in &rules {
-                self.inner
-                    .append(IPTABLES_TABLE_NAME, &chain, rule)
-                    .unwrap();
-            }
+enum IPTableFormatter {
+    Normal,
+    Linkerd,
+}
+
+impl IPTableFormatter {
+    fn detect(ipt: &iptables::IPTables) -> Result<Self> {
+        let prerouting = ipt
+            .list(IPTABLES_TABLE_NAME, "PREROUTING")
+            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+
+        if prerouting
+            .iter()
+            .any(|rule| rule.contains("-j PROXY_INIT_REDIRECT"))
+        {
+            Ok(IPTableFormatter::Linkerd)
+        } else {
+            Ok(IPTableFormatter::Normal)
+        }
+    }
+
+    fn entrypoint(&self) -> &str {
+        match self {
+            IPTableFormatter::Normal => "PREROUTING",
+            IPTableFormatter::Linkerd => "OUTPUT",
+        }
+    }
+
+    fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
+        let redirect_rule = format!(
+            "-m tcp -p tcp --dport {} -j REDIRECT --to-ports {}",
+            redirected_port, target_port
+        );
+
+        match self {
+            IPTableFormatter::Normal => redirect_rule,
+            IPTableFormatter::Linkerd => format!("-o lo {}", redirect_rule),
         }
     }
 }
