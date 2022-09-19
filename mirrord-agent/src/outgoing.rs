@@ -55,6 +55,8 @@ async fn layer_recv(
         // [user] -> [layer] -> [agent] -> [layer]
         // `user` is asking us to connect to some remote host.
         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
+            // TODO(alex): `timeout` here works around the issue where golang tries to connect to an
+            // invalid `IP:port` combination, and hangs until the go socket times out.
             let daemon_connect = timeout(
                 Duration::from_millis(3000),
                 TcpStream::connect(remote_address),
