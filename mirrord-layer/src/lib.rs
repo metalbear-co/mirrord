@@ -79,14 +79,15 @@ pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-#[cfg(not(test))]
 #[ctor]
 fn before_init() {
-    let args = std::env::args().collect::<Vec<_>>();
-    let given_process = args.first().unwrap().split('/').last().unwrap();
-    let config = LayerConfig::init_from_env().unwrap();
-    if should_load(given_process, &config.skip_processes) {
-        init(config);
+    if !cfg!(test) {
+        let args = std::env::args().collect::<Vec<_>>();
+        let given_process = args.first().unwrap().split('/').last().unwrap();
+        let config = LayerConfig::init_from_env().unwrap();
+        if should_load(given_process, &config.skip_processes) {
+            init(config);
+        }
     }
 }
 
