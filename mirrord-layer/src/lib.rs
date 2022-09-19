@@ -80,15 +80,16 @@ pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
-fn init() {
-    if should_load() {
-        init_detour();
+fn before_init() {
+    let args = std::env::args().collect::<Vec<_>>();
+    let given_process = args.first().unwrap().split('/').last().unwrap();
+    let config = LayerConfig::init_from_env().unwrap(); 
+    if should_load(given_process, &config) {
+        init(config);
     }
 }
 
-fn init_detour() {
-    let config = LayerConfig::init_from_env().unwrap();
-
+fn init(config: LayerConfig) {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
@@ -140,12 +141,9 @@ fn init_detour() {
     ));
 }
 
-fn should_load() -> bool {
-    let config = LayerConfig::init_from_env().unwrap();
-    if let Some(avoid_list) = config.skip_processes {
-        let args = std::env::args().collect::<Vec<_>>();
-        let process = args.first().unwrap().split('/').last().unwrap();
-        !avoid_list.split(';').any(|x| x == process)
+fn should_load(given_process: &str, config: &LayerConfig) -> bool {    
+    if let Some(processes_to_avoid) = &config.skip_processes {        
+        !processes_to_avoid.split(';').any(|x| x == given_process)
     } else {
         true
     }
