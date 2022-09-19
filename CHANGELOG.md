@@ -9,13 +9,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
+- mirrord-layer: instrumenting error when `write_detur` is called to stdout/stderr
 - mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
 - intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
-- CI: pin rust nightly channel to 2022-09-13.
-
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 
