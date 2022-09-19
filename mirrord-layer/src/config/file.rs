@@ -164,7 +164,7 @@ impl MirrordConfig for Option<FlagField<NetworkField>> {
         //     outgoing: self.outgoing.generate_config()?,
         // })
 
-        Ok(MappedNetworkField)
+        Ok(MappedNetworkField {})
     }
 }
 
