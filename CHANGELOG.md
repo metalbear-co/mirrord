@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- mirrord-layer: Fix `connect` returning error when called on UDP sockets and the 
+  outgoing traffic feature of mirrord is disabled, by bypassing the detour in that 
+  case.
+
 ## 3.0.5-alpha
 
 ### Fixed

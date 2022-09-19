@@ -11,7 +11,7 @@ use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use super::{hooks::*, *};
 use crate::{
@@ -210,49 +210,58 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<(
         .then_some(())
         .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
 
-    if let SocketKind::Udp(_) = user_socket_info.kind && enabled_udp_outgoing {
-        // Prepare this socket to be intercepted.
-        trace!(
-            "connect -> SocketState::Initialized {:#?}",
-            user_socket_info
-        );
-        let (connect_tx, connect_rx) = oneshot::channel();
-
-        let connect = Connect {
-            remote_address,
-            channel_tx: connect_tx,
-        };
-
-        let connect_hook = UdpOutgoing::Connect(connect);
-
-        blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
-        let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
-
-        let connect_to = SockAddr::from(mirror_address);
-
-        // Connect to the interceptor socket that is listening.
-        let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
-
-        let err_code = errno::errno().0;
-        if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
-            error!(
-                "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
-                connect_result,
-                errno::errno()
+    if let SocketKind::Udp(_) = user_socket_info.kind {
+        return if enabled_udp_outgoing {
+            // Prepare this socket to be intercepted.
+            trace!(
+                "connect -> SocketState::Initialized {:#?}",
+                user_socket_info
             );
-            return Err(io::Error::last_os_error())?;
-        }
+            let (connect_tx, connect_rx) = oneshot::channel();
 
-        // Warning: We're treating `EINPROGRESS` as `Connected`!
-        let connected = Connected {
-            remote_address,
-            mirror_address,
+            let connect = Connect {
+                remote_address,
+                channel_tx: connect_tx,
+            };
+
+            let connect_hook = UdpOutgoing::Connect(connect);
+
+            blocking_send_hook_message(HookMessage::UdpOutgoing(connect_hook))?;
+            let MirrorAddress(mirror_address) = connect_rx.blocking_recv()??;
+
+            let connect_to = SockAddr::from(mirror_address);
+
+            // Connect to the interceptor socket that is listening.
+            let connect_result =
+                unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+
+            let err_code = errno::errno().0;
+            if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+                error!(
+                    "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+                    connect_result,
+                    errno::errno()
+                );
+                return Err(io::Error::last_os_error())?;
+            }
+
+            // Warning: We're treating `EINPROGRESS` as `Connected`!
+            let connected = Connected {
+                remote_address,
+                mirror_address,
+            };
+
+            Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+
+            Ok::<(), HookError>(())
+        } else {
+            // outgoing disabled.
+            warn!(
+                "connect -> connect called on udp socket: {:#?}. Outgoing is disabled, bypassing.",
+                user_socket_info
+            );
+            Err(HookError::BypassedType(user_socket_info.type_))
         };
-
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-
-        return Ok::<(), HookError>(());
     }
 
     match user_socket_info.state {
