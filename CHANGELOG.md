@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+
 ## 3.0.5-alpha
 
 ### Fixed
@@ -16,6 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
+
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 
