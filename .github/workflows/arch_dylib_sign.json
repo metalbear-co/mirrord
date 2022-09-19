@@ -1,7 +1,7 @@
 {
     "source": [
         "target/aarch64-apple-darwin/release/libmirrord_layer.dylib",
-        "target/x86_64-apple-darwin/release/libmirrord_layer.dylib"     
+        "target/x86_64-apple-darwin/release/libmirrord_layer.dylib"
     ],
     "bundle_id": "com.metalbear.mirrord",
     "apple_id": {

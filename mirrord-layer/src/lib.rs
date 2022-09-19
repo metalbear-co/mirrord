@@ -82,7 +82,6 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 #[ctor]
 fn before_init() {
     let args = std::env::args().collect::<Vec<_>>();
-    println!("args: {:?}", args);
     let given_process = args.first().unwrap().split('/').last().unwrap();
     let config = LayerConfig::init_from_env().unwrap();
     if should_load(given_process, &config.skip_processes) {
@@ -476,40 +475,35 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn test_should_load_true_no_skip_process() {
-        //should_load(given_process: &str, skip_processes: &Option<String>)
+    fn test_should_load_true_no_skip_process() {        
         let given_process = "test";
         let skip_processes = None;
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_true_skip_process() {
-        //should_load(given_process: &str, skip_processes: &Option<String>)
+    fn test_should_load_true_skip_process() {        
         let given_process = "test";
         let skip_processes = Some("foo".to_string());
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_true_multiple_skip_process() {
-        //should_load(given_process: &str, skip_processes: &Option<String>)
+    fn test_should_load_true_multiple_skip_process() {    
         let given_process = "test";
         let skip_processes = Some("foo;bar;baz".to_string());
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_false_skip_process() {
-        //should_load(given_process: &str, skip_processes: &Option<String>)
+    fn test_should_load_false_skip_process() {        
         let given_process = "test";
         let skip_processes = Some("test".to_string());
         assert!(!should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_false_multiple_skip_process() {
-        //should_load(given_process: &str, skip_processes: &Option<String>)
+    fn test_should_load_false_multiple_skip_process() {        
         let given_process = "test";
         let skip_processes = Some("foo;bar;test;baz".to_string());
         assert!(!should_load(given_process, &skip_processes));

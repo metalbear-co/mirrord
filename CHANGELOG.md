@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.5-alpha
+
 ### Fixed
 - mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
 - mirrord-layer: instrumenting error when `write_detur` is called to stdout/stderr
