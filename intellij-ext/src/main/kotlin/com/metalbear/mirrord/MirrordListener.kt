@@ -105,22 +105,22 @@ class MirrordListener : ExecutionListener {
         // NOTE: If the option was enabled, and we actually set the env, i.e. cancel was not clicked on the dialog,
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
-        val method = when (env.runProfile::class.simpleName) {
-            "GoApplicationConfiguration" -> "getCustomEnvironment"
-            else -> "getEnvs"
-        }
-        val envMap = try {
-            val envMethod = env.runProfile.javaClass.getMethod(method)
-            envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
-        } catch (e: Exception) {
-            MirrordEnabler.notify(
-                "Error occurred while removing mirrord environment",
-                NotificationType.ERROR,
-                env.project
-            )
-            return super.processTerminating(executorId, env, handler)
-        }
         if (enabled and envSet) {
+            val method = when (env.runProfile::class.simpleName) {
+                "GoApplicationConfiguration" -> "getCustomEnvironment"
+                else -> "getEnvs"
+            }
+            val envMap = try {
+                val envMethod = env.runProfile.javaClass.getMethod(method)
+                envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+            } catch (e: Exception) {
+                MirrordEnabler.notify(
+                    "Error occurred while removing mirrord environment",
+                    NotificationType.ERROR,
+                    env.project
+                )
+                return super.processTerminating(executorId, env, handler)
+            }
             for (key in mirrordEnv.keys) {
                 if (mirrordEnv.containsKey(key)) {
                     envMap.remove(key)
