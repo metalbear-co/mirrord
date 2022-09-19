@@ -475,35 +475,35 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn test_should_load_true_no_skip_process() {        
+    fn test_should_load_true_no_skip_process() {
         let given_process = "test";
         let skip_processes = None;
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_true_skip_process() {        
+    fn test_should_load_true_skip_process() {
         let given_process = "test";
         let skip_processes = Some("foo".to_string());
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_true_multiple_skip_process() {    
+    fn test_should_load_true_multiple_skip_process() {
         let given_process = "test";
         let skip_processes = Some("foo;bar;baz".to_string());
         assert!(should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_false_skip_process() {        
+    fn test_should_load_false_skip_process() {
         let given_process = "test";
         let skip_processes = Some("test".to_string());
         assert!(!should_load(given_process, &skip_processes));
     }
 
     #[rstest]
-    fn test_should_load_false_multiple_skip_process() {        
+    fn test_should_load_false_multiple_skip_process() {
         let given_process = "test";
         let skip_processes = Some("foo;bar;test;baz".to_string());
         assert!(!should_load(given_process, &skip_processes));
