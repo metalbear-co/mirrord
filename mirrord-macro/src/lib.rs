@@ -1,6 +1,6 @@
-use proc_macro2::Span;
+use proc_macro2::{Literal, Span};
 use quote::quote;
-use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn};
+use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, DeriveInput, Ident, ItemFn};
 
 /// `#[hook_fn]` annotates the C ffi functions (mirrord's `_detour`s), and is used to generate the
 /// following boilerplate (using `close_detour` as an example):
@@ -181,5 +181,200 @@ pub fn hook_guard_fn(
 
     // Here we return the equivalent of (1) and (2) for the ffi function, plus the annotated
     // function we received as `input`.
+    proc_macro::TokenStream::from(output)
+}
+
+enum FieldDefinitionMode {
+    Option,
+    UnwrapOption,
+    Nested,
+}
+
+struct FieldDefinition {
+    source_ident: Ident,
+    target_ident: Ident,
+    ty: syn::Type,
+    env: Option<Literal>,
+    default: Option<Literal>,
+    mode: FieldDefinitionMode,
+}
+
+#[proc_macro_derive(
+    MirrordConfig,
+    attributes(mapto, skip_config, unwrap_option, from_env, default_value)
+)]
+pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let DeriveInput {
+        attrs,
+        vis,
+        ident,
+        generics: _,
+        data,
+    } = syn::parse_macro_input!(input as DeriveInput);
+
+    let mapped_struct_ident = attrs
+        .iter()
+        .find(|attr| attr.path.is_ident("mapto"))
+        .and_then(|attr| attr.parse_args().ok())
+        .unwrap_or_else(|| Ident::new(&format!("Mapped{}", ident), Span::call_site()));
+
+    let mapped_fields = match data {
+        syn::Data::Struct(data) => match data.fields {
+            syn::Fields::Named(data) => data
+                .named
+                .into_iter()
+                .filter(|field| {
+                    !field
+                        .attrs
+                        .iter()
+                        .any(|attr| attr.path.is_ident("skip_config"))
+                })
+                .collect(),
+            _ => vec![],
+        },
+        _ => vec![],
+    };
+
+    let mapped_fields_definition = mapped_fields
+        .iter()
+        .filter_map(|field| {
+            let ty = match &field.ty {
+                syn::Type::Path(ty) => ty.path.segments.first().and_then(|seg| {
+                    if seg.ident != "Option" {
+                        Some((FieldDefinitionMode::Nested, field.ty.clone(), None, None))
+                    } else {
+                        let env = field
+                            .attrs
+                            .iter()
+                            .find(|attr| attr.path.is_ident("from_env"))
+                            .and_then(|field| field.parse_args::<Literal>().ok());
+
+                        let default = field
+                            .attrs
+                            .iter()
+                            .find(|attr| attr.path.is_ident("default_value"))
+                            .and_then(|field| field.parse_args::<Literal>().ok());
+
+                        if field.attrs.iter().any(|attr| {
+                            attr.path.is_ident("unwrap_option")
+                                || attr.path.is_ident("default_value")
+                        }) {
+                            match &seg.arguments {
+                                syn::PathArguments::AngleBracketed(generics) => {
+                                    generics.args.first().and_then(|arg| match arg {
+                                        syn::GenericArgument::Type(ty) => Some((
+                                            FieldDefinitionMode::UnwrapOption,
+                                            ty.clone(),
+                                            env,
+                                            default,
+                                        )),
+                                        _ => None,
+                                    })
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            Some((FieldDefinitionMode::Option, field.ty.clone(), env, default))
+                        }
+                    }
+                }),
+                _ => None,
+            };
+
+            field
+                .attrs
+                .iter()
+                .find(|attr| attr.path.is_ident("mapto"))
+                .and_then(|attr| attr.parse_args().ok())
+                .or(field.ident.clone())
+                .zip(field.ident.clone())
+                .zip(ty)
+        })
+        .map(
+            |((source_ident, target_ident), (mode, ty, env, default))| FieldDefinition {
+                source_ident,
+                target_ident,
+                mode,
+                ty,
+                env,
+                default,
+            },
+        )
+        .collect::<Vec<_>>();
+
+    let mapped_fields_definition_tokens = mapped_fields_definition.iter().map(
+        |FieldDefinition {
+             target_ident,
+             ty,
+             mode,
+             ..
+         }| {
+            match mode {
+                FieldDefinitionMode::Option | FieldDefinitionMode::UnwrapOption => {
+                    quote! { #target_ident: #ty }
+                }
+                FieldDefinitionMode::Nested => {
+                    quote! { #target_ident: <#ty as MirrordConfig>::Generated }
+                }
+            }
+        },
+    );
+
+    let mapped_fields_impl_tokens = mapped_fields_definition.iter().map(
+        |FieldDefinition {
+             source_ident,
+             target_ident,
+             mode,
+             default,
+             env,
+             ..
+         }| {
+            let default = match default {
+                Some(default) => quote! { #default.parse().ok() },
+                None => quote! { None }
+            };
+
+            let env = match env {
+                Some(var) => quote! { std::env::var(#var).ok().and_then(|val| val.parse().ok()) },
+                None => quote! { None }
+            };
+
+            match mode {
+                FieldDefinitionMode::UnwrapOption => quote! {
+                    #target_ident: #env.or(self.#source_ident).or(#default).ok_or(ConfigError::ValueNotProvided(stringify!(#source_ident).to_owned()))?
+                },
+                FieldDefinitionMode::Option => quote! {
+                    #target_ident: #env.or(self.#source_ident).or(#default)
+                },
+                FieldDefinitionMode::Nested => quote! {
+                    #target_ident: self.#source_ident.generate_config()?
+                },
+            }
+        },
+    );
+
+    let mapped_struct = quote! {
+        #[derive(Debug)]
+        #vis struct #mapped_struct_ident {
+            #(#mapped_fields_definition_tokens),*
+        }
+    };
+
+    let output = quote! {
+        #mapped_struct
+
+        impl MirrordConfig for #ident {
+            type Generated = #mapped_struct_ident;
+
+            fn generate_config(self) -> Result<#mapped_struct_ident, ConfigError> {
+                Ok(#mapped_struct_ident {
+                    #(#mapped_fields_impl_tokens),*
+                })
+            }
+        }
+    };
+
+    // println!("{}", output);
+
     proc_macro::TokenStream::from(output)
 }

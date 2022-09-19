@@ -1,6 +1,8 @@
 use std::{fs, path::Path};
 
+use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
+use thiserror::Error;
 
 use crate::config::{
     env::LayerEnvConfig,
@@ -8,23 +10,59 @@ use crate::config::{
     LayerConfig,
 };
 
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+pub trait MirrordConfig {
+    type Generated;
+
+    fn generate_config(self) -> Result<Self::Generated, ConfigError>;
+}
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("couldn't find value for {0:?}")]
+    ValueNotProvided(String),
+}
+
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct AgentField {
+    #[default_value("info")]
+    #[from_env("MIRRORD_AGENT_RUST_LOG")]
     log_level: Option<String>,
+
+    #[from_env("MIRRORD_AGENT_NAMESPACE")]
     namespace: Option<String>,
+
+    #[from_env("MIRRORD_AGENT_IMAGE")]
     image: Option<String>,
+
+    #[default_value("IfNotPresent")]
+    #[from_env("MIRRORD_AGENT_IMAGE_PULL_POLICY")]
     image_pull_policy: Option<String>,
+
+    #[default_value("0")]
+    #[from_env("MIRRORD_AGENT_TTL")]
     ttl: Option<u16>,
+
+    #[default_value("false")]
+    #[from_env("MIRRORD_EPHEMERAL_CONTAINER")]
     ephemeral: Option<bool>,
+
+    #[from_env("MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     communication_timeout: Option<u16>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct PodField {
+    #[unwrap_option]
+    #[from_env("MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     name: Option<String>,
+
+    #[default_value("default")]
+    #[from_env("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE")]
     namespace: Option<String>,
+
+    #[from_env("MIRRORD_IMPERSONATED_CONTAINER_NAME")]
     container: Option<String>,
 }
 
@@ -71,9 +109,12 @@ struct FeatureField {
     network: Option<FlagField<NetworkField>>,
 }
 
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
+// #[mapto(LayerConfig)]
 pub struct LayerFileConfig {
+    #[default_value("false")]
+    #[from_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
     accept_invalid_certificates: Option<bool>,
 
     #[serde(default)]
@@ -83,24 +124,18 @@ pub struct LayerFileConfig {
     pod: PodField,
 
     #[serde(default)]
+    #[skip_config]
     feature: FeatureField,
 }
 
 impl LayerFileConfig {
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        let file = fs::read(path)?;
+
         match path.extension().and_then(|os_val| os_val.to_str()) {
-            Some("json") => {
-                let file = fs::read(path)?;
-                serde_json::from_slice::<Self>(&file[..]).map_err(|err| err.into())
-            }
-            Some("toml") => {
-                let file = fs::read(path)?;
-                toml::from_slice::<Self>(&file[..]).map_err(|err| err.into())
-            }
-            Some("yaml") => {
-                let file = fs::read(path)?;
-                serde_yaml::from_slice::<Self>(&file[..]).map_err(|err| err.into())
-            }
+            Some("json") => serde_json::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
+            Some("toml") => toml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
+            Some("yaml") => serde_yaml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
             _ => Err(anyhow::Error::msg("unsupported file format")),
         }
     }
@@ -387,6 +422,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[rstest]
+    fn generate_config(#[values(ConfigType::Json)] config_type: ConfigType) {
+        println!(
+            "{:#?}",
+            config_type
+                .parse(r#"{ "pod": { "name": "test" } }"#)
+                .generate_config()
+        );
     }
 
     #[rstest]
