@@ -21,6 +21,7 @@ class MirrordListener : ExecutionListener {
         mirrordEnv["RUST_LOG"] = rustLog
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = invalidCertificates.toString()
         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainers.toString()
+        mirrordEnv["MIRRORD_SKIP_PROCESSES"] = ""
 
     }
 
@@ -98,7 +99,7 @@ class MirrordListener : ExecutionListener {
             }
         }
         // FAILURE: Just call the parent implementation
-        super.processStarting(executorId, env)
+        return super.processStarting(executorId, env)
     }
 
     override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
@@ -106,12 +107,12 @@ class MirrordListener : ExecutionListener {
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
         if (enabled and envSet) {
-            val method = when (env.runProfile::class.simpleName) {
-                "GoApplicationConfiguration" -> "getCustomEnvironment"
-                else -> "getEnvs"
+            if (env.runProfile::class.simpleName == "GoApplicationConfiguration") {
+                GoRunConfig.clearGoEnv()
+                return super.processTerminating(executorId, env, handler)
             }
             val envMap = try {
-                val envMethod = env.runProfile.javaClass.getMethod(method)
+                val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
                 envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
             } catch (e: Exception) {
                 MirrordEnabler.notify(
@@ -127,7 +128,7 @@ class MirrordListener : ExecutionListener {
                 }
             }
         }
-        super.processTerminating(executorId, env, handler)
+        return super.processTerminating(executorId, env, handler)
     }
 
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String>? {

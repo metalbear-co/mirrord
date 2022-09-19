@@ -7,6 +7,18 @@ import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
 
 class GoRunConfig : GoRunConfigurationExtension() {
+    companion object {
+        fun clearGoEnv() {
+            for (key in MirrordListener.mirrordEnv.keys) {
+                if (MirrordListener.mirrordEnv.containsKey(key)) {
+                    goCmdLine?.removeEnvironmentVariable(key)
+                }
+            }
+        }
+
+        var goCmdLine: TargetedCommandLineBuilder? = null
+    }
+
     override fun isApplicableFor(configuration: GoRunConfigurationBase<*>): Boolean {
         return true
     }
@@ -26,11 +38,12 @@ class GoRunConfig : GoRunConfigurationExtension() {
         state: GoRunningState<out GoRunConfigurationBase<*>>,
         commandLineType: GoRunningState.CommandLineType
     ) {
-        if (commandLineType == GoRunningState.CommandLineType.RUN && MirrordListener.enabled) {
+        if (commandLineType == GoRunningState.CommandLineType.RUN && MirrordListener.enabled && !MirrordListener.envSet) {
+            goCmdLine = cmdLine
+            MirrordListener.mirrordEnv["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver"
             for ((key, value) in MirrordListener.mirrordEnv) {
                 cmdLine.addEnvironmentVariable(key, value)
             }
-            cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
             MirrordListener.envSet = true
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
