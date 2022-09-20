@@ -13,6 +13,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - release CI: add arm64e to the universal dylib
 - intellij-ext: Add support for Goland
 
+### Changed
+- mirrord-layer: Failing to write to local tunneled streams doesn't logs are now info instead of error.
+
 ## 3.0.5-alpha
 
 ### Fixed
