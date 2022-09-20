@@ -15,7 +15,7 @@ use std::path::Path;
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::{agent::AgentField, feature::FeatureField, pod::PodField};
+use crate::{agent::AgentField, feature::FeatureField, pod::PodField, util::VecOrSingle};
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -26,7 +26,7 @@ pub struct LayerFileConfig {
     accept_invalid_certificates: Option<bool>,
 
     #[from_env("MIRRORD_SKIP_PROCESSES")]
-    skip_processes: Option<String>,
+    skip_processes: Option<VecOrSingle<String>>,
 
     #[serde(default)]
     agent: AgentField,

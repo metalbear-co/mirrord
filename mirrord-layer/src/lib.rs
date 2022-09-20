@@ -21,7 +21,10 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
-use mirrord_config::{util::MirrordConfig, LayerConfig, LayerFileConfig};
+use mirrord_config::{
+    util::{MirrordConfig, VecOrSingle},
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -95,7 +98,9 @@ fn before_init() {
         .generate_config()
         .unwrap();
 
-        if should_load(given_process, &config.skip_processes) {
+        let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+
+        if should_load(given_process, skip_processes) {
             init(config);
         }
     }
@@ -152,9 +157,9 @@ fn init(config: LayerConfig) {
     ));
 }
 
-fn should_load(given_process: &str, skip_processes: &Option<String>) -> bool {
+fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
     if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.split(';').any(|x| x == given_process)
+        !processes_to_avoid.iter().any(|x| x == &given_process)
     } else {
         true
     }

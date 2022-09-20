@@ -73,6 +73,13 @@ impl<T> VecOrSingle<T> {
             VecOrSingle::Multiple(vals) => vals.join(sep),
         }
     }
+
+    pub fn to_vec(self) -> Vec<T> {
+        match self {
+            VecOrSingle::Single(val) => vec![val],
+            VecOrSingle::Multiple(vals) => vals,
+        }
+    }
 }
 
 impl<T> FromStr for VecOrSingle<T>
