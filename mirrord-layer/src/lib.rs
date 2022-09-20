@@ -136,7 +136,8 @@ fn init(config: LayerConfig) {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.feature.fs.is_write());
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get_or_init(|| config.feature.fs.is_read() || config.feature.fs.is_write());
     let _ = ENABLED_FILE_RO_OPS.get_or_init(|| config.feature.fs.is_read());
     let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.feature.network.outgoing.tcp);
     let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.feature.network.outgoing.udp);
