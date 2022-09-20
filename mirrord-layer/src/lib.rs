@@ -156,7 +156,7 @@ fn init(config: LayerConfig) {
 
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
     if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.iter().any(|x| x == &given_process)
+        !processes_to_avoid.iter().any(|x| x == given_process)
     } else {
         true
     }
