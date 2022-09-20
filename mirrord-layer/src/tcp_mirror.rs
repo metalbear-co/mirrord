@@ -20,7 +20,7 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     error::{LayerError, Result},
@@ -41,7 +41,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         continue;
                     },
                     Err(fail) => {
-                        error!("Failed reading local_stream with {:#?}", fail);
+                        info!("Failed reading local_stream with {:#?}", fail);
                         break;
                     }
                     Ok(read_amount) if read_amount == 0 => {
