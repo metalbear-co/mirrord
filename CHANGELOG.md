@@ -10,19 +10,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
 
+## 3.0.6-alpha
+
+### Changed
+- mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+
+### Added
+- mirrord-layer, mirrord-cli: new command line argument/environment variable - `MIRRORD_SKIP_PROCESSES` to provide a list of comma separated processes to not to load into.
+  Closes [[#298](https://github.com/metalbear-co/mirrord/issues/298)], [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
+- release CI: add arm64e to the universal dylib
+- intellij-ext: Add support for Goland
+
+### Changed
+- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
+
 ## 3.0.5-alpha
 
 ### Fixed
 - mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
 - mirrord-layer: instrumenting error when `write_detur` is called to stdout/stderr
 - mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
-- mirrord-layer, mirrord-cli: new command line argument/environment variable - `MIRRORD_SKIP_PROCESSES` to provide a list of comma separated processes to not to load into.
-  Closes [[#298](https://github.com/metalbear-co/mirrord/issues/298)], [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
-- intellij-ext: Add support for Goland
-- release CI: add arm64e to the universal dylib
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
+
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 
