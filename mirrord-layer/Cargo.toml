@@ -38,7 +38,6 @@ tokio-util.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
 rand = "0.8"
-envconfig = "0.10"
 regex = "1"
 errno = "0.2"
 async-trait = "0.1"

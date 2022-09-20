@@ -1,26 +1,239 @@
+pub mod agent;
 pub mod env;
-pub mod file;
+pub mod feature;
+pub mod fs;
+pub mod incoming;
+pub mod network;
+pub mod outgoing;
+pub mod pod;
 pub mod util;
 
-#[derive(Debug, Clone)]
-pub struct LayerConfig {
-    pub agent_rust_log: String,
-    pub agent_namespace: Option<String>,
-    pub agent_image: Option<String>,
-    pub image_pull_policy: String,
-    pub impersonated_pod_name: String,
-    pub impersonated_pod_namespace: String,
-    pub impersonated_container_name: Option<String>,
-    pub accept_invalid_certificates: bool,
-    pub agent_ttl: u16,
-    pub agent_tcp_steal_traffic: bool,
-    pub agent_communication_timeout: Option<u16>,
-    pub enabled_file_ops: bool,
-    pub enabled_file_ro_ops: bool,
-    pub override_env_vars_exclude: Option<String>,
-    pub override_env_vars_include: Option<String>,
-    pub ephemeral_container: bool,
-    pub remote_dns: bool,
-    pub enabled_tcp_outgoing: bool,
-    pub enabled_udp_outgoing: bool,
+use std::path::Path;
+
+use mirrord_macro::MirrordConfig;
+use serde::Deserialize;
+
+use crate::config::{
+    agent::AgentField,
+    feature::FeatureField,
+    pod::PodField,
+    util::{ConfigError, MirrordConfig},
+};
+
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+#[mapto(LayerConfig)]
+pub struct LayerFileConfig {
+    #[default_value("false")]
+    #[from_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
+    accept_invalid_certificates: Option<bool>,
+
+    #[serde(default)]
+    agent: AgentField,
+
+    #[serde(default)]
+    pod: PodField,
+
+    #[serde(default)]
+    feature: FeatureField,
+}
+
+impl LayerFileConfig {
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        let file = std::fs::read(path)?;
+
+        match path.extension().and_then(|os_val| os_val.to_str()) {
+            Some("json") => serde_json::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
+            Some("toml") => toml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
+            Some("yaml") => serde_yaml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
+            _ => Err(anyhow::Error::msg("unsupported file format")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use rstest::*;
+
+    use super::*;
+
+    #[derive(Debug)]
+    enum ConfigType {
+        Json,
+        Toml,
+        Yaml,
+    }
+
+    impl ConfigType {
+        fn full(&self) -> &'static str {
+            match self {
+                ConfigType::Json => {
+                    r#"
+                    {
+                        "accept_invalid_certificates": false,
+                        "agent": {
+                            "log_level": "info",
+                            "namespace": "default",
+                            "image": "",
+                            "image_pull_policy": "",
+                            "ttl": 60,
+                            "ephemeral": false
+                        },
+                        "feature": {
+                            "env": true,
+                            "fs": "write",
+                            "network": {
+                                "dns": false,
+                                "incoming": "mirror",
+                                "outgoing": {
+                                    "tcp": true,
+                                    "udp": false
+                                }
+                            }
+                        },
+                        "pod": {
+                            "name": "test-service-abcdefg-abcd",
+                            "namespace": "default",
+                            "container": "test"
+                        }
+                    }
+                    "#
+                }
+                ConfigType::Toml => {
+                    r#"
+                    accept_invalid_certificates = false
+
+                    [agent]
+                    log_level = "info"
+                    namespace = "default"
+                    image = ""
+                    image_pull_policy = ""
+                    ttl = 60
+                    ephemeral = false
+
+                    [feature]
+                    env = true
+                    fs = "write"
+
+                    [feature.network]
+                    dns = false
+                    incoming = "mirror"
+
+                    [feature.network.outgoing]
+                    tcp = true
+                    udp = false
+
+                    [pod]
+                    name = "test-service-abcdefg-abcd"
+                    namespace = "default"
+                    container = "test"
+                    "#
+                }
+                ConfigType::Yaml => {
+                    r#"
+                    accept_invalid_certificates: false
+
+                    agent:
+                        log_level: "info"
+                        namespace: "default"
+                        image: ""
+                        image_pull_policy: ""
+                        ttl: 60
+                        ephemeral: false
+
+                    feature:
+                        env: true
+                        fs: "write"
+                        network:
+                            dns: false
+                            incoming: "mirror"
+                            outgoing:
+                                tcp: true
+                                udp: false
+                    pod:
+                        name: "test-service-abcdefg-abcd"
+                        namespace: "default"
+                        container: "test"
+                    "#
+                }
+            }
+        }
+
+        fn parse(&self, value: &str) -> LayerFileConfig {
+            match self {
+                ConfigType::Json => {
+                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                }
+                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err)),
+                ConfigType::Yaml => {
+                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                }
+            }
+        }
+    }
+
+    #[rstest]
+    fn generate_config(#[values(ConfigType::Json)] config_type: ConfigType) {
+        println!(
+            "{:#?}",
+            config_type
+                .parse(
+                    r#"{ 
+                        "pod": { 
+                            "name": "test"
+                        },
+                        "feature": {
+                            "env": {
+                                "include": ["a", "b"],
+                                "exclude": ["C", "D"]
+                            },
+                            "network": true
+                        }
+                    }"#
+                )
+                .generate_config()
+        );
+    }
+
+    #[rstest]
+    fn full(
+        #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
+    ) {
+        let input = config_type.full();
+
+        let config = config_type.parse(input);
+
+        let expect = LayerFileConfig {
+            accept_invalid_certificates: Some(false),
+            agent: AgentField {
+                log_level: Some("info".to_owned()),
+                namespace: Some("default".to_owned()),
+                image: Some("".to_owned()),
+                image_pull_policy: Some("".to_owned()),
+                ttl: Some(60),
+                ephemeral: Some(false),
+                communication_timeout: None,
+            },
+            feature: FeatureField {
+                env: Some(FlagField::Enabled(true)),
+                fs: Some(FlagField::Config(FsField::Write)),
+                network: Some(FlagField::Config(NetworkField {
+                    dns: Some(false),
+                    incoming: Some(ModeField::Mirror),
+                    outgoing: Some(FlagField::Config(OutgoingField {
+                        tcp: Some(true),
+                        udp: Some(false),
+                    })),
+                })),
+            },
+            pod: PodField {
+                name: Some("test-service-abcdefg-abcd".to_owned()),
+                namespace: Some("default".to_owned()),
+                container: Some("test".to_owned()),
+            },
+        };
+
+        assert_eq!(config, expect);
+    }
 }

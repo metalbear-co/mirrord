@@ -201,7 +201,7 @@ struct FieldDefinition {
 
 #[proc_macro_derive(
     MirrordConfig,
-    attributes(mapto, skip_config, unwrap_option, from_env, default_value)
+    attributes(mapto, nested, skip_config, unwrap_option, from_env, default_value)
 )]
 pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let DeriveInput {
@@ -240,7 +240,9 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         .filter_map(|field| {
             let ty = match &field.ty {
                 syn::Type::Path(ty) => ty.path.segments.first().and_then(|seg| {
-                    if seg.ident != "Option" {
+                    if seg.ident != "Option"
+                        || field.attrs.iter().any(|attr| attr.path.is_ident("nested"))
+                    {
                         Some((FieldDefinitionMode::Nested, field.ty.clone(), None, None))
                     } else {
                         let env = field
@@ -354,7 +356,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     );
 
     let mapped_struct = quote! {
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         #vis struct #mapped_struct_ident {
             #(#mapped_fields_definition_tokens),*
         }

@@ -10,12 +10,12 @@
 
 use std::{
     collections::{HashSet, VecDeque},
+    path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
 
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
-use envconfig::Envconfig;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
@@ -44,7 +44,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::HookMessage,
-    config::{env::LayerEnvConfig, file::LayerFileConfig, LayerConfig},
+    config::{util::MirrordConfig, LayerConfig, LayerFileConfig},
     file::FileHandler,
 };
 
@@ -98,14 +98,15 @@ fn init() {
 
     info!("Initializing mirrord-layer!");
 
-    let env_config = LayerEnvConfig::init_from_env().unwrap();
-
-    let file_config = match env_config.config_file {
-        Some(ref path) => LayerFileConfig::from_path(path).unwrap(),
+    let file_config = match std::env::var("MIRRORD_CONFIG_FILE")
+        .ok()
+        .and_then(|val| val.parse::<PathBuf>().ok())
+    {
+        Some(path) => LayerFileConfig::from_path(&path).unwrap(),
         None => LayerFileConfig::default(),
     };
 
-    let config = file_config.merge_with(env_config);
+    let config = file_config.generate_config().unwrap();
 
     let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
 
@@ -130,14 +131,12 @@ fn init() {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops =
-        ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
-    let _ = ENABLED_FILE_RO_OPS
-        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
-    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
-    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
+    let enabled_file_ops = ENABLED_FILE_OPS.get_or_init(|| config.feature.fs.is_write());
+    let _ = ENABLED_FILE_RO_OPS.get_or_init(|| config.feature.fs.is_read());
+    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.feature.network.outgoing.tcp);
+    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.feature.network.outgoing.udp);
 
-    enable_hooks(*enabled_file_ops, config.remote_dns);
+    enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -365,8 +364,8 @@ async fn start_layer_thread(
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
-        config.override_env_vars_exclude,
-        config.override_env_vars_include,
+        config.feature.env.exclude.map(|exclude| exclude.join(";")),
+        config.feature.env.include.map(|include| include.join(";")),
     ) {
         (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
@@ -404,7 +403,11 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
+    let _ = tokio::spawn(thread_loop(
+        receiver,
+        codec,
+        config.feature.network.incoming.is_steal(),
+    ));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
