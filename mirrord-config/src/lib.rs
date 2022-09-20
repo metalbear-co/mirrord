@@ -187,6 +187,7 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            skip_processes: None,
             agent: AgentField {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
