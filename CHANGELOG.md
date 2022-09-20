@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.6-alpha
+
 ### Changed
 - mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
 
@@ -17,7 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - intellij-ext: Add support for Goland
 
 ### Changed
-- mirrord-layer: Failing to write to local tunneled streams doesn't logs are now info instead of error.
+- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
 
 ## 3.0.5-alpha
 
