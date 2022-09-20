@@ -1,7 +1,7 @@
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::config::util::{ConfigError, MirrordConfig, MirrordFlaggedConfig};
+use crate::util::{ConfigError, MirrordFlaggedConfig};
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[mapto(MappedOutgoingField)]

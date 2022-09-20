@@ -6,7 +6,6 @@
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
-#![feature(slice_concat_trait)]
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -22,6 +21,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_config::{util::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -42,14 +42,9 @@ use tokio::{
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{
-    common::HookMessage,
-    config::{util::MirrordConfig, LayerConfig, LayerFileConfig},
-    file::FileHandler,
-};
+use crate::{common::HookMessage, file::FileHandler};
 
 mod common;
-mod config;
 mod detour;
 mod error;
 mod file;
@@ -84,7 +79,6 @@ pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-#[cfg(not(test))]
 #[ctor]
 fn init() {
     tracing_subscriber::registry()

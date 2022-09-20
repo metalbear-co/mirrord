@@ -1,8 +1,6 @@
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::config::util::{ConfigError, MirrordConfig};
-
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PodField {

@@ -42,7 +42,7 @@ jobs:
           cd mirrord-protocol
           cargo test
 
-  test_mirrord_layer:
+  test_mirrord_config:
     strategy:
       matrix:
         os: [ubuntu-latest]
@@ -58,7 +58,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-layer
+          cargo test -p mirrord-config
 
   test_agent:
     runs-on: ubuntu-latest

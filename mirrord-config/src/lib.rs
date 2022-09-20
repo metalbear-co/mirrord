@@ -1,3 +1,5 @@
+#![feature(slice_concat_trait)]
+
 pub mod agent;
 pub mod env;
 pub mod feature;
@@ -13,12 +15,7 @@ use std::path::Path;
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::config::{
-    agent::AgentField,
-    feature::FeatureField,
-    pod::PodField,
-    util::{ConfigError, MirrordConfig},
-};
+use crate::{agent::AgentField, feature::FeatureField, pod::PodField};
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +54,7 @@ mod tests {
     use rstest::*;
 
     use super::*;
-    use crate::config::{
+    use crate::{
         fs::FsField, incoming::IncomingField, network::NetworkField, outgoing::OutgoingField,
         util::FlagField,
     };

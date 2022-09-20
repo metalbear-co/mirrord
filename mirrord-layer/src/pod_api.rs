@@ -8,15 +8,13 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
+use mirrord_config::LayerConfig;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, info, warn};
 
-use crate::{
-    config::LayerConfig,
-    error::{LayerError, Result},
-};
+use crate::error::{LayerError, Result};
 
 struct EnvVarGuard {
     library: String,

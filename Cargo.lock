@@ -1481,6 +1481,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-config"
+version = "3.0.4-alpha"
+dependencies = [
+ "anyhow",
+ "mirrord-macro",
+ "rstest",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.11",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "mirrord-layer"
 version = "3.0.4-alpha"
 dependencies = [
@@ -1496,6 +1510,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "libc",
+ "mirrord-config",
  "mirrord-macro",
  "mirrord-protocol",
  "nix 0.24.2",

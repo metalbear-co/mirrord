@@ -316,7 +316,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     quote! { #vis #target_ident: #ty }
                 }
                 FieldDefinitionMode::Nested => {
-                    quote! { #vis #target_ident: <#ty as MirrordConfig>::Generated }
+                    quote! { #vis #target_ident: <#ty as crate::util::MirrordConfig>::Generated }
                 }
             }
         },
@@ -343,7 +343,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
             match mode {
                 FieldDefinitionMode::UnwrapOption => quote! {
-                    #target_ident: #env.or(self.#source_ident).or(#default).ok_or(ConfigError::ValueNotProvided(stringify!(#source_ident).to_owned()))?
+                    #target_ident: #env.or(self.#source_ident).or(#default).ok_or(crate::util::ConfigError::ValueNotProvided(stringify!(#source_ident).to_owned()))?
                 },
                 FieldDefinitionMode::Option => quote! {
                     #target_ident: #env.or(self.#source_ident).or(#default)
@@ -365,10 +365,10 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let output = quote! {
         #mapped_struct
 
-        impl MirrordConfig for #ident {
+        impl crate::util::MirrordConfig for #ident {
             type Generated = #mapped_struct_ident;
 
-            fn generate_config(self) -> Result<#mapped_struct_ident, ConfigError> {
+            fn generate_config(self) -> std::result::Result<#mapped_struct_ident, crate::util::ConfigError> {
                 Ok(#mapped_struct_ident {
                     #(#mapped_fields_impl_tokens),*
                 })
