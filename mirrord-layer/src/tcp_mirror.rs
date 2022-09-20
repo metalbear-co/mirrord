@@ -20,7 +20,7 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, info};
 
 use crate::{
     error::{LayerError, Result},
