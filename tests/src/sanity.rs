@@ -586,7 +586,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(300))]
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
@@ -612,11 +612,11 @@ mod tests {
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
         send_requests(&url, false).await;
-        process.wait_for_line(Duration::from_secs(10), "GET");
-        process.wait_for_line(Duration::from_secs(10), "POST");
-        process.wait_for_line(Duration::from_secs(10), "PUT");
-        process.wait_for_line(Duration::from_secs(10), "DELETE");
-        timeout(Duration::from_secs(40), process.child.wait())
+        process.wait_for_line(Duration::from_secs(60), "GET");
+        process.wait_for_line(Duration::from_secs(60), "POST");
+        process.wait_for_line(Duration::from_secs(60), "PUT");
+        process.wait_for_line(Duration::from_secs(60), "DELETE");
+        timeout(Duration::from_secs(60), process.child.wait())
             .await
             .unwrap()
             .unwrap();
@@ -628,7 +628,7 @@ mod tests {
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(360))]
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
@@ -646,7 +646,7 @@ mod tests {
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
-        process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
+        process.wait_for_line(Duration::from_secs(360), "daemon subscribed");
         send_requests(&url, false).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
