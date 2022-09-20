@@ -10,10 +10,8 @@ import javax.swing.JCheckBox
 import javax.swing.JTextField
 
 
-@Suppress("UNCHECKED_CAST", "NAME_SHADOWING", "DialogTitleCapitalization")
+@Suppress("UNCHECKED_CAST", "NAME_SHADOWING")
 class MirrordListener : ExecutionListener {
-    private val mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
-
     init {
         val (ldPreloadPath, dylibPath, defaultMirrordAgentLog, rustLog, invalidCertificates, ephemeralContainers) = MirrordDefaultData()
 
@@ -23,12 +21,14 @@ class MirrordListener : ExecutionListener {
         mirrordEnv["RUST_LOG"] = rustLog
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = invalidCertificates.toString()
         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainers.toString()
+        mirrordEnv["MIRRORD_SKIP_PROCESSES"] = ""
 
     }
 
     companion object {
         var enabled: Boolean = false
         var envSet: Boolean = false
+        var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
 
     override fun processStarting(executorId: String, env: ExecutionEnvironment) {
@@ -39,7 +39,11 @@ class MirrordListener : ExecutionListener {
             val namespaces = try {
                 JBList(kubeDataProvider.getNamespaces())
             } catch (e: Exception) {
-                MirrordEnabler.notify("Error occurred while fetching namespaces from Kubernetes context", NotificationType.ERROR, env.project)
+                MirrordEnabler.notify(
+                    "Error occurred while fetching namespaces from Kubernetes context",
+                    NotificationType.ERROR,
+                    env.project
+                )
                 return super.processStarting(executorId, env)
             }
             val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
@@ -52,7 +56,11 @@ class MirrordListener : ExecutionListener {
                 val pods = try {
                     JBList(kubeDataProvider.getNameSpacedPods(choseNamespace))
                 } catch (e: Exception) {
-                    MirrordEnabler.notify("Error occurred while fetching pods from Kubernetes context", NotificationType.ERROR, env.project)
+                    MirrordEnabler.notify(
+                        "Error occurred while fetching pods from Kubernetes context",
+                        NotificationType.ERROR,
+                        env.project
+                    )
                     return super.processStarting(executorId, env)
                 }
 
@@ -63,7 +71,14 @@ class MirrordListener : ExecutionListener {
                 val agentRustLog = JTextField(mirrordEnv["MIRRORD_AGENT_RUST_LOG"])
                 val rustLog = JTextField(mirrordEnv["RUST_LOG"])
 
-                val panel = customDialogBuilder.createMirrordKubeDialog(pods, fileOpsCheckbox, remoteDnsCheckbox, ephemeralContainerCheckBox, agentRustLog, rustLog)
+                val panel = customDialogBuilder.createMirrordKubeDialog(
+                    pods,
+                    fileOpsCheckbox,
+                    remoteDnsCheckbox,
+                    ephemeralContainerCheckBox,
+                    agentRustLog,
+                    rustLog
+                )
                 val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
                 // SUCCESS: set the respective environment variables
@@ -77,14 +92,14 @@ class MirrordListener : ExecutionListener {
                     mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
 
                     val envMap = getRunConfigEnv(env)
-                    envMap.putAll(mirrordEnv)
+                    envMap?.putAll(mirrordEnv)
 
-                    envSet = true
+                    envSet = envMap != null
                 }
             }
         }
         // FAILURE: Just call the parent implementation
-        super.processStarting(executorId, env)
+        return super.processStarting(executorId, env)
     }
 
     override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
@@ -92,18 +107,43 @@ class MirrordListener : ExecutionListener {
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
         if (enabled and envSet) {
-            val envMap = getRunConfigEnv(env)
+            if (env.runProfile::class.simpleName == "GoApplicationConfiguration") {
+                GoRunConfig.clearGoEnv()
+                return super.processTerminating(executorId, env, handler)
+            }
+            val envMap = try {
+                val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
+                envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+            } catch (e: Exception) {
+                MirrordEnabler.notify(
+                    "Error occurred while removing mirrord environment",
+                    NotificationType.ERROR,
+                    env.project
+                )
+                return super.processTerminating(executorId, env, handler)
+            }
             for (key in mirrordEnv.keys) {
-                if (mirrordEnv.containsKey(key)) {
+                if (envMap.containsKey(key)) {
                     envMap.remove(key)
                 }
             }
         }
-        super.processTerminating(executorId, env, handler)
+        return super.processTerminating(executorId, env, handler)
     }
 
-    private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String> {
-        val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
-        return envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+    private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String>? {
+        if (env.runProfile::class.simpleName == "GoApplicationConfiguration")
+            return null
+        return try {
+            val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
+            envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
+        } catch (e: Exception) {
+            MirrordEnabler.notify(
+                "Error occurred while substituting provided configuration",
+                NotificationType.ERROR,
+                env.project
+            )
+            null
+        }
     }
 }
