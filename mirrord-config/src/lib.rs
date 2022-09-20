@@ -25,6 +25,9 @@ pub struct LayerFileConfig {
     #[from_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
     accept_invalid_certificates: Option<bool>,
 
+    #[from_env("MIRRORD_SKIP_PROCESSES")]
+    skip_processes: Option<String>,
+
     #[serde(default)]
     agent: AgentField,
 

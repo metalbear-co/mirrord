@@ -46,9 +46,7 @@ socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
-serde = "1"
-serde_yaml = "0.9"
-toml = "0.5"
+
 
 [dev-dependencies]
 rstest = "*"

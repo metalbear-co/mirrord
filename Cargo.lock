@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.20",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "anyhow",
  "mirrord-macro",
@@ -1496,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1517,9 +1517,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "rstest",
- "serde",
  "serde_json",
- "serde_yaml 0.9.11",
  "socket2",
  "stacker",
  "streammap-ext",
@@ -1527,14 +1525,13 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.4",
- "toml",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "mirrord-macro"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1543,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.0.4-alpha"
+version = "3.0.6-alpha"
 dependencies = [
  "actix-codec",
  "bincode",

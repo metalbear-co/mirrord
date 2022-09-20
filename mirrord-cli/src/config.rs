@@ -65,6 +65,10 @@ pub(super) struct ExecArgs {
     #[clap(value_parser)]
     pub binary: String,
 
+    /// Binary to execute and mirror traffic into.
+    #[clap(long, value_parser)]
+    pub skip_processes: Option<String>,
+
     /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,

@@ -106,6 +106,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", pod_name.clone());
     }
 
+    if let Some(skip_processes) = &args.skip_processes {
+        std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
+    }
+
     if let Some(namespace) = &args.pod_namespace {
         std::env::set_var(
             "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE",

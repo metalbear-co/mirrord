@@ -80,7 +80,28 @@ pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 #[ctor]
-fn init() {
+fn before_init() {
+    if !cfg!(test) {
+        let args = std::env::args().collect::<Vec<_>>();
+        let given_process = args.first().unwrap().split('/').last().unwrap();
+
+        let config = match std::env::var("MIRRORD_CONFIG_FILE")
+            .ok()
+            .and_then(|val| val.parse::<PathBuf>().ok())
+        {
+            Some(path) => LayerFileConfig::from_path(&path).unwrap(),
+            None => LayerFileConfig::default(),
+        }
+        .generate_config()
+        .unwrap();
+
+        if should_load(given_process, &config.skip_processes) {
+            init(config);
+        }
+    }
+}
+
+fn init(config: LayerConfig) {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
@@ -91,16 +112,6 @@ fn init() {
         .init();
 
     info!("Initializing mirrord-layer!");
-
-    let file_config = match std::env::var("MIRRORD_CONFIG_FILE")
-        .ok()
-        .and_then(|val| val.parse::<PathBuf>().ok())
-    {
-        Some(path) => LayerFileConfig::from_path(&path).unwrap(),
-        None => LayerFileConfig::default(),
-    };
-
-    let config = file_config.generate_config().unwrap();
 
     let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
 
@@ -138,6 +149,14 @@ fn init() {
         config,
         connection_port,
     ));
+}
+
+fn should_load(given_process: &str, skip_processes: &Option<String>) -> bool {
+    if let Some(processes_to_avoid) = skip_processes {
+        !processes_to_avoid.split(';').any(|x| x == given_process)
+    } else {
+        true
+    }
 }
 
 struct Layer<T>
@@ -459,5 +478,27 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
             .unwrap_or_else(|fail| fail)
     } else {
         FN_CLOSE(fd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case("test", Some("foo".to_string()))]
+    #[case("test", None)]
+    #[case("test", Some("foo;bar;baz".to_string()))]
+    fn test_should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
+        assert!(should_load(given_process, &skip_processes));
+    }
+
+    #[rstest]
+    #[case("test", Some("test".to_string()))]
+    #[case("test", Some("test;foo;bar;baz".to_string()))]
+    fn test_should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
+        assert!(!should_load(given_process, &skip_processes));
     }
 }
