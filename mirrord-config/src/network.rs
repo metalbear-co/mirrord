@@ -2,9 +2,10 @@ use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
+    config::ConfigError,
     incoming::IncomingField,
     outgoing::OutgoingField,
-    util::{ConfigError, FlagField, MirrordFlaggedConfig},
+    util::{FlagField, MirrordFlaggedConfig},
 };
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]

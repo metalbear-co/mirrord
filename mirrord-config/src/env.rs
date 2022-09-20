@@ -1,7 +1,10 @@
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::util::{ConfigError, MirrordFlaggedConfig, VecOrSingle};
+use crate::{
+    config::ConfigError,
+    util::{MirrordFlaggedConfig, VecOrSingle},
+};
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]

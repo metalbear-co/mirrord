@@ -1,6 +1,9 @@
 use serde::Deserialize;
 
-use crate::util::{ConfigError, MirrordConfig, MirrordFlaggedConfig};
+use crate::{
+    config::{ConfigError, MirrordConfig},
+    util::MirrordFlaggedConfig,
+};
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]

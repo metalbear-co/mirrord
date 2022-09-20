@@ -1,6 +1,7 @@
 #![feature(slice_concat_trait)]
 
 pub mod agent;
+pub mod config;
 pub mod env;
 pub mod feature;
 pub mod fs;

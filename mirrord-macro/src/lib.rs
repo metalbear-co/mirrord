@@ -316,7 +316,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     quote! { #vis #target_ident: #ty }
                 }
                 FieldDefinitionMode::Nested => {
-                    quote! { #vis #target_ident: <#ty as crate::util::MirrordConfig>::Generated }
+                    quote! { #vis #target_ident: <#ty as crate::config::MirrordConfig>::Generated }
                 }
             }
         },
@@ -343,7 +343,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
             match mode {
                 FieldDefinitionMode::UnwrapOption => quote! {
-                    #target_ident: #env.or(self.#source_ident).or(#default).ok_or(crate::util::ConfigError::ValueNotProvided(stringify!(#source_ident).to_owned()))?
+                    #target_ident: #env.or(self.#source_ident).or(#default).ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#source_ident).to_owned()))?
                 },
                 FieldDefinitionMode::Option => quote! {
                     #target_ident: #env.or(self.#source_ident).or(#default)
@@ -365,10 +365,10 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let output = quote! {
         #mapped_struct
 
-        impl crate::util::MirrordConfig for #ident {
+        impl crate::config::MirrordConfig for #ident {
             type Generated = #mapped_struct_ident;
 
-            fn generate_config(self) -> std::result::Result<#mapped_struct_ident, crate::util::ConfigError> {
+            fn generate_config(self) -> std::result::Result<#mapped_struct_ident, crate::config::ConfigError> {
                 Ok(#mapped_struct_ident {
                     #(#mapped_fields_impl_tokens),*
                 })
@@ -377,4 +377,17 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     };
 
     proc_macro::TokenStream::from(output)
+}
+
+#[proc_macro_derive(MirrordConfig2, attributes(config))]
+pub fn mirrord_config2(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let DeriveInput {
+        attrs: _,
+        vis: _,
+        ident: _,
+        generics: _,
+        data: _,
+    } = syn::parse_macro_input!(input as DeriveInput);
+
+    proc_macro::TokenStream::from(quote! {})
 }
