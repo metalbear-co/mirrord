@@ -30,7 +30,7 @@ impl MirrordConfig for FsField {
     type Generated = FsField;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let read = std::env::var("MIRRORD_FILE_OPS")
+        let read = std::env::var("MIRRORD_FILE_RO_OPS")
             .ok()
             .and_then(|val| val.parse::<bool>().ok());
 
