@@ -19,6 +19,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
 - mirrord-agent: `IndexAllocator` now uses `ConnectionId` for outgoing traffic feature.
 
+## 3.0.6-alpha
+
+### Changed
+- mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+
+### Added
+- mirrord-layer, mirrord-cli: new command line argument/environment variable - `MIRRORD_SKIP_PROCESSES` to provide a list of comma separated processes to not to load into.
+  Closes [[#298](https://github.com/metalbear-co/mirrord/issues/298)], [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
+- release CI: add arm64e to the universal dylib
+- intellij-ext: Add support for Goland
+
+### Changed
+- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
+
 ## 3.0.5-alpha
 
 ### Fixed
