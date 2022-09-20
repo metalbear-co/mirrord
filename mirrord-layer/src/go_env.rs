@@ -38,7 +38,6 @@ fn make_argv() -> Vec<*mut c_char> {
 }
 
 #[hook_fn]
-#[tracing::instrument(level = "trace")]
 unsafe extern "C" fn goenvs_unix_detour() {
     stacker::grow(32 * 1024 * 1024, || {
         let modules = frida_gum::Module::enumerate_modules();
