@@ -16,27 +16,32 @@ use std::path::Path;
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::{agent::AgentField, feature::FeatureField, pod::PodField, util::VecOrSingle};
+use crate::{
+    agent::AgentField, config::source::MirrordConfigSource, feature::FeatureField, pod::PodField,
+    util::VecOrSingle,
+};
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-#[mapto(LayerConfig)]
+#[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {
-    #[default_value("false")]
-    #[from_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
-    accept_invalid_certificates: Option<bool>,
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
+    pub accept_invalid_certificates: Option<bool>,
 
-    #[from_env("MIRRORD_SKIP_PROCESSES")]
-    skip_processes: Option<VecOrSingle<String>>,
-
-    #[serde(default)]
-    agent: AgentField,
+    #[config(env = "MIRRORD_SKIP_PROCESSES")]
+    pub skip_processes: Option<VecOrSingle<String>>,
 
     #[serde(default)]
-    pod: PodField,
+    #[config(nested = true)]
+    pub agent: AgentField,
 
     #[serde(default)]
-    feature: FeatureField,
+    #[config(nested = true)]
+    pub pod: PodField,
+
+    #[serde(default)]
+    #[config(nested = true)]
+    pub feature: FeatureField,
 }
 
 impl LayerFileConfig {

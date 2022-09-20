@@ -2,7 +2,7 @@ use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
-    config::ConfigError,
+    config::{source::MirrordConfigSource, ConfigError},
     incoming::IncomingField,
     outgoing::OutgoingField,
     util::{FlagField, MirrordFlaggedConfig},
@@ -11,15 +11,13 @@ use crate::{
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkField {
-    #[nested]
+    #[config(nested = true)]
     pub incoming: Option<IncomingField>,
 
-    #[nested]
+    #[config(nested = true)]
     pub outgoing: Option<FlagField<OutgoingField>>,
 
-    #[default_value("true")]
-    #[from_env("MIRRORD_REMOTE_DNS")]
-    #[unwrap_option]
+    #[config(unwrap = true, env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,
 }
 

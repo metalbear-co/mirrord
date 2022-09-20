@@ -1,17 +1,18 @@
 use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
-use crate::{config::ConfigError, util::MirrordFlaggedConfig};
+use crate::{
+    config::{source::MirrordConfigSource, ConfigError},
+    util::MirrordFlaggedConfig,
+};
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[mapto(MappedOutgoingField)]
+#[config(map_to = MappedOutgoingField)]
 pub struct OutgoingField {
-    #[default_value("true")]
-    #[from_env("MIRRORD_TCP_OUTGOING")]
+    #[config(unwrap = true, env = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub tcp: Option<bool>,
 
-    #[default_value("true")]
-    #[from_env("MIRRORD_UDP_OUTGOING")]
+    #[config(unwrap = true, env = "MIRRORD_UDP_OUTGOING", default = "true")]
     pub udp: Option<bool>,
 }
 

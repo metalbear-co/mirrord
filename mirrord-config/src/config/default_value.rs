@@ -2,6 +2,7 @@ use std::{marker::PhantomData, str::FromStr};
 
 use crate::config::source::MirrordConfigSource;
 
+#[derive(Clone)]
 pub struct DefaultValue<T>(&'static str, PhantomData<T>);
 
 impl<T> DefaultValue<T> {
@@ -16,7 +17,7 @@ where
 {
     type Result = T;
 
-    fn source_value(&self) -> Option<T> {
+    fn source_value(self) -> Option<T> {
         self.0.parse().ok()
     }
 }

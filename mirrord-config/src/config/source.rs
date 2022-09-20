@@ -1,7 +1,7 @@
 pub trait MirrordConfigSource: Sized {
     type Result;
 
-    fn source_value(&self) -> Option<Self::Result>;
+    fn source_value(self) -> Option<Self::Result>;
 }
 
 impl<T> MirrordConfigSource for Option<T>
@@ -10,8 +10,8 @@ where
 {
     type Result = T;
 
-    fn source_value(&self) -> Option<Self::Result> {
-        self.clone()
+    fn source_value(self) -> Option<Self::Result> {
+        self
     }
 }
 
@@ -21,7 +21,7 @@ where
 {
     type Result = T::Result;
 
-    fn source_value(&self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Self::Result> {
         self.0.source_value()
     }
 }
@@ -33,7 +33,7 @@ where
 {
     type Result = T::Result;
 
-    fn source_value(&self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Self::Result> {
         self.0.source_value().or_else(|| self.1.source_value())
     }
 }
@@ -46,7 +46,7 @@ where
 {
     type Result = T::Result;
 
-    fn source_value(&self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Self::Result> {
         self.0
             .source_value()
             .or_else(|| self.1.source_value())
@@ -63,7 +63,7 @@ where
 {
     type Result = T::Result;
 
-    fn source_value(&self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Self::Result> {
         self.0
             .source_value()
             .or_else(|| self.1.source_value())
@@ -82,7 +82,7 @@ where
 {
     type Result = T::Result;
 
-    fn source_value(&self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Self::Result> {
         self.0
             .source_value()
             .or_else(|| self.1.source_value())
@@ -106,7 +106,7 @@ mod tests {
             DefaultValue::new("10"),
         );
 
-        assert_eq!(val.source_value(), Some(10));
+        assert_eq!(val.clone().source_value(), Some(10));
 
         std::env::set_var("SOURCE_TEST_VALUE", "13");
 

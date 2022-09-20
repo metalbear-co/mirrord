@@ -2,6 +2,7 @@ use std::{marker::PhantomData, str::FromStr};
 
 use crate::config::source::MirrordConfigSource;
 
+#[derive(Clone)]
 pub struct FromEnv<T>(&'static str, PhantomData<T>);
 
 impl<T> FromEnv<T> {
@@ -16,7 +17,7 @@ where
 {
     type Result = T;
 
-    fn source_value(&self) -> Option<T> {
+    fn source_value(self) -> Option<T> {
         std::env::var(self.0).ok().and_then(|var| var.parse().ok())
     }
 }
@@ -30,7 +31,7 @@ mod tests {
     fn basic() {
         let value = FromEnv::<i32>::new("FROM_ENV_TEST_VALUE");
 
-        assert_eq!(value.source_value(), None);
+        assert_eq!(value.clone().source_value(), None);
 
         std::env::set_var("FROM_ENV_TEST_VALUE", "13");
 
