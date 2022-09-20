@@ -57,6 +57,10 @@ mod tests {
     use rstest::*;
 
     use super::*;
+    use crate::config::{
+        fs::FsField, incoming::IncomingField, network::NetworkField, outgoing::OutgoingField,
+        util::FlagField,
+    };
 
     #[derive(Debug)]
     enum ConfigType {
@@ -174,29 +178,6 @@ mod tests {
     }
 
     #[rstest]
-    fn generate_config(#[values(ConfigType::Json)] config_type: ConfigType) {
-        println!(
-            "{:#?}",
-            config_type
-                .parse(
-                    r#"{ 
-                        "pod": { 
-                            "name": "test"
-                        },
-                        "feature": {
-                            "env": {
-                                "include": ["a", "b"],
-                                "exclude": ["C", "D"]
-                            },
-                            "network": true
-                        }
-                    }"#
-                )
-                .generate_config()
-        );
-    }
-
-    #[rstest]
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
@@ -220,7 +201,7 @@ mod tests {
                 fs: Some(FlagField::Config(FsField::Write)),
                 network: Some(FlagField::Config(NetworkField {
                     dns: Some(false),
-                    incoming: Some(ModeField::Mirror),
+                    incoming: Some(IncomingField::Mirror),
                     outgoing: Some(FlagField::Config(OutgoingField {
                         tcp: Some(true),
                         udp: Some(false),
