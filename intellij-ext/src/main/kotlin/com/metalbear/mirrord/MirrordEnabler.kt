@@ -5,19 +5,22 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 
 @Suppress("DialogTitleCapitalization")
 class MirrordEnabler : ToggleAction() {
     companion object {
         private val notificationManager: NotificationGroup = NotificationGroupManager
-                .getInstance()
-                .getNotificationGroup("mirrord Notification Handler")
+            .getInstance()
+            .getNotificationGroup("mirrord Notification Handler")
 
         fun notify(message: String, type: NotificationType, project: Project?) {
-            notificationManager
+            ApplicationManager.getApplication().invokeLater {
+                notificationManager
                     .createNotification("mirrord", message, type)
                     .notify(project)
+            }
         }
     }
 
