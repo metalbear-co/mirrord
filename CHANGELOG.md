@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+
 ### Added
 - mirrord-layer, mirrord-cli: new command line argument/environment variable - `MIRRORD_SKIP_PROCESSES` to provide a list of comma separated processes to not to load into.
   Closes [[#298](https://github.com/metalbear-co/mirrord/issues/298)], [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
@@ -22,6 +25,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - mirrord-layer: Use `tracing::instrument` to improve logs.
+
 ### Added
 - Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
 
