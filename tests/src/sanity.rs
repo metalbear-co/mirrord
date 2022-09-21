@@ -127,10 +127,11 @@ mod tests {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
                 let stdout = self.get_stdout();
+                println!("Process stdout:\n{}", &stdout);
                 if stdout.contains(line) {
                     return;
                 }
-                sleep(Duration::from_secs(1));
+                sleep(Duration::from_secs(10));
             }
             panic!("Timeout waiting for line: {}", line);
         }
@@ -548,35 +549,39 @@ mod tests {
         println!("{url}");
         let client = reqwest::Client::new();
         let res = client.get(url).send().await.unwrap();
+        println!("Sent GET.");
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
 
-        let resp = res.bytes().await.unwrap();
         if expect_response {
+            let resp = res.bytes().await.unwrap();
             assert_eq!(resp, Bytes::from("GET"));
         }
 
         let res = client.post(url).body(TEXT).send().await.unwrap();
+        println!("Sent POST.");
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
-        let resp = res.bytes().await.unwrap();
         if expect_response {
+            let resp = res.bytes().await.unwrap();
             assert_eq!(resp, "POST".as_bytes());
         }
 
         let res = client.put(url).send().await.unwrap();
+        println!("Sent PUT.");
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
-        let resp = res.bytes().await.unwrap();
         if expect_response {
+            let resp = res.bytes().await.unwrap();
             assert_eq!(resp, "PUT".as_bytes());
         }
 
         let res = client.delete(url).send().await.unwrap();
+        println!("Sent DELETE.");
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
-        let resp = res.bytes().await.unwrap();
         if expect_response {
+            let resp = res.bytes().await.unwrap();
             assert_eq!(resp, "DELETE".as_bytes());
         }
     }
