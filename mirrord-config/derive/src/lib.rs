@@ -1,13 +1,16 @@
 use proc_macro2::Span;
 use quote::quote;
-use syn::{DeriveInput, Expr, Ident};
+use syn::{
+    Data, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed, GenericArgument, Ident, Lit,
+    Meta, NestedMeta, PathArguments, Type,
+};
 
 #[derive(Eq, PartialEq, Debug)]
 enum FieldFlags {
     Unwrap,
     Nested,
-    Env(syn::Lit),
-    Default(syn::Lit),
+    Env(Lit),
+    Default(Lit),
 }
 
 fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
@@ -24,8 +27,8 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
     fallback
 }
 
-fn get_config_flag(meta: &syn::NestedMeta) -> Option<FieldFlags> {
-    if let syn::NestedMeta::Meta(syn::Meta::NameValue(meta)) = meta {
+fn get_config_flag(meta: &NestedMeta) -> Option<FieldFlags> {
+    if let NestedMeta::Meta(Meta::NameValue(meta)) = meta {
         if meta.path.is_ident("env") {
             return Some(FieldFlags::Env(meta.lit.clone()));
         }
@@ -46,17 +49,17 @@ fn get_config_flag(meta: &syn::NestedMeta) -> Option<FieldFlags> {
     None
 }
 
-fn unwrap_option(ty: &syn::Type) -> Option<&syn::Type> {
-    let seg = if let syn::Type::Path(ty) = ty {
+fn unwrap_option(ty: &Type) -> Option<&Type> {
+    let seg = if let Type::Path(ty) = ty {
         ty.path.segments.first().expect("invalid segments")
     } else {
         panic!("invalid segments");
     };
 
     match &seg.arguments {
-        syn::PathArguments::AngleBracketed(generics) => {
+        PathArguments::AngleBracketed(generics) => {
             generics.args.first().and_then(|arg| match arg {
-                syn::GenericArgument::Type(ty) => Some(ty),
+                GenericArgument::Type(ty) => Some(ty),
                 _ => None,
             })
         }
@@ -64,9 +67,9 @@ fn unwrap_option(ty: &syn::Type) -> Option<&syn::Type> {
     }
 }
 
-fn get_config_flags(meta: syn::Meta) -> Vec<FieldFlags> {
+fn get_config_flags(meta: Meta) -> Vec<FieldFlags> {
     match meta {
-        syn::Meta::List(list) => list
+        Meta::List(list) => list
             .nested
             .iter()
             .filter_map(get_config_flag)
@@ -75,8 +78,8 @@ fn get_config_flags(meta: syn::Meta) -> Vec<FieldFlags> {
     }
 }
 
-fn map_field_name(field: syn::Field) -> proc_macro2::TokenStream {
-    let syn::Field {
+fn map_field_name(field: Field) -> proc_macro2::TokenStream {
+    let Field {
         vis,
         attrs,
         ident,
@@ -111,8 +114,8 @@ fn map_field_name(field: syn::Field) -> proc_macro2::TokenStream {
     }
 }
 
-fn map_field_name_impl(parent: &Ident, field: syn::Field) -> proc_macro2::TokenStream {
-    let syn::Field { attrs, ident, .. } = field;
+fn map_field_name_impl(parent: &Ident, field: Field) -> proc_macro2::TokenStream {
+    let Field { attrs, ident, .. } = field;
 
     let flags = attrs
         .iter()
@@ -170,14 +173,14 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     );
 
     let mapped_type = match data {
-        syn::Data::Struct(_) => quote! { struct },
-        syn::Data::Enum(_) => quote! { enum },
+        Data::Struct(_) => quote! { struct },
+        Data::Enum(_) => quote! { enum },
         _ => panic!("Unions are not supported"),
     };
 
     let mapped_fields = match &data {
-        syn::Data::Struct(syn::DataStruct { fields, .. }) => match fields {
-            syn::Fields::Named(syn::FieldsNamed { named, .. }) => {
+        Data::Struct(DataStruct { fields, .. }) => match fields {
+            Fields::Named(FieldsNamed { named, .. }) => {
                 let named = named
                     .clone()
                     .into_iter()
@@ -192,8 +195,8 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     };
 
     let mapped_fields_impl = match data {
-        syn::Data::Struct(syn::DataStruct { fields, .. }) => match fields {
-            syn::Fields::Named(syn::FieldsNamed { named, .. }) => {
+        Data::Struct(DataStruct { fields, .. }) => match fields {
+            Fields::Named(FieldsNamed { named, .. }) => {
                 let named = named
                     .into_iter()
                     .map(|field| map_field_name_impl(&ident, field))
