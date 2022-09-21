@@ -30,7 +30,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::MirrordConfig,
+        util::{testing::with_env_vars, FlagField},
+    };
 
     #[rstest]
     fn default(
@@ -72,7 +75,9 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let env = EnvField::disabled_config().unwrap();
+                let env = FlagField::<EnvField>::Enabled(false)
+                    .generate_config()
+                    .unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
                 assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);

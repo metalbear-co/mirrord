@@ -29,30 +29,80 @@ impl Default for FsField {
     }
 }
 
+impl FsField {
+    fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
+        match (fs, ro_fs) {
+            (Some(false), Some(true)) | (None, Some(true)) => Some(FsField::Read),
+            (Some(true), _) => Some(FsField::Write),
+            (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
+                Some(FsField::Disabled)
+            }
+            (None, None) => None,
+        }
+    }
+}
+
 impl MirrordConfig for FsField {
     type Generated = FsField;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let read = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
-        let write = FromEnv::new("MIRRORD_FILE_OPS").source_value();
+        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
+        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
 
-        Ok(match (read, write) {
-            (Some(true), Some(false)) => FsField::Read,
-            (_, Some(true)) => FsField::Write,
-            _ => self,
-        })
+        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
     }
 }
 
 impl MirrordFlaggedConfig for FsField {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let read = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
-        let write = FromEnv::new("MIRRORD_FILE_OPS").source_value();
+        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
+        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
 
-        Ok(match (read, write) {
-            (Some(true), Some(false)) => FsField::Read,
-            (_, Some(true)) => FsField::Write,
-            _ => FsField::Disabled,
-        })
+        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsField::Disabled))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::{
+        config::MirrordConfig,
+        util::{testing::with_env_vars, FlagField},
+    };
+
+    #[rstest]
+    #[case(None, None, FsField::Read)]
+    #[case(Some("true"), None, FsField::Write)]
+    #[case(Some("true"), Some("true"), FsField::Write)]
+    #[case(Some("false"), Some("true"), FsField::Read)]
+    fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsField) {
+        with_env_vars(
+            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
+            || {
+                let fs = FsField::default().generate_config().unwrap();
+
+                assert_eq!(fs, expect);
+            },
+        );
+    }
+
+    #[rstest]
+    #[case(None, None, FsField::Disabled)]
+    #[case(Some("true"), None, FsField::Write)]
+    #[case(Some("true"), Some("true"), FsField::Write)]
+    #[case(Some("false"), Some("true"), FsField::Read)]
+    fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsField) {
+        with_env_vars(
+            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
+            || {
+                let fs = FlagField::<FsField>::Enabled(false)
+                    .generate_config()
+                    .unwrap();
+
+                assert_eq!(fs, expect);
+            },
+        );
     }
 }
