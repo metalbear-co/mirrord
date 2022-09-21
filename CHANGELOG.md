@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
 - mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
 - mirrord-agent: `IndexAllocator` now uses `ConnectionId` for outgoing traffic feature.
+- intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
 
 ## 3.0.6-alpha
 
