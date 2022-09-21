@@ -253,6 +253,44 @@ pub(crate) unsafe extern "C" fn fread_detour(
     }
 }
 
+#[hook_guard_fn]
+#[tracing::instrument(level = "trace", skip())]
+pub(crate) unsafe extern "C" fn fgets_detour(
+    out_buffer: *mut c_char,
+    capacity: c_int,
+    file_stream: *mut FILE,
+) -> *mut c_char {
+    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
+    let fd = fileno_logic(file_stream);
+
+    // TODO(alex) [high] 2022-09-20: Implement this to see if remote nsswitch and resolv will solve
+    // the ipv6 issue.
+    // We're only interested in files that are handled by `mirrord-agent`.
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    if let Some(remote_fd) = remote_fd {
+        let read_result = fgets(remote_fd, capacity).map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
+            // copy to buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount);
+            }
+
+            // TODO: The function fread() does not distinguish between end-of-file and error,
+            // and callers must use feof(3) and ferror(3) to determine which occurred.
+            read_amount
+        });
+
+        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
+        result
+    } else {
+        FN_FGETS(out_buffer, capacity, file_stream)
+    }
+}
+
 /// Hook for `libc::fileno`.
 ///
 /// Converts a `*mut FILE` stream into an fd.
@@ -401,6 +439,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
     let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
     let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
+    let _ = replace!(interceptor, "fgets", fgets_detour, FnFgets, FN_FGETS);
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
