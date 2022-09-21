@@ -13,6 +13,7 @@ mod tests {
 
     use bytes::Bytes;
     use chrono::Utc;
+    use futures::Future;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -1069,6 +1070,20 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_make_request_localhost(#[future] service: EchoService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
+        ];
+        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn test_outgoing_traffic_udp(#[future] service: EchoService) {
         let service = service.await;
@@ -1093,11 +1108,39 @@ mod tests {
         process.assert_stderr();
     }
 
+    /// Test that the process does not crash and messages are sent out normally when the
+    /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+    #[timeout(Duration::from_secs(30))]
+    pub async fn test_outgoing_disabled_udp(#[future] service: EchoService) {
         let service = service.await;
-        let command = vec!["go-e2e-outgoing/18"];
+        // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
+        // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
+        let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        let port = socket.local_addr().unwrap().port().to_string();
+
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            &port,
+        ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+
+        // Listen for UDP message directly from application.
+        let mut buf = [0; 27];
+        let amt = socket.recv(&mut buf).unwrap();
+        assert_eq!(amt, 27);
+        assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    pub async fn test_go(service: impl Future<Output = EchoService>, command: Vec<&str>) {
+        let service = service.await;
         let mut process = run(command, &service.pod_name, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1106,12 +1149,29 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+        let command = vec!["go-e2e-outgoing/18"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
-        let service = service.await;
         let command = vec!["go-e2e-outgoing/19"];
-        let mut process = run(command, &service.pod_name, None, None).await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_dns_lookup(#[future] service: EchoService) {
+        let command = vec!["go-e2e-dns/18"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go19_dns_lookup(#[future] service: EchoService) {
+        let command = vec!["go-e2e-dns/19"];
+        test_go(service, command).await;
     }
 }
