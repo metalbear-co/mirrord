@@ -64,7 +64,7 @@ jobs:
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
           cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin          
-          printf '\x02' | dd of=target/aarch64-apple-darwin/libmirrord_layer.dylib bs=1 seek=8 count=1 conv=notrunc
+          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer.dylib bs=1 seek=8 count=1 conv=notrunc
       - name: Sign layer binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
