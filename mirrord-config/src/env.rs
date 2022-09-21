@@ -24,3 +24,59 @@ impl MirrordFlaggedConfig for EnvField {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+
+    #[rstest]
+    fn default(
+        #[values((None, None), (Some("IVAR1"), Some("IVAR1")), (Some("IVAR1;IVAR2"), Some("IVAR1;IVAR2")))]
+        include: (Option<&str>, Option<&str>),
+        #[values((None, None), (Some("EVAR1"), Some("EVAR1")))] exclude: (
+            Option<&str>,
+            Option<&str>,
+        ),
+    ) {
+        with_env_vars(
+            vec![
+                ("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", include.0),
+                ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
+            ],
+            || {
+                let env = EnvField::default().generate_config().unwrap();
+
+                assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
+                assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
+            },
+        );
+    }
+
+    #[rstest]
+    fn disabled_config(
+        #[values((None, None), (Some("IVAR1"), Some("IVAR1")))] include: (
+            Option<&str>,
+            Option<&str>,
+        ),
+        #[values((None, None), (Some("EVAR1"), Some("EVAR1")))] exclude: (
+            Option<&str>,
+            Option<&str>,
+        ),
+    ) {
+        with_env_vars(
+            vec![
+                ("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", include.0),
+                ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
+            ],
+            || {
+                let env = EnvField::disabled_config().unwrap();
+
+                assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
+                assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
+            },
+        );
+    }
+}

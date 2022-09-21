@@ -15,3 +15,39 @@ pub struct PodField {
     #[config(env = "MIRRORD_IMPERSONATED_CONTAINER_NAME")]
     pub container: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+
+    #[rstest]
+    fn default(
+        #[values((Some("pod"), "pod"))] name: (Option<&str>, &str),
+        #[values((None, "default"), (Some("namespace"), "namespace"))] namespace: (
+            Option<&str>,
+            &str,
+        ),
+        #[values((None, None), (Some("container"), Some("container")))] container: (
+            Option<&str>,
+            Option<&str>,
+        ),
+    ) {
+        with_env_vars(
+            vec![
+                ("MIRRORD_AGENT_IMPERSONATED_POD_NAME", name.0),
+                ("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", namespace.0),
+                ("MIRRORD_IMPERSONATED_CONTAINER_NAME", container.0),
+            ],
+            || {
+                let outgoing = PodField::default().generate_config().unwrap();
+
+                assert_eq!(outgoing.name, name.1);
+                assert_eq!(outgoing.namespace, namespace.1);
+                assert_eq!(outgoing.container.as_deref(), container.1);
+            },
+        );
+    }
+}

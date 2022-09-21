@@ -48,53 +48,53 @@ mod tests {
     };
 
     #[rstest]
-    #[case(None, None, true, true)]
-    #[case(None, Some("false"), true, false)]
-    #[case(Some("false"), Some("false"), false, false)]
-    #[case(Some("true"), Some("true"), true, true)]
-    fn enabled(
-        #[case] tcp_var: Option<&str>,
-        #[case] udp_var: Option<&str>,
-        #[case] tcp: bool,
-        #[case] udp: bool,
+    fn default(
+        #[values((None, true), (Some("false"), false), (Some("true"), true))] tcp: (
+            Option<&str>,
+            bool,
+        ),
+        #[values((None, true), (Some("false"), false), (Some("true"), true))] udp: (
+            Option<&str>,
+            bool,
+        ),
     ) {
         with_env_vars(
             vec![
-                ("MIRRORD_TCP_OUTGOING", tcp_var),
-                ("MIRRORD_UDP_OUTGOING", udp_var),
+                ("MIRRORD_TCP_OUTGOING", tcp.0),
+                ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
                 let outgoing = OutgoingField::default().generate_config().unwrap();
 
-                assert_eq!(outgoing.tcp, tcp);
-                assert_eq!(outgoing.udp, udp);
+                assert_eq!(outgoing.tcp, tcp.1);
+                assert_eq!(outgoing.udp, udp.1);
             },
         );
     }
 
     #[rstest]
-    #[case(None, None, false, false)]
-    #[case(None, Some("false"), false, false)]
-    #[case(Some("false"), Some("false"), false, false)]
-    #[case(Some("true"), Some("true"), true, true)]
     fn disabled(
-        #[case] tcp_var: Option<&str>,
-        #[case] udp_var: Option<&str>,
-        #[case] tcp: bool,
-        #[case] udp: bool,
+        #[values((None, false), (Some("false"), false), (Some("true"), true))] tcp: (
+            Option<&str>,
+            bool,
+        ),
+        #[values((None, false), (Some("false"), false), (Some("true"), true))] udp: (
+            Option<&str>,
+            bool,
+        ),
     ) {
         with_env_vars(
             vec![
-                ("MIRRORD_TCP_OUTGOING", tcp_var),
-                ("MIRRORD_UDP_OUTGOING", udp_var),
+                ("MIRRORD_TCP_OUTGOING", tcp.0),
+                ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
                 let outgoing = FlagField::<OutgoingField>::Enabled(false)
                     .generate_config()
                     .unwrap();
 
-                assert_eq!(outgoing.tcp, tcp);
-                assert_eq!(outgoing.udp, udp);
+                assert_eq!(outgoing.tcp, tcp.1);
+                assert_eq!(outgoing.udp, udp.1);
             },
         );
     }
