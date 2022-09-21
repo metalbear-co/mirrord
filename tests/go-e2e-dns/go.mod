@@ -1,3 +1,3 @@
-module go-e2e-outgoing
+module go-e2e-dns
 
 go 1.19
