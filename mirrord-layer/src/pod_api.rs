@@ -11,7 +11,7 @@ use kube::{
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     config::{Deployment, LayerConfig, PodAndContainer, Target},
@@ -57,6 +57,11 @@ impl RuntimeData {
                 Err(_) => return Err(LayerError::InvalidTarget(target.to_string())),
             },
         };
+        let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
+
+        let container_info = target
+            .container_info(&pods_api, &client, pod_namespace)
+            .await;
 
         let container_info = container_info
             .as_ref()
@@ -75,7 +80,12 @@ impl RuntimeData {
         Ok(RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
-            node_name: node_name.as_ref().unwrap().to_string(),
+            node_name: target
+                .node_name(pods_api)
+                .await
+                .as_ref()
+                .unwrap()
+                .to_string(),
             socket_path: socket_path.to_string(),
         })
     }

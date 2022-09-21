@@ -1,6 +1,11 @@
 use std::str::FromStr;
 
 use envconfig::Envconfig;
+use k8s_openapi::api::core::v1::Pod;
+use kube::{Api, Client};
+use tracing::info;
+
+use crate::error::LayerError;
 
 #[derive(Envconfig, Debug, Clone)]
 pub struct LayerConfig {
@@ -77,19 +82,64 @@ pub enum Target {
 }
 
 impl Target {
-    pub fn container_id(&self) -> Option<String> {
+    pub async fn container_info(
+        &self,
+        pods_api: &Api<Pod>,
+        client: &Client,
+        pod_namespace: &str,
+    ) -> Option<String> {
         match self {
-            Target::Pod(PodAndContainer(pod, container)) => self.pod(pod, container),
+            Target::Pod(PodAndContainer(pod, container)) => {
+                self.pod(&pods_api, pod, container, pod_namespace, &client)
+                    .await
+            }
             Target::Deployment(_) => None,
         }
     }
 
-    pub fn pod(&self, pod: &String, container: &Option<String>) -> Option<String> {
-        todo!()
+    pub async fn pod(
+        &self,
+        pods_api: &Api<Pod>,
+        pod_name: &String,
+        container_name: &Option<String>,
+        pod_namespace: &str,
+        client: &Client,
+    ) -> Option<String> {
+        let pod = pods_api.get(pod_name).await.unwrap();
+        let node_name = &pod.spec.unwrap().node_name;
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+        let container_info = if let Some(container_name) = container_name {
+            &container_statuses
+                .iter()
+                .find(|&status| &status.name == container_name)
+                .ok_or_else(|| {
+                    LayerError::ContainerNotFound(
+                        container_name.clone(),
+                        pod_namespace.to_string(),
+                        pod_name.to_string(),
+                    )
+                })
+                .unwrap()
+                .container_id
+        } else {
+            info!("No container name specified, defaulting to first container found");
+            &container_statuses.first().unwrap().container_id
+        };
+        container_info.clone()
     }
 
     pub fn deployment(&self) -> Option<String> {
         todo!()
+    }
+
+    pub async fn node_name(&self, pods_api: Api<Pod>) -> Option<String> {
+        match self {
+            Target::Pod(PodAndContainer(pod_name, _)) => {
+                let pod = pods_api.get(&pod_name).await.unwrap();
+                pod.spec.unwrap().node_name
+            }
+            Target::Deployment(_) => None,
+        }
     }
 }
 
