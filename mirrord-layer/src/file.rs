@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     collections::HashMap,
     env,
@@ -12,8 +13,9 @@ use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRO
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
-    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, RemoteResult,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
+    ReadStringFileRequest, ReadStringFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -44,7 +46,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/proc/.*",
         r"^/sys/.*",
         r"^/lib/.*",
-        r"^/etc/.*",
+        // r"^/etc/.*",
         r"^/usr/.*",
         r"^/dev/.*",
         r"^/opt/.*",
@@ -127,6 +129,7 @@ pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
+    read_string_queue: ResponseDeque<ReadStringFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
@@ -134,12 +137,16 @@ pub struct FileHandler {
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
-fn pop_send<T>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<()> {
+#[tracing::instrument(level = "trace", skip(deque))]
+fn pop_send<T: fmt::Debug>(deque: &mut ResponseDeque<T>, value: RemoteResult<T>) -> Result<()> {
     deque
         .pop_front()
         .ok_or(LayerError::SendErrorFileResponse)?
         .send(value)
-        .map_err(|_| LayerError::SendErrorFileResponse)
+        .map_err(|fail| {
+            error!("Failed send operation with {:#?}!", fail);
+            LayerError::SendErrorFileResponse
+        })
 }
 
 impl FileHandler {
@@ -152,13 +159,26 @@ impl FileHandler {
             }
             Read(read) => {
                 // The debug message is too big if we just log it directly.
-                let file_response = read
-                    .inspect(|success| {
-                        debug!("DaemonMessage::ReadFileResponse {:#?}", success.read_amount)
-                    })
+                let _ = read
+                    .as_ref()
+                    .inspect(|success| debug!("DaemonMessage::ReadFileResponse {:#?}", success))
                     .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
-                pop_send(&mut self.read_queue, file_response)
+                pop_send(&mut self.read_queue, read)
+            }
+            ReadString(read_string) => {
+                // The debug message is too big if we just log it directly.
+                let _ = read_string
+                    .as_ref()
+                    .inspect(|success| debug!("DaemonMessage::ReadFileResponse {:#?}", success))
+                    .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+
+                pop_send(&mut self.read_string_queue, read_string).inspect_err(|fail| {
+                    error!(
+                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
+                        fail,
+                    )
+                })
             }
             Seek(seek) => {
                 debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
@@ -179,6 +199,7 @@ impl FileHandler {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: HookMessageFile,
@@ -195,6 +216,7 @@ impl FileHandler {
             }
 
             Read(read) => self.handle_hook_read(read, codec).await,
+            ReadString(read_string) => self.handle_hook_read_string(read_string, codec).await,
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
@@ -202,6 +224,7 @@ impl FileHandler {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_open(
         &mut self,
         open: Open,
@@ -227,6 +250,8 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
         codec.send(request).await.map_err(From::from)
     }
+
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_open_relative(
         &mut self,
         open_relative: OpenRelative,
@@ -259,6 +284,7 @@ impl FileHandler {
         codec.send(request).await.map_err(From::from)
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_read(
         &mut self,
         read: Read,
@@ -272,21 +298,35 @@ impl FileHandler {
             buffer_size,
             file_channel_tx,
         } = read;
-        debug!(
-            "HookMessage::ReadFileHook fd {:#?} | buffer_size {:#?}",
-            fd, buffer_size
-        );
 
         self.read_queue.push_back(file_channel_tx);
 
         let read_file_request = ReadFileRequest { fd, buffer_size };
 
-        debug!(
-            "HookMessage::ReadFileHook read_file_request {:#?}",
-            read_file_request
-        );
-
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, codec))]
+    async fn handle_hook_read_string(
+        &mut self,
+        read_string: ReadString,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let ReadString {
+            fd,
+            buffer_size,
+            file_channel_tx,
+        } = read_string;
+
+        self.read_string_queue.push_back(file_channel_tx);
+
+        let read_file_request = ReadStringFileRequest { fd, buffer_size };
+
+        let request = ClientMessage::FileRequest(FileRequest::ReadString(read_file_request));
         codec.send(request).await.map_err(From::from)
     }
 
@@ -419,17 +459,33 @@ pub struct Read {
 }
 
 #[derive(Debug)]
+pub struct ReadString {
+    pub(crate) fd: usize,
+    pub(crate) buffer_size: usize,
+    pub(crate) file_channel_tx: ResponseChannel<ReadStringFileResponse>,
+}
+
+#[derive(Debug)]
 pub struct Seek {
     pub(crate) fd: usize,
     pub(crate) seek_from: SeekFrom,
     pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
 }
 
-#[derive(Debug)]
 pub struct Write {
     pub(crate) fd: usize,
     pub(crate) write_bytes: Vec<u8>,
     pub(crate) file_channel_tx: ResponseChannel<WriteFileResponse>,
+}
+
+impl fmt::Debug for Write {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Write")
+            .field("fd", &self.fd)
+            .field("write_bytes (length)", &self.write_bytes.len())
+            .field("file_channel_tx", &self.file_channel_tx)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -450,6 +506,7 @@ pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
     Read(Read),
+    ReadString(ReadString),
     Seek(Seek),
     Write(Write),
     Close(Close),

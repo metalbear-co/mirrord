@@ -8,13 +8,10 @@ use mirrord_protocol::{
 use tokio::sync::oneshot;
 use tracing::error;
 
+use super::*;
 use crate::{
     common::blocking_send_hook_message,
     error::{HookError, HookResult as Result},
-    file::{
-        Access, Close, HookMessageFile, Open, OpenOptionsInternalExt, OpenRelative, Read, Seek,
-        Write, OPEN_FILES,
-    },
     HookMessage,
 };
 
@@ -182,6 +179,22 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse> {
 }
 
 #[tracing::instrument(level = "trace")]
+pub(crate) fn fgets(fd: usize, buffer_size: usize) -> Result<ReadStringFileResponse> {
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let reading_file = ReadString {
+        fd,
+        buffer_size,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::ReadString(reading_file))?;
+
+    let read_file_response = file_channel_rx.blocking_recv()??;
+    Ok(read_file_response)
+}
+
+#[tracing::instrument(level = "trace")]
 pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -197,7 +210,7 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
     Ok(result_offset)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", skip(write_bytes))]
 pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 

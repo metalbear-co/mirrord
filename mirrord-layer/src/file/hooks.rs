@@ -3,14 +3,12 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse};
-use tracing::error;
+use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadStringFileResponse};
+use tracing::{error, info};
 
-use super::{
-    ops::{fdopen, fopen, openat},
-    OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES,
-};
+use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
 use crate::{
+    close_detour,
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     replace, ENABLED_FILE_RO_OPS,
@@ -257,7 +255,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 #[tracing::instrument(level = "trace", skip())]
 pub(crate) unsafe extern "C" fn fgets_detour(
     out_buffer: *mut c_char,
-    capacity: c_int,
+    buffer_size: c_int,
     file_stream: *mut FILE,
 ) -> *mut c_char {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
@@ -265,30 +263,55 @@ pub(crate) unsafe extern "C" fn fgets_detour(
 
     // TODO(alex) [high] 2022-09-20: Implement this to see if remote nsswitch and resolv will solve
     // the ipv6 issue.
+    //
+    // ADD(alex) [high] 2022-09-21: Hooked, but I think we read until certain point, and don't
+    // retain the read position? Looks like we read the whole file, so a secondary call to `fgets`
+    // just returns `read_amount = 0`.
+
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
     if let Some(remote_fd) = remote_fd {
-        let read_result = fgets(remote_fd, capacity).map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+        // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
+        // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
+        // `capacity` here.
+        // let capacity = (capacity - 1) as usize;
+        let buffer_size = (buffer_size - 1) as usize;
+
+        let read_result = fgets(remote_fd, buffer_size).map(|read_file| {
+            let ReadStringFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
             if read_amount > 0 {
-                let read_ptr = bytes.as_ptr();
-                let out_buffer = out_buffer.cast();
-                ptr::copy(read_ptr, out_buffer, read_amount);
-            }
+                let bytes_slice = &bytes[0..buffer_size.min(read_amount)];
+                let eof = vec![0; 1];
 
-            // TODO: The function fread() does not distinguish between end-of-file and error,
-            // and callers must use feof(3) and ferror(3) to determine which occurred.
-            read_amount
+                let read = [bytes_slice, &eof].concat();
+                info!("fgets -> read {:#?}", String::from_utf8(read.clone()));
+
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read.as_ptr(), out_buffer, read_amount.min(buffer_size));
+
+                out_buffer as *mut _
+            } else {
+                ptr::null_mut()
+            }
         });
 
         let (Ok(result) | Err(result)) = read_result.map_err(From::from);
         result
     } else {
-        FN_FGETS(out_buffer, capacity, file_stream)
+        FN_FGETS(out_buffer, buffer_size, file_stream)
     }
+}
+
+#[hook_guard_fn]
+#[tracing::instrument(level = "trace", skip(file_stream))]
+pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
+    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
+    let fd = fileno_logic(file_stream);
+
+    close_detour(fd)
 }
 
 /// Hook for `libc::fileno`.
@@ -440,6 +463,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
     let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
     let _ = replace!(interceptor, "fgets", fgets_detour, FnFgets, FN_FGETS);
+    let _ = replace!(interceptor, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);

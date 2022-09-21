@@ -2,7 +2,7 @@ use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;
-use libc::FILE;
+use libc::{c_char, FILE};
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
@@ -247,6 +247,14 @@ impl From<HookError> for i32 {
 }
 
 impl From<HookError> for *mut FILE {
+    fn from(fail: HookError) -> Self {
+        let _ = i64::from(fail);
+
+        ptr::null_mut()
+    }
+}
+
+impl From<HookError> for *mut c_char {
     fn from(fail: HookError) -> Self {
         let _ = i64::from(fail);
 

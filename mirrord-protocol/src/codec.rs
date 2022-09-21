@@ -30,6 +30,12 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadStringFileRequest {
+    pub fd: usize,
+    pub buffer_size: usize,
+}
+
 // TODO: Should probably live in a separate place (maybe even a separate `util` crate).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct AddrInfoHint {
@@ -164,6 +170,7 @@ pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
+    ReadString(ReadStringFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
@@ -206,9 +213,24 @@ pub struct ReadFileResponse {
     pub read_amount: usize,
 }
 
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+pub struct ReadStringFileResponse {
+    pub bytes: Vec<u8>,
+    pub read_amount: usize,
+}
+
 impl fmt::Debug for ReadFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadFileResponse")
+            .field("bytes (length)", &self.bytes.len())
+            .field("read_amount", &self.read_amount)
+            .finish()
+    }
+}
+
+impl fmt::Debug for ReadStringFileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadStringFileResponse")
             .field("bytes (length)", &self.bytes.len())
             .field("read_amount", &self.read_amount)
             .finish()
@@ -238,6 +260,7 @@ pub type RemoteResult<T> = Result<T, ResponseError>;
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
+    ReadString(RemoteResult<ReadStringFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),

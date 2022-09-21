@@ -96,7 +96,8 @@ fn init(config: LayerConfig) {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE),
+                .with_span_events(FmtSpan::ACTIVE)
+                .compact(),
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -447,7 +448,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// so it tries to do the same for files.
 #[hook_guard_fn]
 #[tracing::instrument(level = "trace")]
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
@@ -460,7 +461,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
         close_file_result
             .map_err(|fail| {
-                error!("Failed writing file with {fail:#?}");
+                error!("Failed closing file with {fail:#?}");
                 -1
             })
             .unwrap_or_else(|fail| fail)

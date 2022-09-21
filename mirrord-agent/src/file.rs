@@ -2,7 +2,7 @@ use std::{
     self,
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{prelude::*, SeekFrom},
+    io::{prelude::*, BufReader, SeekFrom},
     path::PathBuf,
 };
 
@@ -10,8 +10,8 @@ use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, RemoteResult, ResponseError, SeekFileRequest,
-    SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ReadFileRequest, ReadFileResponse, ReadStringFileRequest, ReadStringFileResponse, RemoteResult,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
 
@@ -32,6 +32,7 @@ pub struct FileManager {
 
 impl FileManager {
     /// Executes the request and returns the response.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse, AgentError> {
         let root_path = &self.root_path;
         match request {
@@ -59,6 +60,10 @@ impl FileManager {
                 let read_result = self.read(fd, buffer_size);
                 Ok(FileResponse::Read(read_result))
             }
+            FileRequest::ReadString(ReadStringFileRequest { fd, buffer_size }) => {
+                let read_result = self.read_string(fd, buffer_size);
+                Ok(FileResponse::ReadString(read_result))
+            }
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
                 Ok(FileResponse::Seek(seek_result))
@@ -85,6 +90,7 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = match pid {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
@@ -98,17 +104,12 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn open(
         &mut self,
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
-        trace!(
-            "FileManager::open -> path {:#?} | open_options {:#?}",
-            path,
-            open_options
-        );
-
         let file = OpenOptions::from(open_options).open(&path)?;
 
         let fd = self
@@ -129,19 +130,13 @@ impl FileManager {
         Ok(OpenFileResponse { fd })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn open_relative(
         &mut self,
         relative_fd: usize,
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
-        trace!(
-            "FileManager::open_relative -> relative_fd {:#?} | path {:#?} | open_options {:#?}",
-            relative_fd,
-            path,
-            open_options,
-        );
-
         let relative_dir = self
             .open_files
             .get(&relative_fd)
@@ -172,13 +167,8 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read(&mut self, fd: usize, buffer_size: usize) -> RemoteResult<ReadFileResponse> {
-        trace!(
-            "FileManager::read -> fd {:#?} | buffer_size {:#?}",
-            fd,
-            buffer_size
-        );
-
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -192,6 +182,34 @@ impl FileManager {
                         })?;
 
                     Ok(read_amount)
+                } else {
+                    Err(ResponseError::NotFile(fd))
+                }
+            })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn read_string(
+        &mut self,
+        fd: usize,
+        buffer_size: usize,
+    ) -> RemoteResult<ReadStringFileResponse> {
+        self.open_files
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))
+            .and_then(|remote_file| {
+                if let RemoteFile::File(file) = remote_file {
+                    let mut reader = BufReader::new(file);
+                    let mut buffer = String::with_capacity(buffer_size);
+                    let read_result = reader
+                        .read_line(&mut buffer)
+                        // TODO(alex) [high] 2022-09-21: Cannot use read_exact, as it breaks on EOF.
+                        .map(|read_amount| ReadStringFileResponse {
+                            bytes: buffer.into_bytes(),
+                            read_amount,
+                        })?;
+
+                    Ok(read_result)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
