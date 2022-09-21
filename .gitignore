@@ -13,6 +13,7 @@ tests/go-e2e/go-e2e
 tests/go-e2e-env/go-e2e-env
 tests/go-e2e-fileops/go-e2e-fileops
 tests/go-e2e-outgoing/go-e2e-outgoing
+tests/go-e2e-dns/go-e2e-dns
 
 ### VSCode ###
 .vscode/*
