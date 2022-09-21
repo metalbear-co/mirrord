@@ -75,12 +75,12 @@ where
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         let mut multiple = Vec::new();
 
-        if !val.contains(';') {
-            return Ok(VecOrSingle::Single(T::from_str(val)?));
-        }
-
         for part in val.split(';') {
             multiple.push(T::from_str(part)?);
+        }
+
+        if multiple.len() == 1 {
+            return Ok(VecOrSingle::Single(multiple.remove(0)));
         }
 
         Ok(VecOrSingle::Multiple(multiple))
