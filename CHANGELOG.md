@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Fix `connect` returning error when called on UDP sockets and the
   outgoing traffic feature of mirrord is disabled.
 - mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
+- intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
 
 ### Changed
 - mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
