@@ -14,7 +14,7 @@ use tokio::pin;
 use tracing::{debug, info, warn};
 
 use crate::{
-    config::LayerConfig,
+    config::{LayerConfig, Deployment, Target, PodAndContainer},
     error::{LayerError, Result},
 };
 
@@ -49,12 +49,14 @@ struct RuntimeData {
 }
 
 impl RuntimeData {
-    async fn from_k8s(
-        client: Client,
-        pod_name: &str,
-        pod_namespace: &str,
-        container_name: &Option<String>,
-    ) -> Result<Self> {
+    async fn from_k8s(client: Client, target: &str, pod_namespace: &str) -> Result<Self> {
+        let target = match target.parse::<Deployment>() {
+            Ok(deployment) => Target::Deployment(deployment),
+            Err(_) => match target.parse::<PodAndContainer>() {
+                Ok(pod) => Target::Pod(pod),
+                Err(_) => return Err(LayerError::InvalidTarget(target.to_string())),
+            },
+        };
         let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
         let pod = pods_api.get(pod_name).await?;
         let node_name = &pod.spec.unwrap().node_name;
@@ -107,9 +109,8 @@ pub(crate) async fn create_agent(
     let LayerConfig {
         agent_image,
         agent_namespace,
-        impersonated_pod_name,
+        target,
         impersonated_pod_namespace,
-        impersonated_container_name,
         ephemeral_container,
         accept_invalid_certificates,
         ..
@@ -138,14 +139,10 @@ pub(crate) async fn create_agent(
     let pod_name = if ephemeral_container {
         create_ephemeral_container_agent(&config, agent_image, &pods_api, connection_port).await?
     } else {
-        let runtime_data = RuntimeData::from_k8s(
-            client.clone(),
-            &impersonated_pod_name,
-            &impersonated_pod_namespace,
-            &impersonated_container_name,
-        )
-        .await
-        .map_err(LayerError::from)?;
+        let runtime_data =
+            RuntimeData::from_k8s(client.clone(), &target, &impersonated_pod_namespace)
+                .await
+                .map_err(LayerError::from)?;
 
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),

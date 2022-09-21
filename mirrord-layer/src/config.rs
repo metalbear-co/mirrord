@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use envconfig::Envconfig;
 
 #[derive(Envconfig, Debug, Clone)]
@@ -14,14 +16,11 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
-    #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
-    pub impersonated_pod_name: String,
+    #[envconfig(from = "MIRRORD_TARGET")]
+    pub target: String,
 
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
     pub impersonated_pod_namespace: String,
-
-    #[envconfig(from = "MIRRORD_IMPERSONATED_CONTAINER_NAME")]
-    pub impersonated_container_name: Option<String>,
 
     #[envconfig(from = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
     pub accept_invalid_certificates: bool,
@@ -66,4 +65,43 @@ pub struct LayerConfig {
 
     #[envconfig(from = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Deployment(pub String);
+
+#[derive(Debug, PartialEq)]
+pub enum Target {
+    Deployment(Deployment),
+    Pod(PodAndContainer),
+}
+
+impl FromStr for Deployment {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let split = s.split('/').collect::<Vec<&str>>();
+        match split.first() {
+            Some(&"deployment") => Ok(Deployment(split[1].to_string())),
+            _ => Err(format!("Given target: {:?} is not a deployment.", s)),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PodAndContainer(pub String, pub Option<String>);
+
+impl FromStr for PodAndContainer {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let split = s.split('/').collect::<Vec<&str>>();
+        match split.first() {
+            Some(&"pod") if split.len() == 2 => Ok(Pod(split[1].to_string(), None)),
+            Some(&"pod") if split.len() == 4 && split[2] == "container" => {
+                Ok(Pod(split[1].to_string(), Some(split[3].to_string())))
+            }
+            _ => Err(format!("Given target: {:?} is not a pod.", s)),
+        }
+    }
 }
