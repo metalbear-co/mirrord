@@ -8,6 +8,7 @@ mod tests {
         net::{Ipv4Addr, UdpSocket},
         process::Stdio,
         sync::{Arc, Mutex},
+        thread::sleep,
         time::Duration,
     };
 
@@ -129,6 +130,7 @@ mod tests {
                 if stdout.contains(line) {
                     return;
                 }
+                sleep(Duration::from_secs(1));
             }
             panic!("Timeout waiting for line: {}", line);
         }
@@ -554,7 +556,6 @@ mod tests {
             assert_eq!(resp, Bytes::from("GET"));
         }
 
-        let client = reqwest::Client::new();
         let res = client.post(url).body(TEXT).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
@@ -563,7 +564,6 @@ mod tests {
             assert_eq!(resp, "POST".as_bytes());
         }
 
-        let client = reqwest::Client::new();
         let res = client.put(url).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
@@ -572,7 +572,6 @@ mod tests {
             assert_eq!(resp, "PUT".as_bytes());
         }
 
-        let client = reqwest::Client::new();
         let res = client.delete(url).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
