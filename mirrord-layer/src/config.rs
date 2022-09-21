@@ -76,6 +76,23 @@ pub enum Target {
     Pod(PodAndContainer),
 }
 
+impl Target {
+    pub fn container_id(&self) -> Option<String> {
+        match self {
+            Target::Pod(PodAndContainer(pod, container)) => self.pod(pod, container),
+            Target::Deployment(_) => None,
+        }
+    }
+
+    pub fn pod(&self, pod: &String, container: &Option<String>) -> Option<String> {
+        todo!()
+    }
+
+    pub fn deployment(&self) -> Option<String> {
+        todo!()
+    }
+}
+
 impl FromStr for Deployment {
     type Err = String;
 
@@ -97,10 +114,11 @@ impl FromStr for PodAndContainer {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let split = s.split('/').collect::<Vec<&str>>();
         match split.first() {
-            Some(&"pod") if split.len() == 2 => Ok(Pod(split[1].to_string(), None)),
-            Some(&"pod") if split.len() == 4 && split[2] == "container" => {
-                Ok(Pod(split[1].to_string(), Some(split[3].to_string())))
-            }
+            Some(&"pod") if split.len() == 2 => Ok(PodAndContainer(split[1].to_string(), None)),
+            Some(&"pod") if split.len() == 4 && split[2] == "container" => Ok(PodAndContainer(
+                split[1].to_string(),
+                Some(split[3].to_string()),
+            )),
             _ => Err(format!("Given target: {:?} is not a pod.", s)),
         }
     }

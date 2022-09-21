@@ -14,7 +14,7 @@ use tokio::pin;
 use tracing::{debug, info, warn};
 
 use crate::{
-    config::{LayerConfig, Deployment, Target, PodAndContainer},
+    config::{Deployment, LayerConfig, PodAndContainer, Target},
     error::{LayerError, Result},
 };
 
@@ -56,26 +56,6 @@ impl RuntimeData {
                 Ok(pod) => Target::Pod(pod),
                 Err(_) => return Err(LayerError::InvalidTarget(target.to_string())),
             },
-        };
-        let pods_api: Api<Pod> = Api::namespaced(client, pod_namespace);
-        let pod = pods_api.get(pod_name).await?;
-        let node_name = &pod.spec.unwrap().node_name;
-        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
-        let container_info = if let Some(container_name) = container_name {
-            &container_statuses
-                .iter()
-                .find(|&status| &status.name == container_name)
-                .ok_or_else(|| {
-                    LayerError::ContainerNotFound(
-                        container_name.clone(),
-                        pod_namespace.to_string(),
-                        pod_name.to_string(),
-                    )
-                })?
-                .container_id
-        } else {
-            info!("No container name specified, defaulting to first container found");
-            &container_statuses.first().unwrap().container_id
         };
 
         let container_info = container_info
