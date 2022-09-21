@@ -19,9 +19,9 @@ pub(super) enum Commands {
 
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
-    /// Pod name to mirror.
+    /// Target name to mirror.
     #[clap(short, long, value_parser)]
-    pub pod_name: String,
+    pub target: String,
 
     /// Namespace of the pod to mirror. Defaults to "default".
     #[clap(short = 'n', long, value_parser)]
@@ -70,10 +70,6 @@ pub(super) struct ExecArgs {
     /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
-
-    /// Select container name to impersonate. Default is first container.
-    #[clap(long, value_parser)]
-    pub impersonated_container_name: Option<String>,
 
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
