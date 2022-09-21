@@ -11,11 +11,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
   call to `connect`) is successfully intercepted and forwarded.
 
+## 3.0.7-alpha
+
 ### Fixed
 - mirrord-layer: Fix `connect` returning error when called on UDP sockets and the
   outgoing traffic feature of mirrord is disabled.
 - mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
 - intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
+- vscode-ext: Support debugging Go, and fix issues with configuring file ops and traffic stealing.
 
 ### Changed
 - mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
