@@ -11,6 +11,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
   call to `connect`) is successfully intercepted and forwarded.
 
+### Changed
+- Ignore http tests because they are unstable, and they block the CI.
+
+## 3.0.8-alpha
+
+### Fixed
+- release CI: Fix dylib path for `dd`.
+
 ## 3.0.7-alpha
 
 ### Fixed

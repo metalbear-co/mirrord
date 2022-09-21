@@ -606,6 +606,7 @@ mod tests {
         }
     }
 
+    #[ignore] // TODO: create integration test instead.
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
@@ -648,6 +649,7 @@ mod tests {
         application.assert(&process);
     }
 
+    #[ignore] // TODO: create integration test instead.
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
