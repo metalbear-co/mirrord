@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- release CI: Fix dylib path for `dd`.
+
 ## 3.0.7-alpha
 
 ### Fixed
