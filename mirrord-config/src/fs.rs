@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::{
-    config::{ConfigError, MirrordConfig},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
     util::MirrordFlaggedConfig,
 };
 
@@ -33,13 +33,8 @@ impl MirrordConfig for FsField {
     type Generated = FsField;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let read = std::env::var("MIRRORD_FILE_RO_OPS")
-            .ok()
-            .and_then(|val| val.parse::<bool>().ok());
-
-        let write = std::env::var("MIRRORD_FILE_OPS")
-            .ok()
-            .and_then(|val| val.parse::<bool>().ok());
+        let read = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let write = FromEnv::new("MIRRORD_FILE_OPS").source_value();
 
         Ok(match (read, write) {
             (Some(true), Some(false)) => FsField::Read,
@@ -51,13 +46,8 @@ impl MirrordConfig for FsField {
 
 impl MirrordFlaggedConfig for FsField {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let read = std::env::var("MIRRORD_FILE_RO_OPS")
-            .ok()
-            .and_then(|val| val.parse::<bool>().ok());
-
-        let write = std::env::var("MIRRORD_FILE_OPS")
-            .ok()
-            .and_then(|val| val.parse::<bool>().ok());
+        let read = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let write = FromEnv::new("MIRRORD_FILE_OPS").source_value();
 
         Ok(match (read, write) {
             (Some(true), Some(false)) => FsField::Read,

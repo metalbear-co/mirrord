@@ -1,6 +1,7 @@
-use serde::Deserialize;
+use std::str::FromStr;
 
-use crate::config::{ConfigError, MirrordConfig};
+use serde::Deserialize;
+use thiserror::Error;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -9,27 +10,34 @@ pub enum IncomingField {
     Steal,
 }
 
-impl IncomingField {
-    pub fn is_steal(&self) -> bool {
-        self == &IncomingField::Steal
+impl Default for IncomingField {
+    fn default() -> Self {
+        IncomingField::Mirror
     }
 }
 
-impl MirrordConfig for Option<IncomingField> {
-    type Generated = IncomingField;
+#[derive(Error, Debug)]
+#[error("could not parse IncomingField from string, values must be bool or mirror/steal")]
+pub struct IncomingFieldParseError;
 
-    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let env_value = std::env::var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
-            .ok()
-            .and_then(|val| val.parse::<bool>().ok())
-            .map(|val| {
-                if val {
-                    IncomingField::Steal
-                } else {
-                    IncomingField::Mirror
-                }
-            });
+impl FromStr for IncomingField {
+    type Err = IncomingFieldParseError;
 
-        Ok(env_value.or(self).unwrap_or(IncomingField::Mirror))
+    fn from_str(val: &str) -> Result<Self, Self::Err> {
+        match val.parse::<bool>() {
+            Ok(true) => Ok(IncomingField::Steal),
+            Ok(false) => Ok(IncomingField::Mirror),
+            Err(_) => match val {
+                "steal" => Ok(IncomingField::Steal),
+                "mirror" => Ok(IncomingField::Mirror),
+                _ => Err(IncomingFieldParseError),
+            },
+        }
+    }
+}
+
+impl IncomingField {
+    pub fn is_steal(&self) -> bool {
+        self == &IncomingField::Steal
     }
 }

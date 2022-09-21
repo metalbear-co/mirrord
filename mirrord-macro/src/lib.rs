@@ -294,7 +294,7 @@ fn map_field_name(field: syn::Field) -> proc_macro2::TokenStream {
     }
 }
 
-fn map_field_name_impl(field: syn::Field) -> proc_macro2::TokenStream {
+fn map_field_name_impl(parent: &Ident, field: syn::Field) -> proc_macro2::TokenStream {
     let syn::Field { attrs, ident, .. } = field;
 
     let flags = attrs
@@ -326,7 +326,7 @@ fn map_field_name_impl(field: syn::Field) -> proc_macro2::TokenStream {
     }
 
     let unwrapper = flags.iter().find(|flag| matches!(flag, FieldFlags::Unwrap | FieldFlags::Nested | FieldFlags::Default(_))).map(
-        |_| quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#ident).to_owned()))? },
+        |_| quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident)))? },
     );
 
     quote! {
@@ -379,7 +379,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             syn::Fields::Named(syn::FieldsNamed { named, .. }) => {
                 let named = named
                     .into_iter()
-                    .map(map_field_name_impl)
+                    .map(|field| map_field_name_impl(&ident, field))
                     .collect::<Vec<_>>();
 
                 quote! { { #(#named),* } }

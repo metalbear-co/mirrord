@@ -2,7 +2,7 @@ use mirrord_macro::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
-    config::{source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::{MirrordFlaggedConfig, VecOrSingle},
 };
 
@@ -19,12 +19,8 @@ pub struct EnvField {
 impl MirrordFlaggedConfig for EnvField {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         Ok(MappedEnvField {
-            include: std::env::var("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")
-                .ok()
-                .and_then(|val| val.parse().ok()),
-            exclude: std::env::var("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
-                .ok()
-                .and_then(|val| val.parse().ok()),
+            include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
+            exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value(),
         })
     }
 }
