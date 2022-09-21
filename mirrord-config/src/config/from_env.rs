@@ -24,17 +24,19 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
 
     use super::*;
+    use crate::util::testing::with_env_vars;
 
-    #[test]
-    fn basic() {
-        let value = FromEnv::<i32>::new("FROM_ENV_TEST_VALUE");
+    #[rstest]
+    #[case(None, None)]
+    #[case(Some("13"), Some(13))]
+    fn basic(#[case] env: Option<&str>, #[case] expect: Option<i32>) {
+        with_env_vars(vec![("TEST_VALUE", env)], || {
+            let value = FromEnv::new("TEST_VALUE");
 
-        assert_eq!(value.clone().source_value(), None);
-
-        std::env::set_var("FROM_ENV_TEST_VALUE", "13");
-
-        assert_eq!(value.source_value(), Some(13));
+            assert_eq!(value.source_value(), expect);
+        });
     }
 }

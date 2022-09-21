@@ -94,22 +94,22 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
 
     use super::*;
-    use crate::config::{default_value::DefaultValue, from_env::FromEnv};
+    use crate::{
+        config::{default_value::DefaultValue, from_env::FromEnv},
+        util::testing::with_env_vars,
+    };
 
-    #[test]
-    fn basic() {
-        let val = (
-            FromEnv::new("SOURCE_TEST_VALUE"),
-            None,
-            DefaultValue::new("10"),
-        );
+    #[rstest]
+    #[case(None, 10)]
+    #[case(Some("13"), 13)]
+    fn basic(#[case] env: Option<&str>, #[case] expect: i32) {
+        with_env_vars(vec![("TEST_VALUE", env)], || {
+            let val = (FromEnv::new("TEST_VALUE"), None, DefaultValue::new("10"));
 
-        assert_eq!(val.clone().source_value(), Some(10));
-
-        std::env::set_var("SOURCE_TEST_VALUE", "13");
-
-        assert_eq!(val.source_value(), Some(13));
+            assert_eq!(val.source_value(), Some(expect));
+        });
     }
 }
