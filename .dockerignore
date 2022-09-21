@@ -1,5 +1,5 @@
-*/target*
-*/.vscode*
-*/.git*
-*/.github*
-*/.devcontainer*
+**/target*
+**/.vscode*
+**/.git*
+**/.github*
+**/.devcontainer*

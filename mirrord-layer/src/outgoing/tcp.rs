@@ -145,11 +145,6 @@ impl TcpOutgoingHandler {
                 },
             }
         }
-
-        trace!(
-            "interceptor_task done -> connection_id {:#?}",
-            connection_id
-        );
     }
 
     /// Handles the following hook messages:
