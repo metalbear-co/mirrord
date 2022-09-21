@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-macro"
+name = "mirrord-config-derive"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -13,10 +13,11 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 proc-macro = true
 
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "1", features = ["full"] }
+syn = { version = "1", features = ["full", "extra-traits"] }

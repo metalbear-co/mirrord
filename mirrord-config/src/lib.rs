@@ -1,4 +1,5 @@
 #![feature(slice_concat_trait)]
+#![feature(once_cell)]
 
 pub mod agent;
 pub mod config;
@@ -13,7 +14,7 @@ pub mod util;
 
 use std::path::Path;
 
-use mirrord_macro::MirrordConfig;
+use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{

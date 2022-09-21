@@ -15,6 +15,7 @@ edition.workspace = true
 
 [dependencies]
 mirrord-macro = { path = "../mirrord-macro"}
+mirrord-config-derive = { path = "./derive"}
 
 anyhow.workspace = true
 serde = { version = "1", features = ["derive"] }

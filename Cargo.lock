@@ -1485,6 +1485,7 @@ name = "mirrord-config"
 version = "3.0.6-alpha"
 dependencies = [
  "anyhow",
+ "mirrord-config-derive",
  "mirrord-macro",
  "rstest",
  "serde",
@@ -1492,6 +1493,15 @@ dependencies = [
  "serde_yaml 0.9.11",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "mirrord-config-derive"
+version = "3.0.6-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

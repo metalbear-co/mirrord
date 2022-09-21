@@ -1,4 +1,4 @@
-use mirrord_macro::MirrordConfig;
+use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
