@@ -5,17 +5,16 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
   pull_request:
     branches: [main]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
-
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
 jobs:
   lint:
@@ -285,6 +284,12 @@ jobs:
           - os: ubuntu-latest
             extension: so
             target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            extension: dylib
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            extension: dylib
+            target: x86_64-apple-darwin
     runs-on: ${{matrix.os}}
     steps:
       - uses: actions/checkout@v2
@@ -296,8 +301,12 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.target}}-${{matrix.os}}
-      - name: build mirrord-layer and cli
-        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+      # build cli only on linux because on macOS we need universal
+      - name: build cli
+        if: endsWith(matrix.target, 'gnu')
+        run: cargo +nightly build --release -p mirrord --target=${{matrix.target}}
+      - name: build mirrord-layer
+        run: cargo +nightly build --release -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
@@ -306,15 +315,14 @@ jobs:
             target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
           if-no-files-found: error
 
-  build_binaries_macos:
+  sign_patch_macos:
     runs-on: macos-latest
+    needs: [build_binaries]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/download-artifact@v3
         with:
-          profile: minimal
-          toolchain: nightly
-          target: aarch64-apple-darwin
+          path: /tmp/artifacts
       - uses: Swatinem/rust-cache@v1
       # - name: Import Code-Signing Certificates
       #   uses: Apple-Actions/import-codesign-certs@v1
@@ -328,19 +336,18 @@ jobs:
       #     brew tap mitchellh/gon
       #     brew install mitchellh/gon/gon
       - name: build mirrord-layer x86-64
-        run: cargo +nightly build --release -p mirrord-layer --target=x86_64-apple-darwin
-      - name: build mirrord-layer macOS arm/arm64e
         # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
         # >> magic bits: 0000000 facf feed 000c 0100 0000 0000 0006 0000
-        # >> After editing using dd - 
+        # >> After editing using dd -
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
-        run: |
-          cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
-          cp target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
-          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib bs=1 seek=8 count=1 conv=notrunc
-          codesign -s - target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
+        run:
+          mkdir -p target/aarch64-apple-darwin/release target/x86_64-apple-darwin/release
+          cp -r /tmp/artifacts/target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+          cp -r /tmp/artifacts/target/x86_64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer.dylib bs=1 seek=8 count=1 conv=notrunc
+          codesign -s - target/aarch64-apple-darwin/release/libmirrord_layer.dylib
       # - name: Sign layer binaries
       #   env:
       #     AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
