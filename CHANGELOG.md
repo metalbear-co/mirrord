@@ -7,6 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Release of armv7 docker images.
+
+### Changed
+- Faster release by cross compiling agent from native architecture.
+
+
 ## 3.0.9-alpha
 
 ### Changed
