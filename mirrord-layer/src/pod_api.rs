@@ -82,7 +82,7 @@ impl RuntimeData {
             container_id: container_id.to_string(),
             container_runtime: container_runtime.to_string(),
             node_name: target
-                .node_name(pods_api)
+                .node_name(pods_api, deployment_api)
                 .await
                 .as_ref()
                 .ok_or(LayerError::NodeNotFound(target))?
@@ -433,14 +433,22 @@ impl DeploymentData {
         pod_api: &Api<Pod>,
     ) -> Option<String> {
         let deployment = deployment_api.get(&self.deployment).await.ok()?;
-        let pod = deployment
+        let pod_label = deployment
             .spec
-            .and_then(|spec| spec.template.metadata?.name)
-            .map(|pod_name| PodData {
-                pod_name,
-                container_name: None,
-            })?;
-        pod.container_id(pod_api).await
+            .and_then(|spec| spec.template.metadata?.labels)
+            .and_then(|pod_name| pod_name.get("app").cloned())?;
+        let pod = pod_api
+            .list(&ListParams::default().labels(&format!("app={}", pod_label)))
+            .await
+            .ok()?
+            .items
+            .first()?
+            .clone();
+        pod.status?
+            .container_statuses?
+            .first()?
+            .container_id
+            .clone()
     }
 }
 
@@ -464,16 +472,37 @@ impl Target {
         }
     }
 
-    pub async fn node_name(&self, pods_api: Api<Pod>) -> Option<String> {
+    pub async fn node_name(
+        &self,
+        pod_api: Api<Pod>,
+        deployment_api: Api<Deployment>,
+    ) -> Option<String> {
         match self {
             Target::Pod(PodData {
                 pod_name,
                 container_name: _,
             }) => {
-                let pod = pods_api.get(pod_name).await.ok()?;
+                let pod = pod_api.get(pod_name).await.ok()?;
                 pod.spec?.node_name
             }
-            Target::Deployment(_) => None,
+            Target::Deployment(DeploymentData { deployment }) => {
+                let deployment = deployment_api.get(deployment).await.ok()?;
+                debug!("Deployment = {:#?}", deployment);
+                // deployment.spec?.template.spec?.node_name
+                // TODO: bad code ahead ):, find a way to put the node_name in when initialized
+                let pod_label = deployment
+                    .spec
+                    .and_then(|spec| spec.template.metadata?.labels)
+                    .and_then(|pod_name| pod_name.get("app").cloned())?;
+                let pod = pod_api
+                    .list(&ListParams::default().labels(&format!("app={}", pod_label)))
+                    .await
+                    .ok()?
+                    .items
+                    .first()?
+                    .clone();
+                pod.spec?.node_name
+            }
         }
     }
 }
