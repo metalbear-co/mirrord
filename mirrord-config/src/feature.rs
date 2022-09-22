@@ -9,12 +9,12 @@ use crate::{
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct FeatureField {
-    #[config(nested = true)]
+    #[config(nested)]
     pub env: Option<FlagField<EnvField>>,
 
-    #[config(nested = true)]
+    #[config(nested)]
     pub fs: Option<FlagField<FsField>>,
 
-    #[config(nested = true)]
+    #[config(nested)]
     pub network: Option<FlagField<NetworkField>>,
 }

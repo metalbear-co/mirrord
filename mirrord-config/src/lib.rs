@@ -33,15 +33,15 @@ pub struct LayerFileConfig {
     pub skip_processes: Option<VecOrSingle<String>>,
 
     #[serde(default)]
-    #[config(nested = true)]
+    #[config(nested)]
     pub agent: AgentField,
 
     #[serde(default)]
-    #[config(nested = true)]
+    #[config(nested)]
     pub pod: PodField,
 
     #[serde(default)]
-    #[config(nested = true)]
+    #[config(nested)]
     pub feature: FeatureField,
 }
 

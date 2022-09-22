@@ -32,22 +32,26 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
 }
 
 fn get_config_flag(meta: &NestedMeta) -> Option<FieldFlags> {
-    if let NestedMeta::Meta(Meta::NameValue(meta)) = meta {
-        if meta.path.is_ident("env") {
-            return Some(FieldFlags::Env(meta.lit.clone()));
-        }
+    match meta {
+        NestedMeta::Meta(Meta::Path(path)) => {
+            if path.is_ident("unwrap") {
+                return Some(FieldFlags::Unwrap);
+            }
 
-        if meta.path.is_ident("default") {
-            return Some(FieldFlags::Default(meta.lit.clone()));
+            if path.is_ident("nested") {
+                return Some(FieldFlags::Nested);
+            }
         }
+        NestedMeta::Meta(Meta::NameValue(meta)) => {
+            if meta.path.is_ident("env") {
+                return Some(FieldFlags::Env(meta.lit.clone()));
+            }
 
-        if meta.path.is_ident("unwrap") {
-            return Some(FieldFlags::Unwrap);
+            if meta.path.is_ident("default") {
+                return Some(FieldFlags::Default(meta.lit.clone()));
+            }
         }
-
-        if meta.path.is_ident("nested") {
-            return Some(FieldFlags::Nested);
-        }
+        _ => {}
     }
 
     None
@@ -182,35 +186,31 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         _ => panic!("Unions are not supported"),
     };
 
-    let mapped_fields = match &data {
+    let fields = match data {
         Data::Struct(DataStruct { fields, .. }) => match fields {
-            Fields::Named(FieldsNamed { named, .. }) => {
-                let named = named
-                    .clone()
-                    .into_iter()
-                    .map(map_field_name)
-                    .collect::<Vec<_>>();
-
-                quote! { { #(#named),* } }
-            }
+            Fields::Named(FieldsNamed { named, .. }) => named,
             _ => todo!(),
         },
         _ => todo!(),
     };
 
-    let mapped_fields_impl = match data {
-        Data::Struct(DataStruct { fields, .. }) => match fields {
-            Fields::Named(FieldsNamed { named, .. }) => {
-                let named = named
-                    .into_iter()
-                    .map(|field| map_field_name_impl(&ident, field))
-                    .collect::<Vec<_>>();
+    let mapped_fields = {
+        let named = fields
+            .clone()
+            .into_iter()
+            .map(map_field_name)
+            .collect::<Vec<_>>();
 
-                quote! { { #(#named),* } }
-            }
-            _ => todo!(),
-        },
-        _ => todo!(),
+        quote! { { #(#named),* } }
+    };
+
+    let mapped_fields_impl = {
+        let named = fields
+            .into_iter()
+            .map(|field| map_field_name_impl(&ident, field))
+            .collect::<Vec<_>>();
+
+        quote! { { #(#named),* } }
     };
 
     let output = quote! {

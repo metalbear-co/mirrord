@@ -16,7 +16,7 @@ pub struct NetworkField {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
     pub incoming: Option<IncomingField>,
 
-    #[config(nested = true)]
+    #[config(nested)]
     pub outgoing: Option<FlagField<OutgoingField>>,
 
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
