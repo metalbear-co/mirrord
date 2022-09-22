@@ -230,6 +230,11 @@ async fn create_ephemeral_container_agent(
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
 
+    let PodData {
+        pod_name,
+        container_name,
+    } = pod_target;
+
     let mirrord_agent_name = get_agent_name();
 
     let mut agent_command_line = vec![
@@ -253,21 +258,21 @@ async fn create_ephemeral_container_agent(
             "privileged": true,
         },
         "imagePullPolicy": config.image_pull_policy,
-        "targetContainerName": pod_target.container_name,
+        "targetContainerName": container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
         "command": agent_command_line,
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
     let mut ephemeral_containers_subresource = pods_api
-        .get_subresource("ephemeralcontainers", &pod_target.pod_name)
+        .get_subresource("ephemeralcontainers", &pod_name)
         .await
         .map_err(LayerError::KubeError)?;
 
     let mut spec = ephemeral_containers_subresource
         .spec
         .as_mut()
-        .ok_or_else(|| LayerError::PodSpecNotFound(pod_target.pod_name.clone()))?;
+        .ok_or_else(|| LayerError::PodSpecNotFound(pod_name.clone()))?;
 
     spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
         Some(mut ephemeral_containers) => {
@@ -280,7 +285,7 @@ async fn create_ephemeral_container_agent(
     pods_api
         .replace_subresource(
             "ephemeralcontainers",
-            &pod_target.pod_name,
+            &pod_name,
             &PostParams::default(),
             to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
@@ -288,7 +293,7 @@ async fn create_ephemeral_container_agent(
         .map_err(LayerError::KubeError)?;
 
     let params = ListParams::default()
-        .fields(&format!("metadata.name={}", &pod_target.pod_name))
+        .fields(&format!("metadata.name={}", &pod_name))
         .timeout(60);
 
     let stream = watcher(pods_api.clone(), params).applied_objects();
@@ -303,10 +308,10 @@ async fn create_ephemeral_container_agent(
         }
     }
 
-    wait_for_agent_startup(pods_api, &pod_target.pod_name, mirrord_agent_name).await?;
+    wait_for_agent_startup(pods_api, &pod_name, mirrord_agent_name).await?;
 
     debug!("container is ready");
-    Ok(pod_target.pod_name.clone())
+    Ok(pod_name)
 }
 
 async fn create_job_pod_agent(
