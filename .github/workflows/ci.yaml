@@ -5,17 +5,16 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
   pull_request:
     branches: [main]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
-
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
 jobs:
   lint:
@@ -333,7 +332,7 @@ jobs:
         # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
         # >> magic bits: 0000000 facf feed 000c 0100 0000 0000 0006 0000
-        # >> After editing using dd - 
+        # >> After editing using dd -
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
@@ -383,6 +382,10 @@ jobs:
           path: |
             target/universal-apple-darwin/release/mirrord
             target/universal-apple-darwin/release/libmirrord_layer.dylib
+            target/universal-apple-darwin/release/mirrord
+            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+            target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+            target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
           if-no-files-found: error
 
   release_docker_image:
