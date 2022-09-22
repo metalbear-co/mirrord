@@ -7,8 +7,32 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.9-alpha
+
+### Changed
+- Ignore http tests because they are unstable, and they block the CI.
+- Bundle arm64 binary into the universal binary for MacOS.
+
+## 3.0.8-alpha
+
 ### Fixed
+- release CI: Fix dylib path for `dd`.
+
+## 3.0.7-alpha
+
+### Fixed
+- mirrord-layer: Fix `connect` returning error when called on UDP sockets and the
+  outgoing traffic feature of mirrord is disabled.
+- mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
 - intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
+- vscode-ext: Support debugging Go, and fix issues with configuring file ops and traffic stealing.
+
+### Changed
+- mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
+- mirrord-layer: Refactor `connect` function to be less bloated.
+- `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
+- mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
+- mirrord-agent: `IndexAllocator` now uses `ConnectionId` for outgoing traffic feature.
 
 ## 3.0.6-alpha
 

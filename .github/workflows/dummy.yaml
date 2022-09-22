@@ -1,0 +1,59 @@
+# https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks#handling-skipped-but-required-checks/
+name: CI
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
+      - 'CHANGELOG.md'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
+      - 'CHANGELOG.md'
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  test_mirrord_protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  test_agent:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  test_mirrord_layer:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  test_agent_image:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  test_mirrord_layer_cli:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  build_mirrord:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  e2e_macos:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  
+  
+  
+  
+  

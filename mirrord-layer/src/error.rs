@@ -6,7 +6,7 @@ use libc::FILE;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::{error, log::trace, warn};
+use tracing::{error, warn};
 
 use super::HookMessage;
 
@@ -167,7 +167,7 @@ impl From<HookError> for i64 {
             }
             HookError::ResponseError(ResponseError::DnsFailure(code)) => {
                 use dns_lookup::{LookupError, LookupErrorKind};
-                trace!("dns failed with code {}", code);
+                error!("dns failed with code {}", code);
                 // Some of the codes of Unix doesn't match FreeBSD/macOS so we re-use the library
                 // to return valid codes.
                 let error = LookupError::new(code);
@@ -182,7 +182,7 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
-                trace!("Error occured in Layer >> {:?}", fail)
+                error!("Error occured in Layer >> {:?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
@@ -203,7 +203,11 @@ impl From<HookError> for i64 {
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
-                ResponseError::Remote(_) => libc::EINVAL,
+                ResponseError::Remote(remote) => match remote {
+                    // So far only encountered when trying to make requests from golang.
+                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
+                    _ => libc::EINVAL,
+                },
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
