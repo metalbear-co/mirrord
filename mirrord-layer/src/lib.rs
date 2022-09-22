@@ -395,16 +395,22 @@ async fn start_layer_thread(
             }))
             .await;
 
-        let msg = codec.next().await;
-        if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
-            trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+        select! {
+          msg = codec.next() => {
+            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
-            for (key, value) in remote_env_vars.into_iter() {
-                std::env::set_var(&key, &value);
-                debug_assert_eq!(std::env::var(key), Ok(value));
+                for (key, value) in remote_env_vars.into_iter() {
+                    std::env::set_var(&key, &value);
+                    debug_assert_eq!(std::env::var(key), Ok(value));
+                }
+            } else {
+                panic!("unexpected response - expected env vars response {msg:?}");
             }
-        } else {
-            panic!("unexpected response - expected env vars response {msg:?}");
+          },
+          _ = sleep(Duration::from_secs(config.agent_communication_timeout.unwrap_or(30).into())) => {
+            panic!("response timeout - expected env var response");
+          }
         }
     };
 
