@@ -117,7 +117,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if let Some(namespace) = &args.agent_namespace {
         std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }    
+    }
 
     if let Some(log_level) = &args.agent_log_level {
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
