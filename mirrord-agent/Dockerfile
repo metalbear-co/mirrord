@@ -13,8 +13,8 @@ COPY tests /app/tests
 COPY .cargo /app/.cargo
 ARG TARGETPLATFORM
 RUN /bin/bash -c 'if [ "$TARGETPLATFORM" = "linux/amd64" ]; then export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu && rustup target add $CARGO_BUILD_TARGET && cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release && cp target/$CARGO_BUILD_TARGET/release/mirrord-agent /app/mirrord-agent; fi'
-RUN /bin/bash -c 'if [ "$TARGETPLATFORM" = "linux/arm64" ]; then export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu && rustup target add $CARGO_BUILD_TARGET && cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release && cp target/$CARGO_BUILD_TARGET/release/mirrord-agent /app/mirrord-agent; fi'
-RUN /bin/bash -c 'if [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf && rustup target add $CARGO_BUILD_TARGET && cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release && cp target/$CARGO_BUILD_TARGET/release/mirrord-agent /app/mirrord-agent; fi'
+RUN /bin/bash -c 'if [ "$TARGETPLATFORM" = "linux/arm64" ]; then export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu && apt-get install -y gcc make gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu && rustup target add $CARGO_BUILD_TARGET && cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release && cp target/$CARGO_BUILD_TARGET/release/mirrord-agent /app/mirrord-agent; fi'
+RUN /bin/bash -c 'if [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf && dpkg --add-architecture armhf && apt-get update && apt-get install -y libdbus-1-dev libdbus-1-dev:armhf libc6-armhf-cross libc6-dev-armhf-cross gcc-arm-linux-gnueabihf && rustup target add $CARGO_BUILD_TARGET && cargo +nightly build -Z bindeps --manifest-path /app/mirrord-agent/Cargo.toml --release && cp target/$CARGO_BUILD_TARGET/release/mirrord-agent /app/mirrord-agent; fi'
 
 FROM debian:stable
 COPY --from=build-env /app/mirrord-agent /
