@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
+    apps::v1::Deployment,
     batch::v1::Job,
     core::v1::{EphemeralContainer, Pod},
 };
@@ -11,10 +14,10 @@ use kube::{
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
-    config::{Deployment, LayerConfig, PodAndContainer, Target},
+    config::LayerConfig,
     error::{LayerError, Result},
 };
 
@@ -50,16 +53,21 @@ struct RuntimeData {
 
 impl RuntimeData {
     async fn from_k8s(client: Client, target: &str, pod_namespace: &str) -> Result<Self> {
-        let target = match target.parse::<Deployment>() {
+        let target = match target.parse::<DeploymentData>() {
             Ok(deployment) => Target::Deployment(deployment),
-            Err(_) => match target.parse::<PodAndContainer>() {
+            Err(_) => match target.parse::<PodData>() {
                 Ok(pod) => Target::Pod(pod),
                 Err(_) => return Err(LayerError::InvalidTarget(target.to_string())),
             },
         };
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
+        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), pod_namespace);
 
-        let container_info = target.container_info(&pods_api, pod_namespace).await;
+        // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
+        // Apis, but match on the Target enum and pass accordingly
+        let container_info = target
+            .container_info(&pods_api, &deployment_api, pod_namespace)
+            .await;
 
         let container_info = container_info
             .as_ref()
@@ -125,7 +133,7 @@ pub(crate) async fn create_agent(
     });
 
     let pod_name = if ephemeral_container {
-        let pod_target = target.parse::<PodAndContainer>().unwrap();
+        let pod_target = target.parse::<PodData>().unwrap();
 
         create_ephemeral_container_agent(
             &config,
@@ -219,7 +227,7 @@ async fn wait_for_agent_startup(
 
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
-    pod_target: PodAndContainer,
+    pod_target: PodData,
     agent_image: String,
     pods_api: &Api<Pod>,
     connection_port: u16,
@@ -411,4 +419,128 @@ async fn create_job_pod_agent(
 
     wait_for_agent_startup(pods_api, &pod_name, "mirrord-agent".to_string()).await?;
     Ok(pod_name)
+}
+
+#[derive(Debug)]
+pub(crate) struct DeploymentData {
+    deployment: String,
+}
+
+impl DeploymentData {
+    pub async fn container_id(
+        &self,
+        deployment_api: &Api<Deployment>,
+        _pod_namespace: &str,
+    ) -> Option<String> {
+        // TODO: Can a deployment have multiple pods? Do we just want deployment/name &
+        // deployment/name/container/name or deployment/name/pod/name as well?
+        let _deployment = deployment_api.get(&self.deployment).await.unwrap();
+        // deployment.spec.unwrap().template.spec.unwrap().containers.first().unwrap().name.clone()
+        None
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum Target {
+    Deployment(DeploymentData),
+    Pod(PodData),
+}
+
+impl Target {
+    pub async fn container_info(
+        &self,
+        pods_api: &Api<Pod>,
+        deployment_api: &Api<Deployment>,
+        pod_namespace: &str,
+    ) -> Option<String> {
+        match self {
+            Target::Pod(pod) => pod.container_id(pods_api, pod_namespace).await,
+            Target::Deployment(deployment) => {
+                deployment.container_id(deployment_api, pod_namespace).await
+            }
+        }
+    }
+
+    pub async fn node_name(&self, pods_api: Api<Pod>) -> Option<String> {
+        match self {
+            Target::Pod(PodData {
+                pod_name,
+                container_name: _,
+            }) => {
+                let pod = pods_api.get(pod_name).await.unwrap();
+                pod.spec.unwrap().node_name
+            }
+            Target::Deployment(_) => None,
+        }
+    }
+}
+
+impl FromStr for DeploymentData {
+    type Err = LayerError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let split = s.split('/').collect::<Vec<&str>>();
+        match split.first() {
+            Some(&"deployment") => Ok(DeploymentData {
+                deployment: split[1].to_string(),
+            }),
+            _ => Err(LayerError::InvalidTarget(format!(
+                "Given target: {:?} is not a deployment.",
+                s
+            ))),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PodData {
+    pub pod_name: String,
+    pub container_name: Option<String>,
+}
+
+impl FromStr for PodData {
+    type Err = LayerError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let split = s.split('/').collect::<Vec<&str>>();
+        match split.first() {
+            Some(&"pod") if split.len() == 2 => Ok(PodData {
+                pod_name: split[1].to_string(),
+                container_name: None,
+            }),
+            Some(&"pod") if split.len() == 4 && split[2] == "container" => Ok(PodData {
+                pod_name: split[1].to_string(),
+                container_name: Some(split[3].to_string()),
+            }),
+            _ => Err(LayerError::InvalidTarget(format!(
+                "Given target: {:?} is not a pod.",
+                s
+            ))),
+        }
+    }
+}
+
+impl PodData {
+    pub async fn container_id(&self, pods_api: &Api<Pod>, pod_namespace: &str) -> Option<String> {
+        let pod = pods_api.get(&self.pod_name).await.unwrap();
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+        let container_info = if let Some(container_name) = &self.container_name {
+            &container_statuses
+                .iter()
+                .find(|&status| &status.name == container_name)
+                .ok_or_else(|| {
+                    LayerError::ContainerNotFound(
+                        container_name.clone(),
+                        pod_namespace.to_string(),
+                        self.pod_name.to_string(),
+                    )
+                })
+                .unwrap()
+                .container_id
+        } else {
+            info!("No container name specified, defaulting to first container found");
+            &container_statuses.first().unwrap().container_id
+        };
+        container_info.clone()
+    }
 }
