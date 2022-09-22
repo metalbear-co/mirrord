@@ -427,15 +427,15 @@ impl DeploymentData {
         deployment_api: &Api<Deployment>,
         pod_api: &Api<Pod>,
         pod_namespace: &str,
-    ) -> Option<String> {
-        let deployment = deployment_api.get(&self.deployment).await.ok()?;
+    ) -> Result<String> {
+        let deployment = deployment_api.get(&self.deployment).await.map_err(LayerError::KubeError)?;
         let pod = deployment
             .spec
             .and_then(|spec| spec.template.metadata?.name)
             .map(|pod_name| PodData {
                 pod_name,
                 container_name: None,
-            })?;
+            }).ok_or(LayerError::PodNotFound(self.deployment.clone()))?;
         pod.container_id(pod_api, pod_namespace).await
     }
 }
@@ -452,7 +452,7 @@ impl Target {
         pod_api: &Api<Pod>,
         deployment_api: &Api<Deployment>,
         pod_namespace: &str,
-    ) -> Option<String> {
+    ) -> Result<String> {
         match self {
             Target::Pod(pod) => pod.container_id(pod_api, pod_namespace).await,
             Target::Deployment(deployment) => {
@@ -469,8 +469,8 @@ impl Target {
                 pod_name,
                 container_name: _,
             }) => {
-                let pod = pods_api.get(pod_name).await.unwrap();
-                pod.spec.unwrap().node_name
+                let pod = pods_api.get(pod_name).await.ok()?;
+                pod.spec?.node_name
             }
             Target::Deployment(_) => None,
         }
@@ -523,11 +523,14 @@ impl FromStr for PodData {
 }
 
 impl PodData {
-    pub async fn container_id(&self, pods_api: &Api<Pod>, pod_namespace: &str) -> Option<String> {
-        let pod = pods_api.get(&self.pod_name).await.unwrap();
-        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+    pub async fn container_id(&self, pods_api: &Api<Pod>, pod_namespace: &str) -> Result<String> {
+        let pod = pods_api.get(&self.pod_name).await.map_err(LayerError::KubeError)?;
+        let container_statuses = &pod.status.and_then(|status| status.container_statuses);
+        // TODO: should the return type be a Result here?
         let container_info = if let Some(container_name) = &self.container_name {
             &container_statuses
+            .as_ref()
+            .unwrap()
                 .iter()
                 .find(|&status| &status.name == container_name)
                 .ok_or_else(|| {
@@ -536,14 +539,13 @@ impl PodData {
                         pod_namespace.to_string(),
                         self.pod_name.to_string(),
                     )
-                })
-                .unwrap()
+                })?                
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
-            &container_statuses.first().unwrap().container_id
+            &container_statuses.as_ref().unwrap().first().unwrap().container_id
         };
-        container_info.clone()
+        container_info.clone().ok_or(LayerError::ContainerNotFound("".to_string(), "".to_string(), "".to_string()))
     }
 }
 
