@@ -54,7 +54,7 @@ struct RuntimeData {
 impl RuntimeData {
     async fn from_k8s(client: Client, target: &str, pod_namespace: &str) -> Result<Self> {
         let target = target.parse::<Target>().unwrap();
-          
+
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
         let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), pod_namespace);
 
@@ -425,13 +425,23 @@ impl DeploymentData {
     pub async fn container_id(
         &self,
         deployment_api: &Api<Deployment>,
-        _pod_namespace: &str,
+        pod_api: &Api<Pod>,
+        pod_namespace: &str,
     ) -> Option<String> {
-        // TODO: Can a deployment have multiple pods? Do we just want deployment/name &
-        // deployment/name/container/name or deployment/name/pod/name as well?
-        let _deployment = deployment_api.get(&self.deployment).await.unwrap();
-        // deployment.spec.unwrap().template.spec.unwrap().containers.first().unwrap().name.clone()
-        None
+        let deployment = deployment_api.get(&self.deployment).await.unwrap();
+        let pod_name = deployment
+            .spec
+            .unwrap()
+            .template
+            .metadata
+            .unwrap()
+            .name
+            .unwrap();
+        let pod = PodData {
+            pod_name,
+            container_name: None,
+        };
+        pod.container_id(pod_api, pod_namespace).await
     }
 }
 
@@ -444,14 +454,16 @@ pub(crate) enum Target {
 impl Target {
     pub async fn container_info(
         &self,
-        pods_api: &Api<Pod>,
+        pod_api: &Api<Pod>,
         deployment_api: &Api<Deployment>,
         pod_namespace: &str,
     ) -> Option<String> {
         match self {
-            Target::Pod(pod) => pod.container_id(pods_api, pod_namespace).await,
+            Target::Pod(pod) => pod.container_id(pod_api, pod_namespace).await,
             Target::Deployment(deployment) => {
-                deployment.container_id(deployment_api, pod_namespace).await
+                deployment
+                    .container_id(deployment_api, pod_api, pod_namespace)
+                    .await
             }
         }
     }
@@ -550,6 +562,6 @@ impl FromStr for Target {
                 Ok(pod) => Ok(Target::Pod(pod)),
                 Err(_) => Err(LayerError::InvalidTarget(target.to_string())),
             },
-    }
+        }
     }
 }
