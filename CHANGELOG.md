@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Ignore http tests because they are unstable, and they block the CI.
+- Bundle arm64 binary into the universal binary for MacOS.
 
 ## 3.0.8-alpha
 
