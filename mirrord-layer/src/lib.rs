@@ -85,20 +85,28 @@ fn before_init() {
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
 
-        let config = match std::env::var("MIRRORD_CONFIG_FILE")
+        let config = std::env::var("MIRRORD_CONFIG_FILE")
             .ok()
             .and_then(|val| val.parse::<PathBuf>().ok())
-        {
-            Some(path) => LayerFileConfig::from_path(&path).unwrap(),
-            None => LayerFileConfig::default(),
-        }
-        .generate_config()
-        .unwrap();
+            .map(|path| {
+                LayerFileConfig::from_path(&path).expect("error parsing mirrord config file")
+            })
+            .unwrap_or_default()
+            .generate_config();
 
-        let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+        match config {
+            Ok(config) => {
+                let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-        if should_load(given_process, skip_processes) {
-            init(config);
+                if should_load(given_process, skip_processes) {
+                    init(config);
+                }
+            }
+            Err(err) => {
+                eprintln!("mirrord config error: {}", err);
+
+                std::process::exit(-1);
+            }
         }
     }
 }

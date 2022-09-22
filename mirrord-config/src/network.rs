@@ -31,13 +31,21 @@ impl MirrordFlaggedConfig for NetworkField {
                 DefaultValue::new("mirror"),
             )
                 .source_value()
-                .ok_or(ConfigError::ValueNotProvided("NetworkField", "incoming"))?,
+                .ok_or(ConfigError::ValueNotProvided(
+                    "NetworkField",
+                    "incoming",
+                    Some("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
+                ))?,
             dns: (
                 FromEnv::new("MIRRORD_REMOTE_DNS"),
                 DefaultValue::new("false"),
             )
                 .source_value()
-                .ok_or(ConfigError::ValueNotProvided("NetworkField", "dns"))?,
+                .ok_or(ConfigError::ValueNotProvided(
+                    "NetworkField",
+                    "dns",
+                    Some("MIRRORD_REMOTE_DNS"),
+                ))?,
             outgoing: OutgoingField::disabled_config()?,
         })
     }

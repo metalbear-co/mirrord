@@ -4,8 +4,8 @@ pub mod source;
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("couldn't find value {0:?} for {1:?}")]
-    ValueNotProvided(&'static str, &'static str),
+    #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
+    ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 }
 
 use thiserror::Error;

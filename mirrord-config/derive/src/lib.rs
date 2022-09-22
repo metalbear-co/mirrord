@@ -134,9 +134,12 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> proc_macro2::TokenStream
 
     let mut impls = Vec::new();
 
-    if let Some(FieldFlags::Env(flag)) =
-        flags.iter().find(|flag| matches!(flag, FieldFlags::Env(_)))
-    {
+    let env_flag = flags.iter().fold(None, |acc, flag| match flag {
+        FieldFlags::Env(env) => Some(env),
+        _ => acc,
+    });
+
+    if let Some(flag) = env_flag {
         impls.push(quote! { crate::config::from_env::FromEnv::new(#flag) });
     }
 
@@ -154,7 +157,13 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> proc_macro2::TokenStream
     }
 
     let unwrapper = flags.iter().find(|flag| matches!(flag, FieldFlags::Unwrap | FieldFlags::Nested | FieldFlags::Default(_))).map(
-        |_| quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident)))? },
+        |_| {
+            let env_override = match env_flag {
+                Some(flag) => quote! { Some(#flag) },
+                None => quote! { None }
+            };
+            quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
+        }
     );
 
     quote! {

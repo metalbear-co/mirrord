@@ -26,13 +26,21 @@ impl MirrordFlaggedConfig for OutgoingField {
                 DefaultValue::new("false"),
             )
                 .source_value()
-                .ok_or(ConfigError::ValueNotProvided("NetworkField", "incoming"))?,
+                .ok_or(ConfigError::ValueNotProvided(
+                    "OutgoingField",
+                    "tcp",
+                    Some("MIRRORD_TCP_OUTGOING"),
+                ))?,
             udp: (
                 FromEnv::new("MIRRORD_UDP_OUTGOING"),
                 DefaultValue::new("false"),
             )
                 .source_value()
-                .ok_or(ConfigError::ValueNotProvided("NetworkField", "incoming"))?,
+                .ok_or(ConfigError::ValueNotProvided(
+                    "OutgoingField",
+                    "udp",
+                    Some("MIRRORD_TCP_OUTGOING"),
+                ))?,
         })
     }
 }
