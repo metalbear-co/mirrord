@@ -90,6 +90,7 @@ impl UdpOutgoingHandler {
         mirror_socket: UdpSocket,
         remote_rx: Receiver<Vec<u8>>,
     ) {
+        debug!("UDP interceptor started.");
         let mut remote_stream = ReceiverStream::new(remote_rx);
         let mut recv_from_buffer = vec![0; 1500];
 

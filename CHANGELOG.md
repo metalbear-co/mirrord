@@ -12,7 +12,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Faster release by cross compiling agent from native architecture.
-
+- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
+  call to `connect`) is successfully intercepted and forwarded.
 
 ## 3.0.9-alpha
 
