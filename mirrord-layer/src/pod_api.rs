@@ -428,19 +428,14 @@ impl DeploymentData {
         pod_api: &Api<Pod>,
         pod_namespace: &str,
     ) -> Option<String> {
-        let deployment = deployment_api.get(&self.deployment).await.unwrap();
-        let pod_name = deployment
+        let deployment = deployment_api.get(&self.deployment).await.ok()?;
+        let pod = deployment
             .spec
-            .unwrap()
-            .template
-            .metadata
-            .unwrap()
-            .name
-            .unwrap();
-        let pod = PodData {
-            pod_name,
-            container_name: None,
-        };
+            .and_then(|spec| spec.template.metadata?.name)
+            .map(|pod_name| PodData {
+                pod_name,
+                container_name: None,
+            })?;
         pod.container_id(pod_api, pod_namespace).await
     }
 }
