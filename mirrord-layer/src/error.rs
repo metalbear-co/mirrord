@@ -9,6 +9,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, warn};
 
 use super::HookMessage;
+use crate::pod_api::Target;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
@@ -135,13 +136,13 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1}`")]
-    ContainerNotFound(String, String),
+    #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1:#?}`")]
+    ContainerNotFound(String, Target),
 
-    #[error("mirrord-layer: Node not found for target `{0}`")]
-    NodeNotFound(String),
+    #[error("mirrord-layer: Node not found for target `{0:#?}`")]
+    NodeNotFound(Target),
 
-    #[error("mirrord-layer: Invalid target proivded `{0}`!")]
+    #[error("mirrord-layer: Invalid target proivded `{0:#?}`!")]
     InvalidTarget(String),
 }
 

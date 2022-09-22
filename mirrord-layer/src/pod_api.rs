@@ -65,7 +65,7 @@ impl RuntimeData {
         let container_info = container_info
             .as_ref()
             .ok_or_else(|| {
-                LayerError::ContainerNotFound(pod_namespace.to_string(), format!("{:?}", target))
+                LayerError::ContainerNotFound(pod_namespace.to_string(), target.clone())
             })?
             .split("://")
             .collect::<Vec<&str>>();
@@ -85,7 +85,7 @@ impl RuntimeData {
                 .node_name(pods_api)
                 .await
                 .as_ref()
-                .ok_or_else(|| LayerError::NodeNotFound(format!("{:?}", target)))?
+                .ok_or(LayerError::NodeNotFound(target))?
                 .to_string(),
             socket_path: socket_path.to_string(),
         })
@@ -416,7 +416,7 @@ async fn create_job_pod_agent(
     Ok(pod_name)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DeploymentData {
     deployment: String,
 }
@@ -439,7 +439,7 @@ impl DeploymentData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Target {
     Deployment(DeploymentData),
     Pod(PodData),
@@ -490,7 +490,7 @@ impl FromStr for DeploymentData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PodData {
     pub pod_name: String,
     pub container_name: Option<String>,
