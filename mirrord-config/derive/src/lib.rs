@@ -19,7 +19,11 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
     if let Some(Expr::Assign(expr)) = expr {
         if let (Expr::Path(left_path), Expr::Path(right_path)) = (*expr.left, *expr.right) {
             if left_path.path.is_ident("map_to") {
-                return right_path.path.get_ident().cloned().unwrap_or(fallback);
+                return right_path
+                    .path
+                    .get_ident()
+                    .cloned()
+                    .expect("map_to value not a valid Ident");
             }
         }
     }

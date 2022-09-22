@@ -18,8 +18,8 @@ Example
 
 ```rust
 #[derive(MirrordConfig, Default)]
-#[config(map_to = MappedConfig)] // This is the default unless you want change it don't add this attribute
-pub struct Config {
+#[config(map_to = MappedConfig)] // This will default to MappedMyConfig unless you want change it don't add this attribute
+pub struct MyConfig {
     #[config(env = "VALUE_1")]
     pub value_1: Option<String>,
 
