@@ -53,13 +53,8 @@ struct RuntimeData {
 
 impl RuntimeData {
     async fn from_k8s(client: Client, target: &str, pod_namespace: &str) -> Result<Self> {
-        let target = match target.parse::<DeploymentData>() {
-            Ok(deployment) => Target::Deployment(deployment),
-            Err(_) => match target.parse::<PodData>() {
-                Ok(pod) => Target::Pod(pod),
-                Err(_) => return Err(LayerError::InvalidTarget(target.to_string())),
-            },
-        };
+        let target = target.parse::<Target>().unwrap();
+          
         let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
         let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), pod_namespace);
 
@@ -542,5 +537,19 @@ impl PodData {
             &container_statuses.first().unwrap().container_id
         };
         container_info.clone()
+    }
+}
+
+impl FromStr for Target {
+    type Err = LayerError;
+
+    fn from_str(target: &str) -> Result<Self> {
+        match target.parse::<DeploymentData>() {
+            Ok(deployment) => Ok(Target::Deployment(deployment)),
+            Err(_) => match target.parse::<PodData>() {
+                Ok(pod) => Ok(Target::Pod(pod)),
+                Err(_) => Err(LayerError::InvalidTarget(target.to_string())),
+            },
+    }
     }
 }
