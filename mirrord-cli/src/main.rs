@@ -102,7 +102,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.target.clone());
+    std::env::set_var("MIRRORD_TARGET", args.target.clone());
 
     if let Some(skip_processes) = &args.skip_processes {
         std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
@@ -117,14 +117,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if let Some(namespace) = &args.agent_namespace {
         std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(impersonated_container_name) = &args.impersonated_container_name {
-        std::env::set_var(
-            "MIRRORD_IMPERSONATED_CONTAINER_NAME",
-            impersonated_container_name,
-        );
-    }
+    }    
 
     if let Some(log_level) = &args.agent_log_level {
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());

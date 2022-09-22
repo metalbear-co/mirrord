@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use envconfig::Envconfig;
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client};
+use kube::Api;
 use tracing::info;
 
 use crate::error::LayerError;
@@ -72,25 +72,23 @@ pub struct LayerConfig {
     pub skip_processes: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Deployment(pub String);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Target {
     Deployment(Deployment),
     Pod(PodAndContainer),
 }
 
 impl Target {
-    pub async fn container_info(
-        &self,
-        pods_api: &Api<Pod>,
-        client: &Client,
-        pod_namespace: &str,
-    ) -> Option<String> {
+    pub async fn container_info(&self, pods_api: &Api<Pod>, pod_namespace: &str) -> Option<String> {
         match self {
-            Target::Pod(PodAndContainer(pod, container)) => {
-                self.pod(&pods_api, pod, container, pod_namespace, &client)
+            Target::Pod(PodAndContainer {
+                pod_name,
+                container_name,
+            }) => {
+                self.pod(pods_api, pod_name, container_name, pod_namespace)
                     .await
             }
             Target::Deployment(_) => None,
@@ -103,10 +101,8 @@ impl Target {
         pod_name: &String,
         container_name: &Option<String>,
         pod_namespace: &str,
-        client: &Client,
     ) -> Option<String> {
         let pod = pods_api.get(pod_name).await.unwrap();
-        let node_name = &pod.spec.unwrap().node_name;
         let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
         let container_info = if let Some(container_name) = container_name {
             &container_statuses
@@ -128,14 +124,17 @@ impl Target {
         container_info.clone()
     }
 
-    pub fn deployment(&self) -> Option<String> {
+    pub fn _deployment(&self) -> Option<String> {
         todo!()
     }
 
     pub async fn node_name(&self, pods_api: Api<Pod>) -> Option<String> {
         match self {
-            Target::Pod(PodAndContainer(pod_name, _)) => {
-                let pod = pods_api.get(&pod_name).await.unwrap();
+            Target::Pod(PodAndContainer {
+                pod_name,
+                container_name: _,
+            }) => {
+                let pod = pods_api.get(pod_name).await.unwrap();
                 pod.spec.unwrap().node_name
             }
             Target::Deployment(_) => None,
@@ -155,8 +154,11 @@ impl FromStr for Deployment {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct PodAndContainer(pub String, pub Option<String>);
+#[derive(Debug)]
+pub struct PodAndContainer {
+    pub pod_name: String,
+    pub container_name: Option<String>,
+}
 
 impl FromStr for PodAndContainer {
     type Err = String;
@@ -164,11 +166,14 @@ impl FromStr for PodAndContainer {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let split = s.split('/').collect::<Vec<&str>>();
         match split.first() {
-            Some(&"pod") if split.len() == 2 => Ok(PodAndContainer(split[1].to_string(), None)),
-            Some(&"pod") if split.len() == 4 && split[2] == "container" => Ok(PodAndContainer(
-                split[1].to_string(),
-                Some(split[3].to_string()),
-            )),
+            Some(&"pod") if split.len() == 2 => Ok(PodAndContainer {
+                pod_name: split[1].to_string(),
+                container_name: None,
+            }),
+            Some(&"pod") if split.len() == 4 && split[2] == "container" => Ok(PodAndContainer {
+                pod_name: split[1].to_string(),
+                container_name: Some(split[3].to_string()),
+            }),
             _ => Err(format!("Given target: {:?} is not a pod.", s)),
         }
     }
