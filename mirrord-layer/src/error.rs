@@ -135,8 +135,11 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
-    ContainerNotFound(String, String, String),
+    #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1}`")]
+    ContainerNotFound(String, String),
+
+    #[error("mirrord-layer: Node not found for target `{0}`")]
+    NodeNotFound(String),
 
     #[error("mirrord-layer: Invalid target proivded `{0}`!")]
     InvalidTarget(String),

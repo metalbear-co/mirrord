@@ -60,13 +60,13 @@ impl RuntimeData {
 
         // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
         // Apis, but match on the Target enum and pass accordingly
-        let container_info = target
-            .container_info(&pods_api, &deployment_api, pod_namespace)
-            .await;
+        let container_info = target.container_info(&pods_api, &deployment_api).await;
 
         let container_info = container_info
             .as_ref()
-            .unwrap()
+            .ok_or_else(|| {
+                LayerError::ContainerNotFound(pod_namespace.to_string(), format!("{:?}", target))
+            })?
             .split("://")
             .collect::<Vec<&str>>();
 
@@ -85,7 +85,7 @@ impl RuntimeData {
                 .node_name(pods_api)
                 .await
                 .as_ref()
-                .unwrap()
+                .ok_or_else(|| LayerError::NodeNotFound(format!("{:?}", target)))?
                 .to_string(),
             socket_path: socket_path.to_string(),
         })
@@ -128,7 +128,7 @@ pub(crate) async fn create_agent(
     });
 
     let pod_name = if ephemeral_container {
-        let pod_target = target.parse::<PodData>().unwrap();
+        let pod_target = target.parse::<PodData>()?;
 
         create_ephemeral_container_agent(
             &config,
@@ -426,17 +426,16 @@ impl DeploymentData {
         &self,
         deployment_api: &Api<Deployment>,
         pod_api: &Api<Pod>,
-        pod_namespace: &str,
-    ) -> Result<String> {
-        let deployment = deployment_api.get(&self.deployment).await.map_err(LayerError::KubeError)?;
+    ) -> Option<String> {
+        let deployment = deployment_api.get(&self.deployment).await.ok()?;
         let pod = deployment
             .spec
             .and_then(|spec| spec.template.metadata?.name)
             .map(|pod_name| PodData {
                 pod_name,
                 container_name: None,
-            }).ok_or(LayerError::PodNotFound(self.deployment.clone()))?;
-        pod.container_id(pod_api, pod_namespace).await
+            })?;
+        pod.container_id(pod_api).await
     }
 }
 
@@ -451,14 +450,11 @@ impl Target {
         &self,
         pod_api: &Api<Pod>,
         deployment_api: &Api<Deployment>,
-        pod_namespace: &str,
-    ) -> Result<String> {
+    ) -> Option<String> {
         match self {
-            Target::Pod(pod) => pod.container_id(pod_api, pod_namespace).await,
+            Target::Pod(pod) => pod.container_id(pod_api).await,
             Target::Deployment(deployment) => {
-                deployment
-                    .container_id(deployment_api, pod_api, pod_namespace)
-                    .await
+                deployment.container_id(deployment_api, pod_api).await
             }
         }
     }
@@ -480,15 +476,15 @@ impl Target {
 impl FromStr for DeploymentData {
     type Err = LayerError;
 
-    fn from_str(s: &str) -> Result<Self> {
-        let split = s.split('/').collect::<Vec<&str>>();
-        match split.first() {
+    fn from_str(input: &str) -> Result<Self> {
+        let target_data = input.split('/').collect::<Vec<&str>>();
+        match target_data.first() {
             Some(&"deployment") => Ok(DeploymentData {
-                deployment: split[1].to_string(),
+                deployment: target_data[1].to_string(),
             }),
             _ => Err(LayerError::InvalidTarget(format!(
-                "Given target: {:?} is not a deployment.",
-                s
+                "Provided target: {:?} is not a deployment.",
+                input
             ))),
         }
     }
@@ -503,49 +499,42 @@ pub(crate) struct PodData {
 impl FromStr for PodData {
     type Err = LayerError;
 
-    fn from_str(s: &str) -> Result<Self> {
-        let split = s.split('/').collect::<Vec<&str>>();
-        match split.first() {
-            Some(&"pod") if split.len() == 2 => Ok(PodData {
-                pod_name: split[1].to_string(),
+    fn from_str(input: &str) -> Result<Self> {
+        let target_data = input.split('/').collect::<Vec<&str>>();
+        match target_data.first() {
+            Some(&"pod") if target_data.len() == 2 => Ok(PodData {
+                pod_name: target_data[1].to_string(),
                 container_name: None,
             }),
-            Some(&"pod") if split.len() == 4 && split[2] == "container" => Ok(PodData {
-                pod_name: split[1].to_string(),
-                container_name: Some(split[3].to_string()),
-            }),
+            Some(&"pod") if target_data.len() == 4 && target_data[2] == "container" => {
+                Ok(PodData {
+                    pod_name: target_data[1].to_string(),
+                    container_name: Some(target_data[3].to_string()),
+                })
+            }
             _ => Err(LayerError::InvalidTarget(format!(
-                "Given target: {:?} is not a pod.",
-                s
+                "Provided target: {:?} is neither a pod or a deployment.",
+                input
             ))),
         }
     }
 }
 
 impl PodData {
-    pub async fn container_id(&self, pods_api: &Api<Pod>, pod_namespace: &str) -> Result<String> {
-        let pod = pods_api.get(&self.pod_name).await.map_err(LayerError::KubeError)?;
-        let container_statuses = &pod.status.and_then(|status| status.container_statuses);
+    pub async fn container_id(&self, pods_api: &Api<Pod>) -> Option<String> {
+        let pod = pods_api.get(&self.pod_name).await.ok()?;
+        let container_statuses = &pod.status?.container_statuses?;
         // TODO: should the return type be a Result here?
         let container_info = if let Some(container_name) = &self.container_name {
             &container_statuses
-            .as_ref()
-            .unwrap()
                 .iter()
-                .find(|&status| &status.name == container_name)
-                .ok_or_else(|| {
-                    LayerError::ContainerNotFound(
-                        container_name.clone(),
-                        pod_namespace.to_string(),
-                        self.pod_name.to_string(),
-                    )
-                })?                
+                .find(|&status| &status.name == container_name)?
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
-            &container_statuses.as_ref().unwrap().first().unwrap().container_id
+            &container_statuses.first()?.container_id
         };
-        container_info.clone().ok_or(LayerError::ContainerNotFound("".to_string(), "".to_string(), "".to_string()))
+        container_info.clone()
     }
 }
 
