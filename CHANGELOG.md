@@ -7,8 +7,23 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.10-alpha
+
+### Added
+- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
+  call to `connect`) is successfully intercepted and forwarded.
+
+### Fixed
+- macOS binaries should be okay now.
+
+
+### Fixed
+
+## 3.0.9-alpha
+
 ### Changed
 - Ignore http tests because they are unstable, and they block the CI.
+- Bundle arm64 binary into the universal binary for MacOS.
 
 ## 3.0.8-alpha
 

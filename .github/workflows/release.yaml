@@ -33,7 +33,7 @@ jobs:
             target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
           if-no-files-found: error
   build_binaries_macos:
-    runs-on: macos-latest
+    runs-on: macos-12
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -63,8 +63,9 @@ jobs:
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
-          cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin          
-          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer.dylib bs=1 seek=8 count=1 conv=notrunc
+          cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
+          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib bs=1 seek=8 count=1 conv=notrunc
       - name: Sign layer binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
@@ -73,7 +74,7 @@ jobs:
       - name: create universal target dir
         run: mkdir -p /tmp/target/universal-apple-darwin/release
       - name: create universal dylib
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
       - name: Sign layer universal
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
