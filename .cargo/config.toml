@@ -4,3 +4,7 @@ bindeps = true
 # don't know why it's needed..
 [target.armv7-unknown-linux-gnueabihf]
 linker = "armv7-unknown-linux-gnueabihf-gcc"
+
+# don't know why it's needed..
+[target.armv7-unknown-linux-gnueabihf]
+linker = "aarch64-unknown-linux-gnu-gcc"
