@@ -494,6 +494,7 @@ mod tests {
     #[rstest]
     #[case("pod/foobaz", Target::Pod(PodData {pod_name: "foobaz".to_string(), container_name: None}))]
     #[case("deployment/foobaz", Target::Deployment(DeploymentData {deployment: "foobaz".to_string()}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentData {deployment: "nginx-deployment".to_string()}))]
     #[case("pod/foo/container/baz", Target::Pod(PodData { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
     fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();

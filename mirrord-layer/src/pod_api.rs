@@ -63,6 +63,7 @@ impl RuntimeData {
         let Response {
             container_info,
             node_name,
+            ..
         } = target.container_info(&pods_api, &deployment_api).await?;
 
         let ContainerRuntime {
@@ -115,25 +116,30 @@ pub(crate) async fn create_agent(
         agent_namespace.as_ref().unwrap_or(&target_namespace),
     );
 
+    let deployment_api: Api<Deployment> = Api::namespaced(
+        client.clone(),
+        agent_namespace.as_ref().unwrap_or(&target_namespace),
+    );
+
     let agent_image = agent_image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
     let pod_name = if ephemeral_container {
-        let pod_target = target.parse::<PodData>()?;
+        let target = target.parse::<Target>()?;
 
         create_ephemeral_container_agent(
             &config,
-            pod_target,
+            target,
             agent_image,
             &pods_api,
+            &deployment_api,
             connection_port,
         )
         .await?
     } else {
-        let runtime_data = RuntimeData::from_k8s(client.clone(), &target, &target_namespace)
-            .await
-            .map_err(LayerError::from)?;
+        let runtime_data =
+            RuntimeData::from_k8s(client.clone(), &target, &target_namespace).await?;
 
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),
@@ -211,18 +217,26 @@ async fn wait_for_agent_startup(
 
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
-    pod_target: PodData,
+    target: Target,
     agent_image: String,
     pods_api: &Api<Pod>,
+    deployment_api: &Api<Deployment>,
     connection_port: u16,
 ) -> Result<String> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
 
-    let PodData {
+    let Response {
         pod_name,
         container_name,
-    } = pod_target;
+        ..
+    } = target.container_info(pods_api, deployment_api).await?;
+
+    let pod_name = pod_name.as_ref().ok_or_else(|| {
+        LayerError::PodNotFound(format!("Ephemeral Container target: {:?}", pod_name))
+    })?;
+    let container_name = container_name
+        .ok_or_else(|| LayerError::ContainerNotFound(config.target_namespace.clone(), target))?;
 
     let mirrord_agent_name = get_agent_name();
 
@@ -254,7 +268,7 @@ async fn create_ephemeral_container_agent(
     debug!("Requesting ephemeral_containers_subresource");
 
     let mut ephemeral_containers_subresource = pods_api
-        .get_subresource("ephemeralcontainers", &pod_name)
+        .get_subresource("ephemeralcontainers", pod_name)
         .await
         .map_err(LayerError::KubeError)?;
 
@@ -274,7 +288,7 @@ async fn create_ephemeral_container_agent(
     pods_api
         .replace_subresource(
             "ephemeralcontainers",
-            &pod_name,
+            pod_name,
             &PostParams::default(),
             to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
@@ -297,10 +311,10 @@ async fn create_ephemeral_container_agent(
         }
     }
 
-    wait_for_agent_startup(pods_api, &pod_name, mirrord_agent_name).await?;
+    wait_for_agent_startup(pods_api, pod_name, mirrord_agent_name).await?;
 
     debug!("container is ready");
-    Ok(pod_name)
+    Ok(pod_name.to_string())
 }
 
 async fn create_job_pod_agent(
@@ -414,6 +428,8 @@ async fn create_job_pod_agent(
 pub(crate) struct Response {
     container_info: Option<String>,
     node_name: Option<String>,
+    pod_name: Option<String>,
+    container_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -439,16 +455,26 @@ impl DeploymentData {
             .items
             .first()?
             .clone();
+        let pod_name = pod.clone().metadata.name;
         let container_info = pod
+            .clone()
             .status?
             .container_statuses?
             .first()?
             .container_id
             .clone();
+        let container_name = pod
+            .clone()
+            .spec?
+            .containers
+            .first()
+            .map(|container| container.name.clone());
         let node_name = pod.spec?.node_name;
         Some(Response {
             container_info,
             node_name,
+            pod_name,
+            container_name,
         })
     }
 }
@@ -544,6 +570,8 @@ impl PodData {
         Some(Response {
             container_info,
             node_name,
+            pod_name: Some(self.pod_name.clone()),
+            container_name: self.container_name.clone(),
         })
     }
 }
