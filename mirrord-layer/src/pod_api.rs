@@ -60,34 +60,28 @@ impl RuntimeData {
 
         // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
         // Apis, but match on the Target enum and pass accordingly
-        let container_info = target.container_info(&pods_api, &deployment_api).await;
+        let Response {
+            container_info,
+            node_name,
+        } = target.container_info(&pods_api, &deployment_api).await?;
 
-        let container_info = container_info
+        let ContainerRuntime {
+            container_runtime,
+            socket_path,
+            container_id,
+        } = container_info
             .as_ref()
             .ok_or_else(|| {
                 LayerError::ContainerNotFound(pod_namespace.to_string(), target.clone())
             })?
-            .split("://")
-            .collect::<Vec<&str>>();
-
-        let (container_runtime, socket_path) = match container_info.first() {
-            Some(&"docker") => ("docker", "/var/run/docker.sock"),
-            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
-            _ => panic!("unsupported container runtime"),
-        };
-
-        let container_id = container_info.last().unwrap();
+            .parse::<ContainerRuntime>()?;
+        let node_name = node_name.ok_or(LayerError::NodeNotFound(target))?;
 
         Ok(RuntimeData {
-            container_id: container_id.to_string(),
-            container_runtime: container_runtime.to_string(),
-            node_name: target
-                .node_name(pods_api, deployment_api)
-                .await
-                .as_ref()
-                .ok_or(LayerError::NodeNotFound(target))?
-                .to_string(),
-            socket_path: socket_path.to_string(),
+            container_id,
+            container_runtime,
+            node_name,
+            socket_path,
         })
     }
 }
@@ -422,16 +416,22 @@ async fn create_job_pod_agent(
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct Response {
+    container_info: Option<String>,
+    node_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct DeploymentData {
     deployment: String,
 }
 
 impl DeploymentData {
-    pub async fn container_id(
+    pub async fn container_data(
         &self,
         deployment_api: &Api<Deployment>,
         pod_api: &Api<Pod>,
-    ) -> Option<String> {
+    ) -> Option<Response> {
         let deployment = deployment_api.get(&self.deployment).await.ok()?;
         let pod_label = deployment
             .spec
@@ -444,11 +444,17 @@ impl DeploymentData {
             .items
             .first()?
             .clone();
-        pod.status?
+        let container_info = pod
+            .status?
             .container_statuses?
             .first()?
             .container_id
-            .clone()
+            .clone();
+        let node_name = pod.spec?.node_name;
+        Some(Response {
+            container_info,
+            node_name,
+        })
     }
 }
 
@@ -463,46 +469,16 @@ impl Target {
         &self,
         pod_api: &Api<Pod>,
         deployment_api: &Api<Deployment>,
-    ) -> Option<String> {
+    ) -> Result<Response> {
         match self {
-            Target::Pod(pod) => pod.container_id(pod_api).await,
-            Target::Deployment(deployment) => {
-                deployment.container_id(deployment_api, pod_api).await
-            }
-        }
-    }
-
-    pub async fn node_name(
-        &self,
-        pod_api: Api<Pod>,
-        deployment_api: Api<Deployment>,
-    ) -> Option<String> {
-        match self {
-            Target::Pod(PodData {
-                pod_name,
-                container_name: _,
-            }) => {
-                let pod = pod_api.get(pod_name).await.ok()?;
-                pod.spec?.node_name
-            }
-            Target::Deployment(DeploymentData { deployment }) => {
-                let deployment = deployment_api.get(deployment).await.ok()?;
-                debug!("Deployment = {:#?}", deployment);
-                // deployment.spec?.template.spec?.node_name
-                // TODO: bad code ahead ):, find a way to put the node_name in when initialized
-                let pod_label = deployment
-                    .spec
-                    .and_then(|spec| spec.template.metadata?.labels)
-                    .and_then(|pod_name| pod_name.get("app").cloned())?;
-                let pod = pod_api
-                    .list(&ListParams::default().labels(&format!("app={}", pod_label)))
-                    .await
-                    .ok()?
-                    .items
-                    .first()?
-                    .clone();
-                pod.spec?.node_name
-            }
+            Target::Pod(pod) => pod
+                .container_data(pod_api)
+                .await
+                .ok_or_else(|| LayerError::PodNotFound(pod.pod_name.clone())),
+            Target::Deployment(deployment) => deployment
+                .container_data(deployment_api, pod_api)
+                .await
+                .ok_or_else(|| LayerError::DeploymentNotFound(deployment.deployment.clone())),
         }
     }
 }
@@ -555,7 +531,7 @@ impl FromStr for PodData {
 }
 
 impl PodData {
-    pub async fn container_id(&self, pods_api: &Api<Pod>) -> Option<String> {
+    pub async fn container_data(&self, pods_api: &Api<Pod>) -> Option<Response> {
         let pod = pods_api.get(&self.pod_name).await.ok()?;
         let container_statuses = &pod.status?.container_statuses?;
         // TODO: should the return type be a Result here?
@@ -568,7 +544,12 @@ impl PodData {
             info!("No container name specified, defaulting to first container found");
             &container_statuses.first()?.container_id
         };
-        container_info.clone()
+        let container_info = container_info.clone();
+        let node_name = pod.spec?.node_name;
+        Some(Response {
+            container_info,
+            node_name,
+        })
     }
 }
 
@@ -580,5 +561,37 @@ impl FromStr for Target {
             .parse::<DeploymentData>()
             .map(Target::Deployment)
             .or_else(|_| target.parse::<PodData>().map(Target::Pod))
+    }
+}
+
+pub(crate) struct ContainerRuntime {
+    container_runtime: String,
+    socket_path: String,
+    container_id: String,
+}
+
+impl FromStr for ContainerRuntime {
+    type Err = LayerError;
+    fn from_str(input: &str) -> Result<Self> {
+        let container_runtime_info = input.split("://").collect::<Vec<&str>>();
+        let (container_runtime, socket_path) = match container_runtime_info.first() {
+            Some(&"docker") => Ok(("docker", "/var/run/docker.sock")),
+            Some(&"containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
+            _ => Err(LayerError::ContainerRuntimeError(
+                "unsupported container runtime".to_owned(),
+            )),
+        }?;
+
+        let container_id = container_runtime_info.last().ok_or_else(|| {
+            LayerError::ContainerRuntimeError(format!(
+                "Failed while parsing container_id for {}",
+                input
+            ))
+        })?;
+        Ok(ContainerRuntime {
+            container_runtime: container_runtime.to_string(),
+            socket_path: socket_path.to_string(),
+            container_id: container_id.to_string(),
+        })
     }
 }
