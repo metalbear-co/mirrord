@@ -421,9 +421,9 @@ pub(crate) struct Response {
     node_name: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DeploymentData {
-    deployment: String,
+    pub deployment: String,
 }
 
 impl DeploymentData {
@@ -458,7 +458,7 @@ impl DeploymentData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Target {
     Deployment(DeploymentData),
     Pod(PodData),
@@ -489,7 +489,7 @@ impl FromStr for DeploymentData {
     fn from_str(input: &str) -> Result<Self> {
         let target_data = input.split('/').collect::<Vec<&str>>();
         match target_data.first() {
-            Some(&"deployment") => Ok(DeploymentData {
+            Some(&"deployment") if target_data.len() == 2 => Ok(DeploymentData {
                 deployment: target_data[1].to_string(),
             }),
             _ => Err(LayerError::InvalidTarget(format!(
@@ -500,7 +500,7 @@ impl FromStr for DeploymentData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PodData {
     pub pod_name: String,
     pub container_name: Option<String>,
