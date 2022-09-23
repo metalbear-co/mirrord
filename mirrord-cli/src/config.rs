@@ -25,7 +25,7 @@ pub(super) struct ExecArgs {
 
     /// Namespace of the pod to mirror. Defaults to "default".
     #[clap(short = 'n', long, value_parser)]
-    pub pod_namespace: Option<String>,
+    pub target_namespace: Option<String>,
 
     /// Namespace to place agent in.
     #[clap(short = 'a', long, value_parser)]

@@ -52,11 +52,11 @@ struct RuntimeData {
 }
 
 impl RuntimeData {
-    async fn from_k8s(client: Client, target: &str, pod_namespace: &str) -> Result<Self> {
+    async fn from_k8s(client: Client, target: &str, target_namespace: &str) -> Result<Self> {
         let target = target.parse::<Target>()?;
 
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
-        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), pod_namespace);
+        let pods_api: Api<Pod> = Api::namespaced(client.clone(), target_namespace);
+        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), target_namespace);
 
         // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
         // Apis, but match on the Target enum and pass accordingly
@@ -72,7 +72,7 @@ impl RuntimeData {
         } = container_info
             .as_ref()
             .ok_or_else(|| {
-                LayerError::ContainerNotFound(pod_namespace.to_string(), target.clone())
+                LayerError::ContainerNotFound(target_namespace.to_string(), target.clone())
             })?
             .parse::<ContainerRuntime>()?;
         let node_name = node_name.ok_or(LayerError::NodeNotFound(target))?;
@@ -95,7 +95,7 @@ pub(crate) async fn create_agent(
         agent_image,
         agent_namespace,
         target,
-        impersonated_pod_namespace,
+        target_namespace,
         ephemeral_container,
         accept_invalid_certificates,
         ..
@@ -112,9 +112,7 @@ pub(crate) async fn create_agent(
 
     let pods_api: Api<Pod> = Api::namespaced(
         client.clone(),
-        agent_namespace
-            .as_ref()
-            .unwrap_or(&impersonated_pod_namespace),
+        agent_namespace.as_ref().unwrap_or(&target_namespace),
     );
 
     let agent_image = agent_image.unwrap_or_else(|| {
@@ -133,16 +131,13 @@ pub(crate) async fn create_agent(
         )
         .await?
     } else {
-        let runtime_data =
-            RuntimeData::from_k8s(client.clone(), &target, &impersonated_pod_namespace)
-                .await
-                .map_err(LayerError::from)?;
+        let runtime_data = RuntimeData::from_k8s(client.clone(), &target, &target_namespace)
+            .await
+            .map_err(LayerError::from)?;
 
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),
-            agent_namespace
-                .as_ref()
-                .unwrap_or(&impersonated_pod_namespace),
+            agent_namespace.as_ref().unwrap_or(&target_namespace),
         );
 
         create_job_pod_agent(
