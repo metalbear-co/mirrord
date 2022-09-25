@@ -14,7 +14,7 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
-    #[envconfig(from = "MIRRORD_TARGET")]
+    #[envconfig(from = "MIRRORD_IMPERSONATED_TARGET")]
     pub target: String,
 
     #[envconfig(from = "MIRRORD_TARGET_NAMESPACE", default = "default")]

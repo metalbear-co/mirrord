@@ -127,7 +127,7 @@ pub(crate) async fn create_agent(
 
     let pod_name = if ephemeral_container {
         let target = target.parse::<Target>()?;
-
+        debug!("Target: {:?}", target);
         create_ephemeral_container_agent(
             &config,
             target,
@@ -554,7 +554,7 @@ impl FromStr for PodData {
 impl PodData {
     pub async fn container_data(&self, pods_api: &Api<Pod>) -> Option<Response> {
         let pod = pods_api.get(&self.pod_name).await.ok()?;
-        let container_statuses = &pod.status?.container_statuses?;
+        let container_statuses = &pod.clone().status?.container_statuses?;
         // TODO: should the return type be a Result here?
         let container_info = if let Some(container_name) = &self.container_name {
             &container_statuses
@@ -566,12 +566,21 @@ impl PodData {
             &container_statuses.first()?.container_id
         };
         let container_info = container_info.clone();
-        let node_name = pod.spec?.node_name;
+        let node_name = pod.clone().spec?.node_name;
+        let container_name = if self.container_name.is_some() {
+            self.container_name.clone()
+        } else {
+            pod.spec?
+                .containers
+                .first()
+                .map(|container| container.name.clone())
+        };
+        debug!("Container info: {:?}", container_info);
         Some(Response {
             container_info,
             node_name,
             pod_name: Some(self.pod_name.clone()),
-            container_name: self.container_name.clone(),
+            container_name,
         })
     }
 }

@@ -102,7 +102,23 @@ fn exec(args: &ExecArgs) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    std::env::set_var("MIRRORD_TARGET", args.target.clone());
+    if let Some(target) = &args.target {
+        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
+    }
+
+    if let Some(pod) = &args.pod_name {
+        // TODO: do we need a print here or just a log is fine?
+        println!("[WARNING]: DEPRECATED - `--pod-name` is deprecated, consider using `--target instead.\nDeprecated since: [24/09/2022] | Scheduled removal: [24/10/2022]");
+        warn!("[WARNING]: DEPRECATED - `--pod-name` is deprecated, consider using `--target instead.\nDeprecated since: [24/09/2022] | Scheduled removal: [24/10/2022]");
+        std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", pod);
+    }
+
+    if let Some(impersonated_container_name) = &args.impersonated_container_name {
+        std::env::set_var(
+            "MIRRORD_IMPERSONATED_CONTAINER_NAME",
+            impersonated_container_name,
+        );
+    }
 
     if let Some(skip_processes) = &args.skip_processes {
         std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());

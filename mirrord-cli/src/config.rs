@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -18,14 +18,34 @@ pub(super) enum Commands {
 }
 
 #[derive(Args, Debug)]
+#[clap(group(
+    ArgGroup::new("exec")
+        .required(true)
+        .args(&["target", "pod-name"]),
+))]
 pub(super) struct ExecArgs {
-    /// Target name to mirror.
+    /// Target name to mirror.    
     #[clap(short, long, value_parser)]
-    pub target: String,
+    pub target: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
-    #[clap(short = 'n', long, value_parser)]
+    #[clap(long, value_parser)]
     pub target_namespace: Option<String>,
+
+    /// Target name to mirror.
+    /// WARNING: [DEPRECATED] Consider using `--target` instead.
+    #[clap(short, long, group = "pod", value_parser)]
+    pub pod_name: Option<String>,
+
+    /// Namespace of the pod to mirror. Defaults to "default".
+    #[clap(
+        short = 'n',
+        requires = "pod",
+        conflicts_with = "target",
+        long,
+        value_parser
+    )]
+    pub pod_namespace: Option<String>,
 
     /// Namespace to place agent in.
     #[clap(short = 'a', long, value_parser)]
@@ -70,6 +90,10 @@ pub(super) struct ExecArgs {
     /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
+
+    /// Select container name to impersonate. Default is first container.
+    #[clap(long, requires = "pod", conflicts_with = "target", value_parser)]
+    pub impersonated_container_name: Option<String>,
 
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
