@@ -128,7 +128,10 @@ pub(crate) enum LayerError {
     PodSpecNotFound(String),
 
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
-    PodNotFound(String),
+    JobPodNotFound(String),
+
+    #[error("mirrord-layer: Failed to get Pod for Target `{0:#?}`!")]
+    PodNotFound(Target),
 
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
@@ -138,6 +141,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1:#?}`")]
     ContainerNotFound(String, Target),
+
+    #[error("mirrord-layer: Container not found for target `{0:#?}`")]
+    TargetContainerNotFound(Target),
 
     #[error("mirrord-layer: Node not found for target `{0:#?}`")]
     NodeNotFound(Target),

@@ -49,38 +49,24 @@ struct RuntimeData {
     container_runtime: String,
     node_name: String,
     socket_path: String,
+    _pod_name: String,
+    _container_name: String,
 }
 
 impl RuntimeData {
     async fn from_k8s(client: Client, target: &str, target_namespace: &str) -> Result<Self> {
         let target = target.parse::<Target>()?;
 
-        // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
-        // Apis, but match on the Target enum and pass accordingly
-        let Response {
-            container_info,
-            node_name,
-            ..
-        } = target.container_info(&client).await?;
-
-        let ContainerRuntime {
-            container_runtime,
-            socket_path,
-            container_id,
-        } = container_info
+        let response = target.container_info(&client, target_namespace).await?;
+        let container_info = response
+            .container_info
             .as_ref()
             .ok_or_else(|| {
                 LayerError::ContainerNotFound(target_namespace.to_string(), target.clone())
             })?
             .parse::<ContainerRuntime>()?;
-        let node_name = node_name.ok_or(LayerError::NodeNotFound(target))?;
 
-        Ok(RuntimeData {
-            container_id,
-            container_runtime,
-            node_name,
-            socket_path,
-        })
+        target.merge(response, container_info)
     }
 }
 
@@ -119,10 +105,10 @@ pub(crate) async fn create_agent(
 
     let pod_name = if ephemeral_container {
         let target = target.parse::<Target>()?;
-        debug!("Target: {:?}", target);
         create_ephemeral_container_agent(
             &config,
             target,
+            &target_namespace,
             &client,
             &pods_api,
             agent_image,
@@ -210,6 +196,7 @@ async fn wait_for_agent_startup(
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     target: Target,
+    target_namespace: &str,
     client: &Client,
     pods_api: &Api<Pod>,
     agent_image: String,
@@ -222,10 +209,10 @@ async fn create_ephemeral_container_agent(
         pod_name,
         container_name,
         ..
-    } = target.container_info(client).await?;
+    } = target.container_info(client, target_namespace).await?;
 
     let pod_name = pod_name.as_ref().ok_or_else(|| {
-        LayerError::PodNotFound(format!("Ephemeral Container target: {:?}", pod_name))
+        LayerError::JobPodNotFound(format!("Ephemeral Container target: {:?}", pod_name))
     })?;
     let container_name = container_name
         .ok_or_else(|| LayerError::ContainerNotFound(config.target_namespace.clone(), target))?;
@@ -410,7 +397,7 @@ async fn create_job_pod_agent(
         .items
         .first()
         .and_then(|pod| pod.metadata.name.clone())
-        .ok_or(LayerError::PodNotFound(mirrord_agent_job_name))?;
+        .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
 
     wait_for_agent_startup(pods_api, &pod_name, "mirrord-agent".to_string()).await?;
     Ok(pod_name)
@@ -478,13 +465,13 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    pub async fn container_info(&self, client: &Client) -> Result<Response> {
-        let (pod_api, deployment_api) = self.target_apis(client)?;
+    pub async fn container_info(&self, client: &Client, namespace: &str) -> Result<Response> {
+        let (pod_api, deployment_api) = self.target_apis(client, namespace)?;
         match self {
             Target::Pod(pod) => pod
                 .container_data(&pod_api)
                 .await
-                .ok_or_else(|| LayerError::PodNotFound(pod.pod_name.clone())),
+                .ok_or_else(|| LayerError::PodNotFound(self.clone())),
             Target::Deployment(deployment) => deployment
                 .container_data(&deployment_api, &pod_api)
                 .await
@@ -492,10 +479,44 @@ impl Target {
         }
     }
 
-    fn target_apis(&self, client: &Client) -> Result<(Api<Pod>, Api<Deployment>)> {
-        let pod_api: Api<Pod> = Api::all(client.clone());
-        let deployment_api: Api<Deployment> = Api::all(client.clone());
+    fn target_apis(&self, client: &Client, namespace: &str) -> Result<(Api<Pod>, Api<Deployment>)> {
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
         Ok((pod_api, deployment_api))
+    }
+
+    fn merge(
+        &self,
+        response_data: Response,
+        container_data: ContainerRuntime,
+    ) -> Result<RuntimeData> {
+        let Response {
+            node_name,
+            pod_name,
+            container_name,
+            ..
+        } = response_data;
+
+        // TODO: any way to clear this mess?
+        let node_name = node_name.ok_or_else(|| LayerError::NodeNotFound(self.clone()))?;
+        let pod_name = pod_name.ok_or_else(|| LayerError::PodNotFound(self.clone()))?;
+        let container_name =
+            container_name.ok_or_else(|| LayerError::TargetContainerNotFound(self.clone()))?;
+
+        let ContainerRuntime {
+            socket_path,
+            container_id,
+            container_runtime,
+        } = container_data;
+
+        Ok(RuntimeData {
+            node_name,
+            _pod_name: pod_name,
+            _container_name: container_name,
+            container_id,
+            socket_path,
+            container_runtime,
+        })
     }
 }
 
