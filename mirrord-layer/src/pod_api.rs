@@ -55,16 +55,13 @@ impl RuntimeData {
     async fn from_k8s(client: Client, target: &str, target_namespace: &str) -> Result<Self> {
         let target = target.parse::<Target>()?;
 
-        let pods_api: Api<Pod> = Api::namespaced(client.clone(), target_namespace);
-        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), target_namespace);
-
         // TODO: figure a way to pass the Api in a generic way, don't want to pass two different
         // Apis, but match on the Target enum and pass accordingly
         let Response {
             container_info,
             node_name,
             ..
-        } = target.container_info(&pods_api, &deployment_api).await?;
+        } = target.container_info(&client).await?;
 
         let ContainerRuntime {
             container_runtime,
@@ -116,11 +113,6 @@ pub(crate) async fn create_agent(
         agent_namespace.as_ref().unwrap_or(&target_namespace),
     );
 
-    let deployment_api: Api<Deployment> = Api::namespaced(
-        client.clone(),
-        agent_namespace.as_ref().unwrap_or(&target_namespace),
-    );
-
     let agent_image = agent_image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
@@ -131,9 +123,9 @@ pub(crate) async fn create_agent(
         create_ephemeral_container_agent(
             &config,
             target,
-            agent_image,
+            &client,
             &pods_api,
-            &deployment_api,
+            agent_image,
             connection_port,
         )
         .await?
@@ -218,9 +210,9 @@ async fn wait_for_agent_startup(
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
     target: Target,
-    agent_image: String,
+    client: &Client,
     pods_api: &Api<Pod>,
-    deployment_api: &Api<Deployment>,
+    agent_image: String,
     connection_port: u16,
 ) -> Result<String> {
     warn!("Ephemeral Containers is an experimental feature
@@ -230,7 +222,7 @@ async fn create_ephemeral_container_agent(
         pod_name,
         container_name,
         ..
-    } = target.container_info(pods_api, deployment_api).await?;
+    } = target.container_info(client).await?;
 
     let pod_name = pod_name.as_ref().ok_or_else(|| {
         LayerError::PodNotFound(format!("Ephemeral Container target: {:?}", pod_name))
@@ -486,21 +478,24 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    pub async fn container_info(
-        &self,
-        pod_api: &Api<Pod>,
-        deployment_api: &Api<Deployment>,
-    ) -> Result<Response> {
+    pub async fn container_info(&self, client: &Client) -> Result<Response> {
+        let (pod_api, deployment_api) = self.target_apis(client)?;
         match self {
             Target::Pod(pod) => pod
-                .container_data(pod_api)
+                .container_data(&pod_api)
                 .await
                 .ok_or_else(|| LayerError::PodNotFound(pod.pod_name.clone())),
             Target::Deployment(deployment) => deployment
-                .container_data(deployment_api, pod_api)
+                .container_data(&deployment_api, &pod_api)
                 .await
                 .ok_or_else(|| LayerError::DeploymentNotFound(deployment.deployment.clone())),
         }
+    }
+
+    fn target_apis(&self, client: &Client) -> Result<(Api<Pod>, Api<Deployment>)> {
+        let pod_api: Api<Pod> = Api::all(client.clone());
+        let deployment_api: Api<Deployment> = Api::all(client.clone());
+        Ok((pod_api, deployment_api))
     }
 }
 
