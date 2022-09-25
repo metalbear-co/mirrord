@@ -607,12 +607,14 @@ impl FromStr for ContainerRuntime {
     fn from_str(input: &str) -> Result<Self> {
         let container_runtime_info = input.split("://").collect::<Vec<&str>>();
         let (container_runtime, socket_path) = match container_runtime_info.first() {
-            Some(&"docker") => Ok(("docker", "/var/run/docker.sock")),
-            Some(&"containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
-            _ => Err(LayerError::ContainerRuntimeError(
-                "unsupported container runtime".to_owned(),
-            )),
-        }?;
+            Some(&"docker") => ("docker", "/var/run/docker.sock"),
+            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
+            _ => {
+                return Err(LayerError::ContainerRuntimeError(
+                    "unsupported container runtime".to_owned(),
+                ))
+            }
+        };
 
         let container_id = container_runtime_info.last().ok_or_else(|| {
             LayerError::ContainerRuntimeError(format!(
@@ -620,6 +622,7 @@ impl FromStr for ContainerRuntime {
                 input
             ))
         })?;
+
         Ok(ContainerRuntime {
             container_runtime: container_runtime.to_string(),
             socket_path: socket_path.to_string(),
