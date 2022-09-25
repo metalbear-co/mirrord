@@ -1,8 +1,9 @@
-use proc_macro2::Span;
+use proc_macro2::{Span, TokenStream};
+use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
 use quote::quote;
 use syn::{
-    Data, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed, GenericArgument, Ident, Lit,
-    Meta, NestedMeta, PathArguments, Type,
+    spanned::Spanned, Data, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed,
+    GenericArgument, Ident, Lit, Meta, NestedMeta, PathArguments, Type,
 };
 
 #[derive(Eq, PartialEq, Debug)]
@@ -13,6 +14,7 @@ enum FieldFlags {
     Default(Lit),
 }
 
+/// Parse and create Ident from map_to attribute
 fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
     let fallback = Ident::new(&format!("Mapped{}", source), Span::call_site());
 
@@ -31,62 +33,57 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
     fallback
 }
 
-fn get_config_flag(meta: &NestedMeta) -> Option<FieldFlags> {
+/// Parse field attribte to FieldFlags
+fn get_config_flag(meta: &NestedMeta) -> Result<FieldFlags, Diagnostic> {
     match meta {
-        NestedMeta::Meta(Meta::Path(path)) => {
-            if path.is_ident("unwrap") {
-                return Some(FieldFlags::Unwrap);
-            }
-
-            if path.is_ident("nested") {
-                return Some(FieldFlags::Nested);
-            }
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldFlags::Unwrap),
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldFlags::Nested),
+        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
+            Ok(FieldFlags::Env(meta.lit.clone()))
         }
-        NestedMeta::Meta(Meta::NameValue(meta)) => {
-            if meta.path.is_ident("env") {
-                return Some(FieldFlags::Env(meta.lit.clone()));
-            }
-
-            if meta.path.is_ident("default") {
-                return Some(FieldFlags::Default(meta.lit.clone()));
-            }
+        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("default") => {
+            Ok(FieldFlags::Default(meta.lit.clone()))
         }
-        _ => {}
+        _ => Err(meta.span().error("unsupported config attribute flag")),
     }
-
-    None
 }
 
-fn unwrap_option(ty: &Type) -> Option<&Type> {
+/// Parse field attribtes to FieldFlags
+fn get_config_flags(meta: Meta) -> Result<Vec<FieldFlags>, Diagnostic> {
+    let result = match meta {
+        Meta::List(list) => {
+            let mut result = Vec::new();
+            for nested in list.nested.iter() {
+                result.push(get_config_flag(nested)?);
+            }
+
+            result
+        }
+        _ => vec![],
+    };
+
+    Ok(result)
+}
+
+/// Extract Type from Option<Type>
+fn unwrap_option(ty: &Type) -> Result<&Type, Diagnostic> {
     let seg = if let Type::Path(ty) = ty {
         ty.path.segments.first().expect("invalid segments")
     } else {
-        panic!("invalid segments");
+        return Err(ty.span().error("invalid segments"));
     };
 
     match &seg.arguments {
-        PathArguments::AngleBracketed(generics) => {
-            generics.args.first().and_then(|arg| match arg {
-                GenericArgument::Type(ty) => Some(ty),
-                _ => None,
-            })
-        }
-        _ => None,
+        PathArguments::AngleBracketed(generics) => match generics.args.first() {
+            Some(GenericArgument::Type(ty)) => Ok(ty),
+            _ => Err(ty.span().error("called on not Option type")),
+        },
+        _ => Err(ty.span().error("called on not Option type")),
     }
 }
 
-fn get_config_flags(meta: Meta) -> Vec<FieldFlags> {
-    match meta {
-        Meta::List(list) => list
-            .nested
-            .iter()
-            .filter_map(get_config_flag)
-            .collect::<Vec<_>>(),
-        _ => vec![],
-    }
-}
-
-fn map_field_name(field: Field) -> proc_macro2::TokenStream {
+/// Create struct definition
+fn map_field_name(field: Field) -> Result<TokenStream, Diagnostic> {
     let Field {
         vis,
         attrs,
@@ -95,23 +92,27 @@ fn map_field_name(field: Field) -> proc_macro2::TokenStream {
         ..
     } = field;
 
-    let flags = attrs
-        .iter()
-        .find(|attr| attr.path.is_ident("config"))
-        .and_then(|attr| attr.parse_meta().ok())
-        .map(get_config_flags)
-        .unwrap_or_default();
+    let flags = {
+        match attrs
+            .iter()
+            .find(|attr| attr.path.is_ident("config"))
+            .and_then(|attr| attr.parse_meta().ok())
+        {
+            Some(meta) => get_config_flags(meta)?,
+            None => Vec::new(),
+        }
+    };
 
     let ty = if flags
         .iter()
         .any(|flag| matches!(flag, FieldFlags::Unwrap | FieldFlags::Default(_)))
     {
-        unwrap_option(&ty)
+        unwrap_option(&ty)?
     } else {
-        Some(&ty)
+        &ty
     };
 
-    if flags.contains(&FieldFlags::Nested) {
+    let output = if flags.contains(&FieldFlags::Nested) {
         quote! {
             #vis #ident: <#ty as crate::config::MirrordConfig>::Generated
         }
@@ -119,18 +120,25 @@ fn map_field_name(field: Field) -> proc_macro2::TokenStream {
         quote! {
             #vis #ident: #ty
         }
-    }
+    };
+
+    Ok(output)
 }
 
-fn map_field_name_impl(parent: &Ident, field: Field) -> proc_macro2::TokenStream {
+/// Create implementation for fields under generate_config
+fn map_field_name_impl(parent: &Ident, field: Field) -> Result<TokenStream, Diagnostic> {
     let Field { attrs, ident, .. } = field;
 
-    let flags = attrs
-        .iter()
-        .find(|attr| attr.path.is_ident("config"))
-        .and_then(|attr| attr.parse_meta().ok())
-        .map(get_config_flags)
-        .unwrap_or_default();
+    let flags = {
+        match attrs
+            .iter()
+            .find(|attr| attr.path.is_ident("config"))
+            .and_then(|attr| attr.parse_meta().ok())
+        {
+            Some(meta) => get_config_flags(meta)?,
+            None => Vec::new(),
+        }
+    };
 
     let mut impls = Vec::new();
 
@@ -166,20 +174,22 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> proc_macro2::TokenStream
         }
     );
 
-    quote! {
+    let output = quote! {
         #ident: (#(#impls),*).source_value() #unwrapper
-    }
+    };
+
+    Ok(output)
 }
 
-#[proc_macro_derive(MirrordConfig, attributes(config))]
-pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+/// Macro Logic
+fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     let DeriveInput {
         attrs,
         ident,
         data,
         generics,
         vis,
-    } = syn::parse_macro_input!(input as DeriveInput);
+    } = input;
 
     let mapped_name = map_to_ident(
         &ident,
@@ -191,33 +201,33 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
     let mapped_type = match data {
         Data::Struct(_) => quote! { struct },
-        Data::Enum(_) => quote! { enum },
-        _ => panic!("Unions are not supported"),
+        _ => return Err(ident.span().error("Enums and Unions are not supported")),
     };
 
     let fields = match data {
         Data::Struct(DataStruct { fields, .. }) => match fields {
             Fields::Named(FieldsNamed { named, .. }) => named,
-            _ => todo!(),
+            _ => return Err(ident.span().error("Unnamed Structs are not supported")),
         },
-        _ => todo!(),
+        _ => return Err(ident.span().error("Enums and Unions are not supported")),
     };
 
     let mapped_fields = {
-        let named = fields
-            .clone()
-            .into_iter()
-            .map(map_field_name)
-            .collect::<Vec<_>>();
+        let mut named = Vec::new();
+
+        for field in fields.clone() {
+            named.push(map_field_name(field)?);
+        }
 
         quote! { { #(#named),* } }
     };
 
     let mapped_fields_impl = {
-        let named = fields
-            .into_iter()
-            .map(|field| map_field_name_impl(&ident, field))
-            .collect::<Vec<_>>();
+        let mut named = Vec::new();
+
+        for field in fields {
+            named.push(map_field_name_impl(&ident, field)?);
+        }
 
         quote! { { #(#named),* } }
     };
@@ -235,5 +245,15 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
     };
 
-    proc_macro::TokenStream::from(output)
+    Ok(output)
+}
+
+#[proc_macro_derive(MirrordConfig, attributes(config))]
+pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = syn::parse_macro_input!(input as DeriveInput);
+
+    match mirrord_config_macro(input) {
+        Ok(tokens) => tokens.into(),
+        Err(diag) => diag.emit_as_expr_tokens().into(),
+    }
 }

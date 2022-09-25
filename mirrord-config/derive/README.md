@@ -2,16 +2,16 @@
 
 This crate implements derive macro `MirrordConfig`
 
-it addes `config` attribute
+`config` attribute:
 
-for struct:
-- `map_to = Ident` set the name of the struct generated (defaults to `format!("Mapped{}", <struct name>)`)
+- container
+    - `map_to = Ident` set the name of the struct generated (defaults to `format!("Mapped{}", <struct name>)`)
 
-for fields:
-- `unwrap` for generated struct for the field remove the Option and set it to inner type 
-- `nested` for using a struct implementing `MirrordConfig` and insert it's `Generated` type
-- `env = &str` load value from enviroment variable
-- `default = &str` load value from provided string and also implicitly addes `unwrap` to the field
+- fields
+    - `unwrap` for generated struct for the field remove the Option and set it to inner type 
+    - `nested` for using a struct implementing `MirrordConfig` and insert it's `Generated` type
+    - `env = &str` load value from enviroment variable
+    - `default = &str` load value from provided string and also implicitly addes `unwrap` to the field
 
 
 Example
