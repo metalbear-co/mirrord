@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.20",
@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1517,7 +1517,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macro"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1574,7 +1574,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.0.9-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "actix-codec",
  "bincode",
