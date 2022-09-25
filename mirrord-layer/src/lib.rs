@@ -85,9 +85,33 @@ fn before_init() {
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
         let config = LayerConfig::init_from_env().unwrap();
+        deprecation_check(&config);
         if should_load(given_process, &config.skip_processes) {
             init(config);
         }
+    }
+}
+
+fn deprecation_check(config: &LayerConfig) {
+    let LayerConfig {
+        target,
+        impersonated_pod_name,
+        impersonated_container_name,
+        ..
+    } = config;
+
+    match (target, impersonated_pod_name, impersonated_container_name) {
+        (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
+            panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together");
+        }
+        (None, Some(_), Some(_)) | (None, Some(_), None) => {
+            panic!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
+            \nDeprecated since: [24/09/2022] | Scheduled removal: [24/10/2022]");
+        }
+        (None, None, _) => {
+            panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
+        }
+        _ => {}
     }
 }
 

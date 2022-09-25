@@ -103,7 +103,9 @@ pub(crate) async fn create_agent(
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
-    let runtime_data = RuntimeData::from_k8s(client.clone(), &target, &target_namespace).await?;
+    // TODO: restore old functionality, remove unwraps
+    let runtime_data =
+        RuntimeData::from_k8s(client.clone(), &target.unwrap(), &target_namespace).await?;
 
     let pod_name = if ephemeral_container {
         create_ephemeral_container_agent(
