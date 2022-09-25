@@ -49,8 +49,8 @@ struct RuntimeData {
     container_runtime: String,
     node_name: String,
     socket_path: String,
-    _pod_name: String,
-    _container_name: String,
+    pod_name: String,
+    container_name: String,
 }
 
 impl RuntimeData {
@@ -103,22 +103,18 @@ pub(crate) async fn create_agent(
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
+    let runtime_data = RuntimeData::from_k8s(client.clone(), &target, &target_namespace).await?;
+
     let pod_name = if ephemeral_container {
-        let target = target.parse::<Target>()?;
         create_ephemeral_container_agent(
             &config,
-            target,
-            &target_namespace,
-            &client,
+            runtime_data,
             &pods_api,
             agent_image,
             connection_port,
         )
         .await?
     } else {
-        let runtime_data =
-            RuntimeData::from_k8s(client.clone(), &target, &target_namespace).await?;
-
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),
             agent_namespace.as_ref().unwrap_or(&target_namespace),
@@ -195,27 +191,13 @@ async fn wait_for_agent_startup(
 
 async fn create_ephemeral_container_agent(
     config: &LayerConfig,
-    target: Target,
-    target_namespace: &str,
-    client: &Client,
+    runtime_data: RuntimeData,
     pods_api: &Api<Pod>,
     agent_image: String,
     connection_port: u16,
 ) -> Result<String> {
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
-
-    let Response {
-        pod_name,
-        container_name,
-        ..
-    } = target.container_info(client, target_namespace).await?;
-
-    let pod_name = pod_name.as_ref().ok_or_else(|| {
-        LayerError::JobPodNotFound(format!("Ephemeral Container target: {:?}", pod_name))
-    })?;
-    let container_name = container_name
-        .ok_or_else(|| LayerError::ContainerNotFound(config.target_namespace.clone(), target))?;
 
     let mirrord_agent_name = get_agent_name();
 
@@ -240,21 +222,21 @@ async fn create_ephemeral_container_agent(
             "privileged": true,
         },
         "imagePullPolicy": config.image_pull_policy,
-        "targetContainerName": container_name,
+        "targetContainerName": runtime_data.container_name,
         "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
         "command": agent_command_line,
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
     let mut ephemeral_containers_subresource = pods_api
-        .get_subresource("ephemeralcontainers", pod_name)
+        .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
         .await
         .map_err(LayerError::KubeError)?;
 
     let mut spec = ephemeral_containers_subresource
         .spec
         .as_mut()
-        .ok_or_else(|| LayerError::PodSpecNotFound(pod_name.clone()))?;
+        .ok_or_else(|| LayerError::PodSpecNotFound(runtime_data.pod_name.clone()))?;
 
     spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
         Some(mut ephemeral_containers) => {
@@ -267,7 +249,7 @@ async fn create_ephemeral_container_agent(
     pods_api
         .replace_subresource(
             "ephemeralcontainers",
-            pod_name,
+            &runtime_data.pod_name,
             &PostParams::default(),
             to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
@@ -275,7 +257,7 @@ async fn create_ephemeral_container_agent(
         .map_err(LayerError::KubeError)?;
 
     let params = ListParams::default()
-        .fields(&format!("metadata.name={}", &pod_name))
+        .fields(&format!("metadata.name={}", &runtime_data.pod_name))
         .timeout(60);
 
     let stream = watcher(pods_api.clone(), params).applied_objects();
@@ -290,10 +272,10 @@ async fn create_ephemeral_container_agent(
         }
     }
 
-    wait_for_agent_startup(pods_api, pod_name, mirrord_agent_name).await?;
+    wait_for_agent_startup(pods_api, &runtime_data.pod_name, mirrord_agent_name).await?;
 
     debug!("container is ready");
-    Ok(pod_name.to_string())
+    Ok(runtime_data.pod_name.to_string())
 }
 
 async fn create_job_pod_agent(
@@ -511,8 +493,8 @@ impl Target {
 
         Ok(RuntimeData {
             node_name,
-            _pod_name: pod_name,
-            _container_name: container_name,
+            pod_name,
+            container_name,
             container_id,
             socket_path,
             container_runtime,
