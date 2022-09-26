@@ -46,7 +46,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/proc/.*",
         r"^/sys/.*",
         r"^/lib/.*",
-        // r"^/etc/.*",
+        r"^/etc/.*",
         r"^/usr/.*",
         r"^/dev/.*",
         r"^/opt/.*",

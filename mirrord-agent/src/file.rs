@@ -13,7 +13,7 @@ use mirrord_protocol::{
     ReadFileRequest, ReadFileResponse, ReadStringFileRequest, ReadStringFileResponse, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 use crate::{error::AgentError, util::IndexAllocator};
 
@@ -199,14 +199,34 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(file);
+                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
                     let mut buffer = String::with_capacity(buffer_size);
                     let read_result = reader
                         .read_line(&mut buffer)
                         // TODO(alex) [high] 2022-09-21: Cannot use read_exact, as it breaks on EOF.
-                        .map(|read_amount| ReadStringFileResponse {
-                            bytes: buffer.into_bytes(),
-                            read_amount,
+                        //
+                        // ADD(alex) [high] 2022-09-22: Almost working, but we get segfault in
+                        // layer.
+                        .and_then(|read_amount| {
+                            let position_after_read = reader.stream_position()?;
+
+                            if read_amount > buffer_size {
+                                Ok((read_amount, position_after_read - buffer_size as u64))
+                            } else {
+                                Ok((read_amount, position_after_read))
+                            }
+                        })
+                        .and_then(|(read_amount, seek_to)| {
+                            file.seek(SeekFrom::Start(seek_to))?;
+
+                            let response = ReadStringFileResponse {
+                                bytes: buffer.into_bytes(),
+                                read_amount,
+                            };
+                            let d_string = String::from_utf8_lossy(&response.bytes);
+                            info!("fgets read {:#?}", d_string);
+
+                            Ok(response)
                         })?;
 
                     Ok(read_result)

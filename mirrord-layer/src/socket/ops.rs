@@ -7,6 +7,10 @@ use std::{
     sync::Arc,
 };
 
+// TODO(alex) [high] 2022-09-26: Even the pod resolves IPv6 addresses, so it might be just an issue
+// with ordering? Could sort the result we get (maybe the `getaddrinfo` crate changes order) before
+// returning it to layer.
+
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
 use socket2::SockAddr;
@@ -76,9 +80,10 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
     };
 
     let requested_port = requested_address.port();
-    (!is_ignored_port(requested_port))
-        .then_some(())
-        .ok_or_else(|| HookError::BypassedPort(requested_address.port()))?;
+
+    if is_ignored_port(requested_port) {
+        return Err(HookError::BypassedPort(requested_address.port()));
+    }
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(

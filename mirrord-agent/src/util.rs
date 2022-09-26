@@ -6,7 +6,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use num_traits::{zero, CheckedAdd, Num};
+use num_traits::{zero, CheckedAdd, Num, NumCast};
 
 /// Struct that helps you manage topic -> subscribers
 /// When a topip has no subscribers, it is removed.
@@ -97,11 +97,11 @@ where
 
 impl<T> IndexAllocator<T>
 where
-    T: Num + CheckedAdd + Clone,
+    T: Num + CheckedAdd + NumCast + Clone,
 {
     pub fn new() -> IndexAllocator<T> {
         IndexAllocator {
-            index: zero(),
+            index: num_traits::cast(100).unwrap(),
             vacant_indices: Vec::new(),
         }
     }

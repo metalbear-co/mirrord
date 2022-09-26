@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::{fs::File, os::unix::prelude::*, path::PathBuf};
 
 use mirrord_protocol::{
     AddrInfoHint, AddrInfoInternal, GetAddrInfoRequest, RemoteResult, ResponseError,
 };
 use tokio::sync::{mpsc::Receiver, oneshot::Sender};
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::{error::AgentError, runtime::set_namespace};
 
@@ -74,12 +74,17 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
             .join(PathBuf::from(pid.to_string()))
-            .join(PathBuf::from("ns/net"));
+            .join(PathBuf::from("ns"));
+        set_namespace(namespace.join(PathBuf::from("net")))?;
 
-        set_namespace(namespace)?;
-    };
+        let fd: RawFd = File::open(namespace.join(PathBuf::from("root")))?.into_raw_fd();
+        debug!("set_namespace -> file root fd {:#?}", fd);
+
+        nix::sched::setns(fd, nix::sched::CloneFlags::CLONE_FS)?;
+    }
 
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
+        debug!("dns_worker -> request {:#?}", request);
         let result = get_addr_info(request);
         if let Err(result) = tx.send(result) {
             error!("couldn't send result to caller {result:?}");

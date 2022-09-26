@@ -28,7 +28,7 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
 ///
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info")]
 pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -89,7 +89,7 @@ fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
     file_channel_rx.blocking_recv()?.map_err(From::from)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info")]
 pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Result<RawFd> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -135,7 +135,7 @@ pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Re
 }
 
 /// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info")]
 pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<*mut FILE> {
     let local_file_fd = open(path, open_options)?;
     let open_files = OPEN_FILES.lock().unwrap();
@@ -147,7 +147,7 @@ pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info")]
 pub(crate) fn fdopen(
     local_fd: &RawFd,
     remote_fd: usize,
@@ -241,7 +241,7 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
     Ok(0)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info")]
 pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
