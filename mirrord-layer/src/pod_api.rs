@@ -58,6 +58,7 @@ pub(crate) async fn create_agent(
         impersonated_pod_namespace,
         ephemeral_container,
         accept_invalid_certificates,
+        impersonated_container_name,
         ..
     } = config.clone();
 
@@ -82,12 +83,20 @@ pub(crate) async fn create_agent(
     // TODO: restore old functionality, remove unwraps
     let runtime_data = match (target, impersonated_pod_name) {
         (None, None) | (Some(_), Some(_)) => unreachable!(),
-        (None, Some(_)) => unreachable!(),
         (Some(target), None) => {
             target
                 .parse::<Target>()?
                 .container_info(&client, &target_namespace)
                 .await?
+        }
+        (None, Some(pod_name)) => {
+            RuntimeData::from_k8s(
+                &client,
+                &pod_name,
+                &impersonated_pod_namespace,
+                &impersonated_container_name,
+            )
+            .await?
         }
     };
 
@@ -378,6 +387,57 @@ pub(crate) struct RuntimeData {
     socket_path: String,
     pod_name: String,
     container_name: String,
+}
+
+impl RuntimeData {
+    async fn from_k8s(
+        client: &Client,
+        pod_name: &str,
+        pod_namespace: &str,
+        container_name: &Option<String>,
+    ) -> Result<Self> {
+        let pods_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
+        let pod = pods_api.get(pod_name).await?;
+        let node_name = &pod.spec.unwrap().node_name;
+        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
+        let container_info = if let Some(container_name) = container_name {
+            &container_statuses
+                .iter()
+                .find(|&status| &status.name == container_name)
+                .ok_or_else(|| LayerError::ContainerNotFoundString(container_name.clone()))?
+                .container_id
+        } else {
+            info!("No container name specified, defaulting to first container found");
+            &container_statuses.first().unwrap().container_id
+        };
+
+        let container_info = container_info
+            .as_ref()
+            .unwrap()
+            .split("://")
+            .collect::<Vec<&str>>();
+
+        let (container_runtime, socket_path) = match container_info.first() {
+            Some(&"docker") => ("docker", "/var/run/docker.sock"),
+            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
+            _ => panic!("unsupported container runtime"),
+        };
+
+        let container_id = container_info.last().unwrap();
+
+        let container_name = container_name
+            .as_ref()
+            .unwrap_or_else(|| &container_statuses.first().unwrap().name);
+
+        Ok(RuntimeData {
+            container_id: container_id.to_string(),
+            container_runtime: container_runtime.to_string(),
+            node_name: node_name.as_ref().unwrap().to_string(),
+            socket_path: socket_path.to_string(),
+            pod_name: pod_name.to_string(),
+            container_name: container_name.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -105,7 +105,7 @@ fn deprecation_check(config: &LayerConfig) {
         (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
             panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together");
         }
-        (None, Some(_), Some(_)) | (None, Some(_), None) => {
+        (None, Some(_), Some(_)) => {
             panic!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
             \nDeprecated since: [24/09/2022] | Scheduled removal: [24/10/2022]");
         }

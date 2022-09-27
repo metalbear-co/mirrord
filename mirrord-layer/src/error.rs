@@ -9,7 +9,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, warn};
 
 use super::HookMessage;
-use crate::pod_api::Target;
+// use crate::pod_api::Target;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
@@ -130,21 +130,21 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
     JobPodNotFound(String),
 
-    #[error("mirrord-layer: Failed to get Pod for Target `{0:#?}`!")]
-    PodNotFound(Target),
-
+    // #[error("mirrord-layer: Failed to get Pod for Target `{0:#?}`!")]
+    // PodNotFound(Target),
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1:#?}`")]
-    ContainerNotFound(String, Target),
+    // #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1:#?}`")]
+    // ContainerNotFound(String, Target),
+    #[error("mirrord-layer: Container not found in namespace `{0}`")]
+    ContainerNotFoundString(String),
 
-    #[error("mirrord-layer: Container not found for target `{0:#?}`")]
-    TargetContainerNotFound(Target),
-
+    // #[error("mirrord-layer: Container not found for target `{0:#?}`")]
+    // TargetContainerNotFound(Target),
     #[error("mirrord-layer: Node not found for target `{0}`")]
     NodeNotFound(String),
 
