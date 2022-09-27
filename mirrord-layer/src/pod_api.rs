@@ -466,7 +466,10 @@ pub(crate) struct DeploymentData {
 impl RuntimeDataProvider for DeploymentData {
     async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
         let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
-        let deployment = deployment_api.get(&self.deployment).await?;
+        let deployment = deployment_api
+            .get(&self.deployment)
+            .await
+            .map_err(LayerError::KubeError)?;
         let pod_label = || -> Option<String> {
             deployment
                 .spec
