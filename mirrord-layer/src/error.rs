@@ -145,8 +145,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Container not found for target `{0:#?}`")]
     TargetContainerNotFound(Target),
 
-    #[error("mirrord-layer: Node not found for target `{0:#?}`")]
-    NodeNotFound(Target),
+    #[error("mirrord-layer: Node not found for target `{0}`")]
+    NodeNotFound(String),
 
     #[error("mirrord-layer: Deployment `{0} not found!`")]
     DeploymentNotFound(String),

@@ -44,32 +44,6 @@ impl Drop for EnvVarGuard {
     }
 }
 
-struct RuntimeData {
-    container_id: String,
-    container_runtime: String,
-    node_name: String,
-    socket_path: String,
-    pod_name: String,
-    container_name: String,
-}
-
-impl RuntimeData {
-    async fn from_k8s(client: Client, target: &str, target_namespace: &str) -> Result<Self> {
-        let target = target.parse::<Target>()?;
-
-        let response = target.container_info(&client, target_namespace).await?;
-        let container_info = response
-            .container_info
-            .as_ref()
-            .ok_or_else(|| {
-                LayerError::ContainerNotFound(target_namespace.to_string(), target.clone())
-            })?
-            .parse::<ContainerRuntime>()?;
-
-        target.merge(response, container_info)
-    }
-}
-
 pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
@@ -80,6 +54,8 @@ pub(crate) async fn create_agent(
         agent_namespace,
         target,
         target_namespace,
+        impersonated_pod_name,
+        impersonated_pod_namespace,
         ephemeral_container,
         accept_invalid_certificates,
         ..
@@ -104,8 +80,16 @@ pub(crate) async fn create_agent(
     });
 
     // TODO: restore old functionality, remove unwraps
-    let runtime_data =
-        RuntimeData::from_k8s(client.clone(), &target.unwrap(), &target_namespace).await?;
+    let runtime_data = match (target, impersonated_pod_name) {
+        (None, None) | (Some(_), Some(_)) => unreachable!(),
+        (None, Some(_)) => unreachable!(),
+        (Some(target), None) => {
+            target
+                .parse::<Target>()?
+                .container_info(&client, &target_namespace)
+                .await?
+        }
+    };
 
     let pod_name = if ephemeral_container {
         create_ephemeral_container_agent(
@@ -387,12 +371,13 @@ async fn create_job_pod_agent(
     Ok(pod_name)
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Response {
-    container_info: Option<String>,
-    node_name: Option<String>,
-    pod_name: Option<String>,
-    container_name: Option<String>,
+pub(crate) struct RuntimeData {
+    container_id: String,
+    container_runtime: String,
+    node_name: String,
+    socket_path: String,
+    pod_name: String,
+    container_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -401,43 +386,74 @@ pub(crate) struct DeploymentData {
 }
 
 impl DeploymentData {
-    pub async fn container_data(
+    pub async fn runtime_data(
         &self,
         deployment_api: &Api<Deployment>,
         pod_api: &Api<Pod>,
-    ) -> Option<Response> {
-        let deployment = deployment_api.get(&self.deployment).await.ok()?;
-        let pod_label = deployment
-            .spec
-            .and_then(|spec| spec.template.metadata?.labels)
-            .and_then(|pod_name| pod_name.get("app").cloned())?;
-        let pod = pod_api
-            .list(&ListParams::default().labels(&format!("app={}", pod_label)))
-            .await
-            .ok()?
-            .items
-            .first()?
-            .clone();
-        let pod_name = pod.clone().metadata.name;
-        let container_info = pod
+    ) -> Result<RuntimeData> {
+        let deployment = deployment_api.get(&self.deployment).await?;
+        let deployment_pod = async || -> Option<Pod> {
+            let pod_label = deployment
+                .spec
+                .and_then(|spec| spec.template.metadata?.labels)
+                .and_then(|pod_name| pod_name.get("app").cloned())?;
+            let pod = pod_api
+                .list(&ListParams::default().labels(&format!("app={}", pod_label)))
+                .await
+                .ok()?
+                .items
+                .first()
+                .cloned();
+            pod
+        }()
+        .await
+        .ok_or_else(|| LayerError::DeploymentNotFound(self.deployment.clone()))?;
+
+        let pod_name = deployment_pod
             .clone()
-            .status?
-            .container_statuses?
-            .first()?
-            .container_id
-            .clone();
-        let container_name = pod
-            .clone()
-            .spec?
-            .containers
-            .first()
-            .map(|container| container.name.clone());
-        let node_name = pod.spec?.node_name;
-        Some(Response {
-            container_info,
+            .metadata
+            .name
+            .ok_or_else(|| LayerError::JobPodNotFound(String::from("")))?;
+
+        let (
+            ContainerRuntime {
+                container_runtime,
+                socket_path,
+                container_id,
+            },
+            container_name,
+        ) = || -> Option<(String, String)> {
+            let container_runtime_and_id = deployment_pod
+                .clone()
+                .status?
+                .container_statuses?
+                .first()?
+                .container_id
+                .clone()?;
+            let container_name = deployment_pod
+                .clone()
+                .spec?
+                .containers
+                .first()
+                .map(|container| container.name.clone())?;
+
+            Some((container_runtime_and_id, container_name))
+        }()
+        .ok_or_else(|| LayerError::ContainerRuntimeError(String::from("")))
+        .and_then(|(runtime_and_id, container_name)| {
+            Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
+        })?;
+
+        let node_name = || -> Option<String> { deployment_pod.spec?.node_name }()
+            .ok_or_else(|| LayerError::NodeNotFound(String::from("")))?;
+
+        Ok(RuntimeData {
             node_name,
             pod_name,
             container_name,
+            container_id,
+            container_runtime,
+            socket_path,
         })
     }
 }
@@ -449,58 +465,15 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    pub async fn container_info(&self, client: &Client, namespace: &str) -> Result<Response> {
-        let (pod_api, deployment_api) = self.target_apis(client, namespace)?;
-        match self {
-            Target::Pod(pod) => pod
-                .container_data(&pod_api)
-                .await
-                .ok_or_else(|| LayerError::PodNotFound(self.clone())),
-            Target::Deployment(deployment) => deployment
-                .container_data(&deployment_api, &pod_api)
-                .await
-                .ok_or_else(|| LayerError::DeploymentNotFound(deployment.deployment.clone())),
-        }
-    }
-
-    fn target_apis(&self, client: &Client, namespace: &str) -> Result<(Api<Pod>, Api<Deployment>)> {
+    pub async fn container_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
-        Ok((pod_api, deployment_api))
-    }
-
-    fn merge(
-        &self,
-        response_data: Response,
-        container_data: ContainerRuntime,
-    ) -> Result<RuntimeData> {
-        let Response {
-            node_name,
-            pod_name,
-            container_name,
-            ..
-        } = response_data;
-
-        // TODO: any way to clear this mess?
-        let node_name = node_name.ok_or_else(|| LayerError::NodeNotFound(self.clone()))?;
-        let pod_name = pod_name.ok_or_else(|| LayerError::PodNotFound(self.clone()))?;
-        let container_name =
-            container_name.ok_or_else(|| LayerError::TargetContainerNotFound(self.clone()))?;
-
-        let ContainerRuntime {
-            socket_path,
-            container_id,
-            container_runtime,
-        } = container_data;
-
-        Ok(RuntimeData {
-            node_name,
-            pod_name,
-            container_name,
-            container_id,
-            socket_path,
-            container_runtime,
-        })
+        match self {
+            Target::Pod(pod) => pod.runtime_data(&pod_api).await,
+            Target::Deployment(deployment) => {
+                deployment.runtime_data(&deployment_api, &pod_api).await
+            }
+        }
     }
 }
 
@@ -552,34 +525,50 @@ impl FromStr for PodData {
 }
 
 impl PodData {
-    pub async fn container_data(&self, pods_api: &Api<Pod>) -> Option<Response> {
-        let pod = pods_api.get(&self.pod_name).await.ok()?;
-        let container_statuses = &pod.clone().status?.container_statuses?;
-        // TODO: should the return type be a Result here?
-        let container_info = if let Some(container_name) = &self.container_name {
-            &container_statuses
-                .iter()
-                .find(|&status| &status.name == container_name)?
-                .container_id
-        } else {
-            info!("No container name specified, defaulting to first container found");
-            &container_statuses.first()?.container_id
-        };
-        let container_info = container_info.clone();
-        let node_name = pod.clone().spec?.node_name;
-        let container_name = if self.container_name.is_some() {
-            self.container_name.clone()
-        } else {
-            pod.spec?
-                .containers
-                .first()
-                .map(|container| container.name.clone())
-        };
-        debug!("Container info: {:?}", container_info);
-        Some(Response {
-            container_info,
+    pub async fn runtime_data(&self, pods_api: &Api<Pod>) -> Result<RuntimeData> {
+        let pod = pods_api.get(&self.pod_name).await?;
+        let (
+            ContainerRuntime {
+                container_runtime,
+                socket_path,
+                container_id,
+            },
+            container_name,
+        ) = || -> Option<(String, String)> {
+            let container_statuses = &pod.clone().status?.container_statuses?;
+            let container_name = if self.container_name.is_some() {
+                self.container_name.clone()
+            } else {
+                pod.clone()
+                    .spec?
+                    .containers
+                    .first()
+                    .map(|container| container.name.clone())
+            }?;
+            let container_info = if let Some(container_name) = &self.container_name {
+                container_statuses
+                    .iter()
+                    .find(|&status| &status.name == container_name)?
+                    .container_id
+                    .clone()
+            } else {
+                info!("No container name specified, defaulting to first container found");
+                container_statuses.first()?.container_id.clone()
+            }?;
+            Some((container_info, container_name))
+        }()
+        .ok_or_else(|| LayerError::ContainerRuntimeError(String::from("")))
+        .and_then(|(runtime_and_id, container_name)| {
+            Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
+        })?;
+        let node_name = || -> Option<String> { pod.clone().spec?.node_name }()
+            .ok_or_else(|| LayerError::NodeNotFound(String::from("")))?;
+        Ok(RuntimeData {
+            container_id,
+            container_runtime,
             node_name,
-            pod_name: Some(self.pod_name.clone()),
+            socket_path,
+            pod_name: self.pod_name.clone(),
             container_name,
         })
     }

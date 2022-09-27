@@ -6,6 +6,7 @@
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
+#![feature(async_closure)]
 
 use std::{
     collections::{HashSet, VecDeque},
