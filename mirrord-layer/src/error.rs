@@ -141,21 +141,21 @@ pub(crate) enum LayerError {
     // #[error("mirrord-layer: Container not found in namespace `{0}` for target `{1:#?}`")]
     // ContainerNotFound(String, Target),
     #[error("mirrord-layer: Container not found in namespace `{0}`")]
-    ContainerNotFoundString(String),
+    ContainerNotFound(String),
 
     // #[error("mirrord-layer: Container not found for target `{0:#?}`")]
     // TargetContainerNotFound(Target),
     #[error("mirrord-layer: Node not found for target `{0}`")]
     NodeNotFound(String),
 
-    #[error("mirrord-layer: Deployment `{0} not found!`")]
+    #[error("mirrord-layer: Deployment: `{0} not found!`")]
     DeploymentNotFound(String),
 
     #[error("mirrord-layer: Invalid target proivded `{0:#?}`!")]
     InvalidTarget(String),
 
-    #[error("mirrord-layer: Failed to get Container runtime data `{0}`!")]
-    ContainerRuntimeError(String),
+    #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
+    ContainerRuntimeParseError(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

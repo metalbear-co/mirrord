@@ -404,8 +404,8 @@ pub(crate) struct RuntimeData {
     socket_path: String,
 }
 
+/// DEPRECATED: - Scheduled for removal on [DATE]
 impl RuntimeData {
-    /// DEPRECATED: - Scheduled for removal on [DATE]
     async fn from_k8s(
         client: &Client,
         pod_name: &str,
@@ -420,7 +420,7 @@ impl RuntimeData {
             &container_statuses
                 .iter()
                 .find(|&status| &status.name == container_name)
-                .ok_or_else(|| LayerError::ContainerNotFoundString(container_name.clone()))?
+                .ok_or_else(|| LayerError::ContainerNotFound(container_name.clone()))?
                 .container_id
         } else {
             info!("No container name specified, defaulting to first container found");
@@ -468,28 +468,38 @@ impl DeploymentData {
         pod_api: &Api<Pod>,
     ) -> Result<RuntimeData> {
         let deployment = deployment_api.get(&self.deployment).await?;
-        let deployment_pod = async || -> Option<Pod> {
-            let pod_label = deployment
+        let pod_label = || -> Option<String> {
+            deployment
                 .spec
                 .and_then(|spec| spec.template.metadata?.labels)
-                .and_then(|pod_name| pod_name.get("app").cloned())?;
-            let pod = pod_api
-                .list(&ListParams::default().labels(&format!("app={}", pod_label)))
-                .await
-                .ok()?
-                .items
-                .first()
-                .cloned();
-            pod
+                .and_then(|pod_name| pod_name.get("app").cloned())
         }()
-        .await
-        .ok_or_else(|| LayerError::DeploymentNotFound(self.deployment.clone()))?;
+        .ok_or_else(|| {
+            LayerError::DeploymentNotFound(format!(
+                "Label for deployment: {}, not found!",
+                self.deployment.clone()
+            ))
+        })?;
 
-        let pod_name = deployment_pod
-            .clone()
-            .metadata
-            .name
-            .ok_or_else(|| LayerError::JobPodNotFound(String::from("")))?;
+        let deployment_pods = pod_api
+            .list(&ListParams::default().labels(&format!("app={}", pod_label)))
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let first_pod = deployment_pods.items.first().ok_or_else(|| {
+            LayerError::DeploymentNotFound(format!(
+                "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
+                self.deployment.clone()
+            ))
+        })?;
+
+        let pod_name = first_pod.clone().metadata.name.ok_or_else(|| {
+            LayerError::DeploymentNotFound(format!(
+                "Failed to fetch the name of the default pod in deployment {}, pod {:?}",
+                self.deployment.clone(),
+                first_pod.clone()
+            ))
+        })?;
 
         let (
             ContainerRuntime {
@@ -499,14 +509,14 @@ impl DeploymentData {
             },
             container_name,
         ) = || -> Option<(String, String)> {
-            let container_runtime_and_id = deployment_pod
+            let container_runtime_and_id = first_pod
                 .clone()
                 .status?
                 .container_statuses?
                 .first()?
                 .container_id
                 .clone()?;
-            let container_name = deployment_pod
+            let container_name = first_pod
                 .clone()
                 .spec?
                 .containers
@@ -515,12 +525,18 @@ impl DeploymentData {
 
             Some((container_runtime_and_id, container_name))
         }()
-        .ok_or_else(|| LayerError::ContainerRuntimeError(String::from("")))
+        .ok_or_else(|| {
+            LayerError::ContainerNotFound(format!(
+                "Failed to fetch container for pod {:?}, deployment {}",
+                first_pod.clone(),
+                self.deployment.clone()
+            ))
+        })
         .and_then(|(runtime_and_id, container_name)| {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
 
-        let node_name = || -> Option<String> { deployment_pod.spec?.node_name }()
+        let node_name = || -> Option<String> { first_pod.clone().spec?.node_name }()
             .ok_or_else(|| LayerError::NodeNotFound(String::from("")))?;
 
         Ok(RuntimeData {
@@ -633,7 +649,7 @@ impl PodData {
             }?;
             Some((container_info, container_name))
         }()
-        .ok_or_else(|| LayerError::ContainerRuntimeError(String::from("")))
+        .ok_or_else(|| LayerError::ContainerRuntimeParseError(String::from("")))
         .and_then(|(runtime_and_id, container_name)| {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
@@ -675,14 +691,14 @@ impl FromStr for ContainerRuntime {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
             Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
             _ => {
-                return Err(LayerError::ContainerRuntimeError(
+                return Err(LayerError::ContainerRuntimeParseError(
                     "unsupported container runtime".to_owned(),
                 ))
             }
         };
 
         let container_id = container_runtime_info.last().ok_or_else(|| {
-            LayerError::ContainerRuntimeError(format!(
+            LayerError::ContainerRuntimeParseError(format!(
                 "Failed while parsing container_id for {}",
                 input
             ))
