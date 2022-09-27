@@ -271,7 +271,7 @@ mod tests {
             temp_dir.path().to_str().unwrap(),
         ];
         if let Some(namespace) = namespace {
-            mirrord_args.extend(["--pod-namespace", namespace].into_iter());
+            mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
         if let Some(args) = args {
             mirrord_args.extend(args.into_iter());
