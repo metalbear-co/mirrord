@@ -5,10 +5,16 @@ use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
+use trust_dns_resolver::config::Protocol;
 
 use super::ops::*;
-use crate::{detour::DetourGuard, error::HookError, replace, socket::AddrInfoHintExt};
+use crate::{
+    detour::DetourGuard,
+    error::HookError,
+    replace,
+    socket::{AddrInfoHintExt, ProtocolExt},
+};
 
 #[hook_guard_fn]
 #[tracing::instrument(level = "trace")]
@@ -350,18 +356,40 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
-    let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
+    let protocol = match (!raw_hints.is_null())
+        .then(|| Protocol::try_from_raw((*raw_hints).ai_protocol))
+        .transpose()
+        .map_err(i32::from)
+    {
+        Ok(protocol) => protocol,
+        Err(fail) => return fail,
+    };
 
-    let (Ok(result) | Err(result)) = getaddrinfo(node, service, hints)
-        .map(|c_addr_info_ptr| {
-            out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+    let libc::addrinfo {
+        ai_flags,
+        ai_family,
+        ai_socktype,
+        ai_protocol,
+        ai_addrlen,
+        ai_addr,
+        ai_canonname,
+        ai_next,
+    } = *raw_hints;
 
-            0
-        })
-        .map_err(From::from);
+    let (Ok(result) | Err(result)) =
+        getaddrinfo(node, service, protocol, ai_protocol, ai_family, ai_socktype)
+            .inspect(|f| info!("result for addrinfo is {f:#?}"))
+            .inspect_err(|f| error!("result for addrinfo is {f:#?}"))
+            .map(|c_addr_info_ptr| {
+                out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+
+                0
+            })
+            .map_err(From::from);
 
     trace!("result: {result:?}");
-    result
+    // result
+    0
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in

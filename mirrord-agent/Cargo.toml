@@ -31,6 +31,7 @@ tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
+trust-dns-resolver.worspace = true
 num-traits = "0.2"
 bollard = "0.13"
 tokio-util.workspace = true

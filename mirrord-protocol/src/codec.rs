@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::PathBuf,
 };
 
@@ -185,7 +185,7 @@ pub enum FileRequest {
 pub struct GetAddrInfoRequest {
     pub node: Option<String>,
     pub service: Option<String>,
-    pub hints: Option<AddrInfoHint>,
+    pub protocol: Option<i32>,
 }
 
 /// `-layer` --> `-agent` messages.
@@ -333,7 +333,8 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
-    GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
+    // GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
+    GetAddrInfoResponse(RemoteResult<Vec<IpAddr>>),
 }
 
 pub struct ClientCodec {

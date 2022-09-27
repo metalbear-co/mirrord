@@ -5,6 +5,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
+use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
@@ -22,6 +23,9 @@ pub enum ResponseError {
 
     #[error("IO failed for remote operation with `{0}!")]
     RemoteIO(RemoteIOError),
+
+    #[error("IO failed for remote operation with `{0}!")]
+    RemoteResolve(RemoteResolveError),
 
     #[error("DNS resolve failed with return code`{0}`")]
     DnsFailure(i32),
@@ -62,11 +66,27 @@ pub struct RemoteIOError {
     pub kind: ErrorKindInternal,
 }
 
+/// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
+/// mirrord-agent.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+#[error("Failed performing `getaddrinfo` with {kind:?}!")]
+pub struct RemoteResolveError {
+    pub kind: ResolveErrorKindInternal,
+}
+
 impl From<io::Error> for ResponseError {
     fn from(io_error: io::Error) -> Self {
         Self::RemoteIO(RemoteIOError {
             raw_os_error: io_error.raw_os_error(),
             kind: From::from(io_error.kind()),
+        })
+    }
+}
+
+impl From<ResolveError> for ResponseError {
+    fn from(fail: ResolveError) -> Self {
+        Self::RemoteResolve(RemoteResolveError {
+            kind: From::from(fail.kind().clone()),
         })
     }
 }
@@ -122,6 +142,17 @@ pub enum ErrorKindInternal {
     Other,
 }
 
+/// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
+pub enum ResolveErrorKindInternal {
+    Message(String),
+    NoConnections,
+    NoRecordsFound,
+    Io,
+    Proto,
+    Timeout,
+}
+
 impl const From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
         match error_kind {
@@ -166,6 +197,29 @@ impl const From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::OutOfMemory => ErrorKindInternal::OutOfMemory,
             io::ErrorKind::Other => ErrorKindInternal::Other,
             _ => unimplemented!(),
+        }
+    }
+}
+
+impl From<ResolveErrorKind> for ResolveErrorKindInternal {
+    fn from(error_kind: ResolveErrorKind) -> Self {
+        match error_kind {
+            ResolveErrorKind::Message(message) => {
+                ResolveErrorKindInternal::Message(message.to_string())
+            }
+            ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
+            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
+            ResolveErrorKind::NoRecordsFound {
+                query,
+                soa,
+                negative_ttl,
+                response_code,
+                trusted,
+            } => ResolveErrorKindInternal::NoRecordsFound,
+            ResolveErrorKind::Io(_) => ResolveErrorKindInternal::Io,
+            ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
+            ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+            _ => todo!(),
         }
     }
 }

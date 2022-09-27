@@ -10,6 +10,8 @@ use std::{
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{AddrInfoHint, Port};
 use socket2::SockAddr;
+use tracing::warn;
+use trust_dns_resolver::config::Protocol;
 
 use crate::error::{HookError, HookResult};
 
@@ -173,6 +175,35 @@ impl AddrInfoHintExt for AddrInfoHint {
             ai_socktype: raw.ai_socktype,
             ai_protocol: raw.ai_protocol,
             ai_flags: raw.ai_flags,
+        }
+    }
+}
+
+pub(crate) trait ProtocolExt {
+    fn try_from_raw(ai_protocol: i32) -> HookResult<Protocol>;
+    fn try_into_raw(self) -> HookResult<i32>;
+}
+
+impl ProtocolExt for Protocol {
+    fn try_from_raw(ai_protocol: i32) -> HookResult<Self> {
+        match ai_protocol {
+            libc::IPPROTO_UDP => Ok(Protocol::Udp),
+            libc::IPPROTO_TCP => Ok(Protocol::Tcp),
+            libc::IPPROTO_UDPLITE => Ok(Protocol::Udp),
+            libc::IPPROTO_SCTP => Err(todo!()),
+            other => {
+                warn!("Trying a protocol of {:#?}", other);
+                Ok(Protocol::Tcp)
+            }
+        }
+    }
+
+    fn try_into_raw(self) -> HookResult<i32> {
+        match self {
+            Protocol::Udp => Ok(libc::IPPROTO_UDP),
+            Protocol::Tcp => Ok(libc::IPPROTO_TCP),
+            Protocol::Udp => Ok(libc::IPPROTO_UDPLITE),
+            invalid => Err(todo!()),
         }
     }
 }

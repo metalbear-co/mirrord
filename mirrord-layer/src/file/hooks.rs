@@ -23,7 +23,7 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 }
 
 /// Implementation of open_detour, used in open_detour and openat_detour
-#[tracing::instrument(level = "info", skip(raw_path))]
+#[tracing::instrument(level = "debug", skip(raw_path))]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
@@ -58,7 +58,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 #[hook_guard_fn]
-#[tracing::instrument(level = "info", skip(raw_path, raw_mode))]
+#[tracing::instrument(level = "debug", skip(raw_path, raw_mode))]
 pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
@@ -104,7 +104,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
 #[hook_guard_fn]
-#[tracing::instrument(level = "info", skip(raw_mode))]
+#[tracing::instrument(level = "debug", skip(raw_mode))]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
     let mode = match CStr::from_ptr(raw_mode)
         .to_str()
@@ -136,7 +136,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
 #[hook_guard_fn]
-#[tracing::instrument(level = "info", skip(raw_path))]
+#[tracing::instrument(level = "debug", skip(raw_path))]
 pub(crate) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
@@ -256,7 +256,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip())]
+#[tracing::instrument(level = "debug", skip(out_buffer, file_stream))]
 pub(crate) unsafe extern "C" fn fgets_detour(
     out_buffer: *mut c_char,
     capacity: c_int,

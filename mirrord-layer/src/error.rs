@@ -208,6 +208,7 @@ impl From<HookError> for i64 {
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
+                ResponseError::RemoteResolve(resolve) => todo!(),
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

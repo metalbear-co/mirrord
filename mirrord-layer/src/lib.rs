@@ -9,6 +9,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
+    net::IpAddr,
     sync::{LazyLock, OnceLock},
 };
 
@@ -28,7 +29,7 @@ use mirrord_protocol::{
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
-use socket::SOCKETS;
+use socket::{ProtocolExt, SOCKETS};
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
@@ -40,6 +41,7 @@ use tokio::{
 };
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+use trust_dns_resolver::config::Protocol;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 
@@ -171,7 +173,7 @@ where
 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
-    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<IpAddr>>>,
 
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -221,15 +223,17 @@ where
             HookMessage::GetAddrInfoHook(GetAddrInfoHook {
                 node,
                 service,
-                hints,
+                protocol,
                 hook_channel_tx,
             }) => {
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
 
+                let protocol = protocol.map(ProtocolExt::try_into_raw).transpose().unwrap();
+
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
                     node,
                     service,
-                    hints,
+                    protocol,
                 });
 
                 self.codec.send(request).await.unwrap();

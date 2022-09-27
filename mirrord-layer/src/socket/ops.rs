@@ -7,15 +7,15 @@ use std::{
     sync::Arc,
 };
 
-// TODO(alex) [high] 2022-09-26: Even the pod resolves IPv6 addresses, so it might be just an issue
-// with ordering? Could sort the result we get (maybe the `getaddrinfo` crate changes order) before
-// returning it to layer.
-
+// TODO(alex) [high] 2022-09-26: Even the pod resolves IPv6 addresses, so it might be just an
+// issue with ordering? Could sort the result we get (maybe the `getaddrinfo` crate changes
+// order) before returning it to layer.
 use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace};
+use trust_dns_resolver::config::Protocol;
 
 use super::{hooks::*, *};
 use crate::{
@@ -454,17 +454,19 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
-    hints: Option<AddrInfoHint>,
+    protocol: Option<Protocol>,
+    ai_protocol: i32,
+    ai_family: i32,
+    ai_socktype: i32,
 ) -> HookResult<*mut libc::addrinfo> {
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
         service,
-        hints,
+        protocol,
         hook_channel_tx,
     };
 
@@ -472,39 +474,27 @@ pub(super) fn getaddrinfo(
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
 
+    debug!("getaddrinfo -> list {:#?}", addr_info_list);
+
+    // only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(AddrInfo::from)
-        .map(|addr_info| {
-            let AddrInfo {
-                socktype: ai_socktype,
-                protocol: ai_protocol,
-                address: ai_family,
-                sockaddr,
-                canonname,
-                flags: ai_flags,
-            } = addr_info;
-
-            let rawish_sockaddr = socket2::SockAddr::from(sockaddr);
-            let ai_addrlen = rawish_sockaddr.len();
+        .map(|ip| SocketAddr::from((ip, 0)))
+        .map(|address| SockAddr::from(address))
+        .map(|rawish_sock_addr| {
+            let ai_addrlen = rawish_sock_addr.len();
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
-            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sockaddr.as_ptr() }));
-
-            let canonname = canonname.map(CString::new).transpose().unwrap();
-            let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
-                let c_str = c_string.as_c_str();
-                c_str.as_ptr()
-            }) as *mut _;
+            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
 
             libc::addrinfo {
-                ai_flags,
+                ai_flags: 0,
                 ai_family,
                 ai_socktype,
                 ai_protocol,
                 ai_addrlen,
                 ai_addr,
-                ai_canonname,
+                ai_canonname: ptr::null_mut(),
                 ai_next: ptr::null_mut(),
             }
         })
