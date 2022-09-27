@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::Deployment,
@@ -80,7 +81,7 @@ pub(crate) async fn create_agent(
         (Some(target), None) => (
             target
                 .parse::<Target>()?
-                .container_info(&client, &target_namespace)
+                .runtime_info(&client, &target_namespace)
                 .await?,
             Api::namespaced(
                 client.clone(),
@@ -461,12 +462,10 @@ pub(crate) struct DeploymentData {
     pub deployment: String,
 }
 
-impl DeploymentData {
-    pub async fn runtime_data(
-        &self,
-        deployment_api: &Api<Deployment>,
-        pod_api: &Api<Pod>,
-    ) -> Result<RuntimeData> {
+#[async_trait]
+impl RuntimeDataProvider for DeploymentData {
+    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
+        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
         let deployment = deployment_api.get(&self.deployment).await?;
         let pod_label = || -> Option<String> {
             deployment
@@ -481,6 +480,7 @@ impl DeploymentData {
             ))
         })?;
 
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let deployment_pods = pod_api
             .list(&ListParams::default().labels(&format!("app={}", pod_label)))
             .await
@@ -536,8 +536,14 @@ impl DeploymentData {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
 
-        let node_name = || -> Option<String> { first_pod.clone().spec?.node_name }()
-            .ok_or_else(|| LayerError::NodeNotFound(String::from("")))?;
+        let node_name =
+            || -> Option<String> { first_pod.clone().spec?.node_name }().ok_or_else(|| {
+                LayerError::NodeNotFound(format!(
+                    "pod {:?}, container {}",
+                    first_pod.clone(),
+                    container_name.clone()
+                ))
+            })?;
 
         Ok(RuntimeData {
             node_name,
@@ -556,15 +562,16 @@ pub(crate) enum Target {
     Pod(PodData),
 }
 
+#[async_trait]
+trait RuntimeDataProvider {
+    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData>;
+}
+
 impl Target {
-    pub async fn container_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
+    pub async fn runtime_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {        
         match self {
-            Target::Pod(pod) => pod.runtime_data(&pod_api).await,
-            Target::Deployment(deployment) => {
-                deployment.runtime_data(&deployment_api, &pod_api).await
-            }
+            Target::Pod(pod) => pod.runtime_data(client, namespace).await,
+            Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
         }
     }
 }
@@ -616,8 +623,10 @@ impl FromStr for PodData {
     }
 }
 
-impl PodData {
-    pub async fn runtime_data(&self, pod_api: &Api<Pod>) -> Result<RuntimeData> {
+#[async_trait]
+impl RuntimeDataProvider for PodData {
+    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let pod = pod_api.get(&self.pod_name).await?;
         let (
             ContainerRuntime {
