@@ -81,7 +81,7 @@ pub(crate) async fn create_agent(
         (Some(target), None) => (
             target
                 .parse::<Target>()?
-                .runtime_info(&client, &target_namespace)
+                .runtime_data(&client, &target_namespace)
                 .await?,
             Api::namespaced(
                 client.clone(),
@@ -572,7 +572,7 @@ trait RuntimeDataProvider {
 }
 
 impl Target {
-    pub async fn runtime_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
+    pub async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
         match self {
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
@@ -650,16 +650,11 @@ impl RuntimeDataProvider for PodData {
                     .first()
                     .map(|container| container.name.clone())
             }?;
-            let container_info = if let Some(container_name) = &self.container_name {
-                container_statuses
-                    .iter()
-                    .find(|&status| &status.name == container_name)?
-                    .container_id
-                    .clone()
-            } else {
-                info!("No container name specified, defaulting to first container found");
-                container_statuses.first()?.container_id.clone()
-            }?;
+            let container_info = container_statuses
+                .iter()
+                .find(|&status| status.name == container_name)?
+                .container_id
+                .clone()?;
             Some((container_info, container_name))
         }()
         .ok_or_else(|| {
