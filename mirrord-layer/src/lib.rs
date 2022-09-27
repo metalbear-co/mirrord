@@ -93,6 +93,7 @@ fn before_init() {
     }
 }
 
+// DEPRECATED: - Scheduled for removal on [DATE]
 fn deprecation_check(config: &LayerConfig) {
     let LayerConfig {
         target,
@@ -107,7 +108,7 @@ fn deprecation_check(config: &LayerConfig) {
         }
         (None, Some(_), Some(_)) => {
             panic!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
-            \nDeprecated since: [24/09/2022] | Scheduled removal: [24/10/2022]");
+            \nDeprecated since: [DATE] | Scheduled removal: [DATE]");
         }
         (None, None, _) => {
             panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");

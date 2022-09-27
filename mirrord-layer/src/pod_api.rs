@@ -103,7 +103,7 @@ pub(crate) async fn create_agent(
                     .unwrap_or(&impersonated_pod_namespace),
             ),
         ),
-        (None, None) | (Some(_), Some(_)) => unreachable!(),
+        _ => unreachable!(),
     };
 
     let pod_name = if ephemeral_container {
@@ -539,7 +539,8 @@ impl RuntimeDataProvider for DeploymentData {
         let node_name =
             || -> Option<String> { first_pod.clone().spec?.node_name }().ok_or_else(|| {
                 LayerError::NodeNotFound(format!(
-                    "pod {:?}, container {}",
+                    "target {:?} pod {:?}, container {}",
+                    self.clone(),
                     first_pod.clone(),
                     container_name.clone()
                 ))
@@ -568,7 +569,7 @@ trait RuntimeDataProvider {
 }
 
 impl Target {
-    pub async fn runtime_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {        
+    pub async fn runtime_info(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
         match self {
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
@@ -658,12 +659,17 @@ impl RuntimeDataProvider for PodData {
             }?;
             Some((container_info, container_name))
         }()
-        .ok_or_else(|| LayerError::ContainerRuntimeParseError(String::from("")))
+        .ok_or_else(|| {
+            LayerError::ContainerNotFound(format!(
+                "Failed to fetch container for pod {:#?}",
+                self.clone(),
+            ))
+        })
         .and_then(|(runtime_and_id, container_name)| {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
         let node_name = || -> Option<String> { pod.clone().spec?.node_name }()
-            .ok_or_else(|| LayerError::NodeNotFound(String::from("")))?;
+            .ok_or_else(|| LayerError::NodeNotFound(format!("{:?}", self.clone())))?;
         Ok(RuntimeData {
             container_id,
             container_runtime,
