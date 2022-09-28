@@ -5,7 +5,7 @@ This crate implements the derive macro `MirrordConfig`.
 `config` attribute:
 
 - container
-    - `map_to = Ident` set the name of the struct generated (defaults to `format!("Mapped{}", <struct name>)`)
+    - `map_to = <Some Ident>` set the name of the new generated struct (defaults to `format!("Mapped{}", <struct name>)`)
 
 - fields
     - `unwrap` for generated struct for the field remove the Option and set it to inner type 
