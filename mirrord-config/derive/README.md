@@ -1,6 +1,6 @@
 # Mirrord Config Derive
 
-This crate implements derive macro `MirrordConfig`
+This crate implements the derive macro `MirrordConfig`.
 
 `config` attribute:
 
@@ -18,7 +18,7 @@ Example
 
 ```rust
 #[derive(MirrordConfig, Default)]
-#[config(map_to = MappedConfig)] // This will default to MappedMyConfig unless you want change it don't add this attribute
+#[config(map_to = MappedConfig)] // This will default to MappedMyConfig
 pub struct MyConfig {
     #[config(env = "VALUE_1")]
     pub value_1: Option<String>,
