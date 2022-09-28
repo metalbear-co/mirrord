@@ -11,7 +11,7 @@ This crate implements the derive macro `MirrordConfig`, which introduces the `co
     - `unwrap` to `unwrap` the `Option` and use its inner type as the field's value in the generated struct. 
     - `nested` to use a value of a type that itself implement `MirrordConfig`. The value used is its `Generated` type.
     - `env = &str` to load the value from the specified environment variable, if it's populated.
-    - `default = &str` load value from provided string and also implicitly addes `unwrap` to the field
+    - `default = &str` to set a default value to the field. This also implicitly `unwrap`s it.
 
 
 Example
