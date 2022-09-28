@@ -1,16 +1,16 @@
 # Mirrord Config Derive
 
-This crate implements the derive macro `MirrordConfig`.
+This crate implements the derive macro `MirrordConfig`, which introduces the `config` attribute:
 
 `config` attribute:
 
-- container
+- On a struct:
     - `map_to = <Some Ident>` set the name of the new generated struct (defaults to `format!("Mapped{}", <struct name>)`)
 
-- fields
-    - `unwrap` for generated struct for the field remove the Option and set it to inner type 
-    - `nested` for using a struct implementing `MirrordConfig` and insert it's `Generated` type
-    - `env = &str` load value from enviroment variable
+- On struct fields:
+    - `unwrap` to `unwrap` the `Option` and use its inner type as the field's value in the generated struct. 
+    - `nested` to use a value of a type that itself implement `MirrordConfig`. The value used is its `Generated` type.
+    - `env = &str` to load the value from the specified environment variable, if it's populated.
     - `default = &str` load value from provided string and also implicitly addes `unwrap` to the field
 
 
@@ -18,7 +18,7 @@ Example
 
 ```rust
 #[derive(MirrordConfig, Default)]
-#[config(map_to = MappedConfig)] // This will default to MappedMyConfig
+#[config(map_to = SomeConfig)] // If map_to isn't given, it will default to MappedMyConfig
 pub struct MyConfig {
     #[config(env = "VALUE_1")]
     pub value_1: Option<String>,
@@ -36,11 +36,11 @@ pub struct MyConfig {
 
 ```
 
-this will generate another struct named MappedConfig
+The following struct will be generated:
 
 ```rust
 #[derive(Clone, Debug)]
-pub struct MappedConfig {
+pub struct SomeConfig {
     pub value_1: Option<String>,
     pub value_2: i32,
     pub value_3: String,
@@ -51,4 +51,4 @@ pub struct MappedConfig {
 
 
 ### Limitations:
-* values must be `Option<impl FromStr>` or a nested config (value implementing MirrordConfig)
+* Value types must either be `Option<impl FromStr>` or implement MirrordConfig (in which case `nested` should be set to true)
