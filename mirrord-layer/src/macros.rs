@@ -89,5 +89,20 @@ macro_rules! hook_symbol {
     };
 }
 
+#[macro_export]
+macro_rules! gracefull_exit {
+    ($($arg:tt)+) => {
+        eprintln!($($arg)+);
+        gracefull_exit!()
+    };
+    () => {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(std::process::id() as i32),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .expect("unable to gracefull exit")
+    };
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) use hook_symbol;

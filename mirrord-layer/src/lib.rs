@@ -405,11 +405,11 @@ async fn start_layer_thread(
                     debug_assert_eq!(std::env::var(key), Ok(value));
                 }
             } else {
-                panic!("unexpected response - expected env vars response {msg:?}");
+                gracefull_exit!("unexpected response - expected env vars response {msg:?}");
             }
           },
           _ = sleep(Duration::from_secs(config.agent_communication_timeout.unwrap_or(30).into())) => {
-            panic!("response timeout - expected env var response");
+            gracefull_exit!("response timeout - expected env var response");
           }
         }
     };
