@@ -288,7 +288,7 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
-        env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", CONTAINER_NAME);
+        // env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", CONTAINER_NAME);
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
         env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
