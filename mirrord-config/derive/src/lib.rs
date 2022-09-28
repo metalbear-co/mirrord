@@ -15,22 +15,28 @@ enum FieldAttr {
 }
 
 /// Parse and create Ident from map_to attribute
-fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
+fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Result<Ident, Diagnostic> {
     let fallback = Ident::new(&format!("Mapped{}", source), Span::call_site());
 
-    if let Some(Expr::Assign(expr)) = expr {
-        if let (Expr::Path(left_path), Expr::Path(right_path)) = (*expr.left, *expr.right) {
-            if left_path.path.is_ident("map_to") {
-                return right_path
-                    .path
-                    .get_ident()
-                    .cloned()
-                    .expect("map_to value not a valid Ident");
-            }
-        }
-    }
+    match expr {
+        Some(Expr::Assign(expr)) => {
+            let expr_span = expr.span();
 
-    fallback
+            if let (Expr::Path(left_path), Expr::Path(right_path)) = (*expr.left, *expr.right) {
+                if left_path.path.is_ident("map_to") {
+                    return right_path
+                        .path
+                        .get_ident()
+                        .cloned()
+                        .ok_or_else(|| right_path.span().error("invalid ident"));
+                }
+            }
+
+            Err(expr_span.error("invalid value for config attribute"))
+        }
+        Some(other) => Err(other.span().error("invalid value for config attribute")),
+        None => Ok(fallback),
+    }
 }
 
 /// Parse field attribte to FieldAttr
@@ -188,7 +194,7 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
             .iter()
             .find(|attr| attr.path.is_ident("config"))
             .and_then(|attr| attr.parse_args::<Expr>().ok()),
-    );
+    )?;
 
     let mapped_type = match data {
         Data::Struct(_) => quote! { struct },

@@ -148,9 +148,15 @@ fn init(config: LayerConfig) {
 
     let enabled_file_ops = ENABLED_FILE_OPS
         .get_or_init(|| config.feature.fs.is_read() || config.feature.fs.is_write());
-    let _ = ENABLED_FILE_RO_OPS.get_or_init(|| config.feature.fs.is_read());
-    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.feature.network.outgoing.tcp);
-    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.feature.network.outgoing.udp);
+    ENABLED_FILE_RO_OPS
+        .set(config.feature.fs.is_read())
+        .expect("Setting ENABLED_FILE_RO_OPS singleton");
+    ENABLED_TCP_OUTGOING
+        .set(config.feature.network.outgoing.tcp)
+        .expect("Setting ENABLED_TCP_OUTGOING singleton");
+    ENABLED_UDP_OUTGOING
+        .set(config.feature.network.outgoing.udp)
+        .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
