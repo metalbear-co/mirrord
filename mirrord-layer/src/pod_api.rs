@@ -76,7 +76,7 @@ pub(crate) async fn create_agent(
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
-    // DEPRECATED: - Scheduled for removal on [DATE]
+    // START DEPRECATED: - Scheduled for removal on [28/10/2022]
     let (runtime_data, pod_api): (RuntimeData, Api<Pod>) = match (&target, &impersonated_pod_name) {
         (Some(target), None) => (
             target
@@ -105,6 +105,7 @@ pub(crate) async fn create_agent(
         ),
         _ => unreachable!(),
     };
+    // END
 
     let pod_name = if ephemeral_container {
         create_ephemeral_container_agent(
@@ -116,7 +117,7 @@ pub(crate) async fn create_agent(
         )
         .await?
     } else {
-        // DEPRECATED: - Scheduled for removal on [DATE]
+        // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
         let job_api: Api<Job> = match target {
             Some(_) => Api::namespaced(
                 client.clone(),
@@ -130,6 +131,7 @@ pub(crate) async fn create_agent(
             ),
             None => unreachable!(),
         };
+        // END
 
         create_job_pod_agent(
             &config,
@@ -405,7 +407,7 @@ pub(crate) struct RuntimeData {
     socket_path: String,
 }
 
-/// DEPRECATED: - Scheduled for removal on [DATE]
+// START | DEPRECATED: - Scheduled for removal on [28/10/2022]
 impl RuntimeData {
     async fn from_k8s(
         client: &Client,
@@ -456,6 +458,7 @@ impl RuntimeData {
         })
     }
 }
+// END
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DeploymentData {

@@ -225,7 +225,7 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests
+        run: cargo test -p tests -- --nocapture
       - name: switch minikube runtime
         run: |
           minikube delete

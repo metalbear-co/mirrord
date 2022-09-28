@@ -93,7 +93,7 @@ fn before_init() {
     }
 }
 
-// DEPRECATED: - Scheduled for removal on [DATE]
+//START | To be removed after deprecated functionality is removed
 fn deprecation_check(config: &LayerConfig) {
     let LayerConfig {
         target,
@@ -116,6 +116,7 @@ fn deprecation_check(config: &LayerConfig) {
         _ => {}
     }
 }
+// END
 
 fn init(config: LayerConfig) {
     tracing_subscriber::registry()
