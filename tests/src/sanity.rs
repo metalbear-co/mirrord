@@ -288,7 +288,6 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
-        // env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", CONTAINER_NAME);
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
         env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
@@ -486,7 +485,7 @@ mod tests {
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
-            target: format!("pod/{}", target),
+            target: format!("pod/{}/container/{}", target, CONTAINER_NAME),
             _pod: pod_guard,
             _service: service_guard,
         }
