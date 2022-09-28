@@ -34,7 +34,7 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
 }
 
 /// Parse field attribte to FieldAttr
-fn get_config_flag(meta: &NestedMeta) -> Result<FieldAttr, Diagnostic> {
+fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
     match meta {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
@@ -50,19 +50,10 @@ fn get_config_flag(meta: &NestedMeta) -> Result<FieldAttr, Diagnostic> {
 
 /// Parse field attribtes to FieldAttr
 fn get_config_flags(meta: Meta) -> Result<Vec<FieldAttr>, Diagnostic> {
-    let result = match meta {
-        Meta::List(list) => {
-            let mut result = Vec::new();
-            for nested in list.nested.iter() {
-                result.push(get_config_flag(nested)?);
-            }
-
-            result
-        }
-        _ => vec![],
-    };
-
-    Ok(result)
+    match meta {
+        Meta::List(list) => list.nested.into_iter().map(get_config_flag).collect(),
+        _ => Ok(vec![]),
+    }
 }
 
 /// Extract Type from Option<Type>
@@ -213,21 +204,20 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     };
 
     let mapped_fields = {
-        let mut named = Vec::new();
-
-        for field in fields.clone() {
-            named.push(map_field_name(field)?);
-        }
+        let named = fields
+            .clone()
+            .into_iter()
+            .map(map_field_name)
+            .collect::<Result<Vec<_>, _>>()?;
 
         quote! { { #(#named),* } }
     };
 
     let mapped_fields_impl = {
-        let mut named = Vec::new();
-
-        for field in fields {
-            named.push(map_field_name_impl(&ident, field)?);
-        }
+        let named = fields
+            .into_iter()
+            .map(|field| map_field_name_impl(&ident, field))
+            .collect::<Result<Vec<_>, _>>()?;
 
         quote! { { #(#named),* } }
     };

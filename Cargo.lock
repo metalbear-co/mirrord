@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.0.6-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.0.6-alpha"
+version = "3.0.10-alpha"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
