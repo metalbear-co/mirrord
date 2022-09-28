@@ -39,7 +39,7 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Result<Ident, Diagnostic>
     }
 }
 
-/// Parse field attribte to FieldAttr
+/// Parse a flag in the `config` attribute on a struct field to FieldAttr
 fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
     match meta {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
@@ -54,7 +54,7 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
     }
 }
 
-/// Parse field attribtes to FieldAttr
+/// Parse the `config` attribute on a struct field
 fn get_config_flags(meta: Meta) -> Result<Vec<FieldAttr>, Diagnostic> {
     match meta {
         Meta::List(list) => list.nested.into_iter().map(get_config_flag).collect(),
