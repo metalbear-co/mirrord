@@ -10,12 +10,15 @@ use crate::{
 #[serde(deny_unknown_fields)]
 #[config(map_to = FeatureConfig)]
 pub struct FeatureFileConfig {
+    #[serde(default)]
     #[config(nested)]
-    pub env: Option<ToggleableConfig<EnvFileConfig>>,
+    pub env: ToggleableConfig<EnvFileConfig>,
 
+    #[serde(default)]
     #[config(nested)]
-    pub fs: Option<ToggleableConfig<FsConfig>>,
+    pub fs: ToggleableConfig<FsConfig>,
 
+    #[serde(default)]
     #[config(nested)]
-    pub network: Option<ToggleableConfig<NetworkFileConfig>>,
+    pub network: ToggleableConfig<NetworkFileConfig>,
 }

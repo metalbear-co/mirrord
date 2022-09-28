@@ -17,8 +17,9 @@ pub struct NetworkFileConfig {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
     pub incoming: Option<IncomingConfig>,
 
+    #[serde(default)]
     #[config(nested)]
-    pub outgoing: Option<ToggleableConfig<OutgoingFileConfig>>,
+    pub outgoing: ToggleableConfig<OutgoingFileConfig>,
 
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,

@@ -22,6 +22,7 @@ use crate::{
     pod::PodFileConfig, util::VecOrSingle,
 };
 
+/// Root config for mirrord-layer
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
@@ -77,6 +78,14 @@ mod tests {
     }
 
     impl ConfigType {
+        fn empty(&self) -> &'static str {
+            match self {
+                ConfigType::Json => "{}",
+                ConfigType::Toml => "",
+                ConfigType::Yaml => "",
+            }
+        }
+
         fn full(&self) -> &'static str {
             match self {
                 ConfigType::Json => {
@@ -185,6 +194,17 @@ mod tests {
     }
 
     #[rstest]
+    fn empty(
+        #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
+    ) {
+        let input = config_type.empty();
+
+        let config = config_type.parse(input);
+
+        assert_eq!(config, LayerFileConfig::default());
+    }
+
+    #[rstest]
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
@@ -205,16 +225,16 @@ mod tests {
                 communication_timeout: None,
             },
             feature: FeatureFileConfig {
-                env: Some(ToggleableConfig::Enabled(true)),
-                fs: Some(ToggleableConfig::Config(FsConfig::Write)),
-                network: Some(ToggleableConfig::Config(NetworkFileConfig {
+                env: ToggleableConfig::Enabled(true),
+                fs: ToggleableConfig::Config(FsConfig::Write),
+                network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
-                    outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
+                    outgoing: ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
-                    })),
-                })),
+                    }),
+                }),
             },
             pod: PodFileConfig {
                 name: Some("test-service-abcdefg-abcd".to_owned()),
