@@ -14,18 +14,18 @@ pub trait MirrordFlaggedConfig: MirrordConfig + Default {
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
-pub enum FlagField<T> {
+pub enum FlagedConfig<T> {
     Enabled(bool),
     Config(T),
 }
 
-impl<T> Default for FlagField<T> {
+impl<T> Default for FlagedConfig<T> {
     fn default() -> Self {
-        FlagField::<T>::Enabled(true)
+        FlagedConfig::<T>::Enabled(true)
     }
 }
 
-impl<T> MirrordConfig for FlagField<T>
+impl<T> MirrordConfig for FlagedConfig<T>
 where
     T: MirrordFlaggedConfig,
 {
@@ -33,9 +33,9 @@ where
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
         match self {
-            FlagField::Enabled(true) => T::enabled_config(),
-            FlagField::Enabled(false) => T::disabled_config(),
-            FlagField::Config(inner) => inner.generate_config(),
+            FlagedConfig::Enabled(true) => T::enabled_config(),
+            FlagedConfig::Enabled(false) => T::disabled_config(),
+            FlagedConfig::Config(inner) => inner.generate_config(),
         }
     }
 }

@@ -5,7 +5,8 @@ use crate::config::source::MirrordConfigSource;
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct PodField {
+#[config(map_to = PodConfig)]
+pub struct PodFileConfig {
     #[config(unwrap, env = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub name: Option<String>,
 
@@ -42,7 +43,7 @@ mod tests {
                 ("MIRRORD_IMPERSONATED_CONTAINER_NAME", container.0),
             ],
             || {
-                let outgoing = PodField::default().generate_config().unwrap();
+                let outgoing = PodFileConfig::default().generate_config().unwrap();
 
                 assert_eq!(outgoing.name, name.1);
                 assert_eq!(outgoing.namespace, namespace.1);

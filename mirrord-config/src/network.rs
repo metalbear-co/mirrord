@@ -5,34 +5,35 @@ use crate::{
     config::{
         default_value::DefaultValue, from_env::FromEnv, source::MirrordConfigSource, ConfigError,
     },
-    incoming::IncomingField,
-    outgoing::OutgoingField,
-    util::{FlagField, MirrordFlaggedConfig},
+    incoming::IncomingConfig,
+    outgoing::OutgoingFileConfig,
+    util::{FlagedConfig, MirrordFlaggedConfig},
 };
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct NetworkField {
+#[config(map_to = NetworkConfig)]
+pub struct NetworkFileConfig {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
-    pub incoming: Option<IncomingField>,
+    pub incoming: Option<IncomingConfig>,
 
     #[config(nested)]
-    pub outgoing: Option<FlagField<OutgoingField>>,
+    pub outgoing: Option<FlagedConfig<OutgoingFileConfig>>,
 
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,
 }
 
-impl MirrordFlaggedConfig for NetworkField {
+impl MirrordFlaggedConfig for NetworkFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        Ok(MappedNetworkField {
+        Ok(NetworkConfig {
             incoming: (
                 FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
                 DefaultValue::new("mirror"),
             )
                 .source_value()
                 .ok_or(ConfigError::ValueNotProvided(
-                    "NetworkField",
+                    "NetworkFileConfig",
                     "incoming",
                     Some("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
                 ))?,
@@ -42,11 +43,11 @@ impl MirrordFlaggedConfig for NetworkField {
             )
                 .source_value()
                 .ok_or(ConfigError::ValueNotProvided(
-                    "NetworkField",
+                    "NetworkFileConfig",
                     "dns",
                     Some("MIRRORD_REMOTE_DNS"),
                 ))?,
-            outgoing: OutgoingField::disabled_config()?,
+            outgoing: OutgoingFileConfig::disabled_config()?,
         })
     }
 }
@@ -60,8 +61,8 @@ mod tests {
 
     #[rstest]
     fn default(
-        #[values((None, IncomingField::Mirror), (Some("false"), IncomingField::Mirror), (Some("true"), IncomingField::Steal))]
-        incoming: (Option<&str>, IncomingField),
+        #[values((None, IncomingConfig::Mirror), (Some("false"), IncomingConfig::Mirror), (Some("true"), IncomingConfig::Steal))]
+        incoming: (Option<&str>, IncomingConfig),
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
     ) {
         with_env_vars(
@@ -70,7 +71,7 @@ mod tests {
                 ("MIRRORD_REMOTE_DNS", dns.0),
             ],
             || {
-                let env = NetworkField::default().generate_config().unwrap();
+                let env = NetworkFileConfig::default().generate_config().unwrap();
 
                 assert_eq!(env.incoming, incoming.1);
                 assert_eq!(env.dns, dns.1);

@@ -18,8 +18,8 @@ use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
-    agent::AgentField, config::source::MirrordConfigSource, feature::FeatureField, pod::PodField,
-    util::VecOrSingle,
+    agent::AgentFileConfig, config::source::MirrordConfigSource, feature::FeatureFileConfig,
+    pod::PodFileConfig, util::VecOrSingle,
 };
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
@@ -34,15 +34,15 @@ pub struct LayerFileConfig {
 
     #[serde(default)]
     #[config(nested)]
-    pub agent: AgentField,
+    pub agent: AgentFileConfig,
 
     #[serde(default)]
     #[config(nested)]
-    pub pod: PodField,
+    pub pod: PodFileConfig,
 
     #[serde(default)]
     #[config(nested)]
-    pub feature: FeatureField,
+    pub feature: FeatureFileConfig,
 }
 
 impl LayerFileConfig {
@@ -65,8 +65,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        fs::FsField, incoming::IncomingField, network::NetworkField, outgoing::OutgoingField,
-        util::FlagField,
+        fs::FsConfig, incoming::IncomingConfig, network::NetworkFileConfig,
+        outgoing::OutgoingFileConfig, util::FlagedConfig,
     };
 
     #[derive(Debug)]
@@ -195,7 +195,7 @@ mod tests {
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
             skip_processes: None,
-            agent: AgentField {
+            agent: AgentFileConfig {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
@@ -204,19 +204,19 @@ mod tests {
                 ephemeral: Some(false),
                 communication_timeout: None,
             },
-            feature: FeatureField {
-                env: Some(FlagField::Enabled(true)),
-                fs: Some(FlagField::Config(FsField::Write)),
-                network: Some(FlagField::Config(NetworkField {
+            feature: FeatureFileConfig {
+                env: Some(FlagedConfig::Enabled(true)),
+                fs: Some(FlagedConfig::Config(FsConfig::Write)),
+                network: Some(FlagedConfig::Config(NetworkFileConfig {
                     dns: Some(false),
-                    incoming: Some(IncomingField::Mirror),
-                    outgoing: Some(FlagField::Config(OutgoingField {
+                    incoming: Some(IncomingConfig::Mirror),
+                    outgoing: Some(FlagedConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
                     })),
                 })),
             },
-            pod: PodField {
+            pod: PodFileConfig {
                 name: Some("test-service-abcdefg-abcd".to_owned()),
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),

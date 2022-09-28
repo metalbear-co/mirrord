@@ -5,39 +5,39 @@ use thiserror::Error;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
-pub enum IncomingField {
+pub enum IncomingConfig {
     Mirror,
     Steal,
 }
 
-impl Default for IncomingField {
+impl Default for IncomingConfig {
     fn default() -> Self {
-        IncomingField::Mirror
+        IncomingConfig::Mirror
     }
 }
 
 #[derive(Error, Debug)]
-#[error("could not parse IncomingField from string, values must be bool or mirror/steal")]
-pub struct IncomingFieldParseError;
+#[error("could not parse IncomingConfig from string, values must be bool or mirror/steal")]
+pub struct IncomingConfigParseError;
 
-impl FromStr for IncomingField {
-    type Err = IncomingFieldParseError;
+impl FromStr for IncomingConfig {
+    type Err = IncomingConfigParseError;
 
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         match val.parse::<bool>() {
-            Ok(true) => Ok(IncomingField::Steal),
-            Ok(false) => Ok(IncomingField::Mirror),
+            Ok(true) => Ok(IncomingConfig::Steal),
+            Ok(false) => Ok(IncomingConfig::Mirror),
             Err(_) => match val {
-                "steal" => Ok(IncomingField::Steal),
-                "mirror" => Ok(IncomingField::Mirror),
-                _ => Err(IncomingFieldParseError),
+                "steal" => Ok(IncomingConfig::Steal),
+                "mirror" => Ok(IncomingConfig::Mirror),
+                _ => Err(IncomingConfigParseError),
             },
         }
     }
 }
 
-impl IncomingField {
+impl IncomingConfig {
     pub fn is_steal(&self) -> bool {
-        self == &IncomingField::Steal
+        self == &IncomingConfig::Steal
     }
 }

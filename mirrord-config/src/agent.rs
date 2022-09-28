@@ -5,7 +5,8 @@ use crate::config::source::MirrordConfigSource;
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct AgentField {
+#[config(map_to = AgentConfig)]
+pub struct AgentFileConfig {
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: Option<String>,
 
@@ -65,7 +66,7 @@ mod tests {
                 ),
             ],
             || {
-                let agent = AgentField::default().generate_config().unwrap();
+                let agent = AgentFileConfig::default().generate_config().unwrap();
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);

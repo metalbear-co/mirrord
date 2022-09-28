@@ -8,7 +8,8 @@ use crate::{
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct EnvField {
+#[config(map_to = EnvConfig)]
+pub struct EnvFileConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
@@ -16,9 +17,9 @@ pub struct EnvField {
     pub exclude: Option<VecOrSingle<String>>,
 }
 
-impl MirrordFlaggedConfig for EnvField {
+impl MirrordFlaggedConfig for EnvFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        Ok(MappedEnvField {
+        Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value(),
         })
@@ -32,7 +33,7 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagField},
+        util::{testing::with_env_vars, FlagedConfig},
     };
 
     #[rstest]
@@ -50,7 +51,7 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let env = EnvField::default().generate_config().unwrap();
+                let env = EnvFileConfig::default().generate_config().unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
                 assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
@@ -75,7 +76,7 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let env = FlagField::<EnvField>::Enabled(false)
+                let env = FlagedConfig::<EnvFileConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 

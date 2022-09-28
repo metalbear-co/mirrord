@@ -9,8 +9,9 @@ use crate::{
 };
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[config(map_to = MappedOutgoingField)]
-pub struct OutgoingField {
+#[serde(deny_unknown_fields)]
+#[config(map_to = OutgoingConfig)]
+pub struct OutgoingFileConfig {
     #[config(env = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub tcp: Option<bool>,
 
@@ -18,16 +19,16 @@ pub struct OutgoingField {
     pub udp: Option<bool>,
 }
 
-impl MirrordFlaggedConfig for OutgoingField {
+impl MirrordFlaggedConfig for OutgoingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        Ok(MappedOutgoingField {
+        Ok(OutgoingConfig {
             tcp: (
                 FromEnv::new("MIRRORD_TCP_OUTGOING"),
                 DefaultValue::new("false"),
             )
                 .source_value()
                 .ok_or(ConfigError::ValueNotProvided(
-                    "OutgoingField",
+                    "OutgoingFileConfig",
                     "tcp",
                     Some("MIRRORD_TCP_OUTGOING"),
                 ))?,
@@ -37,7 +38,7 @@ impl MirrordFlaggedConfig for OutgoingField {
             )
                 .source_value()
                 .ok_or(ConfigError::ValueNotProvided(
-                    "OutgoingField",
+                    "OutgoingFileConfig",
                     "udp",
                     Some("MIRRORD_TCP_OUTGOING"),
                 ))?,
@@ -52,7 +53,7 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagField},
+        util::{testing::with_env_vars, FlagedConfig},
     };
 
     #[rstest]
@@ -72,7 +73,7 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
-                let outgoing = OutgoingField::default().generate_config().unwrap();
+                let outgoing = OutgoingFileConfig::default().generate_config().unwrap();
 
                 assert_eq!(outgoing.tcp, tcp.1);
                 assert_eq!(outgoing.udp, udp.1);
@@ -97,7 +98,7 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
-                let outgoing = FlagField::<OutgoingField>::Enabled(false)
+                let outgoing = FlagedConfig::<OutgoingFileConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 

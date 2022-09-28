@@ -7,43 +7,43 @@ use crate::{
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
-pub enum FsField {
+pub enum FsConfig {
     Disabled,
     Read,
     Write,
 }
 
-impl FsField {
+impl FsConfig {
     pub fn is_read(&self) -> bool {
-        self == &FsField::Read
+        self == &FsConfig::Read
     }
 
     pub fn is_write(&self) -> bool {
-        self == &FsField::Write
+        self == &FsConfig::Write
     }
 }
 
-impl Default for FsField {
+impl Default for FsConfig {
     fn default() -> Self {
-        FsField::Read
+        FsConfig::Read
     }
 }
 
-impl FsField {
+impl FsConfig {
     fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
         match (fs, ro_fs) {
-            (Some(false), Some(true)) | (None, Some(true)) => Some(FsField::Read),
-            (Some(true), _) => Some(FsField::Write),
+            (Some(false), Some(true)) | (None, Some(true)) => Some(FsConfig::Read),
+            (Some(true), _) => Some(FsConfig::Write),
             (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
-                Some(FsField::Disabled)
+                Some(FsConfig::Disabled)
             }
             (None, None) => None,
         }
     }
 }
 
-impl MirrordConfig for FsField {
-    type Generated = FsField;
+impl MirrordConfig for FsConfig {
+    type Generated = FsConfig;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
@@ -53,12 +53,12 @@ impl MirrordConfig for FsField {
     }
 }
 
-impl MirrordFlaggedConfig for FsField {
+impl MirrordFlaggedConfig for FsConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsField::Disabled))
+        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsConfig::Disabled))
     }
 }
 
@@ -69,19 +69,19 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagField},
+        util::{testing::with_env_vars, FlagedConfig},
     };
 
     #[rstest]
-    #[case(None, None, FsField::Read)]
-    #[case(Some("true"), None, FsField::Write)]
-    #[case(Some("true"), Some("true"), FsField::Write)]
-    #[case(Some("false"), Some("true"), FsField::Read)]
-    fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsField) {
+    #[case(None, None, FsConfig::Read)]
+    #[case(Some("true"), None, FsConfig::Write)]
+    #[case(Some("true"), Some("true"), FsConfig::Write)]
+    #[case(Some("false"), Some("true"), FsConfig::Read)]
+    fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
-                let fs = FsField::default().generate_config().unwrap();
+                let fs = FsConfig::default().generate_config().unwrap();
 
                 assert_eq!(fs, expect);
             },
@@ -89,15 +89,15 @@ mod tests {
     }
 
     #[rstest]
-    #[case(None, None, FsField::Disabled)]
-    #[case(Some("true"), None, FsField::Write)]
-    #[case(Some("true"), Some("true"), FsField::Write)]
-    #[case(Some("false"), Some("true"), FsField::Read)]
-    fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsField) {
+    #[case(None, None, FsConfig::Disabled)]
+    #[case(Some("true"), None, FsConfig::Write)]
+    #[case(Some("true"), Some("true"), FsConfig::Write)]
+    #[case(Some("false"), Some("true"), FsConfig::Read)]
+    fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
-                let fs = FlagField::<FsField>::Enabled(false)
+                let fs = FlagedConfig::<FsConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 
