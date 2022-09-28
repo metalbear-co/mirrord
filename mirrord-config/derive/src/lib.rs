@@ -7,7 +7,7 @@ use syn::{
 };
 
 #[derive(Eq, PartialEq, Debug)]
-enum FieldFlags {
+enum FieldAttr {
     Unwrap,
     Nested,
     Env(Lit),
@@ -33,23 +33,23 @@ fn map_to_ident(source: &Ident, expr: Option<Expr>) -> Ident {
     fallback
 }
 
-/// Parse field attribte to FieldFlags
-fn get_config_flag(meta: &NestedMeta) -> Result<FieldFlags, Diagnostic> {
+/// Parse field attribte to FieldAttr
+fn get_config_flag(meta: &NestedMeta) -> Result<FieldAttr, Diagnostic> {
     match meta {
-        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldFlags::Unwrap),
-        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldFlags::Nested),
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
-            Ok(FieldFlags::Env(meta.lit.clone()))
+            Ok(FieldAttr::Env(meta.lit.clone()))
         }
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("default") => {
-            Ok(FieldFlags::Default(meta.lit.clone()))
+            Ok(FieldAttr::Default(meta.lit.clone()))
         }
         _ => Err(meta.span().error("unsupported config attribute flag")),
     }
 }
 
-/// Parse field attribtes to FieldFlags
-fn get_config_flags(meta: Meta) -> Result<Vec<FieldFlags>, Diagnostic> {
+/// Parse field attribtes to FieldAttr
+fn get_config_flags(meta: Meta) -> Result<Vec<FieldAttr>, Diagnostic> {
     let result = match meta {
         Meta::List(list) => {
             let mut result = Vec::new();
@@ -105,14 +105,14 @@ fn map_field_name(field: Field) -> Result<TokenStream, Diagnostic> {
 
     let ty = if flags
         .iter()
-        .any(|flag| matches!(flag, FieldFlags::Unwrap | FieldFlags::Default(_)))
+        .any(|flag| matches!(flag, FieldAttr::Unwrap | FieldAttr::Default(_)))
     {
         unwrap_option(&ty)?
     } else {
         &ty
     };
 
-    let output = if flags.contains(&FieldFlags::Nested) {
+    let output = if flags.contains(&FieldAttr::Nested) {
         quote! {
             #vis #ident: <#ty as crate::config::MirrordConfig>::Generated
         }
@@ -143,7 +143,7 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> Result<TokenStream, Diag
     let mut impls = Vec::new();
 
     let env_flag = flags.iter().fold(None, |acc, flag| match flag {
-        FieldFlags::Env(env) => Some(env),
+        FieldAttr::Env(env) => Some(env),
         _ => acc,
     });
 
@@ -151,20 +151,20 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> Result<TokenStream, Diag
         impls.push(quote! { crate::config::from_env::FromEnv::new(#flag) });
     }
 
-    if flags.contains(&FieldFlags::Nested) {
+    if flags.contains(&FieldAttr::Nested) {
         impls.push(quote! { Some(self.#ident.generate_config()?) })
     } else {
         impls.push(quote! { self.#ident.clone() });
     }
 
-    if let Some(FieldFlags::Default(flag)) = flags
+    if let Some(FieldAttr::Default(flag)) = flags
         .iter()
-        .find(|flag| matches!(flag, FieldFlags::Default(_)))
+        .find(|flag| matches!(flag, FieldAttr::Default(_)))
     {
         impls.push(quote! { crate::config::default_value::DefaultValue::new(#flag) });
     }
 
-    let unwrapper = flags.iter().find(|flag| matches!(flag, FieldFlags::Unwrap | FieldFlags::Nested | FieldFlags::Default(_))).map(
+    let unwrapper = flags.iter().find(|flag| matches!(flag, FieldAttr::Unwrap | FieldAttr::Nested | FieldAttr::Default(_))).map(
         |_| {
             let env_override = match env_flag {
                 Some(flag) => quote! { Some(#flag) },
