@@ -50,6 +50,7 @@ stacker = "0.1"
 
 [dev-dependencies]
 rstest = "*"
+test-cdylib = "*"
 
 [lib]
 crate_type = ["cdylib"]

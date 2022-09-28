@@ -63,6 +63,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Step not required"'
+  integration_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
+  integration_tests_macos:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Step not required"'
   e2e:
     runs-on: ubuntu-latest
     steps:
