@@ -353,6 +353,8 @@ async fn thread_loop(
             }
         }
     }
+
+    gracefull_exit!();
 }
 
 #[tracing::instrument(level = "trace", skip(pf, receiver))]
