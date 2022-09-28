@@ -42,7 +42,7 @@ faccess = "0.2"
 bytes = "1.2"
 regex = "1"
 socket2 = "0.4"
-mockall = "0.11"
 
 [dev-dependencies]
+mockall = "0.11"
 test_bin = "0.4"

@@ -8,7 +8,6 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
-use mockall::automock;
 use rand::distributions::{Alphanumeric, DistString};
 use streammap_ext::StreamMap;
 use tokio::{
@@ -26,7 +25,7 @@ use crate::{
     runtime::set_namespace,
 };
 
-#[automock]
+#[cfg_attr(test, mockall::automock)]
 trait IPTables {
     fn create_chain(&self, name: &str) -> Result<()>;
     fn remove_chain(&self, name: &str) -> Result<()>;
