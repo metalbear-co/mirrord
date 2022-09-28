@@ -102,7 +102,7 @@ pub(crate) async fn create_agent(
                     .as_ref()
                     .unwrap_or(&impersonated_pod_namespace),
             ),
-        ),        
+        ),
         _ => unreachable!(),
     };
     // END
@@ -508,13 +508,19 @@ impl RuntimeDataProvider for DeploymentData {
         })?;
 
         let (
-            ContainerRuntime {
+            container_name,
+            ContainerData {
                 container_runtime,
                 socket_path,
                 container_id,
             },
-            container_name,
         ) = || -> Option<(String, String)> {
+            let container_name = first_pod
+                .clone()
+                .spec?
+                .containers
+                .first()
+                .map(|container| container.name.clone())?;
             let container_runtime_and_id = first_pod
                 .clone()
                 .status?
@@ -522,14 +528,8 @@ impl RuntimeDataProvider for DeploymentData {
                 .first()?
                 .container_id
                 .clone()?;
-            let container_name = first_pod
-                .clone()
-                .spec?
-                .containers
-                .first()
-                .map(|container| container.name.clone())?;
 
-            Some((container_runtime_and_id, container_name))
+            Some((container_name, container_runtime_and_id))
         }()
         .ok_or_else(|| {
             LayerError::ContainerNotFound(format!(
@@ -538,8 +538,11 @@ impl RuntimeDataProvider for DeploymentData {
                 self.deployment.clone()
             ))
         })
-        .and_then(|(runtime_and_id, container_name)| {
-            Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
+        .and_then(|(container_name, container_runtime_and_id)| {
+            Ok((
+                container_name,
+                container_runtime_and_id.parse::<ContainerData>()?,
+            ))
         })?;
 
         let node_name = first_pod
@@ -639,12 +642,12 @@ impl RuntimeDataProvider for PodData {
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let pod = pod_api.get(&self.pod_name).await?;
         let (
-            ContainerRuntime {
+            container_name,
+            ContainerData {
                 container_runtime,
                 socket_path,
                 container_id,
             },
-            container_name,
         ) = || -> Option<(String, String)> {
             let container_statuses = &pod.clone().status?.container_statuses?;
             let container_name = if let Some(container_name) = self.container_name.clone() {
@@ -656,12 +659,12 @@ impl RuntimeDataProvider for PodData {
                     .first()
                     .map(|container| container.name.clone())?
             };
-            let container_info = container_statuses
+            let container_runtime_and_id = container_statuses
                 .iter()
                 .find(|&status| status.name == container_name)?
                 .container_id
                 .clone()?;
-            Some((container_info, container_name))
+            Some((container_name, container_runtime_and_id))
         }()
         .ok_or_else(|| {
             LayerError::ContainerNotFound(format!(
@@ -669,8 +672,11 @@ impl RuntimeDataProvider for PodData {
                 self.clone(),
             ))
         })
-        .and_then(|(runtime_and_id, container_name)| {
-            Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
+        .and_then(|(container_name, container_runtime_and_id)| {
+            Ok((
+                container_name,
+                container_runtime_and_id.parse::<ContainerData>()?,
+            ))
         })?;
 
         let node_name = pod
@@ -700,17 +706,17 @@ impl FromStr for Target {
     }
 }
 
-pub(crate) struct ContainerRuntime {
+pub(crate) struct ContainerData {
     container_runtime: String,
     socket_path: String,
     container_id: String,
 }
 
-impl FromStr for ContainerRuntime {
+impl FromStr for ContainerData {
     type Err = LayerError;
     fn from_str(input: &str) -> Result<Self> {
-        let container_runtime_info = input.split("://").collect::<Vec<&str>>();
-        let (container_runtime, socket_path) = match container_runtime_info.first() {
+        let container_runtime_and_id = input.split("://").collect::<Vec<&str>>();
+        let (container_runtime, socket_path) = match container_runtime_and_id.first() {
             Some(&"docker") => ("docker", "/var/run/docker.sock"),
             Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
             _ => {
@@ -720,14 +726,14 @@ impl FromStr for ContainerRuntime {
             }
         };
 
-        let container_id = container_runtime_info.last().ok_or_else(|| {
+        let container_id = container_runtime_and_id.last().ok_or_else(|| {
             LayerError::ContainerRuntimeParseError(format!(
                 "Failed while parsing container_id for {}",
                 input
             ))
         })?;
 
-        Ok(ContainerRuntime {
+        Ok(ContainerData {
             container_runtime: container_runtime.to_string(),
             socket_path: socket_path.to_string(),
             container_id: container_id.to_string(),
