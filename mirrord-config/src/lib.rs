@@ -22,7 +22,7 @@ use crate::{
     pod::PodFileConfig, util::VecOrSingle,
 };
 
-/// Root config for mirrord-layer
+/// This is the root struct for mirrord-layer's configuration
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
