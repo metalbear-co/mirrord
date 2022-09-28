@@ -5,7 +5,7 @@ use crate::{
     config::{
         default_value::DefaultValue, from_env::FromEnv, source::MirrordConfigSource, ConfigError,
     },
-    util::MirrordFlaggedConfig,
+    util::MirrordToggleableConfig,
 };
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -19,7 +19,7 @@ pub struct OutgoingFileConfig {
     pub udp: Option<bool>,
 }
 
-impl MirrordFlaggedConfig for OutgoingFileConfig {
+impl MirrordToggleableConfig for OutgoingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         Ok(OutgoingConfig {
             tcp: (
@@ -53,7 +53,7 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagedConfig},
+        util::{testing::with_env_vars, ToggleableConfig},
     };
 
     #[rstest]
@@ -98,7 +98,7 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
-                let outgoing = FlagedConfig::<OutgoingFileConfig>::Enabled(false)
+                let outgoing = ToggleableConfig::<OutgoingFileConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 

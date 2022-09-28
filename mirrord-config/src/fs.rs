@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
-    util::MirrordFlaggedConfig,
+    util::MirrordToggleableConfig,
 };
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -53,7 +53,7 @@ impl MirrordConfig for FsConfig {
     }
 }
 
-impl MirrordFlaggedConfig for FsConfig {
+impl MirrordToggleableConfig for FsConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
@@ -69,7 +69,7 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagedConfig},
+        util::{testing::with_env_vars, ToggleableConfig},
     };
 
     #[rstest]
@@ -97,7 +97,7 @@ mod tests {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
-                let fs = FlagedConfig::<FsConfig>::Enabled(false)
+                let fs = ToggleableConfig::<FsConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 

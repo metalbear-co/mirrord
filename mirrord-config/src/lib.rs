@@ -66,7 +66,7 @@ mod tests {
     use super::*;
     use crate::{
         fs::FsConfig, incoming::IncomingConfig, network::NetworkFileConfig,
-        outgoing::OutgoingFileConfig, util::FlagedConfig,
+        outgoing::OutgoingFileConfig, util::ToggleableConfig,
     };
 
     #[derive(Debug)]
@@ -205,12 +205,12 @@ mod tests {
                 communication_timeout: None,
             },
             feature: FeatureFileConfig {
-                env: Some(FlagedConfig::Enabled(true)),
-                fs: Some(FlagedConfig::Config(FsConfig::Write)),
-                network: Some(FlagedConfig::Config(NetworkFileConfig {
+                env: Some(ToggleableConfig::Enabled(true)),
+                fs: Some(ToggleableConfig::Config(FsConfig::Write)),
+                network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
-                    outgoing: Some(FlagedConfig::Config(OutgoingFileConfig {
+                    outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
                     })),

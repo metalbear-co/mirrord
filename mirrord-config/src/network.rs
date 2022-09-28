@@ -7,7 +7,7 @@ use crate::{
     },
     incoming::IncomingConfig,
     outgoing::OutgoingFileConfig,
-    util::{FlagedConfig, MirrordFlaggedConfig},
+    util::{MirrordToggleableConfig, ToggleableConfig},
 };
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
@@ -18,13 +18,13 @@ pub struct NetworkFileConfig {
     pub incoming: Option<IncomingConfig>,
 
     #[config(nested)]
-    pub outgoing: Option<FlagedConfig<OutgoingFileConfig>>,
+    pub outgoing: Option<ToggleableConfig<OutgoingFileConfig>>,
 
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,
 }
 
-impl MirrordFlaggedConfig for NetworkFileConfig {
+impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         Ok(NetworkConfig {
             incoming: (

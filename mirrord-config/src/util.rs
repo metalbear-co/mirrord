@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::config::{ConfigError, MirrordConfig};
 
-pub trait MirrordFlaggedConfig: MirrordConfig + Default {
+pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn enabled_config() -> Result<Self::Generated, ConfigError> {
         Self::default().generate_config()
     }
@@ -14,28 +14,28 @@ pub trait MirrordFlaggedConfig: MirrordConfig + Default {
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
-pub enum FlagedConfig<T> {
+pub enum ToggleableConfig<T> {
     Enabled(bool),
     Config(T),
 }
 
-impl<T> Default for FlagedConfig<T> {
+impl<T> Default for ToggleableConfig<T> {
     fn default() -> Self {
-        FlagedConfig::<T>::Enabled(true)
+        ToggleableConfig::<T>::Enabled(true)
     }
 }
 
-impl<T> MirrordConfig for FlagedConfig<T>
+impl<T> MirrordConfig for ToggleableConfig<T>
 where
-    T: MirrordFlaggedConfig,
+    T: MirrordToggleableConfig,
 {
     type Generated = T::Generated;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
         match self {
-            FlagedConfig::Enabled(true) => T::enabled_config(),
-            FlagedConfig::Enabled(false) => T::disabled_config(),
-            FlagedConfig::Config(inner) => inner.generate_config(),
+            ToggleableConfig::Enabled(true) => T::enabled_config(),
+            ToggleableConfig::Enabled(false) => T::disabled_config(),
+            ToggleableConfig::Config(inner) => inner.generate_config(),
         }
     }
 }

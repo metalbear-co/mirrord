@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::{
     config::source::MirrordConfigSource, env::EnvFileConfig, fs::FsConfig,
-    network::NetworkFileConfig, util::FlagedConfig,
+    network::NetworkFileConfig, util::ToggleableConfig,
 };
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
@@ -11,11 +11,11 @@ use crate::{
 #[config(map_to = FeatureConfig)]
 pub struct FeatureFileConfig {
     #[config(nested)]
-    pub env: Option<FlagedConfig<EnvFileConfig>>,
+    pub env: Option<ToggleableConfig<EnvFileConfig>>,
 
     #[config(nested)]
-    pub fs: Option<FlagedConfig<FsConfig>>,
+    pub fs: Option<ToggleableConfig<FsConfig>>,
 
     #[config(nested)]
-    pub network: Option<FlagedConfig<NetworkFileConfig>>,
+    pub network: Option<ToggleableConfig<NetworkFileConfig>>,
 }

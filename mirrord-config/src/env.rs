@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    util::{MirrordFlaggedConfig, VecOrSingle},
+    util::{MirrordToggleableConfig, VecOrSingle},
 };
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -17,7 +17,7 @@ pub struct EnvFileConfig {
     pub exclude: Option<VecOrSingle<String>>,
 }
 
-impl MirrordFlaggedConfig for EnvFileConfig {
+impl MirrordToggleableConfig for EnvFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
@@ -33,7 +33,7 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, FlagedConfig},
+        util::{testing::with_env_vars, ToggleableConfig},
     };
 
     #[rstest]
@@ -76,7 +76,7 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let env = FlagedConfig::<EnvFileConfig>::Enabled(false)
+                let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
                     .generate_config()
                     .unwrap();
 
