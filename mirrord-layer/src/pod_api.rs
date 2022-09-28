@@ -88,21 +88,25 @@ pub(crate) async fn create_agent(
                 agent_namespace.as_ref().unwrap_or(&target_namespace),
             ),
         ),
-        (None, Some(pod_name)) => (
-            RuntimeData::from_k8s(
-                &client,
-                pod_name,
-                &impersonated_pod_namespace,
-                &impersonated_container_name,
+        (None, Some(pod_name)) => {
+            warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
+                \nDeprecated since: [DATE] | Scheduled removal: [DATE]");
+            (
+                RuntimeData::from_k8s(
+                    &client,
+                    pod_name,
+                    &impersonated_pod_namespace,
+                    &impersonated_container_name,
+                )
+                .await?,
+                Api::namespaced(
+                    client.clone(),
+                    agent_namespace
+                        .as_ref()
+                        .unwrap_or(&impersonated_pod_namespace),
+                ),
             )
-            .await?,
-            Api::namespaced(
-                client.clone(),
-                agent_namespace
-                    .as_ref()
-                    .unwrap_or(&impersonated_pod_namespace),
-            ),
-        ),
+        }
         _ => unreachable!(),
     };
     // END

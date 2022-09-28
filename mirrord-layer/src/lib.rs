@@ -107,10 +107,6 @@ fn deprecation_check(config: &LayerConfig) {
             panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
             >> EnvVars: {:?}, {:?}, {:?}", target, impersonated_pod_name, impersonated_container_name);
         }
-        (None, Some(_), Some(_)) => {
-            panic!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
-            \nDeprecated since: [DATE] | Scheduled removal: [DATE]");
-        }
         (None, None, _) => {
             panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
         }
