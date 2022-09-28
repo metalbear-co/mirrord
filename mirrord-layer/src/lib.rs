@@ -409,7 +409,11 @@ async fn start_layer_thread(
             }
           },
           _ = sleep(Duration::from_secs(config.agent_communication_timeout.unwrap_or(30).into())) => {
-            gracefull_exit!("response timeout - expected env var response");
+            gracefull_exit!(r#"
+                agent response timeout - expected env var response
+
+                check that the agent image can run on your architecture
+            "#);
           }
         }
     };
