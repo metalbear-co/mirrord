@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - macOS binaries should be okay now.
+- tcp-steal working with linkerd meshing.
 
 
 ### Fixed
