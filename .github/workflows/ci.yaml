@@ -18,69 +18,69 @@ on:
 
 
 jobs:
-  # lint:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt, clippy
-  #     - uses: Swatinem/rust-cache@v1
-  #     # Needed for agent
-  #     - run: sudo apt install libpcap-dev cmake
-  #     - run: cargo fmt --all -- --check
-  #     - run: cargo clippy -- -D warnings
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v1
+      # Needed for agent
+      - run: sudo apt install libpcap-dev cmake
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
 
-  # test_mirrord_protocol:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}
-  #     - run: |
-  #         cd mirrord-protocol
-  #         cargo test
-  # test_agent:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt
-  #     - uses: Swatinem/rust-cache@v1
-  #     - run: sudo apt install -y libpcap-dev cmake
-  #     - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+  test_mirrord_protocol:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cd mirrord-protocol
+          cargo test
+  test_agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+      - run: sudo apt install -y libpcap-dev cmake
+      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
-  # test_mirrord_layer:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}
-  #     - run: |
-  #         cargo test -p mirrord-layer
+  test_mirrord_layer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-layer
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -102,36 +102,36 @@ jobs:
           name: test
           path: /tmp/test.tar
 
-  # test_mirrord_layer_cli:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest, macos-12, macos-11]
-  #       target:
-  #         [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
-  #       exclude:
-  #         - os: ubuntu-latest
-  #           target: x86_64-apple-darwin
-  #         - os: ubuntu-latest
-  #           target: aarch64-apple-darwin
-  #         - os: macos-12
-  #           target: x86_64-unknown-linux-gnu
-  #         - os: macos-11
-  #           target: aarch64-apple-darwin
-  #         - os: macos-11
-  #           target: x86_64-unknown-linux-gnu
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}-${{matrix.target}}
-  #     # For now, just verify it compiles.
-  #     - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+  test_mirrord_layer_cli:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-12, macos-11]
+        target:
+          [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: macos-12
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            target: aarch64-apple-darwin
+          - os: macos-11
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}-${{matrix.target}}
+      # For now, just verify it compiles.
+      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
@@ -225,7 +225,7 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests -- --nocapture
+        run: cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
@@ -239,41 +239,41 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  # e2e_macos:
-  #   runs-on: macos-12
-  #   name: e2e macOS
-  #   needs: [build_mirrord, test_agent_image]
-  #   env:
-  #     MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: macos-latest
-  #         cache-on-failure: true
-  #     - run: npm install express
-  #     - uses: actions/setup-python@v3
-  #     - run: pip3 install flask
-  #     - run: pip3 install fastapi
-  #     - run: pip3 install uvicorn[standard]
-  #     - name: setup cluster requirements
-  #       run: brew install docker colima kubectl
-  #     - name: create cluster
-  #       run: colima start --kubernetes --network-address --cpu 3 --memory 8
-  #     - name: download image
-  #       uses: actions/download-artifact@v2
-  #       with:
-  #         name: test
-  #         path: /tmp
-  #     - name: load image
-  #       run: docker load --input /tmp/test.tar
-  #     - name: cargo test
-  #       run: cargo test -p tests test_mirror_http_traffic
-  #     - name: Collect container logs
-  #       if: ${{ failure() }}
-  #       run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
+  e2e_macos:
+    runs-on: macos-12
+    name: e2e macOS
+    needs: [build_mirrord, test_agent_image]
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: macos-latest
+          cache-on-failure: true
+      - run: npm install express
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - run: pip3 install fastapi
+      - run: pip3 install uvicorn[standard]
+      - name: setup cluster requirements
+        run: brew install docker colima kubectl
+      - name: create cluster
+        run: colima start --kubernetes --network-address --cpu 3 --memory 8
+      - name: download image
+        uses: actions/download-artifact@v2
+        with:
+          name: test
+          path: /tmp
+      - name: load image
+        run: docker load --input /tmp/test.tar
+      - name: cargo test
+        run: cargo test -p tests test_mirror_http_traffic
+      - name: Collect container logs
+        if: ${{ failure() }}
+        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
