@@ -470,18 +470,18 @@ impl RuntimeDataProvider for DeploymentData {
             .get(&self.deployment)
             .await
             .map_err(LayerError::KubeError)?;
-        let pod_label = || -> Option<String> {
-            deployment
-                .spec
-                .and_then(|spec| spec.template.metadata?.labels)
-                .and_then(|pod_name| pod_name.get("app").cloned())
-        }()
-        .ok_or_else(|| {
-            LayerError::DeploymentNotFound(format!(
-                "Label for deployment: {}, not found!",
-                self.deployment.clone()
-            ))
-        })?;
+
+        let pod_label = deployment
+            .spec
+            .and_then(|spec| spec.template.metadata)
+            .and_then(|metadata| metadata.labels)
+            .and_then(|labels| labels.get("app").cloned())
+            .ok_or_else(|| {
+                LayerError::DeploymentNotFound(format!(
+                    "Label for deployment: {}, not found!",
+                    self.deployment.clone()
+                ))
+            })?;
 
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let deployment_pods = pod_api
@@ -539,8 +539,11 @@ impl RuntimeDataProvider for DeploymentData {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
 
-        let node_name =
-            || -> Option<String> { first_pod.clone().spec?.node_name }().ok_or_else(|| {
+        let node_name = first_pod
+            .clone()
+            .spec
+            .and_then(|spec| spec.node_name)
+            .ok_or_else(|| {
                 LayerError::NodeNotFound(format!(
                     "target {:?} pod {:?}, container {}",
                     self.clone(),
@@ -641,15 +644,15 @@ impl RuntimeDataProvider for PodData {
             container_name,
         ) = || -> Option<(String, String)> {
             let container_statuses = &pod.clone().status?.container_statuses?;
-            let container_name = if self.container_name.is_some() {
-                self.container_name.clone()
+            let container_name = if let Some(container_name) = self.container_name.clone() {
+                container_name
             } else {
                 pod.clone()
                     .spec?
                     .containers
                     .first()
-                    .map(|container| container.name.clone())
-            }?;
+                    .map(|container| container.name.clone())?
+            };
             let container_info = container_statuses
                 .iter()
                 .find(|&status| status.name == container_name)?
@@ -666,8 +669,12 @@ impl RuntimeDataProvider for PodData {
         .and_then(|(runtime_and_id, container_name)| {
             Ok((runtime_and_id.parse::<ContainerRuntime>()?, container_name))
         })?;
-        let node_name = || -> Option<String> { pod.clone().spec?.node_name }()
+
+        let node_name = pod
+            .spec
+            .and_then(|spec| spec.node_name)
             .ok_or_else(|| LayerError::NodeNotFound(format!("{:?}", self.clone())))?;
+
         Ok(RuntimeData {
             container_id,
             container_runtime,

@@ -25,6 +25,8 @@ pub(super) enum Commands {
 ))]
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
+    /// Target can either be a deployment or a pod.
+    /// Valid formats: deployment/name, pod/name, pod/name/container/name
     #[clap(short, long, value_parser)]
     pub target: Option<String>,
 
