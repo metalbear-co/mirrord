@@ -1,6 +1,9 @@
 use std::{collections::VecDeque, net::IpAddr};
 
-use mirrord_protocol::{AddrInfoHint, AddrInfoInternal, RemoteResult};
+use mirrord_protocol::{
+    dns::{DnsLookup, GetAddrInfoResponse},
+    RemoteResult,
+};
 use tokio::sync::oneshot;
 use trust_dns_resolver::config::Protocol;
 
@@ -30,7 +33,7 @@ pub struct GetAddrInfoHook {
     pub(crate) node: Option<String>,
     pub(crate) service: Option<String>,
     pub(crate) protocol: Option<Protocol>,
-    pub(crate) hook_channel_tx: ResponseChannel<Vec<IpAddr>>,
+    pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
 }
 
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.

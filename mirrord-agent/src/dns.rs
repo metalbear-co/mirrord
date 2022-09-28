@@ -1,68 +1,54 @@
-use std::{fs::File, net::IpAddr, os::unix::prelude::*, path::PathBuf};
+use std::{
+    fs::{self, File},
+    net::IpAddr,
+    path::{Path, PathBuf},
+};
 
 use mirrord_protocol::{
-    AddrInfoHint, AddrInfoInternal, GetAddrInfoRequest, RemoteResult, ResponseError,
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    RemoteResult,
 };
 use tokio::sync::{mpsc::Receiver, oneshot::Sender};
-use tracing::{debug, error, trace};
-use trust_dns_resolver::{
-    config::{ResolverConfig, ResolverOpts},
-    proto::rr::RecordType,
-    system_conf::parse_resolv_conf,
-    AsyncResolver, Resolver, TokioAsyncResolver,
-};
+use tracing::{debug, error};
+use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
 use crate::{error::AgentError, runtime::set_namespace};
 
 #[derive(Debug)]
 pub struct DnsRequest {
     request: GetAddrInfoRequest,
-    // tx: Sender<RemoteResult<Vec<AddrInfoInternal>>>,
-    tx: Sender<RemoteResult<Vec<IpAddr>>>,
+    tx: Sender<GetAddrInfoResponse>,
 }
 
 impl DnsRequest {
-    pub fn new(
-        request: GetAddrInfoRequest,
-        // tx: Sender<RemoteResult<Vec<AddrInfoInternal>>>,
-        tx: Sender<RemoteResult<Vec<IpAddr>>>,
-    ) -> Self {
+    pub fn new(request: GetAddrInfoRequest, tx: Sender<GetAddrInfoResponse>) -> Self {
         Self { request, tx }
     }
 }
 
-trait AddrInfoHintExt {
-    fn into_lookup(self) -> dns_lookup::AddrInfoHints;
-}
-
-impl AddrInfoHintExt for AddrInfoHint {
-    fn into_lookup(self) -> dns_lookup::AddrInfoHints {
-        dns_lookup::AddrInfoHints {
-            socktype: self.ai_socktype,
-            protocol: self.ai_protocol,
-            address: self.ai_family,
-            flags: self.ai_flags,
-        }
-    }
-}
-
-use std::fs;
-
 #[tracing::instrument(level = "debug")]
-async fn dns_lookup(root_path: PathBuf, host: String) -> RemoteResult<Vec<IpAddr>> {
+async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let resolv_conf_path = root_path.join("etc").join("resolv.conf");
     debug!("dns_lookup -> resolv_conf_path {:#?}", resolv_conf_path);
+
+    let hosts_path = root_path.join("etc").join("hosts");
+    debug!("dns_lookup -> hosts_path {:#?}", hosts_path);
 
     let resolv_conf = fs::read(resolv_conf_path)?;
     debug!("dns_lookup -> resolv_conf {:#?}", resolv_conf);
 
-    let (config, options) = parse_resolv_conf(resolv_conf)?;
-    // let resolver = AsyncResolver::new(config, options)?;
-    let tokio_resolver = TokioAsyncResolver::tokio(config, options)?;
+    let hosts_file = File::open(hosts_path)?;
 
-    let lookup = tokio_resolver.lookup_ip(host).await?;
-    let addresses = lookup.into_iter().collect::<Vec<_>>();
-    Ok(addresses)
+    let (config, options) = parse_resolv_conf(resolv_conf)?;
+    let mut resolver = AsyncResolver::tokio(config, options)?;
+
+    let hosts = Hosts::default().read_hosts_conf(hosts_file)?;
+    resolver.set_hosts(Some(hosts));
+
+    let lookup = resolver.lookup_ip(host).await?.into();
+    debug!("dns_lookup -> lookup {:#?}", lookup);
+
+    Ok(lookup)
 }
 
 pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<(), AgentError> {
@@ -80,8 +66,8 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
         debug!("dns_worker -> request {:#?}", request);
 
-        let result = dns_lookup(root_path.clone(), request.node.unwrap());
-        if let Err(result) = tx.send(result.await) {
+        let result = dns_lookup(root_path.as_path(), request.node.unwrap());
+        if let Err(result) = tx.send(GetAddrInfoResponse(result.await)) {
             error!("couldn't send result to caller {result:?}");
         }
     }

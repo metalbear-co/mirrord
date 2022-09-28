@@ -36,7 +36,6 @@ bytes.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 thiserror.workspace = true
-dns-lookup.workspace = true
 trust-dns-resolver.worspace = true
 rand = "0.8"
 envconfig = "0.10"

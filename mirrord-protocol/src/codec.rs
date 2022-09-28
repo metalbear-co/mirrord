@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
-    net::{IpAddr, SocketAddr},
     path::PathBuf,
 };
 
@@ -11,6 +10,7 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
+    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -34,15 +34,6 @@ pub struct ReadFileRequest {
 pub struct ReadStringFileRequest {
     pub fd: usize,
     pub buffer_size: usize,
-}
-
-// TODO: Should probably live in a separate place (maybe even a separate `util` crate).
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
-pub struct AddrInfoHint {
-    pub ai_family: i32,
-    pub ai_socktype: i32,
-    pub ai_protocol: i32,
-    pub ai_flags: i32,
 }
 
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
@@ -176,18 +167,6 @@ pub enum FileRequest {
     Close(CloseFileRequest),
     Access(AccessFileRequest),
 }
-
-/// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
-///
-/// Even though all parameters are optional, at least one of `node` or `service` must be `Some`,
-/// otherwise this will result in a `ResponseError`.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoRequest {
-    pub node: Option<String>,
-    pub service: Option<String>,
-    pub protocol: Option<i32>,
-}
-
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -266,61 +245,6 @@ pub enum FileResponse {
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
 }
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct AddrInfoInternal {
-    socktype: i32,
-    protocol: i32,
-    address: i32,
-    sockaddr: SocketAddr,
-    canonname: Option<String>,
-    flags: i32,
-}
-
-impl From<AddrInfoInternal> for dns_lookup::AddrInfo {
-    fn from(internal: AddrInfoInternal) -> Self {
-        let AddrInfoInternal {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        } = internal;
-
-        Self {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        }
-    }
-}
-
-impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
-    fn from(addrinfo: dns_lookup::AddrInfo) -> Self {
-        let dns_lookup::AddrInfo {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        } = addrinfo;
-
-        Self {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        }
-    }
-}
-
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
@@ -333,8 +257,7 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
-    // GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
-    GetAddrInfoResponse(RemoteResult<Vec<IpAddr>>),
+    GetAddrInfoResponse(GetAddrInfoResponse),
 }
 
 pub struct ClientCodec {

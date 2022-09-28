@@ -190,7 +190,7 @@ impl ProtocolExt for Protocol {
             libc::IPPROTO_UDP => Ok(Protocol::Udp),
             libc::IPPROTO_TCP => Ok(Protocol::Tcp),
             libc::IPPROTO_UDPLITE => Ok(Protocol::Udp),
-            libc::IPPROTO_SCTP => Err(todo!()),
+            libc::IPPROTO_SCTP => todo!(),
             other => {
                 warn!("Trying a protocol of {:#?}", other);
                 Ok(Protocol::Tcp)
@@ -202,8 +202,7 @@ impl ProtocolExt for Protocol {
         match self {
             Protocol::Udp => Ok(libc::IPPROTO_UDP),
             Protocol::Tcp => Ok(libc::IPPROTO_TCP),
-            Protocol::Udp => Ok(libc::IPPROTO_UDPLITE),
-            invalid => Err(todo!()),
+            _ => todo!(),
         }
     }
 }

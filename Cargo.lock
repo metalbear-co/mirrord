@@ -557,18 +557,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns-lookup"
-version = "1.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53ecafc952c4528d9b51a458d1a8904b81783feff9fde08ab6ed2545ff396872"
-dependencies = [
- "cfg-if",
- "libc",
- "socket2",
- "winapi",
-]
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1536,7 +1524,6 @@ dependencies = [
  "bytes",
  "clap 3.2.20",
  "containerd-client",
- "dns-lookup",
  "faccess",
  "futures",
  "iptables",
@@ -1584,7 +1571,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "ctor",
- "dns-lookup",
  "envconfig",
  "errno",
  "frida-gum",
@@ -1627,7 +1613,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
- "dns-lookup",
+ "serde",
  "thiserror",
  "trust-dns-resolver",
 ]

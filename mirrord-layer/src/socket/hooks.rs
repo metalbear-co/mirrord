@@ -3,18 +3,12 @@ use std::{ffi::CStr, os::unix::io::RawFd};
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
 use tracing::{error, info, trace, warn};
 use trust_dns_resolver::config::Protocol;
 
 use super::ops::*;
-use crate::{
-    detour::DetourGuard,
-    error::HookError,
-    replace,
-    socket::{AddrInfoHintExt, ProtocolExt},
-};
+use crate::{detour::DetourGuard, error::HookError, replace, socket::ProtocolExt};
 
 #[hook_guard_fn]
 #[tracing::instrument(level = "trace")]
@@ -366,14 +360,10 @@ unsafe extern "C" fn getaddrinfo_detour(
     };
 
     let libc::addrinfo {
-        ai_flags,
         ai_family,
         ai_socktype,
         ai_protocol,
-        ai_addrlen,
-        ai_addr,
-        ai_canonname,
-        ai_next,
+        ..
     } = *raw_hints;
 
     let (Ok(result) | Err(result)) =

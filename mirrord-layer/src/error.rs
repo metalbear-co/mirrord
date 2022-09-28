@@ -166,16 +166,7 @@ impl From<HookError> for i64 {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
             HookError::ResponseError(ResponseError::DnsFailure(code)) => {
-                use dns_lookup::{LookupError, LookupErrorKind};
-                error!("dns failed with code {}", code);
-                // Some of the codes of Unix doesn't match FreeBSD/macOS so we re-use the library
-                // to return valid codes.
-                let error = LookupError::new(code);
-                let code = match error.kind() {
-                    LookupErrorKind::IO => libc::EAI_SYSTEM,
-                    _ => error.error_num(),
-                };
-                return code.into();
+                todo!()
             }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))

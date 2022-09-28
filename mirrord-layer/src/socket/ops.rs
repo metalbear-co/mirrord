@@ -1,5 +1,4 @@
 use std::{
-    ffi::CString,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -7,10 +6,6 @@ use std::{
     sync::Arc,
 };
 
-// TODO(alex) [high] 2022-09-26: Even the pod resolves IPv6 addresses, so it might be just an
-// issue with ordering? Could sort the result we get (maybe the `getaddrinfo` crate changes
-// order) before returning it to layer.
-use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -479,7 +474,7 @@ pub(super) fn getaddrinfo(
     // only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(|ip| SocketAddr::from((ip, 0)))
+        .map(|dns_record| SocketAddr::from((dns_record.ip   , 0)))
         .map(|address| SockAddr::from(address))
         .map(|rawish_sock_addr| {
             let ai_addrlen = rawish_sock_addr.len();

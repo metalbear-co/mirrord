@@ -24,8 +24,8 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
-    AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
-    GetEnvVarsRequest,
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
@@ -41,7 +41,6 @@ use tokio::{
 };
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
-use trust_dns_resolver::config::Protocol;
 
 use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
 
@@ -173,7 +172,7 @@ where
 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
-    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<IpAddr>>>,
+    getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
 
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -230,11 +229,7 @@ where
 
                 let protocol = protocol.map(ProtocolExt::try_into_raw).transpose().unwrap();
 
-                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                    node,
-                    service,
-                    protocol,
-                });
+                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
                 self.codec.send(request).await.unwrap();
             }

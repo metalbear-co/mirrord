@@ -90,13 +90,6 @@ impl From<ResolveError> for ResponseError {
         })
     }
 }
-
-impl From<dns_lookup::LookupError> for ResponseError {
-    fn from(error: dns_lookup::LookupError) -> Self {
-        Self::DnsFailure(error.error_num())
-    }
-}
-
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ErrorKindInternal {
@@ -147,7 +140,7 @@ pub enum ErrorKindInternal {
 pub enum ResolveErrorKindInternal {
     Message(String),
     NoConnections,
-    NoRecordsFound,
+    NoRecordsFound(u16),
     Io,
     Proto,
     Timeout,
@@ -209,13 +202,9 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
             ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
-            ResolveErrorKind::NoRecordsFound {
-                query,
-                soa,
-                negative_ttl,
-                response_code,
-                trusted,
-            } => ResolveErrorKindInternal::NoRecordsFound,
+            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
+                ResolveErrorKindInternal::NoRecordsFound(response_code.into())
+            }
             ResolveErrorKind::Io(_) => ResolveErrorKindInternal::Io,
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
