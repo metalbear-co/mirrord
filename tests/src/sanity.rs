@@ -1170,7 +1170,7 @@ mod tests {
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
         let logs = pod_api
-            .log_stream(&internal_service.target, &lp)
+            .log_stream(stripped_target, &lp)
             .await
             .unwrap()
             .try_next()
