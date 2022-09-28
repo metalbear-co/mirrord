@@ -2,8 +2,6 @@
 
 This crate implements the derive macro `MirrordConfig`, which introduces the `config` attribute:
 
-`config` attribute:
-
 - On a struct:
     - `map_to = <Some Ident>` set the name of the new generated struct (defaults to `format!("Mapped{}", <struct name>)`)
 
