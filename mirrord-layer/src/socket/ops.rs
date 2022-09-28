@@ -474,7 +474,7 @@ pub(super) fn getaddrinfo(
     // only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(|dns_record| SocketAddr::from((dns_record.ip   , 0)))
+        .map(|dns_record| SocketAddr::from((dns_record.ip, 0)))
         .map(|address| SockAddr::from(address))
         .map(|rawish_sock_addr| {
             let ai_addrlen = rawish_sock_addr.len();
@@ -489,6 +489,7 @@ pub(super) fn getaddrinfo(
                 ai_protocol,
                 ai_addrlen,
                 ai_addr,
+                // TODO(alex) [high] 2022-09-28: Convert `DnsLookup::name` into leaked pointer.
                 ai_canonname: ptr::null_mut(),
                 ai_next: ptr::null_mut(),
             }

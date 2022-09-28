@@ -8,7 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoHint, Port};
+use mirrord_protocol::Port;
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -161,21 +161,6 @@ fn fill_address(
         }
 
         Ok(())
-    }
-}
-
-pub(crate) trait AddrInfoHintExt {
-    fn from_raw(raw: libc::addrinfo) -> Self;
-}
-
-impl AddrInfoHintExt for AddrInfoHint {
-    fn from_raw(raw: libc::addrinfo) -> Self {
-        Self {
-            ai_family: raw.ai_family,
-            ai_socktype: raw.ai_socktype,
-            ai_protocol: raw.ai_protocol,
-            ai_flags: raw.ai_flags,
-        }
     }
 }
 

@@ -283,7 +283,7 @@ where
                 .getaddrinfo_handler_queue
                 .pop_front()
                 .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
-                .send(get_addr_info)
+                .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close => todo!(),
             DaemonMessage::LogMessage(_) => todo!(),

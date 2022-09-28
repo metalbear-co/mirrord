@@ -1,3 +1,4 @@
+extern crate alloc;
 use core::ops::Deref;
 use std::{collections::HashMap, net::IpAddr};
 
@@ -18,7 +19,7 @@ pub struct LookupRecord {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct DnsLookup(Vec<LookupRecord>);
+pub struct DnsLookup(pub Vec<LookupRecord>);
 
 impl From<LookupIp> for DnsLookup {
     fn from(lookup_ip: LookupIp) -> Self {
@@ -53,8 +54,26 @@ impl Deref for DnsLookup {
     }
 }
 
+impl IntoIterator for DnsLookup {
+    type Item = LookupRecord;
+
+    type IntoIter = alloc::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetAddrInfoResponse(pub RemoteResult<DnsLookup>);
+
+impl Deref for GetAddrInfoResponse {
+    type Target = RemoteResult<DnsLookup>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
 ///
