@@ -76,7 +76,7 @@ pub(crate) async fn create_agent(
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
-    // START DEPRECATED: - Scheduled for removal on [28/10/2022]
+    // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
     let (runtime_data, pod_api): (RuntimeData, Api<Pod>) = match (&target, &impersonated_pod_name) {
         (Some(target), None) => (
             target
@@ -102,7 +102,7 @@ pub(crate) async fn create_agent(
                     .as_ref()
                     .unwrap_or(&impersonated_pod_namespace),
             ),
-        ),
+        ),        
         _ => unreachable!(),
     };
     // END
@@ -548,7 +548,7 @@ impl RuntimeDataProvider for DeploymentData {
             .and_then(|spec| spec.node_name)
             .ok_or_else(|| {
                 LayerError::NodeNotFound(format!(
-                    "target {:?} pod {:?}, container {}",
+                    "Target: {:?} | Pod: {:?} | Container: {}",
                     self.clone(),
                     first_pod.clone(),
                     container_name.clone()

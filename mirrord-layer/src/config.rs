@@ -21,12 +21,15 @@ pub struct LayerConfig {
     #[envconfig(from = "MIRRORD_TARGET_NAMESPACE", default = "default")]
     pub target_namespace: String,
 
+    // DEPRECATED: - Scheduled for removal on [28/10/2022]
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub impersonated_pod_name: Option<String>,
 
+    // DEPRECATED: - Scheduled for removal on [28/10/2022]
     #[envconfig(from = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
     pub impersonated_pod_namespace: String,
 
+    // DEPRECATED: - Scheduled for removal on [28/10/2022]
     #[envconfig(from = "MIRRORD_IMPERSONATED_CONTAINER_NAME")]
     pub impersonated_container_name: Option<String>,
 
