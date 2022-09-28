@@ -39,10 +39,10 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
-            Ok(FieldAttr::Env(meta.lit.clone()))
+            Ok(FieldAttr::Env(meta.lit))
         }
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("default") => {
-            Ok(FieldAttr::Default(meta.lit.clone()))
+            Ok(FieldAttr::Default(meta.lit))
         }
         _ => Err(meta.span().error("unsupported config attribute flag")),
     }
