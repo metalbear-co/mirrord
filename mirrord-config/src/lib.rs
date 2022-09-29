@@ -123,13 +123,17 @@ mod tests {
                             "name": "test-service-abcdefg-abcd",
                             "namespace": "default",
                             "container": "test"
-                        }
+                        },
+                        "target": "pod/test-service-abcdefg-abcd",
+                        "target_namespace": "default"
                     }
                     "#
                 }
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
+                    target: "pod/test-service-abcdefg-abcd",
+                    target_namespace: "default"
 
                     [agent]
                     log_level = "info"
@@ -160,6 +164,8 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
+                    target: "pod/test-service-abcdefg-abcd",
+                    target_namespace: "default"
 
                     agent:
                         log_level: "info"
