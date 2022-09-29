@@ -10,7 +10,6 @@
 extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
-    net::IpAddr,
     sync::{LazyLock, OnceLock},
 };
 
@@ -25,12 +24,12 @@ use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
-use socket::{ProtocolExt, SOCKETS};
+use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
@@ -222,14 +221,9 @@ where
             }
             HookMessage::GetAddrInfoHook(GetAddrInfoHook {
                 node,
-                service,
-                protocol,
                 hook_channel_tx,
             }) => {
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
-
-                let protocol = protocol.map(ProtocolExt::try_into_raw).transpose().unwrap();
-
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
                 self.codec.send(request).await.unwrap();

@@ -1,14 +1,9 @@
 extern crate alloc;
 use core::ops::Deref;
-use std::{collections::HashMap, net::IpAddr};
+use std::net::IpAddr;
 
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
-use trust_dns_resolver::{
-    lookup_ip::LookupIp,
-    proto::rr::{resource::RecordParts, Record},
-    Name,
-};
+use trust_dns_resolver::{lookup_ip::LookupIp, proto::rr::resource::RecordParts};
 
 use crate::RemoteResult;
 

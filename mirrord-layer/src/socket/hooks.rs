@@ -5,7 +5,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use socket2::SockAddr;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 use trust_dns_resolver::config::Protocol;
 
 use super::ops::*;
@@ -336,21 +336,6 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
-    let service = match (!raw_service.is_null())
-        .then(|| CStr::from_ptr(raw_service).to_str().map(String::from))
-        .transpose()
-        .map_err(|fail| {
-            error!(
-                "Failed converting raw_service from `c_char` with {:#?}",
-                fail
-            );
-
-            libc::EAI_MEMORY
-        }) {
-        Ok(service) => service,
-        Err(fail) => return fail,
-    };
-
     let protocol = match (!raw_hints.is_null())
         .then(|| Protocol::try_from_raw((*raw_hints).ai_protocol))
         .transpose()
@@ -367,7 +352,7 @@ unsafe extern "C" fn getaddrinfo_detour(
         ..
     } = *raw_hints;
 
-    let (Ok(result) | Err(result)) = getaddrinfo(node, service, protocol, ai_protocol, ai_socktype)
+    let (Ok(result) | Err(result)) = getaddrinfo(node, protocol, ai_protocol, ai_socktype)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 

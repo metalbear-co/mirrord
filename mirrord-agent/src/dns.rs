@@ -1,6 +1,5 @@
 use std::{
     fs::{self, File},
-    net::IpAddr,
     path::{Path, PathBuf},
 };
 

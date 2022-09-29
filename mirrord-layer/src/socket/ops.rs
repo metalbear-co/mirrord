@@ -8,7 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::dns::{DnsLookup, LookupRecord};
+use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace};
@@ -454,7 +454,6 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 #[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     node: Option<String>,
-    service: Option<String>,
     protocol: Option<Protocol>,
     ai_protocol: i32,
     ai_socktype: i32,
@@ -462,8 +461,6 @@ pub(super) fn getaddrinfo(
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
-        service,
-        protocol,
         hook_channel_tx,
     };
 

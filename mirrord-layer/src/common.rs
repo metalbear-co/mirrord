@@ -1,11 +1,7 @@
-use std::{collections::VecDeque, net::IpAddr};
+use std::collections::VecDeque;
 
-use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoResponse},
-    RemoteResult,
-};
+use mirrord_protocol::{dns::DnsLookup, RemoteResult};
 use tokio::sync::oneshot;
-use trust_dns_resolver::config::Protocol;
 
 use crate::{
     error::{HookError, HookResult},
@@ -31,8 +27,6 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 #[derive(Debug)]
 pub struct GetAddrInfoHook {
     pub(crate) node: Option<String>,
-    pub(crate) service: Option<String>,
-    pub(crate) protocol: Option<Protocol>,
     pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
 }
 

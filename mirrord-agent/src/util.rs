@@ -101,7 +101,7 @@ where
 {
     pub fn new() -> IndexAllocator<T> {
         IndexAllocator {
-            index: num_traits::cast(100).unwrap(),
+            index: zero(),
             vacant_indices: Vec::new(),
         }
     }
