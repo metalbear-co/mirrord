@@ -379,7 +379,7 @@ async fn thread_loop(
         }
     }
 
-    gracefull_exit!();
+    graceful_exit!();
 }
 
 #[tracing::instrument(level = "trace", skip(pf, receiver))]
@@ -432,11 +432,11 @@ async fn start_layer_thread(
                     debug_assert_eq!(std::env::var(key), Ok(value));
                 }
             } else {
-                gracefull_exit!("unexpected response - expected env vars response {msg:?}");
+                graceful_exit!("unexpected response - expected env vars response {msg:?}");
             }
           },
           _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
-            gracefull_exit!(r#"
+            graceful_exit!(r#"
                 agent response timeout - expected env var response
 
                 check that the agent image can run on your architecture
