@@ -125,15 +125,15 @@ mod tests {
                             "name": "test-service-abcdefg-abcd",
                             "namespace": "default",
                             "container": "test"
-                        },                        
+                        }                       
                     }
                     "#
                 }
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
-                    target: "pod/test-service-abcdefg-abcd"
-                    target_namespace: "default"
+                    target = "pod/test-service-abcdefg-abcd"
+                    target_namespace = "default"
 
                     [agent]
                     log_level = "info"
@@ -227,6 +227,8 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            target: Some("pod/test-service-abcdefg-abcd".to_owned()),
+            target_namespace: Some("default".to_owned()),
             skip_processes: None,
             agent: AgentFileConfig {
                 log_level: Some("info".to_owned()),
@@ -254,8 +256,6 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),
             },
-            target: Some("pod/test-service-abcdefg-abcd".to_owned()),
-            target_namespace: Some("default".to_owned()),
         };
 
         assert_eq!(config, expect);
