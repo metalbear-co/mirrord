@@ -23,7 +23,7 @@ pub(super) enum Commands {
 #[clap(group(
     ArgGroup::new("exec")
         .required(true)
-        .args(&["target", "pod-name"]),
+        .args(&["target", "pod-name", "config-file"]),
 ))]
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
@@ -132,7 +132,7 @@ pub(super) struct ExecArgs {
     pub no_udp_outgoing: bool,
 
     /// Load config from config file
-    #[clap(short = 'f', long, value_parser)]
+    #[clap(short = 'f', conflicts_with_all = &["target", "pod-name"], long, value_parser)]
     pub config_file: Option<PathBuf>,
 }
 

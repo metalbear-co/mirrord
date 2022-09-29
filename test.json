@@ -1,0 +1,30 @@
+{
+    "accept_invalid_certificates": false,
+    "target": "pod/test-service-abcdefg-abcd",
+    "target_namespace": "default",
+    "agent": {
+        "log_level": "info",
+        "namespace": "default",
+        "image": "",
+        "image_pull_policy": "",
+        "ttl": 60,
+        "ephemeral": false
+    },
+    "feature": {
+        "env": true,
+        "fs": "write",
+        "network": {
+            "dns": false,
+            "incoming": "mirror",
+            "outgoing": {
+                "tcp": true,
+                "udp": false
+            }
+        }
+    },
+    "pod": {
+        "name": "test-service-abcdefg-abcd",
+        "namespace": "default",
+        "container": "test"
+    }                       
+}
