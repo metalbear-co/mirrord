@@ -164,7 +164,7 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
-                    target: "pod/test-service-abcdefg-abcd",
+                    target: "pod/test-service-abcdefg-abcd"
                     target_namespace: "default"
 
                     agent:
