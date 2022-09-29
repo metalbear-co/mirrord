@@ -1,3 +1,4 @@
+use alloc::ffi::CString;
 use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
@@ -405,10 +406,12 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     while !current.is_null() {
         let current_box = Box::from_raw(current);
         let ai_addr = Box::from_raw(current_box.ai_addr);
+        let ai_canonname = CString::from_raw(current_box.ai_canonname);
 
         current = (*current).ai_next;
 
         drop(ai_addr);
+        drop(ai_canonname);
         drop(current_box);
     }
 }

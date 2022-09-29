@@ -1,3 +1,4 @@
+use alloc::ffi::CString;
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -7,6 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::dns::{DnsLookup, LookupRecord};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace};
@@ -474,13 +476,13 @@ pub(super) fn getaddrinfo(
     // only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(|dns_record| SocketAddr::from((dns_record.ip, 0)))
-        .map(|address| SockAddr::from(address))
-        .map(|rawish_sock_addr| {
+        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, 0)))))
+        .map(|(name, rawish_sock_addr)| {
             let ai_addrlen = rawish_sock_addr.len();
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
             let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            let ai_canonname = CString::new(name).unwrap().into_raw();
 
             libc::addrinfo {
                 ai_flags: 0,
@@ -490,11 +492,13 @@ pub(super) fn getaddrinfo(
                 ai_addrlen,
                 ai_addr,
                 // TODO(alex) [high] 2022-09-28: Convert `DnsLookup::name` into leaked pointer.
-                ai_canonname: ptr::null_mut(),
+                ai_canonname,
                 ai_next: ptr::null_mut(),
             }
         })
+        .inspect(|addrinfo| debug!("before rev {:#?}", addrinfo))
         .rev()
+        .inspect(|addrinfo| debug!("after rev {:#?}", addrinfo))
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {

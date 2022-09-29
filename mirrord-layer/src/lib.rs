@@ -7,6 +7,7 @@
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
 
+extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
     net::IpAddr,
