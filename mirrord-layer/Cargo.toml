@@ -15,6 +15,7 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+mirrord-config = { path = "../mirrord-config"}
 mirrord-protocol = { path = "../mirrord-protocol"}
 mirrord-macro = { path = "../mirrord-macro"}
 
@@ -38,7 +39,6 @@ tokio-util.workspace = true
 thiserror.workspace = true
 dns-lookup.workspace = true
 rand = "0.8"
-envconfig = "0.10"
 regex = "1"
 errno = "0.2"
 async-trait = "0.1"
@@ -47,6 +47,7 @@ anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
 mirrord-common = { version = "0.1.0", path = "../mirrord-common" }
+
 
 [dev-dependencies]
 rstest = "*"

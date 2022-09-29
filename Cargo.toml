@@ -2,6 +2,8 @@
 
 members = [
     "mirrord-auth",
+    "mirrord-config",
+    "mirrord-config/derive",
     "mirrord-protocol",
     "mirrord-agent",
     "mirrord-layer",
