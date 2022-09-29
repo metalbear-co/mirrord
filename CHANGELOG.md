@@ -22,6 +22,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
   call to `connect`) is successfully intercepted and forwarded.
+- mirrord-layer: Support config from file alongside environment variables.
 
 ### Fixed
 - macOS binaries should be okay now.

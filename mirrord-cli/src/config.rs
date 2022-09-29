@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -128,6 +130,10 @@ pub(super) struct ExecArgs {
     /// Disable udp outgoing feature.
     #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
+
+    /// Load config from config file
+    #[clap(short = 'f', long, value_parser)]
+    pub config_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

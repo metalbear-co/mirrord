@@ -10,18 +10,19 @@
 
 use std::{
     collections::{HashSet, VecDeque},
+    path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
 
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
-use envconfig::Envconfig;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -42,10 +43,9 @@ use tokio::{
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
+use crate::{common::HookMessage, file::FileHandler};
 
 mod common;
-mod config;
 mod detour;
 mod error;
 mod file;
@@ -85,10 +85,37 @@ fn before_init() {
     if !cfg!(test) {
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
+      // TODO: resolve this
+// <<<<<<< target-mirrord
         let config = LayerConfig::init_from_env().unwrap();
         deprecation_check(&config);
         if should_load(given_process, &config.skip_processes) {
             init(config);
+// =======
+
+        let config = std::env::var("MIRRORD_CONFIG_FILE")
+            .ok()
+            .and_then(|val| val.parse::<PathBuf>().ok())
+            .map(|path| {
+                LayerFileConfig::from_path(&path).expect("error parsing mirrord config file")
+            })
+            .unwrap_or_default()
+            .generate_config();
+
+        match config {
+            Ok(config) => {
+                let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+
+                if should_load(given_process, skip_processes) {
+                    init(config);
+                }
+            }
+            Err(err) => {
+                eprintln!("mirrord config error: {}", err);
+
+                std::process::exit(-1);
+            }
+// >>>>>>> main
         }
     }
 }
@@ -150,14 +177,19 @@ fn init(config: LayerConfig) {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops =
-        ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
-    let _ = ENABLED_FILE_RO_OPS
-        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
-    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
-    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get_or_init(|| config.feature.fs.is_read() || config.feature.fs.is_write());
+    ENABLED_FILE_RO_OPS
+        .set(config.feature.fs.is_read())
+        .expect("Setting ENABLED_FILE_RO_OPS singleton");
+    ENABLED_TCP_OUTGOING
+        .set(config.feature.network.outgoing.tcp)
+        .expect("Setting ENABLED_TCP_OUTGOING singleton");
+    ENABLED_UDP_OUTGOING
+        .set(config.feature.network.outgoing.udp)
+        .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
-    enable_hooks(*enabled_file_ops, config.remote_dns);
+    enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -167,9 +199,9 @@ fn init(config: LayerConfig) {
     ));
 }
 
-fn should_load(given_process: &str, skip_processes: &Option<String>) -> bool {
+fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
     if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.split(';').any(|x| x == given_process)
+        !processes_to_avoid.iter().any(|x| x == given_process)
     } else {
         true
     }
@@ -393,8 +425,8 @@ async fn start_layer_thread(
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
-        config.override_env_vars_exclude,
-        config.override_env_vars_include,
+        config.feature.env.exclude.map(|exclude| exclude.join(";")),
+        config.feature.env.include.map(|include| include.join(";")),
     ) {
         (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
@@ -432,7 +464,11 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
+    let _ = tokio::spawn(thread_loop(
+        receiver,
+        codec,
+        config.feature.network.incoming.is_steal(),
+    ));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
@@ -501,18 +537,24 @@ mod tests {
     use crate::pod_api::*;
 
     #[rstest]
-    #[case("test", Some("foo".to_string()))]
+    #[case("test", Some(vec!["foo".to_string()]))]
     #[case("test", None)]
-    #[case("test", Some("foo;bar;baz".to_string()))]
-    fn test_should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
-        assert!(should_load(given_process, &skip_processes));
+    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
+    fn test_should_load_true(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+    ) {
+        assert!(should_load(given_process, skip_processes));
     }
 
     #[rstest]
-    #[case("test", Some("test".to_string()))]
-    #[case("test", Some("test;foo;bar;baz".to_string()))]
-    fn test_should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
-        assert!(!should_load(given_process, &skip_processes));
+    #[case("test", Some(vec!["test".to_string()]))]
+    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
+    fn test_should_load_false(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+    ) {
+        assert!(!should_load(given_process, skip_processes));
     }
 
     #[rstest]
