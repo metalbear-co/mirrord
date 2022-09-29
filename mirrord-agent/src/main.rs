@@ -171,11 +171,13 @@ impl ClientConnectionHandler {
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
 
-        let _ = run_thread(steal_worker(
-            tcp_steal_layer_receiver,
-            tcp_steal_daemon_sender,
-            pid,
-        ));
+        let _ = run_thread(async move {
+            if let Err(err) =
+                steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await
+            {
+                error!("steal_worker error {:?}", err)
+            }
+        });
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
