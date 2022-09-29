@@ -102,7 +102,9 @@ fn exec(args: &ExecArgs) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", args.pod_name.clone());
+    if let Some(pod_name) = &args.pod_name {
+        std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", pod_name.clone());
+    }
 
     if let Some(skip_processes) = &args.skip_processes {
         std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
@@ -186,6 +188,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if args.no_outgoing || args.no_udp_outgoing {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
+    }
+
+    if let Some(config_file) = &args.config_file {
+        std::env::set_var("MIRRORD_CONFIG_FILE", config_file.clone());
     }
 
     let library_path = extract_library(args.extract_path.clone())?;

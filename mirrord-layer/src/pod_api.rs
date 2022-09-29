@@ -8,15 +8,13 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
+use mirrord_config::LayerConfig;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, info, warn};
 
-use crate::{
-    config::LayerConfig,
-    error::{LayerError, Result},
-};
+use crate::error::{LayerError, Result};
 
 struct EnvVarGuard {
     library: String,
@@ -105,13 +103,9 @@ pub(crate) async fn create_agent(
 ) -> Result<Portforwarder> {
     let _guard = EnvVarGuard::new();
     let LayerConfig {
-        agent_image,
-        agent_namespace,
-        impersonated_pod_name,
-        impersonated_pod_namespace,
-        impersonated_container_name,
-        ephemeral_container,
         accept_invalid_certificates,
+        agent,
+        pod,
         ..
     } = config.clone();
 
@@ -126,32 +120,24 @@ pub(crate) async fn create_agent(
 
     let pods_api: Api<Pod> = Api::namespaced(
         client.clone(),
-        agent_namespace
-            .as_ref()
-            .unwrap_or(&impersonated_pod_namespace),
+        agent.namespace.as_ref().unwrap_or(&pod.namespace),
     );
 
-    let agent_image = agent_image.unwrap_or_else(|| {
+    let agent_image = agent.image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
     });
 
-    let pod_name = if ephemeral_container {
+    let pod_name = if agent.ephemeral {
         create_ephemeral_container_agent(&config, agent_image, &pods_api, connection_port).await?
     } else {
-        let runtime_data = RuntimeData::from_k8s(
-            client.clone(),
-            &impersonated_pod_name,
-            &impersonated_pod_namespace,
-            &impersonated_container_name,
-        )
-        .await
-        .map_err(LayerError::from)?;
+        let runtime_data =
+            RuntimeData::from_k8s(client.clone(), &pod.name, &pod.namespace, &pod.container)
+                .await
+                .map_err(LayerError::from)?;
 
         let jobs_api: Api<Job> = Api::namespaced(
             client.clone(),
-            agent_namespace
-                .as_ref()
-                .unwrap_or(&impersonated_pod_namespace),
+            agent.namespace.as_ref().unwrap_or(&pod.namespace),
         );
 
         create_job_pod_agent(
@@ -240,7 +226,7 @@ async fn create_ephemeral_container_agent(
         connection_port.to_string(),
         "-e".to_string(),
     ];
-    if let Some(timeout) = config.agent_communication_timeout {
+    if let Some(timeout) = config.agent.communication_timeout {
         agent_command_line.push("-t".to_string());
         agent_command_line.push(timeout.to_string());
     }
@@ -254,22 +240,22 @@ async fn create_ephemeral_container_agent(
             },
             "privileged": true,
         },
-        "imagePullPolicy": config.image_pull_policy,
-        "targetContainerName": config.impersonated_container_name,
-        "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
+        "imagePullPolicy": config.agent.image_pull_policy,
+        "targetContainerName": config.pod.container,
+        "env": [{"name": "RUST_LOG", "value": config.agent.log_level}],
         "command": agent_command_line,
     }))?;
     debug!("Requesting ephemeral_containers_subresource");
 
     let mut ephemeral_containers_subresource = pods_api
-        .get_subresource("ephemeralcontainers", &config.impersonated_pod_name)
+        .get_subresource("ephemeralcontainers", &config.pod.name)
         .await
         .map_err(LayerError::KubeError)?;
 
     let mut spec = ephemeral_containers_subresource
         .spec
         .as_mut()
-        .ok_or_else(|| LayerError::PodSpecNotFound(config.impersonated_pod_name.clone()))?;
+        .ok_or_else(|| LayerError::PodSpecNotFound(config.pod.name.clone()))?;
 
     spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
         Some(mut ephemeral_containers) => {
@@ -282,7 +268,7 @@ async fn create_ephemeral_container_agent(
     pods_api
         .replace_subresource(
             "ephemeralcontainers",
-            &config.impersonated_pod_name,
+            &config.pod.name,
             &PostParams::default(),
             to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
         )
@@ -290,7 +276,7 @@ async fn create_ephemeral_container_agent(
         .map_err(LayerError::KubeError)?;
 
     let params = ListParams::default()
-        .fields(&format!("metadata.name={}", &config.impersonated_pod_name))
+        .fields(&format!("metadata.name={}", &config.pod.name))
         .timeout(60);
 
     let stream = watcher(pods_api.clone(), params).applied_objects();
@@ -305,10 +291,10 @@ async fn create_ephemeral_container_agent(
         }
     }
 
-    wait_for_agent_startup(pods_api, &config.impersonated_pod_name, mirrord_agent_name).await?;
+    wait_for_agent_startup(pods_api, &config.pod.name, mirrord_agent_name).await?;
 
     debug!("container is ready");
-    Ok(config.impersonated_pod_name.clone())
+    Ok(config.pod.name.clone())
 }
 
 async fn create_job_pod_agent(
@@ -330,7 +316,7 @@ async fn create_job_pod_agent(
         "-l".to_string(),
         connection_port.to_string(),
     ];
-    if let Some(timeout) = config.agent_communication_timeout {
+    if let Some(timeout) = config.agent.communication_timeout {
         agent_command_line.push("-t".to_string());
         agent_command_line.push(timeout.to_string());
     }
@@ -344,7 +330,7 @@ async fn create_job_pod_agent(
                     }
                 },
                 "spec": {
-                "ttlSecondsAfterFinished": config.agent_ttl,
+                "ttlSecondsAfterFinished": config.agent.ttl,
 
                     "template": {
                 "spec": {
@@ -363,7 +349,7 @@ async fn create_job_pod_agent(
                         {
                             "name": "mirrord-agent",
                             "image": agent_image,
-                            "imagePullPolicy": config.image_pull_policy,
+                            "imagePullPolicy": config.agent.image_pull_policy,
                             "securityContext": {
                                 "privileged": true,
                             },
@@ -374,7 +360,7 @@ async fn create_job_pod_agent(
                                 }
                             ],
                             "command": agent_command_line,
-                            "env": [{"name": "RUST_LOG", "value": config.agent_rust_log}],
+                            "env": [{"name": "RUST_LOG", "value": config.agent.log_level}],
                         }
                     ]
                 }
