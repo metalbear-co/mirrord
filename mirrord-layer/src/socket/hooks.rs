@@ -337,7 +337,7 @@ unsafe extern "C" fn getaddrinfo_detour(
     };
 
     let service = match (!raw_service.is_null())
-        .then(|| CStr::from_ptr(raw_service).to_str())
+        .then(|| CStr::from_ptr(raw_service).to_str().map(String::from))
         .transpose()
         .map_err(|fail| {
             error!(
@@ -347,7 +347,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 
             libc::EAI_MEMORY
         }) {
-        Ok(service) => service.map(String::from),
+        Ok(service) => service,
         Err(fail) => return fail,
     };
 
@@ -360,27 +360,22 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
+    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
     let libc::addrinfo {
-        ai_family,
         ai_socktype,
         ai_protocol,
         ..
     } = *raw_hints;
 
-    let (Ok(result) | Err(result)) =
-        getaddrinfo(node, service, protocol, ai_protocol, ai_family, ai_socktype)
-            .inspect(|f| info!("result for addrinfo is {f:#?}"))
-            .inspect_err(|f| error!("result for addrinfo is {f:#?}"))
-            .map(|c_addr_info_ptr| {
-                out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+    let (Ok(result) | Err(result)) = getaddrinfo(node, service, protocol, ai_protocol, ai_socktype)
+        .map(|c_addr_info_ptr| {
+            out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
-                0
-            })
-            .map_err(From::from);
+            0
+        })
+        .map_err(From::from);
 
-    trace!("result: {result:?}");
-    // result
-    0
+    result
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in

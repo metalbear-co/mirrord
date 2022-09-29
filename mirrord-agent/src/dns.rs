@@ -45,7 +45,11 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let hosts = Hosts::default().read_hosts_conf(hosts_file)?;
     resolver.set_hosts(Some(hosts));
 
-    let lookup = resolver.lookup_ip(host).await?.into();
+    let lookup = resolver
+        .lookup_ip(host)
+        .await
+        .inspect(|lookup| debug!("lookup {lookup:#?}"))?
+        .into();
     debug!("dns_lookup -> lookup {:#?}", lookup);
 
     Ok(lookup)

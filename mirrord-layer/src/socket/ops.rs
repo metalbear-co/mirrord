@@ -451,12 +451,12 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
+#[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
     protocol: Option<Protocol>,
     ai_protocol: i32,
-    ai_family: i32,
     ai_socktype: i32,
 ) -> HookResult<*mut libc::addrinfo> {
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
@@ -479,6 +479,7 @@ pub(super) fn getaddrinfo(
         .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, 0)))))
         .map(|(name, rawish_sock_addr)| {
             let ai_addrlen = rawish_sock_addr.len();
+            let ai_family = rawish_sock_addr.family() as _;
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
             let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
@@ -488,17 +489,16 @@ pub(super) fn getaddrinfo(
                 ai_flags: 0,
                 ai_family,
                 ai_socktype,
+                // TODO(alex): Don't just reuse whatever the user passed to us.
                 ai_protocol,
                 ai_addrlen,
                 ai_addr,
-                // TODO(alex) [high] 2022-09-28: Convert `DnsLookup::name` into leaked pointer.
                 ai_canonname,
                 ai_next: ptr::null_mut(),
             }
         })
-        .inspect(|addrinfo| debug!("before rev {:#?}", addrinfo))
+        .inspect(|addrinfo| info!("before rev {:#?}", addrinfo))
         .rev()
-        .inspect(|addrinfo| debug!("after rev {:#?}", addrinfo))
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {
