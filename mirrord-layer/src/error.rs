@@ -9,6 +9,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, warn};
 
 use super::HookMessage;
+// use crate::pod_api::Target;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
@@ -127,7 +128,7 @@ pub(crate) enum LayerError {
     PodSpecNotFound(String),
 
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
-    PodNotFound(String),
+    JobPodNotFound(String),
 
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
@@ -135,8 +136,20 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
-    ContainerNotFound(String, String, String),
+    #[error("mirrord-layer: Container not found: `{0}`")]
+    ContainerNotFound(String),
+
+    #[error("mirrord-layer: Node not found for: `{0}`")]
+    NodeNotFound(String),
+
+    #[error("mirrord-layer: Deployment: `{0} not found!`")]
+    DeploymentNotFound(String),
+
+    #[error("mirrord-layer: Invalid target proivded `{0:#?}`!")]
+    InvalidTarget(String),
+
+    #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
+    ContainerRuntimeParseError(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
