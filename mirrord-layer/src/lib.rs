@@ -22,7 +22,9 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
-use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
+use mirrord_config::{
+    config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
+};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -85,20 +87,11 @@ fn before_init() {
     if !cfg!(test) {
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
-      // TODO: resolve this
-// <<<<<<< target-mirrord
-        let config = LayerConfig::init_from_env().unwrap();
-        deprecation_check(&config);
-        if should_load(given_process, &config.skip_processes) {
-            init(config);
-// =======
 
         let config = std::env::var("MIRRORD_CONFIG_FILE")
             .ok()
             .and_then(|val| val.parse::<PathBuf>().ok())
-            .map(|path| {
-                LayerFileConfig::from_path(&path).expect("error parsing mirrord config file")
-            })
+            .map(|path| LayerFileConfig::from_path(&path).unwrap())
             .unwrap_or_default()
             .generate_config();
 
@@ -107,32 +100,31 @@ fn before_init() {
                 let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
                 if should_load(given_process, skip_processes) {
+                    deprecation_check(&config);
                     init(config);
                 }
             }
             Err(err) => {
-                eprintln!("mirrord config error: {}", err);
-
-                std::process::exit(-1);
+                panic!("Failed to load config: {}", err);
             }
-// >>>>>>> main
         }
     }
 }
 
-//START | To be removed after deprecated functionality is removed
+// START | To be removed after deprecated functionality is removed
 fn deprecation_check(config: &LayerConfig) {
     let LayerConfig {
         target,
-        impersonated_pod_name,
-        impersonated_container_name,
+        pod: PodConfig {
+            name, container, ..
+        },
         ..
     } = config;
 
-    match (target, impersonated_pod_name, impersonated_container_name) {
+    match (target, name, container) {
         (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
             panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
-            >> EnvVars: {:?}, {:?}, {:?}", target, impersonated_pod_name, impersonated_container_name);
+            >> EnvVars: {:?}, {:?}, {:?}", target, name, container);
         }
         (None, None, _) => {
             panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");

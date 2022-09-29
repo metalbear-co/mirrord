@@ -33,14 +33,21 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
+    #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
+    pub target: Option<String>,
+
+    #[config(env = "MIRRORD_TARGET_NAMESPACE", default = "default")]
+    pub target_namespace: Option<String>,
+
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,
 
+    // START | To be removed after deprecated functionality is removed
     #[serde(default)]
     #[config(nested)]
     pub pod: PodFileConfig,
-
+    // END
     #[serde(default)]
     #[config(nested)]
     pub feature: FeatureFileConfig,
