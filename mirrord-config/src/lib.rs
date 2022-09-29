@@ -248,6 +248,8 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),
             },
+            target: Some("pod/test-service-abcdefg-abcd".to_owned()),
+            target_namespace: Some("default".to_owned()),
         };
 
         assert_eq!(config, expect);

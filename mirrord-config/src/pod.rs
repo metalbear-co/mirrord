@@ -27,7 +27,7 @@ mod tests {
 
     #[rstest]
     fn default(
-        #[values((Some("pod"), "pod"))] name: (Option<&str>, &str),
+        #[values((Some("pod"), Some("pod".to_string())))] name: (Option<&str>, Option<String>),
         #[values((None, "default"), (Some("namespace"), "namespace"))] namespace: (
             Option<&str>,
             &str,
