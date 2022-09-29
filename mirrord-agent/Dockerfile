@@ -4,6 +4,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 COPY sample/rust /app/sample/rust
 COPY mirrord-auth /app/mirrord-auth
+COPY mirrord-config /app/mirrord-config
 COPY mirrord-protocol /app/mirrord-protocol
 COPY mirrord-agent /app/mirrord-agent
 COPY mirrord-macro /app/mirrord-macro
