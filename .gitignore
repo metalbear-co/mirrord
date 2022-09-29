@@ -9,11 +9,21 @@ __pycache__
 target
 
 ### go tests ###
-tests/go-e2e/go-e2e
-tests/go-e2e-env/go-e2e-env
-tests/go-e2e-fileops/go-e2e-fileops
-tests/go-e2e-outgoing/go-e2e-outgoing
-tests/go-e2e-dns/go-e2e-dns
+tests/go-e2e/18
+tests/go-e2e-env/18
+tests/go-e2e-fileops/18
+tests/go-e2e-outgoing/18
+tests/go-e2e-dns/18
+
+tests/go-e2e/19
+tests/go-e2e-env/19
+tests/go-e2e-fileops/19
+tests/go-e2e-outgoing/19
+tests/go-e2e-dns/19
+
+### dotnet tests ###
+tests/dotnet-e2e/*/bin
+tests/dotnet-e2e/*/obj
 
 ### VSCode ###
 .vscode/*

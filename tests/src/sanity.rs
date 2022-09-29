@@ -79,6 +79,7 @@ mod tests {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        Dotnet6KestrelHTTP,
     }
 
     #[derive(Debug)]
@@ -93,6 +94,7 @@ mod tests {
         Python,
         Go18,
         Go19,
+        Dotnet6,
     }
 
     struct TestProcess {
@@ -207,6 +209,7 @@ mod tests {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
+                Application::Dotnet6KestrelHTTP => vec!["dotnet-e2e/http/bin/Release/net6.0/http"],
             };
             run(process_cmd, pod_name, namespace, args).await
         }
@@ -242,6 +245,7 @@ mod tests {
                 }
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
+                FileOps::Dotnet6 => vec!["dotnet-e2e/fileops/bin/Release/net6.0/fileops"],
             }
         }
 
@@ -250,6 +254,7 @@ mod tests {
                 FileOps::Python => process.assert_python_fileops_stderr(),
                 FileOps::Go18 => process.assert_stderr(),
                 FileOps::Go19 => process.assert_stderr(),
+                FileOps::Dotnet6 => process.assert_stderr(),
             }
         }
     }
@@ -624,7 +629,8 @@ mod tests {
             Application::Go18HTTP,
             Application::Go19HTTP,
             Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP
+            Application::PythonFastApiHTTP,
+            Application::Dotnet6KestrelHTTP
         )]
         application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
@@ -649,7 +655,7 @@ mod tests {
         application.assert(&process);
     }
 
-    #[ignore] // TODO: create integration test instead.
+    // #[ignore] // TODO: create integration test instead.
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
@@ -662,13 +668,18 @@ mod tests {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)]
+        #[values(
+            // Application::PythonFlaskHTTP,
+            // Application::PythonFastApiHTTP,
+            Application::Dotnet6KestrelHTTP
+        )]
         application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
+        println!("{url}");
         let mut process = application
             .run(&service.pod_name, Some(&service.namespace), agent.flag())
             .await;
@@ -696,7 +707,7 @@ mod tests {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19)] ops: FileOps,
+        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Dotnet6)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -730,13 +741,14 @@ mod tests {
         #[notrace]
         service: KubeService,
         #[values(Agent::Job)] agent: Agent,
+        #[values(FileOps::Python, FileOps::Dotnet6)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
+        let command = ops.command();
         let args = vec!["--rw"];
         let mut process = run(
-            python_command,
+            command,
             &service.pod_name,
             Some(&service.namespace),
             Some(args),
@@ -744,7 +756,7 @@ mod tests {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        ops.assert(process);
     }
 
     #[rstest]
@@ -1246,5 +1258,43 @@ mod tests {
     pub async fn test_go19_dns_lookup(#[future] service: KubeService) {
         let command = vec!["go-e2e-dns/19"];
         test_go(service, command).await;
+    }
+
+    pub async fn test_dotnet(service: impl Future<Output = KubeService>, target_test: &str) {
+        let service = service.await;
+        let formatted_test = format!("dotnet-e2e/{0}/bin/Release/net6.0/{0}", target_test);
+        let command = vec![formatted_test];
+        let command = command.iter().map(AsRef::as_ref).collect();
+        let mut process = run(command, &service.pod_name, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_dotnet6_dns_lookup(
+        #[future] service: KubeService,
+        #[values("dns")] target_test: &str,
+    ) {
+        test_dotnet(service, target_test).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_dotnet6_outgoing_traffic_single_request_enabled(
+        #[future] service: KubeService,
+        #[values("outgoing")] target_test: &str,
+    ) {
+        test_dotnet(service, target_test).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_dotnet6_remote_env_vars_works(
+        #[future] service: KubeService,
+        #[values("env")] target_test: &str,
+    ) {
+        test_dotnet(service, target_test).await;
     }
 }
