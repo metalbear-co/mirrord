@@ -125,7 +125,7 @@ mod tests {
                             "name": "test-service-abcdefg-abcd",
                             "namespace": "default",
                             "container": "test"
-                        }                       
+                        }
                     }
                     "#
                 }
