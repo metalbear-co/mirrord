@@ -435,7 +435,7 @@ async fn start_layer_thread(
                 gracefull_exit!("unexpected response - expected env vars response {msg:?}");
             }
           },
-          _ = sleep(Duration::from_secs(config.agent_communication_timeout.unwrap_or(30).into())) => {
+          _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
             gracefull_exit!(r#"
                 agent response timeout - expected env var response
 
