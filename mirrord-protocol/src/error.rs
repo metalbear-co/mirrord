@@ -25,10 +25,7 @@ pub enum ResponseError {
     RemoteIO(RemoteIOError),
 
     #[error("IO failed for remote operation with `{0}!")]
-    RemoteResolve(RemoteResolveError),
-
-    #[error("DNS resolve failed with return code`{0}`")]
-    DnsFailure(i32),
+    DnsLookup(DnsLookupError),
 
     #[error("Remote operation failed with `{0}`")]
     Remote(#[from] RemoteError),
@@ -70,7 +67,7 @@ pub struct RemoteIOError {
 /// mirrord-agent.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 #[error("Failed performing `getaddrinfo` with {kind:?}!")]
-pub struct RemoteResolveError {
+pub struct DnsLookupError {
     pub kind: ResolveErrorKindInternal,
 }
 
@@ -85,9 +82,12 @@ impl From<io::Error> for ResponseError {
 
 impl From<ResolveError> for ResponseError {
     fn from(fail: ResolveError) -> Self {
-        Self::RemoteResolve(RemoteResolveError {
-            kind: From::from(fail.kind().clone()),
-        })
+        match fail.kind().to_owned() {
+            ResolveErrorKind::Io(io_fail) => io_fail.into(),
+            other => Self::DnsLookup(DnsLookupError {
+                kind: From::from(other),
+            }),
+        }
     }
 }
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
@@ -141,7 +141,6 @@ pub enum ResolveErrorKindInternal {
     Message(String),
     NoConnections,
     NoRecordsFound(u16),
-    Io,
     Proto,
     Timeout,
 }
@@ -205,10 +204,9 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             ResolveErrorKind::NoRecordsFound { response_code, .. } => {
                 ResolveErrorKindInternal::NoRecordsFound(response_code.into())
             }
-            ResolveErrorKind::Io(_) => ResolveErrorKindInternal::Io,
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-            _ => todo!(),
+            _ => unimplemented!(),
         }
     }
 }

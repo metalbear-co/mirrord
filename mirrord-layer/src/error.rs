@@ -165,9 +165,6 @@ impl From<HookError> for i64 {
             | HookError::BypassedPort(_) => {
                 warn!("Recoverable issue >> {:#?}", fail)
             }
-            HookError::ResponseError(ResponseError::DnsFailure(code)) => {
-                todo!()
-            }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
@@ -193,13 +190,15 @@ impl From<HookError> for i64 {
                 ResponseError::NotDirectory(_) => libc::ENOTDIR,
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
-                ResponseError::DnsFailure(_) => libc::EIO,
                 ResponseError::Remote(remote) => match remote {
                     // So far only encountered when trying to make requests from golang.
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
-                ResponseError::RemoteResolve(resolve) => todo!(),
+                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
+                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                    _ => libc::EAI_FAIL,
+                },
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

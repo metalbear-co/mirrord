@@ -323,8 +323,10 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-    if let Some(remote_fd) = remote_fd {
-        0
+    if let Some(_) = remote_fd {
+        std::io::Error::last_os_error()
+            .raw_os_error()
+            .unwrap_or_default()
     } else {
         FN_FERROR(file_stream)
     }
