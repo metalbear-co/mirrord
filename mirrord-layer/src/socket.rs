@@ -174,7 +174,6 @@ impl ProtocolExt for Protocol {
         match ai_protocol {
             libc::IPPROTO_UDP => Ok(Protocol::Udp),
             libc::IPPROTO_TCP => Ok(Protocol::Tcp),
-            libc::IPPROTO_UDPLITE => Ok(Protocol::Udp),
             libc::IPPROTO_SCTP => todo!(),
             other => {
                 warn!("Trying a protocol of {:#?}", other);
