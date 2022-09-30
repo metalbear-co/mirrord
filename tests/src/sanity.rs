@@ -93,6 +93,7 @@ mod tests {
         Python,
         Go18,
         Go19,
+        Rust,
     }
 
     struct TestProcess {
@@ -242,14 +243,14 @@ mod tests {
                 }
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
+                FileOps::Rust => vec!["cargo", "run", "-p", "rust-e2e-fileops"],
             }
         }
 
         fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                FileOps::Go18 => process.assert_stderr(),
-                FileOps::Go19 => process.assert_stderr(),
+                _ => process.assert_stderr(),
             }
         }
     }
@@ -696,7 +697,7 @@ mod tests {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19)] ops: FileOps,
+        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));

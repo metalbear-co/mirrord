@@ -2571,6 +2571,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-e2e-fileops"
+version = "3.0.10-alpha"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

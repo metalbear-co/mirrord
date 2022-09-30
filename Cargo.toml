@@ -10,7 +10,8 @@ members = [
     "mirrord-cli",
     "mirrord-macro",
     "sample/rust",
-    "tests"
+    "tests",
+    "tests/rust-e2e-fileops"
 ]
 
 # latest commits on rustls suppress certificate verification
