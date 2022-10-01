@@ -6,9 +6,10 @@ use libc::FILE;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::{error, log::trace, warn};
+use tracing::{error, warn};
 
 use super::HookMessage;
+// use crate::pod_api::Target;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
@@ -127,7 +128,7 @@ pub(crate) enum LayerError {
     PodSpecNotFound(String),
 
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
-    PodNotFound(String),
+    JobPodNotFound(String),
 
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
@@ -135,8 +136,20 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Container `{0}` not found in namespace `{1}` pod `{2}`")]
-    ContainerNotFound(String, String, String),
+    #[error("mirrord-layer: Container not found: `{0}`")]
+    ContainerNotFound(String),
+
+    #[error("mirrord-layer: Node not found for: `{0}`")]
+    NodeNotFound(String),
+
+    #[error("mirrord-layer: Deployment: `{0} not found!`")]
+    DeploymentNotFound(String),
+
+    #[error("mirrord-layer: Invalid target proivded `{0:#?}`!")]
+    InvalidTarget(String),
+
+    #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
+    ContainerRuntimeParseError(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -167,7 +180,7 @@ impl From<HookError> for i64 {
             }
             HookError::ResponseError(ResponseError::DnsFailure(code)) => {
                 use dns_lookup::{LookupError, LookupErrorKind};
-                trace!("dns failed with code {}", code);
+                error!("dns failed with code {}", code);
                 // Some of the codes of Unix doesn't match FreeBSD/macOS so we re-use the library
                 // to return valid codes.
                 let error = LookupError::new(code);
@@ -182,7 +195,7 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
-                trace!("Error occured in Layer >> {:?}", fail)
+                error!("Error occured in Layer >> {:?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
@@ -203,7 +216,11 @@ impl From<HookError> for i64 {
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
                 ResponseError::DnsFailure(_) => libc::EIO,
-                ResponseError::Remote(_) => libc::EINVAL,
+                ResponseError::Remote(remote) => match remote {
+                    // So far only encountered when trying to make requests from golang.
+                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
+                    _ => libc::EINVAL,
+                },
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

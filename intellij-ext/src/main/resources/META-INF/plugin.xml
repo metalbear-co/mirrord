@@ -1,4 +1,5 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<!--suppress PluginXmlCapitalization -->
 <idea-plugin>
     <id>com.metalbear.mirrord</id>
     <name>mirrord</name>
@@ -31,5 +32,7 @@
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
         </action>
     </actions>
+
+    <depends optional="true" config-file="go-plugin.xml">org.jetbrains.plugins.go</depends>
 
 </idea-plugin>

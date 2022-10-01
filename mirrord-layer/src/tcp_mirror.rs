@@ -20,16 +20,15 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     error::{LayerError, Result},
     tcp::{Listen, TcpHandler},
 };
 
+#[tracing::instrument(level = "trace", skip(remote_stream))]
 async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>>) {
-    trace!("tcp_tunnel -> local_stream {:#?}", local_stream);
-
     let mut remote_stream = ReceiverStream::new(remote_stream);
     let mut buffer = vec![0; 1024];
     let mut remote_stream_closed = false;
@@ -42,7 +41,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         continue;
                     },
                     Err(fail) => {
-                        error!("Failed reading local_stream with {:#?}", fail);
+                        info!("Failed reading local_stream with {:#?}", fail);
                         break;
                     }
                     Ok(read_amount) if read_amount == 0 => {
@@ -122,9 +121,8 @@ pub struct TcpMirrorHandler {
 #[async_trait]
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
-        debug!("handle_new_connection -> {:#?}", tcp_connection);
-
         let stream = self.create_local_stream(&tcp_connection).await?;
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
@@ -138,9 +136,8 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle New Data messages
+    #[tracing::instrument(level = "trace", skip(self), fields(data = data.connection_id))]
     async fn handle_new_data(&mut self, data: TcpData) -> Result<()> {
-        trace!("handle_new_data -> id {:#?}", data.connection_id);
-
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
         let mut connection = self
@@ -164,9 +161,8 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     /// Handle connection close
+    #[tracing::instrument(level = "trace", skip(self))]
     fn handle_close(&mut self, close: TcpClose) -> Result<()> {
-        trace!("handle_close -> close {:#?}", close);
-
         let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
@@ -184,6 +180,7 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self.ports
     }
 
+    #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_listen(
         &mut self,
         listen: Listen,
@@ -192,8 +189,6 @@ impl TcpHandler for TcpMirrorHandler {
             ClientCodec,
         >,
     ) -> Result<()> {
-        debug!("handle_listen -> listen {:#?}", listen);
-
         let port = listen.requested_port;
 
         self.ports_mut()

@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
@@ -126,10 +127,19 @@ pub struct SeekFileRequest {
     pub seek_from: SeekFromInternal,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct WriteFileRequest {
     pub fd: usize,
     pub write_bytes: Vec<u8>,
+}
+
+impl fmt::Debug for WriteFileRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WriteFileRequest")
+            .field("fd", &self.fd)
+            .field("write_bytes (length)", &self.write_bytes.len())
+            .finish()
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -190,10 +200,19 @@ pub struct OpenFileResponse {
     pub fd: usize,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: usize,
+}
+
+impl fmt::Debug for ReadFileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadFileResponse")
+            .field("bytes (length)", &self.bytes.len())
+            .field("read_amount", &self.read_amount)
+            .finish()
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

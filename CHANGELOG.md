@@ -7,6 +7,110 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Support impersonated deployments, closes [[#293](https://github.com/metalbear-co/mirrord/issues/293)]
+- Shorter way to select which deployment/pod/container to impersonate through `--target` or `MIRRORD_IMPERSONATED_TARGET`, closes [[#392](https://github.com/metalbear-co/mirrord/issues/392)]
+- mirrord-layer: Support config from file alongside environment variables.
+
+### Deprecated
+- `--pod-name` or `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated in favor of `--target` or `MIRRORD_IMPERSONATED_TARGET`
+
+### Fixed
+- tcp-steal working with linkerd meshing.
+- mirrord-layer should exit when agent disconnects or unable to make initial connection
+
+## 3.0.10-alpha
+
+### Added
+- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
+  call to `connect`) is successfully intercepted and forwarded.
+
+### Fixed
+- macOS binaries should be okay now.
+
+## 3.0.9-alpha
+
+### Changed
+- Ignore http tests because they are unstable, and they block the CI.
+- Bundle arm64 binary into the universal binary for MacOS.
+
+## 3.0.8-alpha
+
+### Fixed
+- release CI: Fix dylib path for `dd`.
+
+## 3.0.7-alpha
+
+### Fixed
+- mirrord-layer: Fix `connect` returning error when called on UDP sockets and the
+  outgoing traffic feature of mirrord is disabled.
+- mirrord-agent: Add a `tokio::time:timeout` to `TcpStream::connect`, fixes golang issue where sometimes it would get stuck attempting to connect on IPv6.
+- intelliJ-ext: Fix CLion crash issue, closes [[#317](https://github.com/metalbear-co/mirrord/issues/317)]
+- vscode-ext: Support debugging Go, and fix issues with configuring file ops and traffic stealing.
+
+### Changed
+- mirrord-layer: Remove check for ignored IP (localhost) from `connect`.
+- mirrord-layer: Refactor `connect` function to be less bloated.
+- `.dockerignore` now ignores more useless files (reduces mirrord-agent image build time, and size).
+- mirrord-agent: Use `tracing::instrument` for the outgoing traffic feature.
+- mirrord-agent: `IndexAllocator` now uses `ConnectionId` for outgoing traffic feature.
+
+## 3.0.6-alpha
+
+### Changed
+- mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+
+### Added
+- mirrord-layer, mirrord-cli: new command line argument/environment variable - `MIRRORD_SKIP_PROCESSES` to provide a list of comma separated processes to not to load into.
+  Closes [[#298](https://github.com/metalbear-co/mirrord/issues/298)], [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
+- release CI: add arm64e to the universal dylib
+- intellij-ext: Add support for Goland
+
+### Changed
+- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
+
+## 3.0.5-alpha
+
+### Fixed
+- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
+- mirrord-layer: instrumenting error when `write_detur` is called to stdout/stderr
+- mirrord-layer: workaround for `presented server name type wasn't supported` error when Kubernetes server has IP for CN in certificate. [[#388](https://github.com/metalbear-co/mirrord/issues/388)]
+
+### Changed
+- mirrord-layer: Use `tracing::instrument` to improve logs.
+
+### Added
+- Outgoing UDP test with node. Closes [[#323](https://github.com/metalbear-co/mirrord/issues/323)]
+
+## 3.0.4-alpha
+
+### Fixed
+- Fix crash in VS Code extension happening because the MIRRORD_OVERRIDE_ENV_VARS_INCLUDE and MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE vars being populated with empty values (rather than not being populated at all).Closes [[#413](https://github.com/metalbear-co/mirrord/issues/413)].
+- Add exception to gradle when dylib/so file is not found. Closes [[#345](https://github.com/metalbear-co/mirrord/issues/345)]
+- mirrord-layer: Return errors from agent when `connect` fails back to the hook (previously we were handling these as errors in layer, so `connect` had slightly wrong behavior).
+
+## 3.0.3-alpha
+
+### Changed
+- Changed agent namespace to default to the pod namespace.
+  Closes [[#404](https://github.com/metalbear-co/mirrord/issues/404)].
+
+## 3.0.2-alpha
+
+### Added
+- Code sign Apple binaries.
+- CD - Update latest tag after release is published.
+
+### Changed
+- In `go-e2e` test, call `os.Exit` instead fo sending `SIGINT` to the process.
+- Install script now downloads latest tag instead of main branch to avoid downtime on installs.
+
+### Fixed
+- Fix Environment parsing error when value contained '='
+  Closes [[#387](https://github.com/metalbear-co/mirrord/issues/387)].
+- Fix bug in outgoing traffic with multiple requests in quick succession.
+  Closes [[#331](https://github.com/metalbear-co/mirrord/issues/331)].
+
 ## 3.0.1-alpha
 
 ### Fixed

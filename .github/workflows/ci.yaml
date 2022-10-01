@@ -3,9 +3,19 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main, v2.0]
+    branches: [main]
+    paths-ignore:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
+      - 'CHANGELOG.md'
+
   pull_request:
-    branches: [main, v2.0]
+    branches: [main]
+    paths-ignore:
+      - 'vscode-ext/**'
+      - 'intellij-ext/**'
+      - 'CHANGELOG.md'
+
 
 jobs:
   lint:
@@ -41,6 +51,25 @@ jobs:
       - run: |
           cd mirrord-protocol
           cargo test
+
+  test_mirrord_config:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-config
+
   test_agent:
     runs-on: ubuntu-latest
     steps:
@@ -53,6 +82,24 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - run: sudo apt install -y libpcap-dev cmake
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+
+  test_mirrord_layer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-layer
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -165,6 +212,9 @@ jobs:
       - run: |
           cd tests/go-e2e-outgoing
           go build -o 18
+      - run: |
+          cd tests/go-e2e-dns
+          go build -o 18
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.0"
@@ -179,6 +229,9 @@ jobs:
           go build -o 19
       - run: |
           cd tests/go-e2e-outgoing
+          go build -o 19
+      - run: |
+          cd tests/go-e2e-dns
           go build -o 19
       - name: start minikube
         uses: medyagh/setup-minikube@master
@@ -243,18 +296,3 @@ jobs:
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
-
-  build_intellij_plugin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - name: Build Plugin
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin

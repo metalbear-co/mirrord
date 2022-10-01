@@ -12,7 +12,6 @@ use std::{ffi::CString, mem::ManuallyDrop};
 use frida_gum::interceptor::Interceptor;
 use libc::c_char;
 use mirrord_macro::hook_fn;
-use tracing::trace;
 
 use crate::replace_symbol;
 
@@ -41,7 +40,6 @@ fn make_argv() -> Vec<*mut c_char> {
 #[hook_fn]
 unsafe extern "C" fn goenvs_unix_detour() {
     stacker::grow(32 * 1024 * 1024, || {
-        trace!("hook goenvs_unix");
         let modules = frida_gum::Module::enumerate_modules();
         let binary = &modules.first().unwrap().name;
         if let Some(argv) = frida_gum::Module::find_symbol_by_name(binary, "runtime.argv") {

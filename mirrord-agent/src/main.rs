@@ -31,7 +31,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     runtime::get_container_pid,
@@ -109,7 +109,7 @@ async fn select_env_vars(
         // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
         .split_terminator(char::from(0))
         // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-        .map(|key_and_value| key_and_value.split_terminator('=').collect::<Vec<_>>())
+        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
         // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
         .filter_map(
             |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
@@ -171,11 +171,13 @@ impl ClientConnectionHandler {
         let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
         let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
 
-        let _ = run_thread(steal_worker(
-            tcp_steal_layer_receiver,
-            tcp_steal_daemon_sender,
-            pid,
-        ));
+        let _ = run_thread(async move {
+            if let Err(err) =
+                steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await
+            {
+                error!("steal_worker error {:?}", err)
+            }
+        });
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -406,7 +408,11 @@ async fn start_agent() -> Result<(), AgentError> {
 #[tokio::main]
 async fn main() -> Result<(), AgentError> {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::ACTIVE),
+        )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 

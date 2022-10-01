@@ -214,21 +214,33 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
+						'MIRRORD_FILE_RO_OPS': 'false', // TODO: Add this to settings
+						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_ACCEPT_INVALID_CERTIFICATES': globalContext.workspaceState.get('invalidCertificates', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', false).toString(),
+						'MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', false).toString(),
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_OVERRIDE_ENV_VARS_INCLUDE': globalContext.workspaceState.get('includeEnvironmentVariables', ''),
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE': globalContext.workspaceState.get('excludeEnvironmentVariables', ''),
-
 					}
 				};
+
+				// mirrord doesn't support specifying both the include and exclude env vars (even if they're empty)
+				let include, exclude;
+				if (include = globalContext.workspaceState.get('includeEnvironmentVariables')){
+					config.env['MIRRORD_OVERRIDE_ENV_VARS_INCLUDE'] = include;
+				}
+				if (exclude = globalContext.workspaceState.get('excludeEnvironmentVariables')){
+					config.env['MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE'] = exclude;
+				}
+
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
+
+				if(config.type === "go"){
+					config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+				}
+				
 				return resolve(config);
 			});
 		});

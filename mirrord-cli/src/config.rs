@@ -1,4 +1,6 @@
-use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -18,13 +20,35 @@ pub(super) enum Commands {
 }
 
 #[derive(Args, Debug)]
+#[clap(group(
+    ArgGroup::new("exec")
+        .required(true)
+        .args(&["target", "pod-name", "config-file"]),
+))]
 pub(super) struct ExecArgs {
-    /// Pod name to mirror.
+    /// Target name to mirror.    
+    /// Target can either be a deployment or a pod.
+    /// Valid formats: deployment/name, pod/name, pod/name/container/name
     #[clap(short, long, value_parser)]
-    pub pod_name: String,
+    pub target: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
-    #[clap(short = 'n', long, value_parser)]
+    #[clap(long, value_parser)]
+    pub target_namespace: Option<String>,
+
+    /// Target name to mirror.
+    /// WARNING: [DEPRECATED] Consider using `--target` instead.
+    #[clap(short, long, group = "pod", value_parser)]
+    pub pod_name: Option<String>,
+
+    /// Namespace of the pod to mirror. Defaults to "default".
+    #[clap(
+        short = 'n',
+        requires = "pod",
+        conflicts_with = "target",
+        long,
+        value_parser
+    )]
     pub pod_namespace: Option<String>,
 
     /// Namespace to place agent in.
@@ -63,12 +87,16 @@ pub(super) struct ExecArgs {
     #[clap(value_parser)]
     pub binary: String,
 
+    /// Binary to execute and mirror traffic into.
+    #[clap(long, value_parser)]
+    pub skip_processes: Option<String>,
+
     /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
 
     /// Select container name to impersonate. Default is first container.
-    #[clap(long, value_parser)]
+    #[clap(long, requires = "pod", conflicts_with = "target", value_parser)]
     pub impersonated_container_name: Option<String>,
 
     /// Accept/reject invalid certificates.
@@ -102,6 +130,10 @@ pub(super) struct ExecArgs {
     /// Disable udp outgoing feature.
     #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
+
+    /// Load config from config file
+    #[clap(short = 'f', conflicts_with_all = &["target", "pod-name"], long, value_parser)]
+    pub config_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

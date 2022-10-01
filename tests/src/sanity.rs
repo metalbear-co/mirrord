@@ -5,7 +5,7 @@ mod tests {
     use std::{
         collections::HashMap,
         fmt::Debug,
-        net::Ipv4Addr,
+        net::{Ipv4Addr, UdpSocket},
         process::Stdio,
         sync::{Arc, Mutex},
         time::Duration,
@@ -13,13 +13,14 @@ mod tests {
 
     use bytes::Bytes;
     use chrono::Utc;
+    use futures::Future;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
         core::v1::{Pod, Service},
     };
     use kube::{
-        api::{DeleteParams, ListParams, PostParams},
+        api::{DeleteParams, ListParams, LogParams, PostParams},
         core::WatchEvent,
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config,
@@ -40,6 +41,7 @@ mod tests {
     use tokio_util::sync::{CancellationToken, DropGuard};
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+    const CONTAINER_NAME: &str = "test";
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
@@ -185,7 +187,7 @@ mod tests {
     impl Application {
         async fn run(
             &self,
-            pod_name: &str,
+            target: &str,
             namespace: Option<&str>,
             args: Option<Vec<&str>>,
         ) -> TestProcess {
@@ -206,7 +208,7 @@ mod tests {
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
             };
-            run(process_cmd, pod_name, namespace, args).await
+            run(process_cmd, target, namespace, args).await
         }
 
         fn assert(&self, process: &TestProcess) {
@@ -254,7 +256,7 @@ mod tests {
 
     async fn run(
         process_cmd: Vec<&str>,
-        pod_name: &str,
+        target: &str,
         namespace: Option<&str>,
         args: Option<Vec<&str>>,
     ) -> TestProcess {
@@ -262,14 +264,14 @@ mod tests {
         let temp_dir = tempdir::TempDir::new("test").unwrap();
         let mut mirrord_args = vec![
             "exec",
-            "--pod-name",
-            pod_name,
+            "--target",
+            target,
             "-c",
             "--extract-path",
             temp_dir.path().to_str().unwrap(),
         ];
         if let Some(namespace) = namespace {
-            mirrord_args.extend(["--pod-namespace", namespace].into_iter());
+            mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
         if let Some(args) = args {
             mirrord_args.extend(args.into_iter());
@@ -286,7 +288,6 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
-        env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", "test");
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
         env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
@@ -362,10 +363,10 @@ mod tests {
         }
     }
 
-    pub struct EchoService {
+    pub struct KubeService {
         name: String,
         namespace: String,
-        pod_name: String,
+        target: String,
         _pod: ResourceGuard,
         _service: ResourceGuard,
     }
@@ -374,7 +375,9 @@ mod tests {
     async fn service(
         #[future] kube_client: Client,
         #[default("default")] namespace: &str,
-    ) -> EchoService {
+        #[default("NodePort")] service_type: &str,
+        #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    ) -> KubeService {
         let kube_client = kube_client.await;
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
         let name = random_string();
@@ -383,29 +386,29 @@ mod tests {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
             "metadata": {
-                "name": name,
+                "name": &name,
                 "labels": {
-                    "app": name
+                    "app": &name
                 }
             },
             "spec": {
                 "replicas": 1,
                 "selector": {
                     "matchLabels": {
-                        "app": name
+                        "app": &name
                     }
                 },
                 "template": {
                     "metadata": {
                         "labels": {
-                            "app": name
+                            "app": &name
                         }
                     },
                     "spec": {
                         "containers": [
                             {
-                                "name": "test",
-                                "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
+                                "name": &CONTAINER_NAME,
+                                "image": &image,
                                 "ports": [
                                     {
                                         "containerPort": 80
@@ -419,8 +422,12 @@ mod tests {
                                     {
                                       "name": "MIRRORD_FAKE_VAR_SECOND",
                                       "value": "7777"
+                                    },
+                                    {
+                                        "name": "MIRRORD_FAKE_VAR_THIRD",
+                                        "value": "foo=bar"
                                     }
-                                  ]
+                                ],
                             }
                         ]
                     }
@@ -442,17 +449,23 @@ mod tests {
                 }
             },
             "spec": {
-                "type": "NodePort",
+                "type": &service_type,
                 "selector": {
                     "app": &name
                 },
                 "sessionAffinity": "None",
                 "ports": [
                     {
+                        "name": "udp",
+                        "protocol": "UDP",
+                        "port": 31415,
+                    },
+                    {
+                        "name": "http",
                         "protocol": "TCP",
                         "port": 80,
-                        "targetPort": 80
-                    }
+                        "targetPort": 80,
+                    },
                 ]
             }
         }))
@@ -461,21 +474,35 @@ mod tests {
         let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
         watch_resource_exists(&service_api, "default").await;
 
-        let pod_name = get_pod_instance(&kube_client, &name, namespace)
+        let target = get_pod_instance(&kube_client, &name, namespace)
             .await
             .unwrap();
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-        await_condition(pod_api, &pod_name, is_pod_running())
+        await_condition(pod_api, &target, is_pod_running())
             .await
             .unwrap();
 
-        EchoService {
+        KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
-            pod_name,
+            target: format!("pod/{}/container/{}", target, CONTAINER_NAME),
             _pod: pod_guard,
             _service: service_guard,
         }
+    }
+
+    /// Service that should only be reachable from inside the cluster, as a communication partner
+    /// for testing outgoing traffic. If this service receives the application's messages, they
+    /// must have been intercepted and forwarded via the agent to be sent from the impersonated pod.
+    #[fixture]
+    async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "ClusterIP",
+            "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
+        )
+        .await
     }
 
     fn resolve_node_host() -> String {
@@ -492,7 +519,7 @@ mod tests {
         }
     }
 
-    async fn get_service_url(kube_client: Client, service: &EchoService) -> String {
+    async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
         let pods = pod_api
             .list(&ListParams::default().labels(&format!("app={}", service.name)))
@@ -578,6 +605,7 @@ mod tests {
         }
     }
 
+    #[ignore] // TODO: create integration test instead.
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
@@ -586,7 +614,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
-        service: EchoService,
+        service: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,
@@ -604,7 +632,7 @@ mod tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.target, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
         send_requests(&url, false).await;
@@ -620,6 +648,7 @@ mod tests {
         application.assert(&process);
     }
 
+    #[ignore] // TODO: create integration test instead.
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
@@ -628,7 +657,7 @@ mod tests {
     async fn test_mirror_http_traffic(
         #[future]
         #[notrace]
-        service: EchoService,
+        service: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,
@@ -640,7 +669,7 @@ mod tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.target, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
         send_requests(&url, false).await;
@@ -664,7 +693,7 @@ mod tests {
     pub async fn test_file_ops(
         #[future]
         #[notrace]
-        service: EchoService,
+        service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::Python, FileOps::Go18, FileOps::Go19)] ops: FileOps,
     ) {
@@ -680,7 +709,7 @@ mod tests {
 
         let mut process = run(
             command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             Some(args),
         )
@@ -698,7 +727,7 @@ mod tests {
     pub async fn test_file_ops(
         #[future]
         #[notrace]
-        service: EchoService,
+        service: KubeService,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
@@ -707,7 +736,7 @@ mod tests {
         let args = vec!["--rw"];
         let mut process = run(
             python_command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             Some(args),
         )
@@ -724,7 +753,7 @@ mod tests {
     pub async fn test_file_ops_ro(
         #[future]
         #[notrace]
-        service: EchoService,
+        service: KubeService,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -739,7 +768,7 @@ mod tests {
 
         let mut process = run(
             python_command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             None,
         )
@@ -752,14 +781,14 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_remote_env_vars_exclude_works(#[future] service: EchoService) {
+    pub async fn test_remote_env_vars_exclude_works(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
         ];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -769,14 +798,14 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_remote_env_vars_include_works(#[future] service: EchoService) {
+    pub async fn test_remote_env_vars_include_works(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
         ];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -786,13 +815,13 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_remote_dns_enabled_works(#[future] service: EchoService) {
+    pub async fn test_remote_dns_enabled_works(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -802,13 +831,13 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_remote_dns_lookup_google(#[future] service: EchoService) {
+    pub async fn test_remote_dns_lookup_google(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -820,7 +849,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn test_steal_http_traffic(
-        #[future] service: EchoService,
+        #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
             Application::PythonFlaskHTTP,
@@ -836,7 +865,7 @@ mod tests {
         let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), Some(flags))
+            .run(&service.target, Some(&service.namespace), Some(flags))
             .await;
 
         process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
@@ -853,10 +882,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_remote_env_vars_works(#[future] service: EchoService) {
+    pub async fn test_bash_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -867,11 +896,11 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: EchoService) {
+    pub async fn test_bash_remote_env_vars_exclude_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -882,11 +911,11 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_remote_env_vars_include_works(#[future] service: EchoService) {
+    pub async fn test_bash_remote_env_vars_include_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -900,10 +929,10 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_exists(#[future] service: EchoService) {
+    pub async fn test_bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -918,10 +947,10 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_read(#[future] service: EchoService) {
+    pub async fn test_bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -933,11 +962,11 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_write(#[future] service: EchoService) {
+    pub async fn test_bash_file_write(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -946,10 +975,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go18_remote_env_vars_works(#[future] service: EchoService) {
+    pub async fn test_go18_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/18"];
-        let mut process = run(command, &service.pod_name, None, None).await;
+        let mut process = run(command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -957,29 +986,27 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go19_remote_env_vars_works(#[future] service: EchoService) {
+    pub async fn test_go19_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/19"];
-        let mut process = run(command, &service.pod_name, None, None).await;
+        let mut process = run(command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
     }
 
-    // TODO: This is valid for all "outgoing" tests:
-    // We have no way of knowing if they're actually being hooked, so they'll pass without mirrord,
-    // which is bad.
-    // An idea to solve this problem would be to have some internal (or test-only) specific messages
-    // that we can pass back and forth between `layer` and `agent`.
+    // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
+    //       they actually verify that the traffic is intercepted and forwarded (and isn't just
+    //       directly sent out from the local application).
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+    pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -988,13 +1015,30 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_outgoing_traffic_single_request_disabled(#[future] service: EchoService) {
+    #[should_panic]
+    pub async fn test_outgoing_traffic_single_request_ipv6(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+        ];
+        let mut process = run(node_command, &service.target, None, None).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_single_request_disabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1003,13 +1047,44 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_outgoing_traffic_make_request_after_listen(#[future] service: EchoService) {
+    pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mut process = run(node_command, &service.target, None, None).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_make_request_after_listen(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1017,23 +1092,159 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
+    pub async fn test_outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
         let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
+        ];
+        let mut process = run(node_command, &service.target, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
+    /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
+    /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn test_outgoing_traffic_udp_with_connect(
+        #[future] udp_logger_service: KubeService,
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+    ) {
+        let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
+        let target_service = service.await; // Impersonate a pod of this service, to reach internal.
+        let kube_client = kube_client.await;
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &internal_service.namespace);
+        let mut lp = LogParams {
+            container: Some(String::from(CONTAINER_NAME)),
+            follow: false,
+            limit_bytes: None,
+            pretty: false,
+            previous: false,
+            since_seconds: None,
+            tail_lines: None,
+            timestamps: false,
+        };
+
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            "31415",
+            // Reaching service by only service name is only possible from within the cluster.
+            &internal_service.name,
+        ];
+
+        // Meta-test: verify that the application cannot reach the internal service without
+        // mirrord forwarding outgoing UDP traffic via the target pod.
+        // If this verification fails, the test itself is invalid.
+        let mirrord_no_outgoing = vec!["--no-outgoing"];
+        let mut process = run(
+            node_command.clone(),
+            &target_service.target,
+            Some(&target_service.namespace),
+            Some(mirrord_no_outgoing),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(!res.success()); // Should fail because local process cannot reach service.
+        let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
+        let logs = pod_api.logs(stripped_target, &lp).await;
+        assert_eq!(logs.unwrap(), "");
+
+        // Run mirrord with outgoing enabled.
+        let mut process = run(
+            node_command,
+            &target_service.target,
+            Some(&target_service.namespace),
+            None,
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+
+        // Verify that the UDP message sent by the application reached the internal service.
+        lp.follow = true; // Follow log stream.
+        let logs = pod_api
+            .log_stream(stripped_target, &lp)
+            .await
+            .unwrap()
+            .try_next()
+            .await
+            .unwrap()
+            .unwrap();
+        let logs = String::from_utf8_lossy(&logs);
+        assert!(logs.contains("Can I pass the test please?")); // Of course you can.
+    }
+
+    /// Test that the process does not crash and messages are sent out normally when the
+    /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(30))]
+    pub async fn test_outgoing_disabled_udp(#[future] service: KubeService) {
+        let service = service.await;
+        // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
+        // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
+        let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
+        let port = socket.local_addr().unwrap().port().to_string();
+
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            &port,
+        ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
+
+        // Listen for UDP message directly from application.
+        let mut buf = [0; 27];
+        let amt = socket.recv(&mut buf).unwrap();
+        assert_eq!(amt, 27);
+        assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
+        let service = service.await;
+        let mut process = run(command, &service.target, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/18"];
-        let mut process = run(command, &service.pod_name, None, None).await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
+        test_go(service, command).await;
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: EchoService) {
-        let service = service.await;
+    pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/19"];
-        let mut process = run(command, &service.pod_name, None, None).await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_stderr();
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go18_dns_lookup(#[future] service: KubeService) {
+        let command = vec!["go-e2e-dns/18"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go19_dns_lookup(#[future] service: KubeService) {
+        let command = vec!["go-e2e-dns/19"];
+        test_go(service, command).await;
     }
 }
