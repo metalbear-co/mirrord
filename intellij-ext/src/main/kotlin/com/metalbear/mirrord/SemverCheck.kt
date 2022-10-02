@@ -1,19 +1,24 @@
 package com.metalbear.mirrord
 
+import com.github.zafarkhaja.semver.Version
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.notification.Notification
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
-import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.installAndEnable
+import com.sun.istack.NotNull
 import java.net.URL
-import com.github.zafarkhaja.semver.Version;
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
 
 class SemverCheck : ProjectManagerListener {
-    private val version: String? = PluginManagerCore.getPlugin(PluginId.getId("com.metalbear.mirrord"))?.version
-    private val versionCheckEndpoint: String = "https://version.mirrord.dev/get-latest-version?source=1&version=$version"
-    private val semverCheckEnabled: Boolean = true
+    private val pluginId = PluginId.getId("com.metalbear.mirrord")
+    private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
+    private val versionCheckEndpoint: String =
+        "https://version.mirrord.dev/get-latest-version?source=1&version=$version"
+    private var semverCheckEnabled: Boolean = true
 
     override fun projectOpened(project: Project) {
         if (semverCheckEnabled) {
@@ -24,14 +29,27 @@ class SemverCheck : ProjectManagerListener {
 
     private fun checkVersion(project: Project) {
         val remoteVersion = Version.valueOf(URL(versionCheckEndpoint).readText())
-//        val localVersion = Version.valueOf(version)
-        val localVersion = Version.valueOf("2.12.1")
+        val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
-            // TODO: fix this to open the plugins window
-//            val action = DonotShowAction()
-            val notification = MirrordEnabler.notifier("New version of mirrord $remoteVersion is available! Update: Preferences->Plugins->mirrord", NotificationType.INFORMATION)
-//                .addAction(action)
-            notification.notify(project)
+            MirrordEnabler.notifier(
+                "New version of mirrord $remoteVersion is available!",
+                NotificationType.INFORMATION
+            )
+                .addAction(object : NotificationAction("Install") {
+                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                        installAndEnable(
+                            project,
+                            setOf<@receiver:NotNull PluginId>(pluginId),
+                            true
+                        ) { notification.expire() }
+                    }
+                })
+                .addAction(object : NotificationAction("Don't show again") {
+                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                        semverCheckEnabled = false
+                        notification.expire()
+                    }
+                }).notify(project)
         }
         return
     }
