@@ -134,7 +134,6 @@ class MirrordListener : ExecutionListener {
         return super.processTerminating(executorId, env, handler)
     }
 
-
     private fun getRunConfigEnv(env: ExecutionEnvironment): LinkedHashMap<String, String>? {
         if (env.runProfile::class.simpleName == "GoApplicationConfiguration")
             return null
