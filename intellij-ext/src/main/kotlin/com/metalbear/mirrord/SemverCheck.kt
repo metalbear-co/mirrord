@@ -2,10 +2,10 @@ package com.metalbear.mirrord
 
 import com.github.zafarkhaja.semver.Version
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationType
-import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
@@ -19,14 +19,14 @@ class SemverCheck : ProjectManagerListener {
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
     private val versionCheckEndpoint: String =
         "https://version.mirrord.dev/get-latest-version?source=3&version=$version"
-    private var semverCheckEnabled
-        get() = PropertiesComponent.getInstance().getBoolean("semverCheckEnabled", true)
+    private var semverCheckDisabled
+        get() = PropertiesComponent.getInstance().getBoolean("semverCheckDisabled", false)
         set(value) {
-            PropertiesComponent.getInstance().setValue("semverCheckEnabled", value)
+            PropertiesComponent.getInstance().setValue("semverCheckDisabled", value)
         }
 
     override fun projectOpened(project: Project) {
-        if (semverCheckEnabled) {
+        if (!semverCheckDisabled) {
             checkVersion(project)
         }
         super.projectOpened(project)
@@ -53,7 +53,7 @@ class SemverCheck : ProjectManagerListener {
                 })
                 .addAction(object : NotificationAction("Don't show again") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        semverCheckEnabled = false
+                        semverCheckDisabled = true
                         notification.expire()
                     }
                 }).notify(project)
