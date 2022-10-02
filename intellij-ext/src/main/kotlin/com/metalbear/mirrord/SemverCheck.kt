@@ -17,7 +17,7 @@ class SemverCheck : ProjectManagerListener {
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
     private val versionCheckEndpoint: String =
-        "https://version.mirrord.dev/get-latest-version?source=1&version=$version"
+        "https://version.mirrord.dev/get-latest-version?source=3&version=$version"
     private var semverCheckEnabled: Boolean = true
 
     override fun projectOpened(project: Project) {
@@ -32,16 +32,18 @@ class SemverCheck : ProjectManagerListener {
         val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
             MirrordEnabler.notifier(
-                "New version of mirrord $remoteVersion is available!",
+                "Your version of mirrord is outdated, you should update.",
                 NotificationType.INFORMATION
             )
-                .addAction(object : NotificationAction("Install") {
+                .addAction(object : NotificationAction("Update") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                         installAndEnable(
                             project,
                             setOf<@receiver:NotNull PluginId>(pluginId),
                             true
-                        ) { notification.expire() }
+                        ) {
+                            notification.expire()
+                        }
                     }
                 })
                 .addAction(object : NotificationAction("Don't show again") {
