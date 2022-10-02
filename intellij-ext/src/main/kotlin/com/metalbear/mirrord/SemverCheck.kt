@@ -34,7 +34,7 @@ class SemverCheck : ProjectManagerListener {
 
     private fun checkVersion(project: Project) {
         val remoteVersion = Version.valueOf(URL(versionCheckEndpoint).readText())
-        val localVersion = Version.valueOf("2.3.1")
+        val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
             MirrordEnabler.notifier(
                 "Your version of mirrord is outdated, you should update.",
