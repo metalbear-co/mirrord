@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Support impersonated deployments, closes [[#293](https://github.com/metalbear-co/mirrord/issues/293)]
 - Shorter way to select which deployment/pod/container to impersonate through `--target` or `MIRRORD_IMPERSONATED_TARGET`, closes [[#392](https://github.com/metalbear-co/mirrord/issues/392)]
 - mirrord-layer: Support config from file alongside environment variables.
+- intellij-ext: better support for Windows with WSL.
 
 ### Deprecated
 - `--pod-name` or `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated in favor of `--target` or `MIRRORD_IMPERSONATED_TARGET`
