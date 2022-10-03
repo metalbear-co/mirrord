@@ -21,7 +21,10 @@ jobs:
     steps:
       - run: 'echo "Step not required"'
   test_mirrord_protocol:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - run: 'echo "Step not required"'
   test_agent:
@@ -37,7 +40,23 @@ jobs:
     steps:
       - run: 'echo "Step not required"'
   test_mirrord_layer_cli:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-12, macos-11]
+        target:
+          [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: macos-12
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            target: aarch64-apple-darwin
+          - os: macos-11
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
     steps:
       - run: 'echo "Step not required"'
   build_mirrord:
