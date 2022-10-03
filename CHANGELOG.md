@@ -7,19 +7,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Support impersonated deployments, closes [[#293](https://github.com/metalbear-co/mirrord/issues/293)]
+- Shorter way to select which deployment/pod/container to impersonate through `--target` or `MIRRORD_IMPERSONATED_TARGET`, closes [[#392](https://github.com/metalbear-co/mirrord/issues/392)]
+- mirrord-layer: Support config from file alongside environment variables.
+
+### Deprecated
+- `--pod-name` or `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated in favor of `--target` or `MIRRORD_IMPERSONATED_TARGET`
+
+### Fixed
+- tcp-steal working with linkerd meshing.
+- mirrord-layer should exit when agent disconnects or unable to make initial connection
+
 ## 3.0.10-alpha
 
 ### Added
 - Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
   call to `connect`) is successfully intercepted and forwarded.
-- mirrord-layer: Support config from file alongside environment variables.
 
 ### Fixed
 - macOS binaries should be okay now.
-- tcp-steal working with linkerd meshing.
-
-
-### Fixed
 
 ## 3.0.9-alpha
 
