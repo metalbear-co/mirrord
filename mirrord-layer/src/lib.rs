@@ -6,6 +6,7 @@
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
+#![feature(async_closure)]
 
 extern crate alloc;
 use std::{
@@ -22,7 +23,9 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
-use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
+use mirrord_config::{
+    config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
+};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -89,9 +92,7 @@ fn before_init() {
         let config = std::env::var("MIRRORD_CONFIG_FILE")
             .ok()
             .and_then(|val| val.parse::<PathBuf>().ok())
-            .map(|path| {
-                LayerFileConfig::from_path(&path).expect("error parsing mirrord config file")
-            })
+            .map(|path| LayerFileConfig::from_path(&path).unwrap())
             .unwrap_or_default()
             .generate_config();
 
@@ -100,17 +101,39 @@ fn before_init() {
                 let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
                 if should_load(given_process, skip_processes) {
+                    deprecation_check(&config);
                     init(config);
                 }
             }
             Err(err) => {
-                eprintln!("mirrord config error: {}", err);
-
-                std::process::exit(-1);
+                panic!("Failed to load config: {}", err);
             }
         }
     }
 }
+
+// START | To be removed after deprecated functionality is removed
+fn deprecation_check(config: &LayerConfig) {
+    let LayerConfig {
+        target,
+        pod: PodConfig {
+            name, container, ..
+        },
+        ..
+    } = config;
+
+    match (target, name, container) {
+        (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
+            panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
+            >> EnvVars: {:?}, {:?}, {:?}", target, name, container);
+        }
+        (None, None, _) => {
+            panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
+        }
+        _ => {}
+    }
+}
+// END
 
 fn init(config: LayerConfig) {
     tracing_subscriber::registry()
@@ -510,6 +533,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::pod_api::*;
 
     #[rstest]
     #[case("test", Some(vec!["foo".to_string()]))]
@@ -530,5 +554,30 @@ mod tests {
         #[case] skip_processes: Option<Vec<String>>,
     ) {
         assert!(!should_load(given_process, skip_processes));
+    }
+
+    #[rstest]
+    #[case("pod/foobaz", Target::Pod(PodData {pod_name: "foobaz".to_string(), container_name: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentData {deployment: "foobaz".to_string()}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentData {deployment: "nginx-deployment".to_string()}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodData { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
+    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(target, expected)
+    }
+
+    #[rstest]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("deployment/foobaz/blah")]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("pod/foo/baz")]
+    fn test_target_parse_fails(#[case] target: &str) {
+        let target = target.parse::<pod_api::Target>().unwrap();
+        assert_eq!(
+            target,
+            Target::Deployment(DeploymentData {
+                deployment: "foobaz".to_string()
+            })
+        )
     }
 }

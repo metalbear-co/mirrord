@@ -1,3 +1,4 @@
+// START | To be removed after deprecated functionality is removed
 use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
@@ -7,7 +8,7 @@ use crate::config::source::MirrordConfigSource;
 #[serde(deny_unknown_fields)]
 #[config(map_to = PodConfig)]
 pub struct PodFileConfig {
-    #[config(unwrap, env = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
+    #[config(env = "MIRRORD_AGENT_IMPERSONATED_POD_NAME")]
     pub name: Option<String>,
 
     #[config(env = "MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", default = "default")]
@@ -26,7 +27,7 @@ mod tests {
 
     #[rstest]
     fn default(
-        #[values((Some("pod"), "pod"))] name: (Option<&str>, &str),
+        #[values((Some("pod"), Some("pod".to_string())))] name: (Option<&str>, Option<String>),
         #[values((None, "default"), (Some("namespace"), "namespace"))] namespace: (
             Option<&str>,
             &str,
@@ -52,3 +53,4 @@ mod tests {
         );
     }
 }
+// END

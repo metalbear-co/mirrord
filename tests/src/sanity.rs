@@ -188,7 +188,7 @@ mod tests {
     impl Application {
         async fn run(
             &self,
-            pod_name: &str,
+            target: &str,
             namespace: Option<&str>,
             args: Option<Vec<&str>>,
         ) -> TestProcess {
@@ -209,7 +209,7 @@ mod tests {
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
             };
-            run(process_cmd, pod_name, namespace, args).await
+            run(process_cmd, target, namespace, args).await
         }
 
         fn assert(&self, process: &TestProcess) {
@@ -257,7 +257,7 @@ mod tests {
 
     async fn run(
         process_cmd: Vec<&str>,
-        pod_name: &str,
+        target: &str,
         namespace: Option<&str>,
         args: Option<Vec<&str>>,
     ) -> TestProcess {
@@ -265,14 +265,14 @@ mod tests {
         let temp_dir = tempdir::TempDir::new("test").unwrap();
         let mut mirrord_args = vec![
             "exec",
-            "--pod-name",
-            pod_name,
+            "--target",
+            target,
             "-c",
             "--extract-path",
             temp_dir.path().to_str().unwrap(),
         ];
         if let Some(namespace) = namespace {
-            mirrord_args.extend(["--pod-namespace", namespace].into_iter());
+            mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
         if let Some(args) = args {
             mirrord_args.extend(args.into_iter());
@@ -289,7 +289,6 @@ mod tests {
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
         env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
-        env.insert("MIRRORD_IMPERSONATED_CONTAINER_NAME", CONTAINER_NAME);
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
         env.insert("RUST_LOG", "warn,mirrord=debug");
         let server = Command::new(path)
@@ -368,7 +367,7 @@ mod tests {
     pub struct KubeService {
         name: String,
         namespace: String,
-        pod_name: String,
+        target: String,
         _pod: ResourceGuard,
         _service: ResourceGuard,
     }
@@ -476,18 +475,18 @@ mod tests {
         let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
         watch_resource_exists(&service_api, "default").await;
 
-        let pod_name = get_pod_instance(&kube_client, &name, namespace)
+        let target = get_pod_instance(&kube_client, &name, namespace)
             .await
             .unwrap();
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-        await_condition(pod_api, &pod_name, is_pod_running())
+        await_condition(pod_api, &target, is_pod_running())
             .await
             .unwrap();
 
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
-            pod_name,
+            target: format!("pod/{}/container/{}", target, CONTAINER_NAME),
             _pod: pod_guard,
             _service: service_guard,
         }
@@ -634,7 +633,7 @@ mod tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.target, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
         send_requests(&url, false).await;
@@ -671,7 +670,7 @@ mod tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), agent.flag())
+            .run(&service.target, Some(&service.namespace), agent.flag())
             .await;
         process.wait_for_line(Duration::from_secs(300), "daemon subscribed");
         send_requests(&url, false).await;
@@ -711,7 +710,7 @@ mod tests {
 
         let mut process = run(
             command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             Some(args),
         )
@@ -738,7 +737,7 @@ mod tests {
         let args = vec!["--rw"];
         let mut process = run(
             python_command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             Some(args),
         )
@@ -770,7 +769,7 @@ mod tests {
 
         let mut process = run(
             python_command,
-            &service.pod_name,
+            &service.target,
             Some(&service.namespace),
             None,
         )
@@ -790,7 +789,7 @@ mod tests {
             "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
         ];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -807,7 +806,7 @@ mod tests {
             "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
         ];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -823,7 +822,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -839,7 +838,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -867,7 +866,7 @@ mod tests {
         let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
         let mut process = application
-            .run(&service.pod_name, Some(&service.namespace), Some(flags))
+            .run(&service.target, Some(&service.namespace), Some(flags))
             .await;
 
         process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
@@ -887,7 +886,7 @@ mod tests {
     pub async fn test_bash_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -902,7 +901,7 @@ mod tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -917,7 +916,7 @@ mod tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -934,7 +933,7 @@ mod tests {
     pub async fn test_bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -952,7 +951,7 @@ mod tests {
     pub async fn test_bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process = run(bash_command, &service.pod_name, None, None).await;
+        let mut process = run(bash_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -968,7 +967,7 @@ mod tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process = run(bash_command, &service.pod_name, None, Some(args)).await;
+        let mut process = run(bash_command, &service.target, None, Some(args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -980,7 +979,7 @@ mod tests {
     pub async fn test_go18_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/18"];
-        let mut process = run(command, &service.pod_name, None, None).await;
+        let mut process = run(command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -991,7 +990,7 @@ mod tests {
     pub async fn test_go19_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/19"];
-        let mut process = run(command, &service.pod_name, None, None).await;
+        let mut process = run(command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1008,7 +1007,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1024,7 +1023,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1040,7 +1039,7 @@ mod tests {
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1055,7 +1054,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1071,7 +1070,7 @@ mod tests {
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1086,7 +1085,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1100,7 +1099,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
         ];
-        let mut process = run(node_command, &service.pod_name, None, None).await;
+        let mut process = run(node_command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1146,20 +1145,21 @@ mod tests {
         let mirrord_no_outgoing = vec!["--no-outgoing"];
         let mut process = run(
             node_command.clone(),
-            &target_service.pod_name,
+            &target_service.target,
             Some(&target_service.namespace),
             Some(mirrord_no_outgoing),
         )
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(!res.success()); // Should fail because local process cannot reach service.
-        let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
+        let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
+        let logs = pod_api.logs(stripped_target, &lp).await;
         assert_eq!(logs.unwrap(), "");
 
         // Run mirrord with outgoing enabled.
         let mut process = run(
             node_command,
-            &target_service.pod_name,
+            &target_service.target,
             Some(&target_service.namespace),
             None,
         )
@@ -1171,7 +1171,7 @@ mod tests {
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
         let logs = pod_api
-            .log_stream(&internal_service.pod_name, &lp)
+            .log_stream(stripped_target, &lp)
             .await
             .unwrap()
             .try_next()
@@ -1200,7 +1200,7 @@ mod tests {
             &port,
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run(node_command, &service.pod_name, None, Some(mirrord_args)).await;
+        let mut process = run(node_command, &service.target, None, Some(mirrord_args)).await;
 
         // Listen for UDP message directly from application.
         let mut buf = [0; 27];
@@ -1215,7 +1215,7 @@ mod tests {
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
         let service = service.await;
-        let mut process = run(command, &service.pod_name, None, None).await;
+        let mut process = run(command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
