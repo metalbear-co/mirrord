@@ -1253,7 +1253,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_listen_localhost(#[future] service: KubeService) {
         let service = service.await;
-        let node_command = vec!["node", "node-e2e/outgoing/test_listen_localhost.mjs"];
+        let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
         let mut process = run(node_command, &service.target, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
