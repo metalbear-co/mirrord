@@ -57,7 +57,6 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 #[hook_guard_fn]
-#[tracing::instrument(level = "debug", skip(raw_path, raw_mode))]
 pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
@@ -83,6 +82,8 @@ pub(super) unsafe extern "C" fn fopen_detour(
     if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
         FN_FOPEN(raw_path, raw_mode)
     } else {
+        debug!("fopen_detour -> path {path:#?} | mode {mode:#?}");
+
         let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
 
         let read_only = ENABLED_FILE_RO_OPS

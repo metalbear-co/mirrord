@@ -467,8 +467,7 @@ pub(super) fn getaddrinfo(
     blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook))?;
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
-
-    debug!("getaddrinfo -> list {:#?}", addr_info_list);
+    debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list

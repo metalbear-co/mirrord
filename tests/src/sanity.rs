@@ -869,7 +869,7 @@ mod tests {
             .run(&service.target, Some(&service.namespace), Some(flags))
             .await;
 
-        process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
+        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
         send_requests(&url, true).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
