@@ -66,7 +66,7 @@
       "type": "lldb",
       "request": "launch",
       "name": "sample.rs: Debug mirrord-layer",
-      "program": "${workspaceFolder}/target/debug/sample-rust",
+      "program": "${workspaceFolder}/target/debug/rust-e2e-fileops",
       "args": [],
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
@@ -76,17 +76,12 @@
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=trace",
+        "RUST_LOG": "warn,mirrord=debug",
         "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
         "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
         "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE": "*",
-        "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
-        "MIRRORD_TCP_OUTGOING": "true",
-        "MIRRORD_UDP_OUTGOING": "true",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
         "RUST_BACKTRACE": "short"
       }
     }

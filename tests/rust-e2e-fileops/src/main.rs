@@ -14,7 +14,10 @@ fn test_fgets() {
         let file_stream = libc::fdopen(fd, mode.as_ptr());
 
         if libc::fgets(buffer, 12, file_stream).is_null() {
-            panic!("`fgets` returned a NULL string!");
+            let error_code = libc::ferror(file_stream);
+            if error_code != 0 {
+                panic!("`fgets` failed with code {error_code:#?}!");
+            }
         }
     };
 }

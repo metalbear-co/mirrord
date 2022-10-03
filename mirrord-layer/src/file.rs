@@ -51,6 +51,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/dev/.*",
         r"^/opt/.*",
         r"^/home/iojs/.*",
+        r"^/home/runner/.*",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r".*/package.json",
