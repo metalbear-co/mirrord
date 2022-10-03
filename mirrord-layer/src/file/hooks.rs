@@ -293,7 +293,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
 
                 info!(
                     "fgets -> sliced read {:#?}",
-                    String::from_utf8_lossy(&bytes_slice)
+                    String::from_utf8_lossy(bytes_slice)
                 );
 
                 let read = [bytes_slice, &eof].concat();
@@ -323,7 +323,7 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-    if let Some(_) = remote_fd {
+    if remote_fd.is_some() {
         std::io::Error::last_os_error()
             .raw_os_error()
             .unwrap_or_default()

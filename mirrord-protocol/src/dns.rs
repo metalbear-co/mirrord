@@ -21,7 +21,7 @@ impl From<LookupIp> for DnsLookup {
         let lookup_records = lookup_ip
             .as_lookup()
             .records()
-            .into_iter()
+            .iter()
             .cloned()
             .filter_map(|record| {
                 let RecordParts {
