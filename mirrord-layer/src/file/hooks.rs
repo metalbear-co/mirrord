@@ -256,7 +256,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "debug", skip(out_buffer, file_stream))]
+#[tracing::instrument(level = "trace", skip(out_buffer, file_stream))]
 pub(crate) unsafe extern "C" fn fgets_detour(
     out_buffer: *mut c_char,
     capacity: c_int,
@@ -265,20 +265,12 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
 
-    // TODO(alex) [high] 2022-09-20: Implement this to see if remote nsswitch and resolv will solve
-    // the ipv6 issue.
-    //
-    // ADD(alex) [high] 2022-09-21: Hooked, but I think we read until certain point, and don't
-    // retain the read position? Looks like we read the whole file, so a secondary call to `fgets`
-    // just returns `read_amount = 0`.
-
     // We're only interested in files that are handled by `mirrord-agent`.
     let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
     if let Some(remote_fd) = remote_fd {
         // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
         // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
         // `capacity` here.
-        // let capacity = (capacity - 1) as usize;
         let buffer_size = (capacity - 1) as usize;
 
         let read_result = fgets(remote_fd, buffer_size).map(|read_file| {
@@ -287,6 +279,8 @@ pub(crate) unsafe extern "C" fn fgets_detour(
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
+            //
+            // Callers can check for EOF by using `ferror`.
             if read_amount > 0 {
                 let bytes_slice = &bytes[0..buffer_size.min(read_amount)];
                 let eof = vec![0; 1];
