@@ -23,7 +23,6 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 }
 
 /// Implementation of open_detour, used in open_detour and openat_detour
-#[tracing::instrument(level = "debug", skip(raw_path))]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let path = match CStr::from_ptr(raw_path)
         .to_str()
@@ -34,12 +33,12 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
         Err(fail) => return fail.into(),
     };
 
-    debug!("open_logic -> path {:#?}", path);
-
     // Calls with non absolute paths are sent to libc::open.
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
         FN_OPEN(raw_path, open_flags)
     } else {
+        debug!("open_logic -> path {path:#?}");
+
         let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
         let read_only = ENABLED_FILE_RO_OPS
             .get()
