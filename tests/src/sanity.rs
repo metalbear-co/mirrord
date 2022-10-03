@@ -243,7 +243,7 @@ mod tests {
                 }
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
-                FileOps::Rust => vec!["target/debug/rust-e2e-fileops"],
+                FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
             }
         }
 
