@@ -13,7 +13,7 @@ use mirrord_protocol::{
     ReadFileRequest, ReadFileResponse, ReadStringFileRequest, ReadStringFileResponse, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 use crate::{error::AgentError, util::IndexAllocator};
 
@@ -223,8 +223,6 @@ impl FileManager {
                                 bytes: buffer.into_bytes(),
                                 read_amount,
                             };
-                            let d_string = String::from_utf8_lossy(&response.bytes);
-                            info!("fgets read {:#?}", d_string);
 
                             Ok(response)
                         })?;

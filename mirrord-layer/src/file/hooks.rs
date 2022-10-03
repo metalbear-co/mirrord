@@ -4,7 +4,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadStringFileResponse};
-use tracing::{error, info};
+use tracing::{debug, error};
 
 use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
 use crate::{
@@ -34,7 +34,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
         Err(fail) => return fail.into(),
     };
 
-    info!("open_logic -> path {:#?}", path);
+    debug!("open_logic -> path {:#?}", path);
 
     // Calls with non absolute paths are sent to libc::open.
     if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
@@ -151,7 +151,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
         Err(fail) => return fail.into(),
     };
 
-    info!("openat_detour -> path {:#?}", path);
+    debug!("openat_detour -> path {:#?}", path);
 
     // `openat` behaves the same as `open` when the path is absolute.
     // when called with AT_FDCWD, the call is propagated to `open`.
@@ -275,7 +275,6 @@ pub(crate) unsafe extern "C" fn fgets_detour(
 
         let read_result = fgets(remote_fd, buffer_size).map(|read_file| {
             let ReadStringFileResponse { bytes, read_amount } = read_file;
-            info!("fgets -> first read {:#?}", String::from_utf8_lossy(&bytes));
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
@@ -285,15 +284,8 @@ pub(crate) unsafe extern "C" fn fgets_detour(
                 let bytes_slice = &bytes[0..buffer_size.min(read_amount)];
                 let eof = vec![0; 1];
 
-                info!(
-                    "fgets -> sliced read {:#?}",
-                    String::from_utf8_lossy(bytes_slice)
-                );
-
                 let read = [bytes_slice, &eof].concat();
-                info!("fgets -> final read {:#?}", String::from_utf8_lossy(&read));
 
-                // let out_buffer = out_buffer.cast();
                 ptr::copy(read.as_ptr().cast(), out_buffer, read.len());
 
                 out_buffer

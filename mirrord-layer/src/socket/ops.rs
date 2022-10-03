@@ -11,7 +11,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 use trust_dns_resolver::config::Protocol;
 
 use super::{hooks::*, *};
@@ -470,7 +470,7 @@ pub(super) fn getaddrinfo(
 
     debug!("getaddrinfo -> list {:#?}", addr_info_list);
 
-    // only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
+    // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
         .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, 0)))))
@@ -494,7 +494,6 @@ pub(super) fn getaddrinfo(
                 ai_next: ptr::null_mut(),
             }
         })
-        .inspect(|addrinfo| info!("before rev {:#?}", addrinfo))
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
@@ -506,7 +505,7 @@ pub(super) fn getaddrinfo(
         })
         .ok_or(HookError::DNSNoName);
 
-    info!("getaddrinfo -> result {:#?}", result);
+    debug!("getaddrinfo -> result {:#?}", result);
 
     result
 }
