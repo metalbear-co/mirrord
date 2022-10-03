@@ -14,19 +14,19 @@ import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.installAndE
 import com.sun.istack.NotNull
 import java.net.URL
 
-class SemverCheck : ProjectManagerListener {
+class VersionCheck : ProjectManagerListener {
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
     private val versionCheckEndpoint: String =
         "https://version.mirrord.dev/get-latest-version?source=3&version=$version"
-    private var semverCheckDisabled
-        get() = PropertiesComponent.getInstance().getBoolean("semverCheckDisabled", false)
+    private var versionCheckDisabled
+        get() = PropertiesComponent.getInstance().getBoolean("versionCheckDisabled", false)
         set(value) {
-            PropertiesComponent.getInstance().setValue("semverCheckDisabled", value)
+            PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
         }
 
     override fun projectOpened(project: Project) {
-        if (!semverCheckDisabled) {
+        if (!versionCheckDisabled) {
             checkVersion(project)
         }
         super.projectOpened(project)
@@ -53,7 +53,7 @@ class SemverCheck : ProjectManagerListener {
                 })
                 .addAction(object : NotificationAction("Don't show again") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        semverCheckDisabled = true
+                        versionCheckDisabled = true
                         notification.expire()
                     }
                 }).notify(project)

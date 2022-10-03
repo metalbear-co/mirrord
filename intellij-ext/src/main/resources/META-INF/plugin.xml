@@ -20,7 +20,7 @@
     <projectListeners>
         <listener class="com.metalbear.mirrord.MirrordListener"
                   topic="com.intellij.execution.ExecutionListener"/>
-        <listener class="com.metalbear.mirrord.SemverCheck"
+        <listener class="com.metalbear.mirrord.VersionCheck"
                   topic="com.intellij.openapi.project.ProjectManagerListener"/>
     </projectListeners>
 
