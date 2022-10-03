@@ -12,7 +12,7 @@ const listen = () => {
     function () {
       console.log(">> server listening to %j", server.address());
 
-      server.close();
+      process.exit();
     }
   );
 
