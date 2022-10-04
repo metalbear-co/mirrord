@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Changed
-- Changed errors that aren't fatal and can be part of a happy flow to be info instead of error (log level change).
+- Remote operations that fail on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
 
 ## 3.0.11-alpha
 
