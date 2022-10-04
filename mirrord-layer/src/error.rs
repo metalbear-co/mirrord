@@ -176,7 +176,7 @@ impl From<HookError> for i64 {
             | HookError::BypassedType(_)
             | HookError::BypassedDomain(_)
             | HookError::BypassedPort(_) => {
-                info!("Non-issue libc error >> {:#?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             HookError::ResponseError(ResponseError::DnsFailure(code)) => {
                 use dns_lookup::{LookupError, LookupErrorKind};
@@ -195,7 +195,7 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
-                info!("Non-issue libc error >> {:#?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
