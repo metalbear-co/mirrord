@@ -378,6 +378,7 @@ pub(crate) unsafe extern "C" fn write_detour(
     buffer: *const c_void,
     count: size_t,
 ) -> ssize_t {
+    // Avoid writing to `std(in|out|err)`.
     if fd > 2 {
         write_logic(fd, buffer, count)
     } else {

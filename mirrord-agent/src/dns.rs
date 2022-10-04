@@ -25,6 +25,9 @@ impl DnsRequest {
     }
 }
 
+// TODO(alex): aviram's suggested caching the resolver, but this should not be done by having a
+// single cached resolver, as we use system files that might change, thus invalidating our cache.
+// The cache should be hash-based.
 #[tracing::instrument(level = "debug")]
 async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let resolv_conf_path = root_path.join("etc").join("resolv.conf");

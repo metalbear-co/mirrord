@@ -487,7 +487,7 @@ pub(super) fn getaddrinfo(
     let addr_info_list = hook_channel_rx.blocking_recv()??;
     debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
-    let service = service.unwrap_or("0".to_string()).parse()?;
+    let service = service.unwrap_or_else(|| "0".to_string()).parse()?;
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
