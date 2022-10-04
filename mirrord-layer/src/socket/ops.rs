@@ -487,7 +487,8 @@ pub(super) fn getaddrinfo(
     let addr_info_list = hook_channel_rx.blocking_recv()??;
     debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
-    let service = service.unwrap_or_else(|| "0".to_string()).parse()?;
+    // Convert `service` into a port.
+    let service = service.map(|s| s.parse().unwrap_or_default()).unwrap();
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
