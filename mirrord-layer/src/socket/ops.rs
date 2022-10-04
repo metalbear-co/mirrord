@@ -471,6 +471,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 #[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     node: Option<String>,
+    service: Option<String>,
     protocol: Option<Protocol>,
     ai_protocol: i32,
     ai_socktype: i32,
@@ -486,10 +487,12 @@ pub(super) fn getaddrinfo(
     let addr_info_list = hook_channel_rx.blocking_recv()??;
     debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
+    let service = service.unwrap_or("0".to_string()).parse()?;
+
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, 0)))))
+        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, service)))))
         .map(|(name, rawish_sock_addr)| {
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
