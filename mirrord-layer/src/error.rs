@@ -1,4 +1,3 @@
-use core::num::ParseIntError;
 use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 
 use errno::set_errno;
@@ -67,9 +66,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
-
-    #[error("mirrord-layer: Parsing `int` value failed with `{0}`!")]
-    ParseIntError(#[from] ParseIntError),
 }
 
 #[derive(Error, Debug)]
@@ -226,7 +222,6 @@ impl From<HookError> for i64 {
             HookError::BypassedDomain(_) => libc::EINVAL,
             HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
-            HookError::ParseIntError(_) => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
