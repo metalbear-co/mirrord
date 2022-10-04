@@ -1,6 +1,7 @@
 package com.metalbear.mirrord
 
 import com.github.zafarkhaja.semver.Version
+import com.intellij.ide.plugins.PluginManagerConfigurable
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.Notification
@@ -10,9 +11,8 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
-import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.installAndEnable
-import com.sun.istack.NotNull
 import java.net.URL
+
 
 class VersionCheck : ProjectManagerListener {
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
@@ -42,13 +42,12 @@ class VersionCheck : ProjectManagerListener {
             )
                 .addAction(object : NotificationAction("Update") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        installAndEnable(
-                            project,
-                            setOf<@receiver:NotNull PluginId>(pluginId),
-                            true
-                        ) {
+                        try {
+                            PluginManagerConfigurable.showPluginConfigurable(project, listOf(pluginId))
+                        } catch (e: Exception) {
                             notification.expire()
                         }
+                        notification.expire()
                     }
                 })
                 .addAction(object : NotificationAction("Don't show again") {
