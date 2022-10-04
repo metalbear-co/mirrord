@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
+- mirrord-layer: When handling an outgoing connection to localhost, check first if it's a socket we intercept/mirror, then just let it connect normally.
 
 ## 3.0.11-alpha
 
