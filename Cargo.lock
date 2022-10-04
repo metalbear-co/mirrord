@@ -2572,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.0.10-alpha"
+version = "3.0.11-alpha"
 dependencies = [
  "libc",
 ]

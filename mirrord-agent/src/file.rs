@@ -199,24 +199,27 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
+                    // `BufReader` supports `read_line`, so we wrap our file here (as a reference to
+                    // avoid taking the file from our list of `open_files`).
                     let mut reader = BufReader::new(std::io::Read::by_ref(file));
                     let mut buffer = String::with_capacity(buffer_size);
                     let read_result = reader
                         .read_line(&mut buffer)
-                        // TODO(alex) [high] 2022-09-21: Cannot use read_exact, as it breaks on EOF.
-                        //
-                        // ADD(alex) [high] 2022-09-22: Almost working, but we get segfault in
-                        // layer.
                         .and_then(|read_amount| {
+                            // The file position remains the same, as we're moving a reading cursor
+                            // of the `BufReader`, so take the new position here to update the file
+                            // position later.
                             let position_after_read = reader.stream_position()?;
 
-                            if read_amount > buffer_size {
-                                Ok((read_amount, position_after_read - buffer_size as u64))
-                            } else {
-                                Ok((read_amount, position_after_read))
-                            }
+                            // `fgets` doesn't want us to read more than what was specified in
+                            // `buffer_size`.
+                            Ok((
+                                read_amount,
+                                position_after_read.clamp(0, buffer_size as u64),
+                            ))
                         })
                         .and_then(|(read_amount, seek_to)| {
+                            // Now we finally move the file cursor based on how much we have read.
                             file.seek(SeekFrom::Start(seek_to))?;
 
                             let response = ReadStringFileResponse {
