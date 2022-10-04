@@ -88,7 +88,7 @@ pub(crate) async fn create_agent(
         ),
         (None, Some(pod_name)) => {
             warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
-                \nDeprecated since: [DATE] | Scheduled removal: [DATE]");
+                \nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
             (
                 RuntimeData::from_k8s(&client, pod_name, &pod.namespace, &pod.container).await?,
                 Api::namespaced(
