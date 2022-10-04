@@ -6,7 +6,7 @@ use libc::FILE;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use super::HookMessage;
 // use crate::pod_api::Target;
