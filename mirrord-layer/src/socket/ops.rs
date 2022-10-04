@@ -488,7 +488,7 @@ pub(super) fn getaddrinfo(
     debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
     // Convert `service` into a port.
-    let service = service.map(|s| s.parse().unwrap_or_default()).unwrap();
+    let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
