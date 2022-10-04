@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Changed
-- Remote operations that fail on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
+- Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
 
 ## 3.0.11-alpha
 
