@@ -8,5 +8,17 @@ data class MirrordDefaultData(val ldPreloadPath: String, val dylibPath: String, 
 }
 
 private fun getSharedLibPath(libName: String): String {
-    return Paths.get(PathManager.getPluginsPath(), "mirrord", libName).toString()
+    val path = Paths.get(PathManager.getPluginsPath(), "mirrord", libName).toString()
+
+    if (System.getProperty("os.name").toLowerCase().contains("win")) {
+        val wslRegex = "^[a-zA-Z]:".toRegex()
+
+         val wslPath = wslRegex.replace(path) {
+                drive -> "/mnt/" + drive.value.toLowerCase().removeSuffix(":")
+        }
+
+        return wslPath.replace("\\", "/")
+    }
+
+    return path
 }
