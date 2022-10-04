@@ -290,6 +290,23 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
         }
     };
 
+    // if it's loopback, check if it's a port we're listening to and if so, just let it connect
+    // locally.
+    if remote_address.ip().is_loopback()
+        && SOCKETS.lock()?.values().any(|socket| {
+            if let SocketState::Listening(Bound { requested_port, .. }) = socket.state {
+                requested_port == remote_address.port()
+                    && socket.protocol == user_socket_info.protocol // added this line even though
+                                                                    // listen is only tcp for
+                                                                    // future..
+            } else {
+                false
+            }
+        })
+    {
+        return raw_connect(remote_address);
+    }
+
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
             connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)

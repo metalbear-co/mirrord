@@ -6,7 +6,7 @@ use libc::{c_char, FILE};
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
-use tracing::{error, warn};
+use tracing::{error, info};
 
 use super::HookMessage;
 // use crate::pod_api::Target;
@@ -176,14 +176,14 @@ impl From<HookError> for i64 {
             | HookError::BypassedType(_)
             | HookError::BypassedDomain(_)
             | HookError::BypassedPort(_) => {
-                warn!("Recoverable issue >> {:#?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
-                error!("Error occured in Layer >> {:?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };

@@ -7,10 +7,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
+- mirrord-layer: When handling an outgoing connection to localhost, check first if it's a socket we intercept/mirror, then just let it connect normally.
+
+## 3.0.11-alpha
+
 ### Added
 - Support impersonated deployments, closes [[#293](https://github.com/metalbear-co/mirrord/issues/293)]
 - Shorter way to select which deployment/pod/container to impersonate through `--target` or `MIRRORD_IMPERSONATED_TARGET`, closes [[#392](https://github.com/metalbear-co/mirrord/issues/392)]
 - mirrord-layer: Support config from file alongside environment variables.
+- intellij-ext: Add version check, closes [[#289](https://github.com/metalbear-co/mirrord/issues/289)]
 - intellij-ext: better support for Windows with WSL.
 
 ### Deprecated
