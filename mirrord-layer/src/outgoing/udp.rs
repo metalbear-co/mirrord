@@ -108,7 +108,7 @@ impl UdpOutgoingHandler {
             }
         };
 
-        // TODO(alex) [low] 2022-09-07: Connect this socket to the user socket.
+        // TODO(alex): Connect this socket to the user socket.
         let mut user_address: Option<SocketAddr> = None;
 
         loop {
@@ -202,8 +202,8 @@ impl UdpOutgoingHandler {
                 remote_address,
                 channel_tx,
             }) => {
-                // TODO(alex) [mid] 2022-09-06: We need to check if this `remote_address` is
-                // actually a local address! If it is, then the `agent` won't be able to reach it.
+                // TODO(alex): We need to check if this `remote_address` is actually a local
+                // address! If it is, then the `agent` won't be able to reach it.
                 // Right now we're sidestepping this issue by just changing the address in `agent`
                 // to be a "local-agent" address.
                 //

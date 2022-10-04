@@ -102,17 +102,8 @@ impl TryFrom<c_int> for SocketKind {
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & libc::SOCK_STREAM) > 0 {
-            // TODO(alex) [mid] 2022-08-31: Mark this socket as `TcpSocket` and insert it into the
-            // `TCP_SOCKETS` static.
-            //
-            // Or maybe just have these in the same place, but as enums inside `SOCKETS` type?
-            //
-            // Lastly, probably don't need to go too deep (like delving too much on working UDP),
-            // just make the DNS feature work.
             Ok(SocketKind::Tcp(type_))
         } else if (type_ & libc::SOCK_DGRAM) > 0 {
-            // TODO(alex) [mid] 2022-08-31: Mark this socket as `UdpSocket` and insert it into the
-            // `UDP_SOCKETS` static.
             Ok(SocketKind::Udp(type_))
         } else {
             Err(HookError::BypassedType(type_))
