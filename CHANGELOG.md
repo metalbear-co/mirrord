@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.11-alpha
+
 ### Added
 - Support impersonated deployments, closes [[#293](https://github.com/metalbear-co/mirrord/issues/293)]
 - Shorter way to select which deployment/pod/container to impersonate through `--target` or `MIRRORD_IMPERSONATED_TARGET`, closes [[#392](https://github.com/metalbear-co/mirrord/issues/392)]
