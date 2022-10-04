@@ -1,5 +1,2 @@
 [unstable]
 bindeps = true
-
-# [build]
-# rustflags = ["Z", "extra-const-ub-checks"]
