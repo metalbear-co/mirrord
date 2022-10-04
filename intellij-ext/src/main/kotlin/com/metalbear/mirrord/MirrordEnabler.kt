@@ -1,5 +1,6 @@
 package com.metalbear.mirrord
 
+import com.intellij.notification.Notification
 import com.intellij.notification.NotificationGroup
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -22,9 +23,11 @@ class MirrordEnabler : ToggleAction() {
                     .notify(project)
             }
         }
+
+        fun notifier(message: String, type: NotificationType): Notification {
+            return notificationManager.createNotification("mirrord", message, type)
+        }
     }
-
-
     override fun isSelected(e: AnActionEvent): Boolean {
         return MirrordListener.enabled
     }
