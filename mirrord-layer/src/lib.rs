@@ -505,7 +505,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
