@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Changed errors that aren't fatal and can be part of a happy flow to be info instead of error (log level change).
+
 ## 3.0.11-alpha
 
 ### Added
