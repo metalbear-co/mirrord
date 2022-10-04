@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- mirrord-layer: When handling an outgoing connection to localhost, check first if it's a socket we intercept/mirror, then just let it connect normally.
+
 ## 3.0.11-alpha
 
 ### Added
