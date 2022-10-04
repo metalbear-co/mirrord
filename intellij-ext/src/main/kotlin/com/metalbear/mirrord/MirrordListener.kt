@@ -32,7 +32,7 @@ class MirrordListener : ExecutionListener {
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
 
-    override fun processStarting(executorId: String, env: ExecutionEnvironment) {
+    override fun processStartScheduled(executorId: String, env: ExecutionEnvironment) {
         if (enabled) {
             ApplicationManager.getApplication().invokeLater {
                 val customDialogBuilder = MirrordDialogBuilder()
@@ -46,7 +46,7 @@ class MirrordListener : ExecutionListener {
                         NotificationType.ERROR,
                         env.project
                     )
-                    return@invokeLater super.processStarting(executorId, env)
+                    return@invokeLater super.processStartScheduled(executorId, env)
                 }
                 val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
                 val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
@@ -63,7 +63,7 @@ class MirrordListener : ExecutionListener {
                             NotificationType.ERROR,
                             env.project
                         )
-                        return@invokeLater super.processStarting(executorId, env)
+                        return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
                     val fileOpsCheckbox = JCheckBox("Enable File Operations")
@@ -102,7 +102,7 @@ class MirrordListener : ExecutionListener {
             }
         }
         // FAILURE: Just call the parent implementation
-        return super.processStarting(executorId, env)
+        return super.processStartScheduled(executorId, env)
     }
 
     override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {

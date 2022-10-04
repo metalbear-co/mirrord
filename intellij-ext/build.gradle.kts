@@ -28,6 +28,7 @@ dependencies {
         exclude(group = "org.slf4j", module = "slf4j-api")
         exclude(group = "org.yaml", module = "snakeyaml")
     }
+    implementation("com.github.zafarkhaja:java-semver:0.9.0")
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin

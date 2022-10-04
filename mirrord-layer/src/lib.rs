@@ -6,21 +6,25 @@
 #![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
+#![feature(async_closure)]
 
 use std::{
     collections::{HashSet, VecDeque},
+    path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
 
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
-use envconfig::Envconfig;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use kube::api::Portforwarder;
 use libc::c_int;
+use mirrord_config::{
+    config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
+};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
     AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
@@ -41,10 +45,9 @@ use tokio::{
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, config::LayerConfig, file::FileHandler};
+use crate::{common::HookMessage, file::FileHandler};
 
 mod common;
-mod config;
 mod detour;
 mod error;
 mod file;
@@ -84,12 +87,52 @@ fn before_init() {
     if !cfg!(test) {
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
-        let config = LayerConfig::init_from_env().unwrap();
-        if should_load(given_process, &config.skip_processes) {
-            init(config);
+
+        let config = std::env::var("MIRRORD_CONFIG_FILE")
+            .ok()
+            .and_then(|val| val.parse::<PathBuf>().ok())
+            .map(|path| LayerFileConfig::from_path(&path).unwrap())
+            .unwrap_or_default()
+            .generate_config();
+
+        match config {
+            Ok(config) => {
+                let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+
+                if should_load(given_process, skip_processes) {
+                    deprecation_check(&config);
+                    init(config);
+                }
+            }
+            Err(err) => {
+                panic!("Failed to load config: {}", err);
+            }
         }
     }
 }
+
+// START | To be removed after deprecated functionality is removed
+fn deprecation_check(config: &LayerConfig) {
+    let LayerConfig {
+        target,
+        pod: PodConfig {
+            name, container, ..
+        },
+        ..
+    } = config;
+
+    match (target, name, container) {
+        (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
+            panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
+            >> EnvVars: {:?}, {:?}, {:?}", target, name, container);
+        }
+        (None, None, _) => {
+            panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
+        }
+        _ => {}
+    }
+}
+// END
 
 fn init(config: LayerConfig) {
     tracing_subscriber::registry()
@@ -126,14 +169,19 @@ fn init(config: LayerConfig) {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops =
-        ENABLED_FILE_OPS.get_or_init(|| (config.enabled_file_ops || config.enabled_file_ro_ops));
-    let _ = ENABLED_FILE_RO_OPS
-        .get_or_init(|| (config.enabled_file_ro_ops && !config.enabled_file_ops));
-    let _ = ENABLED_TCP_OUTGOING.get_or_init(|| config.enabled_tcp_outgoing);
-    let _ = ENABLED_UDP_OUTGOING.get_or_init(|| config.enabled_udp_outgoing);
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get_or_init(|| config.feature.fs.is_read() || config.feature.fs.is_write());
+    ENABLED_FILE_RO_OPS
+        .set(config.feature.fs.is_read())
+        .expect("Setting ENABLED_FILE_RO_OPS singleton");
+    ENABLED_TCP_OUTGOING
+        .set(config.feature.network.outgoing.tcp)
+        .expect("Setting ENABLED_TCP_OUTGOING singleton");
+    ENABLED_UDP_OUTGOING
+        .set(config.feature.network.outgoing.udp)
+        .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
-    enable_hooks(*enabled_file_ops, config.remote_dns);
+    enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
     RUNTIME.block_on(start_layer_thread(
         port_forwarder,
@@ -143,9 +191,9 @@ fn init(config: LayerConfig) {
     ));
 }
 
-fn should_load(given_process: &str, skip_processes: &Option<String>) -> bool {
+fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
     if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.split(';').any(|x| x == given_process)
+        !processes_to_avoid.iter().any(|x| x == given_process)
     } else {
         true
     }
@@ -353,6 +401,8 @@ async fn thread_loop(
             }
         }
     }
+
+    graceful_exit!();
 }
 
 #[tracing::instrument(level = "trace", skip(pf, receiver))]
@@ -369,8 +419,8 @@ async fn start_layer_thread(
     let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
-        config.override_env_vars_exclude,
-        config.override_env_vars_include,
+        config.feature.env.exclude.map(|exclude| exclude.join(";")),
+        config.feature.env.include.map(|include| include.join(";")),
     ) {
         (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
@@ -395,20 +445,34 @@ async fn start_layer_thread(
             }))
             .await;
 
-        let msg = codec.next().await;
-        if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
-            trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
+        select! {
+          msg = codec.next() => {
+            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
-            for (key, value) in remote_env_vars.into_iter() {
-                std::env::set_var(&key, &value);
-                debug_assert_eq!(std::env::var(key), Ok(value));
+                for (key, value) in remote_env_vars.into_iter() {
+                    std::env::set_var(&key, &value);
+                    debug_assert_eq!(std::env::var(key), Ok(value));
+                }
+            } else {
+                graceful_exit!("unexpected response - expected env vars response {msg:?}");
             }
-        } else {
-            panic!("unexpected response - expected env vars response {msg:?}");
+          },
+          _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
+            graceful_exit!(r#"
+                agent response timeout - expected env var response
+
+                check that the agent image can run on your architecture
+            "#);
+          }
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, codec, config.agent_tcp_steal_traffic));
+    let _ = tokio::spawn(thread_loop(
+        receiver,
+        codec,
+        config.feature.network.incoming.is_steal(),
+    ));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
@@ -474,19 +538,51 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::pod_api::*;
 
     #[rstest]
-    #[case("test", Some("foo".to_string()))]
+    #[case("test", Some(vec!["foo".to_string()]))]
     #[case("test", None)]
-    #[case("test", Some("foo;bar;baz".to_string()))]
-    fn test_should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
-        assert!(should_load(given_process, &skip_processes));
+    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
+    fn test_should_load_true(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+    ) {
+        assert!(should_load(given_process, skip_processes));
     }
 
     #[rstest]
-    #[case("test", Some("test".to_string()))]
-    #[case("test", Some("test;foo;bar;baz".to_string()))]
-    fn test_should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<String>) {
-        assert!(!should_load(given_process, &skip_processes));
+    #[case("test", Some(vec!["test".to_string()]))]
+    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
+    fn test_should_load_false(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+    ) {
+        assert!(!should_load(given_process, skip_processes));
+    }
+
+    #[rstest]
+    #[case("pod/foobaz", Target::Pod(PodData {pod_name: "foobaz".to_string(), container_name: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentData {deployment: "foobaz".to_string()}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentData {deployment: "nginx-deployment".to_string()}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodData { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
+    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(target, expected)
+    }
+
+    #[rstest]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("deployment/foobaz/blah")]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("pod/foo/baz")]
+    fn test_target_parse_fails(#[case] target: &str) {
+        let target = target.parse::<pod_api::Target>().unwrap();
+        assert_eq!(
+            target,
+            Target::Deployment(DeploymentData {
+                deployment: "foobaz".to_string()
+            })
+        )
     }
 }
