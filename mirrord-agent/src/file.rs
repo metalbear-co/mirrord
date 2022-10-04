@@ -222,6 +222,8 @@ impl FileManager {
                             // Now we finally move the file cursor based on how much we have read.
                             file.seek(SeekFrom::Start(seek_to))?;
 
+                            // We handle the extra bytes in the `fgets` hook, so here we can just
+                            // return the full buffer.
                             let response = ReadStringFileResponse {
                                 bytes: buffer.into_bytes(),
                                 read_amount,
