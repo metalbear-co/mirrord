@@ -231,7 +231,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: intellij-ext
-          path: intellij-ext/build/distributions/mirrord-{{ steps.version.outputs.version }}.zip
+          path: intellij-ext/build/distributions/mirrord-${{ steps.version.outputs.version }}.zip
           if-no-files-found: error
 
   release_gh:
