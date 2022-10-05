@@ -144,18 +144,21 @@ where
 
 enum IPTableFormatter {
     Normal,
-    Linkerd,
+    Mesh,
 }
 
 impl IPTableFormatter {
+    const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
+
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if output
-            .iter()
-            .any(|rule| rule.contains("-j PROXY_INIT_OUTPUT"))
-        {
-            Ok(IPTableFormatter::Linkerd)
+        if output.iter().any(|rule| {
+            IPTableFormatter::MESH_OUTPUTS
+                .iter()
+                .any(|mesh_output| rule.contains(mesh_output))
+        }) {
+            Ok(IPTableFormatter::Mesh)
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -164,7 +167,7 @@ impl IPTableFormatter {
     fn entrypoint(&self) -> &str {
         match self {
             IPTableFormatter::Normal => "PREROUTING",
-            IPTableFormatter::Linkerd => "OUTPUT",
+            IPTableFormatter::Mesh => "OUTPUT",
         }
     }
 
@@ -176,7 +179,9 @@ impl IPTableFormatter {
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
-            IPTableFormatter::Linkerd => format!("-o lo {}", redirect_rule),
+            IPTableFormatter::Mesh => {
+                format!("-o lo {}", redirect_rule)
+            }
         }
     }
 }
