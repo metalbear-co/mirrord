@@ -7,6 +7,8 @@
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
 #![feature(async_closure)]
+#![feature(try_trait_v2)]
+#![feature(try_trait_v2_residual)]
 
 extern crate alloc;
 use std::{

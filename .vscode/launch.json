@@ -15,7 +15,10 @@
       "name": "Launch index.ts",
       "type": "node",
       "request": "launch",
-      "runtimeArgs": ["-r", "ts-node/register"],
+      "runtimeArgs": [
+        "-r",
+        "ts-node/register"
+      ],
       "args": [
         "${workspaceFolder}/cli/src/index.ts",
         "nginx-deployment-66b6c48dd5-zshg9"
@@ -23,9 +26,13 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
       "name": "Launch Extension",
-      "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
+      "outFiles": [
+        "${workspaceFolder}/vscode-ext/out/**/*.js"
+      ],
       "request": "launch",
       "type": "extensionHost"
     },
@@ -34,16 +41,24 @@
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/node/app.mjs"],
+      "args": [
+        "${file}"
+      ],
       "sourceMap": {},
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        // "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE": "*",
+        // "MIRRORD_FILE_OPS": "true",
+        // "MIRRORD_REMOTE_DNS": "true",
+        // "MIRRORD_TCP_OUTGOING": "true",
+        // "MIRRORD_UDP_OUTGOING": "true",
         "RUST_BACKTRACE": "short"
       }
     },
@@ -51,19 +66,22 @@
       "type": "lldb",
       "request": "launch",
       "name": "sample.rs: Debug mirrord-layer",
-      "program": "${workspaceFolder}/target/debug/sample-rust",
+      "program": "${workspaceFolder}/target/debug/rust-e2e-fileops",
       "args": [],
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
-      "sourceLanguages": ["rust"],
+      "sourceLanguages": [
+        "rust"
+      ],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
         "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
+        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "apache-deployment-8477b45749-bs9qj",
+        "MIRRORD_AGENT_IMAGE": "meowjesty/mirrord-agent:latest",
+        "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
+        "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
+        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
         "RUST_BACKTRACE": "short"
       }
     }

@@ -17,6 +17,7 @@ use trust_dns_resolver::config::Protocol;
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    detour::Detour,
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
@@ -25,11 +26,11 @@ use crate::{
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[tracing::instrument(level = "trace")]
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
-        Err(HookError::BypassedDomain(domain))
+        Err(Bypass::Domain(domain))
     } else {
         Ok(())
     }?;
@@ -53,23 +54,23 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult
     let mut sockets = SOCKETS.lock()?;
     sockets.insert(socket_fd, Arc::new(new_socket));
 
-    Ok(socket_fd)
+    Detour::Success(socket_fd)
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 #[tracing::instrument(level = "trace")]
-pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
-    let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
+pub(super) fn bind(sockfd: c_int, address: SockAddr) -> Detour<i32> {
+    let requested_address = address.as_socket().ok_or(Bypass::AddressConversion)?;
 
     let mut socket = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .ok_or(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| {
                 if !matches!(socket.state, SocketState::Initialized) {
-                    Err(HookError::SocketInvalidState(sockfd))
+                    Err(Bypass::InvalidState(sockfd))
                 } else {
                     Ok(socket)
                 }
@@ -79,7 +80,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
     let requested_port = requested_address.port();
 
     if is_ignored_port(requested_port) {
-        return Err(HookError::BypassedPort(requested_address.port()));
+        Err(Bypass::Port(requested_address.port()))?;
     }
 
     let unbound_address = match socket.domain {
@@ -91,7 +92,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             0,
         ))),
-        invalid => Err(HookError::UnsupportedDomain(invalid)),
+        invalid => Err(Bypass::Domain(invalid)),
     }?;
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
@@ -121,7 +122,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
         })
     }
     .map(|(_, address)| address.as_socket())?
-    .ok_or(HookError::AddressConversion)?;
+    .ok_or(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         requested_port,
@@ -130,7 +131,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
 
     SOCKETS.lock()?.insert(sockfd, socket);
 
-    Ok(())
+    Detour::Success(bind_result)
 }
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
@@ -427,7 +428,8 @@ pub(super) fn accept(
             remote_address,
             mirror_address: local_address,
         }),
-        kind: type_.try_into()?,
+        // kind: type_.try_into()?,
+        kind: todo!(),
     };
     fill_address(address, address_len, remote_address)?;
 

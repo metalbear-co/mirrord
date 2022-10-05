@@ -13,7 +13,10 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
-use crate::error::{HookError, HookResult};
+use crate::{
+    detour::Bypass,
+    error::{HookError, HookResult},
+};
 
 pub(super) mod hooks;
 pub(crate) mod ops;
@@ -98,7 +101,7 @@ pub(crate) enum SocketKind {
 }
 
 impl TryFrom<c_int> for SocketKind {
-    type Error = HookError;
+    type Error = Bypass;
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & libc::SOCK_STREAM) > 0 {
@@ -106,7 +109,7 @@ impl TryFrom<c_int> for SocketKind {
         } else if (type_ & libc::SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
-            Err(HookError::BypassedType(type_))
+            Err(Bypass::Type(type_))
         }
     }
 }

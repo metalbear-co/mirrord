@@ -5,7 +5,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use socket2::SockAddr;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 use trust_dns_resolver::config::Protocol;
 
 use super::ops::*;
@@ -17,13 +17,11 @@ pub(crate) unsafe extern "C" fn socket_detour(
     type_: c_int,
     protocol: c_int,
 ) -> c_int {
-    let (Ok(result) | Err(result)) = socket(domain, type_, protocol).map_err(|fail| match fail {
-        HookError::BypassedType(_) | HookError::BypassedDomain(_) => {
-            warn!("socket_detour -> bypassed with {:#?}", fail);
-            FN_SOCKET(domain, type_, protocol)
-        }
-        other => other.into(),
-    });
+    let (Ok(result) | Err(result)) = socket(domain, type_, protocol)
+        .bypass_with(|_| FN_SOCKET(domain, type_, protocol))
+        .map_err(From::from)
+        .inspect(|s| info!("{s:#?}"))
+        .inspect_err(|e| error!("{e:#?}"));
 
     result
 }
@@ -44,19 +42,9 @@ pub(crate) unsafe extern "C" fn bind_detour(
 
     match address {
         Ok(((), address)) => {
-            let (Ok(result) | Err(result)) =
-                bind(sockfd, address)
-                    .map(|()| 0)
-                    .map_err(|fail| match fail {
-                        HookError::LocalFDNotFound(_)
-                        | HookError::BypassedPort(_)
-                        | HookError::AddressConversion => {
-                            warn!("bind_detour -> bypassed with {:#?}", fail);
-
-                            FN_BIND(sockfd, raw_address, address_length)
-                        }
-                        other => other.into(),
-                    });
+            let (Ok(result) | Err(result)) = bind(sockfd, address)
+                .bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
+                .map_err(From::from);
             result
         }
         Err(_) => {
