@@ -225,8 +225,7 @@ jobs:
           PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
         run: |
           cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
+          chmod +x ./gradlew          
           ./gradlew publishPlugin
       - uses: actions/upload-artifact@v3
         with:
