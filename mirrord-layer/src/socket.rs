@@ -8,8 +8,10 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{AddrInfoHint, Port};
+use mirrord_protocol::Port;
 use socket2::SockAddr;
+use tracing::warn;
+use trust_dns_resolver::config::Protocol;
 
 use crate::error::{HookError, HookResult};
 
@@ -100,17 +102,8 @@ impl TryFrom<c_int> for SocketKind {
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & libc::SOCK_STREAM) > 0 {
-            // TODO(alex) [mid] 2022-08-31: Mark this socket as `TcpSocket` and insert it into the
-            // `TCP_SOCKETS` static.
-            //
-            // Or maybe just have these in the same place, but as enums inside `SOCKETS` type?
-            //
-            // Lastly, probably don't need to go too deep (like delving too much on working UDP),
-            // just make the DNS feature work.
             Ok(SocketKind::Tcp(type_))
         } else if (type_ & libc::SOCK_DGRAM) > 0 {
-            // TODO(alex) [mid] 2022-08-31: Mark this socket as `UdpSocket` and insert it into the
-            // `UDP_SOCKETS` static.
             Ok(SocketKind::Udp(type_))
         } else {
             Err(HookError::BypassedType(type_))
@@ -162,17 +155,29 @@ fn fill_address(
     }
 }
 
-pub(crate) trait AddrInfoHintExt {
-    fn from_raw(raw: libc::addrinfo) -> Self;
+pub(crate) trait ProtocolExt {
+    fn try_from_raw(ai_protocol: i32) -> HookResult<Protocol>;
+    fn try_into_raw(self) -> HookResult<i32>;
 }
 
-impl AddrInfoHintExt for AddrInfoHint {
-    fn from_raw(raw: libc::addrinfo) -> Self {
-        Self {
-            ai_family: raw.ai_family,
-            ai_socktype: raw.ai_socktype,
-            ai_protocol: raw.ai_protocol,
-            ai_flags: raw.ai_flags,
+impl ProtocolExt for Protocol {
+    fn try_from_raw(ai_protocol: i32) -> HookResult<Self> {
+        match ai_protocol {
+            libc::IPPROTO_UDP => Ok(Protocol::Udp),
+            libc::IPPROTO_TCP => Ok(Protocol::Tcp),
+            libc::IPPROTO_SCTP => todo!(),
+            other => {
+                warn!("Trying a protocol of {:#?}", other);
+                Ok(Protocol::Tcp)
+            }
+        }
+    }
+
+    fn try_into_raw(self) -> HookResult<i32> {
+        match self {
+            Protocol::Udp => Ok(libc::IPPROTO_UDP),
+            Protocol::Tcp => Ok(libc::IPPROTO_TCP),
+            _ => todo!(),
         }
     }
 }

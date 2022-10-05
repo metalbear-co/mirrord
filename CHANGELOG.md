@@ -10,6 +10,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
 - mirrord-layer: When handling an outgoing connection to localhost, check first if it's a socket we intercept/mirror, then just let it connect normally.
+- mirrord-layer: removed `tracing::instrument` from `*_detour` functions.
+
+### Fixed
+- `getaddrinfo` now uses [`trust-dns-resolver`](https://docs.rs/trust-dns-resolver/latest/trust_dns_resolver/) when resolving DNS (previously it would do a `getaddrinfo` call in mirrord-agent that could result in incompatibility between the mirrored pod and the user environments).
 
 ## 3.0.11-alpha
 
@@ -30,7 +34,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## 3.0.10-alpha
 
 ### Added
-- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a 
+- Test that verifies that outgoing UDP traffic (only with a bind to non-0 port and a
   call to `connect`) is successfully intercepted and forwarded.
 
 ### Fixed

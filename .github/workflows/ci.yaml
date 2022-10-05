@@ -233,6 +233,9 @@ jobs:
       - run: |
           cd tests/go-e2e-dns
           go build -o 19
+      - run: |
+          cd tests/rust-e2e-fileops
+          cargo build
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:

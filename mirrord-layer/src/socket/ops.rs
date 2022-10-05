@@ -1,5 +1,5 @@
+use alloc::ffi::CString;
 use std::{
-    ffi::CString,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -7,11 +7,12 @@ use std::{
     sync::Arc,
 };
 
-use dns_lookup::AddrInfo;
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
+use trust_dns_resolver::config::Protocol;
 
 use super::{hooks::*, *};
 use crate::{
@@ -76,9 +77,10 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
     };
 
     let requested_port = requested_address.port();
-    (!is_ignored_port(requested_port))
-        .then_some(())
-        .ok_or_else(|| HookError::BypassedPort(requested_address.port()))?;
+
+    if is_ignored_port(requested_port) {
+        return Err(HookError::BypassedPort(requested_address.port()));
+    }
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
@@ -470,13 +472,13 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 pub(super) fn getaddrinfo(
     node: Option<String>,
     service: Option<String>,
-    hints: Option<AddrInfoHint>,
+    protocol: Option<Protocol>,
+    ai_protocol: i32,
+    ai_socktype: i32,
 ) -> HookResult<*mut libc::addrinfo> {
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
-        service,
-        hints,
         hook_channel_tx,
     };
 
@@ -484,35 +486,26 @@ pub(super) fn getaddrinfo(
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
 
+    // Convert `service` into a port.
+    let service = service.map_or(0, |s| s.parse().unwrap_or_default());
+
+    // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
-        .map(AddrInfo::from)
-        .map(|addr_info| {
-            let AddrInfo {
-                socktype: ai_socktype,
-                protocol: ai_protocol,
-                address: ai_family,
-                sockaddr,
-                canonname,
-                flags: ai_flags,
-            } = addr_info;
-
-            let rawish_sockaddr = socket2::SockAddr::from(sockaddr);
-            let ai_addrlen = rawish_sockaddr.len();
+        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, service)))))
+        .map(|(name, rawish_sock_addr)| {
+            let ai_addrlen = rawish_sock_addr.len();
+            let ai_family = rawish_sock_addr.family() as _;
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
-            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sockaddr.as_ptr() }));
-
-            let canonname = canonname.map(CString::new).transpose().unwrap();
-            let ai_canonname = canonname.map_or_else(ptr::null, |c_string| {
-                let c_str = c_string.as_c_str();
-                c_str.as_ptr()
-            }) as *mut _;
+            let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            let ai_canonname = CString::new(name).unwrap().into_raw();
 
             libc::addrinfo {
-                ai_flags,
+                ai_flags: 0,
                 ai_family,
                 ai_socktype,
+                // TODO(alex): Don't just reuse whatever the user passed to us.
                 ai_protocol,
                 ai_addrlen,
                 ai_addr,
@@ -531,7 +524,7 @@ pub(super) fn getaddrinfo(
         })
         .ok_or(HookError::DNSNoName);
 
-    info!("getaddrinfo -> result {:#?}", result);
+    debug!("getaddrinfo -> result {:#?}", result);
 
     result
 }

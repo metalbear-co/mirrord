@@ -199,9 +199,8 @@ impl ClientConnectionHandler {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
-        trace!("respond -> response {:#?}", response);
-
         Ok(self.stream.send(response).await?)
     }
 
@@ -249,12 +248,19 @@ impl ClientConnectionHandler {
     }
 
     /// Handle incoming messages from the client. Returns False if the client disconnected.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
-        debug!("client_handler -> client sent message {:?}", message);
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
-                self.respond(DaemonMessage::File(response)).await?
+                self.respond(DaemonMessage::File(response))
+                    .await
+                    .inspect_err(|fail| {
+                        error!(
+                            "handle_client_message -> Failed responding to file message {:#?}!",
+                            fail
+                        )
+                    })?
             }
             ClientMessage::TcpOutgoing(layer_message) => {
                 self.tcp_outgoing_api.layer_message(layer_message).await?
@@ -411,7 +417,8 @@ async fn main() -> Result<(), AgentError> {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE),
+                .with_span_events(FmtSpan::ACTIVE)
+                .compact(),
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
