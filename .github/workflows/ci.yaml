@@ -331,10 +331,11 @@ jobs:
       - name: load image
         run: docker load --input /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests test_mirror_http_traffic
-        run: cargo test -p tests test_dotnet6_outgoing_traffic_single_request_enabled
-        run: cargo test -p tests test_dotnet6_remote_env_vars_works
-        run: cargo test -p tests test_dotnet6_dns_lookup
+        run: |
+          cargo test -p tests test_mirror_http_traffic
+          cargo test -p tests test_dotnet6_outgoing_traffic_single_request_enabled
+          cargo test -p tests test_dotnet6_remote_env_vars_works
+          cargo test -p tests test_dotnet6_dns_lookup
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
