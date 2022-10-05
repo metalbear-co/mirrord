@@ -251,6 +251,8 @@ pub(crate) unsafe extern "C" fn fread_detour(
     }
 }
 
+/// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,
+/// it appends `'\0'` to the end of the string (thus the limit on `capacity`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fgets_detour(
     out_buffer: *mut c_char,
@@ -279,6 +281,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
                 let bytes_slice = &bytes[0..buffer_size.min(read_amount)];
                 let eof = vec![0; 1];
 
+                // Append '\0' to comply with `fgets`.
                 let read = [bytes_slice, &eof].concat();
 
                 ptr::copy(read.as_ptr().cast(), out_buffer, read.len());
@@ -296,6 +299,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     }
 }
 
+/// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
