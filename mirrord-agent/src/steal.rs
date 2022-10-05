@@ -148,18 +148,16 @@ enum IPTableFormatter {
 }
 
 impl IPTableFormatter {
-    const MESH_OUTPUTS: [&'static str; 2] = [
-        "-j PROXY_INIT_OUTPUT",
-        "-j ISTIO_OUTPUT",
-    ];
-    
+    const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
+
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if output
-            .iter()
-            .any(|rule| IPTableFormatter::MESH_OUTPUTS.iter().any(|mesh_output| rule.contains(mesh_output)))
-        {
+        if output.iter().any(|rule| {
+            IPTableFormatter::MESH_OUTPUTS
+                .iter()
+                .any(|mesh_output| rule.contains(mesh_output))
+        }) {
             Ok(IPTableFormatter::Mesh)
         } else {
             Ok(IPTableFormatter::Normal)
