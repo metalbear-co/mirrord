@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-protocol"
+name = "rust-e2e-fileops"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -13,10 +13,7 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-actix-codec.workspace = true
-bytes.workspace = true
-thiserror.workspace = true
-trust-dns-resolver.worspace = true
-serde = { version = "1", features = ["derive"] }
-bincode =  { version = "2.0.0-rc.1", features = ["serde"] }
+libc = "0.2"

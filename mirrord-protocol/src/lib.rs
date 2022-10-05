@@ -2,6 +2,7 @@
 #![feature(io_error_more)]
 
 pub mod codec;
+pub mod dns;
 pub mod error;
 pub mod outgoing;
 pub mod tcp;

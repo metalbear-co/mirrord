@@ -17,7 +17,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -101,13 +101,13 @@ impl TcpOutgoingHandler {
                             continue;
                         },
                         Err(fail) => {
-                            info!("Failed reading mirror_stream with {:#?}", fail);
+                            error!("Failed reading mirror_stream with {:#?}", fail);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
-                            info!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            error!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;

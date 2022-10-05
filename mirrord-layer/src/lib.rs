@@ -8,6 +8,7 @@
 #![feature(let_chains)]
 #![feature(async_closure)]
 
+extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
     path::PathBuf,
@@ -28,8 +29,8 @@ use mirrord_config::{
 use mirrord_common::progress::{PrintProgress, ProgressMode};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
-    AddrInfoInternal, ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetAddrInfoRequest,
-    GetEnvVarsRequest,
+    dns::{DnsLookup, GetAddrInfoRequest},
+    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use rand::Rng;
@@ -141,6 +142,7 @@ fn init(config: LayerConfig) {
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
                 .with_span_events(FmtSpan::ACTIVE)
+                .compact()
                 .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
         )
         .with(PrintProgress::from_env(ProgressMode::Standard))
@@ -220,7 +222,7 @@ where
 
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
-    getaddrinfo_handler_queue: VecDeque<ResponseChannel<Vec<AddrInfoInternal>>>,
+    getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
 
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -269,17 +271,10 @@ where
             }
             HookMessage::GetAddrInfoHook(GetAddrInfoHook {
                 node,
-                service,
-                hints,
                 hook_channel_tx,
             }) => {
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
-
-                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                    node,
-                    service,
-                    hints,
-                });
+                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
                 self.codec.send(request).await.unwrap();
             }
@@ -333,7 +328,7 @@ where
                 .getaddrinfo_handler_queue
                 .pop_front()
                 .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
-                .send(get_addr_info)
+                .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close => todo!(),
             DaemonMessage::LogMessage(_) => todo!(),
@@ -512,8 +507,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
 /// so it tries to do the same for files.
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
-unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
@@ -526,7 +520,7 @@ unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
         close_file_result
             .map_err(|fail| {
-                error!("Failed writing file with {fail:#?}");
+                error!("Failed closing file with {fail:#?}");
                 -1
             })
             .unwrap_or_else(|fail| fail)
