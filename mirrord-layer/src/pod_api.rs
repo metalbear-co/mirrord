@@ -325,7 +325,7 @@ async fn create_job_pod_agent(
                                 "sidecar.istio.io/inject": "false"
                             }
                         },
-                        
+
                 "spec": {
                     "hostPID": true,
                     "nodeName": runtime_data.node_name,
