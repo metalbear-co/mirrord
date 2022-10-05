@@ -181,7 +181,7 @@ jobs:
           cd vscode-ext
           npm install          
           vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
-          vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
+          tsc && vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: |
