@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
-    net::SocketAddr,
     path::PathBuf,
 };
 
@@ -11,6 +10,7 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
+    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -30,13 +30,10 @@ pub struct ReadFileRequest {
     pub buffer_size: usize,
 }
 
-// TODO: Should probably live in a separate place (maybe even a separate `util` crate).
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
-pub struct AddrInfoHint {
-    pub ai_family: i32,
-    pub ai_socktype: i32,
-    pub ai_protocol: i32,
-    pub ai_flags: i32,
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadLineFileRequest {
+    pub fd: usize,
+    pub buffer_size: usize,
 }
 
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
@@ -164,23 +161,12 @@ pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
+    ReadLine(ReadLineFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
 }
-
-/// Triggered by the `mirrord-layer` hook of `getaddrinfo_detour`.
-///
-/// Even though all parameters are optional, at least one of `node` or `service` must be `Some`,
-/// otherwise this will result in a `ResponseError`.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct GetAddrInfoRequest {
-    pub node: Option<String>,
-    pub service: Option<String>,
-    pub hints: Option<AddrInfoHint>,
-}
-
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -206,9 +192,24 @@ pub struct ReadFileResponse {
     pub read_amount: usize,
 }
 
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+pub struct ReadLineFileResponse {
+    pub bytes: Vec<u8>,
+    pub read_amount: usize,
+}
+
 impl fmt::Debug for ReadFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadFileResponse")
+            .field("bytes (length)", &self.bytes.len())
+            .field("read_amount", &self.read_amount)
+            .finish()
+    }
+}
+
+impl fmt::Debug for ReadLineFileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadLineFileResponse")
             .field("bytes (length)", &self.bytes.len())
             .field("read_amount", &self.read_amount)
             .finish()
@@ -238,66 +239,12 @@ pub type RemoteResult<T> = Result<T, ResponseError>;
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
+    ReadLine(RemoteResult<ReadLineFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
 }
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct AddrInfoInternal {
-    socktype: i32,
-    protocol: i32,
-    address: i32,
-    sockaddr: SocketAddr,
-    canonname: Option<String>,
-    flags: i32,
-}
-
-impl From<AddrInfoInternal> for dns_lookup::AddrInfo {
-    fn from(internal: AddrInfoInternal) -> Self {
-        let AddrInfoInternal {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        } = internal;
-
-        Self {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        }
-    }
-}
-
-impl From<dns_lookup::AddrInfo> for AddrInfoInternal {
-    fn from(addrinfo: dns_lookup::AddrInfo) -> Self {
-        let dns_lookup::AddrInfo {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        } = addrinfo;
-
-        Self {
-            socktype,
-            protocol,
-            address,
-            sockaddr,
-            canonname,
-            flags,
-        }
-    }
-}
-
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
@@ -310,7 +257,7 @@ pub enum DaemonMessage {
     File(FileResponse),
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
-    GetAddrInfoResponse(RemoteResult<Vec<AddrInfoInternal>>),
+    GetAddrInfoResponse(GetAddrInfoResponse),
 }
 
 pub struct ClientCodec {

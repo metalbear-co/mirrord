@@ -17,7 +17,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -108,7 +108,7 @@ impl UdpOutgoingHandler {
             }
         };
 
-        // TODO(alex) [low] 2022-09-07: Connect this socket to the user socket.
+        // TODO(alex): Connect this socket to the user socket.
         let mut user_address: Option<SocketAddr> = None;
 
         loop {
@@ -122,13 +122,13 @@ impl UdpOutgoingHandler {
                             continue;
                         },
                         Err(fail) => {
-                            info!("Failed reading mirror_stream with {:#?}", fail);
+                            error!("Failed reading mirror_stream with {:#?}", fail);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
                         }
                         Ok((read_amount, _)) if read_amount == 0 => {
-                            info!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            error!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
@@ -202,8 +202,8 @@ impl UdpOutgoingHandler {
                 remote_address,
                 channel_tx,
             }) => {
-                // TODO(alex) [mid] 2022-09-06: We need to check if this `remote_address` is
-                // actually a local address! If it is, then the `agent` won't be able to reach it.
+                // TODO(alex): We need to check if this `remote_address` is actually a local
+                // address! If it is, then the `agent` won't be able to reach it.
                 // Right now we're sidestepping this issue by just changing the address in `agent`
                 // to be a "local-agent" address.
                 //
