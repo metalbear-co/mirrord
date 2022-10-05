@@ -59,7 +59,7 @@ jobs:
         # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
         # >> magic bits: 0000000 facf feed 000c 0100 0000 0000 0006 0000
-        # >> After editing using dd - 
+        # >> After editing using dd -
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
@@ -166,18 +166,40 @@ jobs:
       - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --pre-release --target linux-x64
+      - run: mkdir -p /tmp/vscode-ext
+      - run: |
+          cd vscode-ext 
+          npm install          
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-linux-x64 --target linux-x64
+          vsce publish ${{ steps.version.outputs.version }} --pre-release --target linux-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
       - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
       # Same binary for darwin
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
+      - run: |
+          cd vscode-ext
+          npm install          
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
+          vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      - run: cd vscode-ext && npm install && tsc && vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
+      - run: |
+          cd vscode-ext
+          npm install
+          mkdir /tmp/vscode-ext
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
+          vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: vscode-ext
+          path: |
+            /tmp/vscode-ext/vscode-ext-linux-x64
+            /tmp/vscode-ext/vscode-ext-darwin-x64
+            /tmp/vscode-ext/vscode-ext-darwin-arm64
+          if-no-files-found: error
 
   release_intellij_plugin:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
@@ -205,6 +227,11 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew publishPlugin
+      - uses: actions/upload-artifact@v3
+        with:
+          name: intellij-ext
+          path: intellij-ext/build/distributions/mirrord-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
 
   release_gh:
     needs:
@@ -249,6 +276,9 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
+          mv /tmp/artifacts/intellij-ext/mirrord-${{ steps.version.outputs.version }}.zip /tmp/release/
+          mv /tmp/artifacts/vscode-ext/* /tmp/release/
 
       # Consider to add changelog generation..
       - name: Release
