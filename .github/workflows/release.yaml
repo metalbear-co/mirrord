@@ -166,6 +166,7 @@ jobs:
       - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
+      - run: mkdir -p /tmp/vscode-ext
       - run: |
           cd vscode-ext 
           npm install          
@@ -230,7 +231,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: intellij-ext
-          path: build/distributions/mirrord-{{ steps.version.outputs.version }}.zip
+          path: intellij-ext/build/distributions/mirrord-{{ steps.version.outputs.version }}.zip
           if-no-files-found: error
 
   release_gh:
