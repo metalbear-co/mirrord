@@ -8,7 +8,7 @@ use mirrord_protocol::{
     RemoteResult,
 };
 use tokio::sync::{mpsc::Receiver, oneshot::Sender};
-use tracing::{debug, error};
+use tracing::{error, trace};
 use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
 use crate::{error::AgentError, runtime::set_namespace};
@@ -28,17 +28,15 @@ impl DnsRequest {
 // TODO(alex): aviram's suggested caching the resolver, but this should not be done by having a
 // single cached resolver, as we use system files that might change, thus invalidating our cache.
 // The cache should be hash-based.
-#[tracing::instrument(level = "debug")]
+/// Uses `AsyncResolver:::lookup_ip` to resolve `host`.
+///
+/// `root_path` is used to read `/proc/{pid}/root` configuration files when creating a resolver.
+#[tracing::instrument(level = "trace")]
 async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let resolv_conf_path = root_path.join("etc").join("resolv.conf");
-    debug!("dns_lookup -> resolv_conf_path {:#?}", resolv_conf_path);
-
     let hosts_path = root_path.join("etc").join("hosts");
-    debug!("dns_lookup -> hosts_path {:#?}", hosts_path);
 
     let resolv_conf = fs::read(resolv_conf_path)?;
-    debug!("dns_lookup -> resolv_conf {:#?}", resolv_conf);
-
     let hosts_file = File::open(hosts_path)?;
 
     let (config, options) = parse_resolv_conf(resolv_conf)?;
@@ -50,13 +48,16 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let lookup = resolver
         .lookup_ip(host)
         .await
-        .inspect(|lookup| debug!("lookup {lookup:#?}"))?
+        .inspect(|lookup| trace!("lookup {lookup:#?}"))?
         .into();
-    debug!("dns_lookup -> lookup {:#?}", lookup);
 
     Ok(lookup)
 }
 
+/// Task for the DNS resolving thread that runs in the `/proc/{pid}/ns` network namespace.
+///
+/// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
+/// `DnsRequest::tx`.
 pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<(), AgentError> {
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
@@ -70,7 +71,7 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
         .unwrap_or_else(|| PathBuf::from("/"));
 
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
-        debug!("dns_worker -> request {:#?}", request);
+        trace!("dns_worker -> request {:#?}", request);
 
         let result = dns_lookup(root_path.as_path(), request.node.unwrap());
         if let Err(result) = tx.send(GetAddrInfoResponse(result.await)) {

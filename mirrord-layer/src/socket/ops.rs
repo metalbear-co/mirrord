@@ -485,7 +485,6 @@ pub(super) fn getaddrinfo(
     blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook))?;
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
-    debug!("getaddrinfo -> addr_info_list {addr_info_list:#?}");
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
