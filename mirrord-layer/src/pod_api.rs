@@ -315,12 +315,23 @@ async fn create_job_pod_agent(
                     "name": mirrord_agent_job_name,
                     "labels": {
                         "app": "mirrord"
+                    },
+                    "annotations":
+                    {
+                        "sidecar.istio.io/inject": "false"
                     }
                 },
                 "spec": {
                 "ttlSecondsAfterFinished": config.agent.ttl,
 
                     "template": {
+                        "metadata": {
+                            "annotations":
+                            {
+                                "sidecar.istio.io/inject": "false"
+                            }
+                        },
+
                 "spec": {
                     "hostPID": true,
                     "nodeName": runtime_data.node_name,
