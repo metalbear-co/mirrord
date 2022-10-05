@@ -3,7 +3,7 @@ use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slic
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadStringFileResponse};
+use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
 use tracing::{debug, error};
 
 use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
@@ -269,7 +269,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
         let buffer_size = (capacity - 1) as usize;
 
         let read_result = fgets(remote_fd, buffer_size).map(|read_file| {
-            let ReadStringFileResponse { bytes, read_amount } = read_file;
+            let ReadLineFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.

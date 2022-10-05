@@ -179,16 +179,16 @@ pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse> {
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(fd: usize, buffer_size: usize) -> Result<ReadStringFileResponse> {
+pub(crate) fn fgets(fd: usize, buffer_size: usize) -> Result<ReadLineFileResponse> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
-    let reading_file = ReadString {
+    let reading_file = ReadLine {
         fd,
         buffer_size,
         file_channel_tx,
     };
 
-    blocking_send_file_message(HookMessageFile::ReadString(reading_file))?;
+    blocking_send_file_message(HookMessageFile::ReadLine(reading_file))?;
 
     let read_file_response = file_channel_rx.blocking_recv()??;
     Ok(read_file_response)

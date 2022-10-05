@@ -10,7 +10,7 @@ use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadStringFileRequest, ReadStringFileResponse, RemoteResult,
+    ReadFileRequest, ReadFileResponse, ReadLineFileRequest, ReadLineFileResponse, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
@@ -60,9 +60,9 @@ impl FileManager {
                 let read_result = self.read(fd, buffer_size);
                 Ok(FileResponse::Read(read_result))
             }
-            FileRequest::ReadString(ReadStringFileRequest { fd, buffer_size }) => {
-                let read_result = self.read_string(fd, buffer_size);
-                Ok(FileResponse::ReadString(read_result))
+            FileRequest::ReadLine(ReadLineFileRequest { fd, buffer_size }) => {
+                let read_result = self.read_line(fd, buffer_size);
+                Ok(FileResponse::ReadLine(read_result))
             }
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
@@ -188,43 +188,44 @@ impl FileManager {
             })
     }
 
+    /// Remote implementation of `fgets`.
+    ///
+    /// Uses `BufReader::read_line` to read a line (including `"\n"`) from a file with `fd`. The
+    /// file cursor position has to be moved manually due to this.
+    ///
+    /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
+    /// on it (even though we return the full `Vec` of bytes).
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read_string(
+    pub(crate) fn read_line(
         &mut self,
         fd: usize,
         buffer_size: usize,
-    ) -> RemoteResult<ReadStringFileResponse> {
+    ) -> RemoteResult<ReadLineFileResponse> {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    // `BufReader` supports `read_line`, so we wrap our file here (as a reference to
-                    // avoid taking the file from our list of `open_files`).
                     let mut reader = BufReader::new(std::io::Read::by_ref(file));
                     let mut buffer = String::with_capacity(buffer_size);
                     let read_result = reader
                         .read_line(&mut buffer)
                         .and_then(|read_amount| {
-                            // The file position remains the same, as we're moving a reading cursor
-                            // of the `BufReader`, so take the new position here to update the file
-                            // position later.
+                            // Take the new position to update the file's cursor position later.
                             let position_after_read = reader.stream_position()?;
 
-                            // `fgets` doesn't want us to read more than what was specified in
-                            // `buffer_size`.
+                            // Limit the new position to `buffer_size`.
                             Ok((
                                 read_amount,
                                 position_after_read.clamp(0, buffer_size as u64),
                             ))
                         })
                         .and_then(|(read_amount, seek_to)| {
-                            // Now we finally move the file cursor based on how much we have read.
                             file.seek(SeekFrom::Start(seek_to))?;
 
                             // We handle the extra bytes in the `fgets` hook, so here we can just
                             // return the full buffer.
-                            let response = ReadStringFileResponse {
+                            let response = ReadLineFileResponse {
                                 bytes: buffer.into_bytes(),
                                 read_amount,
                             };
