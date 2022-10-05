@@ -277,7 +277,7 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-          mv /tmp/artifacts/intellij-ext/mirrord-{{ steps.version.outputs.version }}.zip /tmp/release/
+          mv /tmp/artifacts/intellij-ext/mirrord-${{ steps.version.outputs.version }}.zip /tmp/release/
           mv /tmp/artifacts/vscode-ext/* /tmp/release
 
       # Consider to add changelog generation..
