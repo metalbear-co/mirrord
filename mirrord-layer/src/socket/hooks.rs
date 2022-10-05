@@ -1,17 +1,17 @@
+use alloc::ffi::CString;
 use std::{ffi::CStr, os::unix::io::RawFd};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::AddrInfoHint;
 use socket2::SockAddr;
 use tracing::{error, trace, warn};
+use trust_dns_resolver::config::Protocol;
 
 use super::ops::*;
-use crate::{detour::DetourGuard, error::HookError, replace, socket::AddrInfoHintExt};
+use crate::{detour::DetourGuard, error::HookError, replace, socket::ProtocolExt};
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(crate) unsafe extern "C" fn socket_detour(
     domain: c_int,
     type_: c_int,
@@ -29,7 +29,6 @@ pub(crate) unsafe extern "C" fn socket_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(raw_address))]
 pub(crate) unsafe extern "C" fn bind_detour(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -69,7 +68,6 @@ pub(crate) unsafe extern "C" fn bind_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
     let (Ok(result) | Err(result)) =
         listen(sockfd, backlog)
@@ -85,7 +83,6 @@ pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> 
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(raw_address))]
 pub(crate) unsafe extern "C" fn connect_detour(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -116,7 +113,6 @@ pub(crate) unsafe extern "C" fn connect_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -134,7 +130,6 @@ pub(super) unsafe extern "C" fn getpeername_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(crate) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -152,7 +147,6 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
@@ -178,7 +172,6 @@ pub(crate) unsafe extern "C" fn accept_detour(
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(crate) unsafe extern "C" fn accept4_detour(
     sockfd: i32,
     address: *mut sockaddr,
@@ -205,7 +198,6 @@ pub(crate) unsafe extern "C" fn accept4_detour(
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(address, address_len))]
 #[allow(non_snake_case)]
 pub(super) unsafe extern "C" fn uv__accept4_detour(
     sockfd: i32,
@@ -220,7 +212,6 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
 
 /// https://github.com/metalbear-co/mirrord/issues/184
 #[hook_fn]
-#[tracing::instrument(level = "trace")]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
@@ -245,7 +236,6 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     let dup_result = FN_DUP(fd);
 
@@ -266,7 +256,6 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int {
     if oldfd == newfd {
         return newfd;
@@ -292,7 +281,6 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
 
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace")]
 pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int {
     let dup3_result = FN_DUP3(oldfd, newfd, flags);
 
@@ -316,7 +304,6 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
 /// # Warning:
 /// - `raw_hostname`, `raw_servname`, and/or `raw_hints` might be null!
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(raw_hints, out_addr_info))]
 unsafe extern "C" fn getaddrinfo_detour(
     raw_node: *const c_char,
     raw_service: *const c_char,
@@ -350,9 +337,23 @@ unsafe extern "C" fn getaddrinfo_detour(
         Err(fail) => return fail,
     };
 
-    let hints = (!raw_hints.is_null()).then(|| AddrInfoHint::from_raw(*raw_hints));
+    let protocol = match (!raw_hints.is_null())
+        .then(|| Protocol::try_from_raw((*raw_hints).ai_protocol))
+        .transpose()
+        .map_err(i32::from)
+    {
+        Ok(protocol) => protocol,
+        Err(fail) => return fail,
+    };
 
-    let (Ok(result) | Err(result)) = getaddrinfo(node, service, hints)
+    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
+    let libc::addrinfo {
+        ai_socktype,
+        ai_protocol,
+        ..
+    } = *raw_hints;
+
+    let (Ok(result) | Err(result)) = getaddrinfo(node, service, protocol, ai_protocol, ai_socktype)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
@@ -360,7 +361,6 @@ unsafe extern "C" fn getaddrinfo_detour(
         })
         .map_err(From::from);
 
-    trace!("result: {result:?}");
     result
 }
 
@@ -380,17 +380,18 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
 #[hook_guard_fn]
-#[tracing::instrument(level = "trace", skip(addrinfo))]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     // Iterate over `addrinfo` linked list dropping it.
     let mut current = addrinfo;
     while !current.is_null() {
         let current_box = Box::from_raw(current);
         let ai_addr = Box::from_raw(current_box.ai_addr);
+        let ai_canonname = CString::from_raw(current_box.ai_canonname);
 
         current = (*current).ai_next;
 
         drop(ai_addr);
+        drop(ai_canonname);
         drop(current_box);
     }
 }

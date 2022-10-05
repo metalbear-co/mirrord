@@ -2,7 +2,7 @@ use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;
-use libc::FILE;
+use libc::{c_char, FILE};
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
@@ -178,18 +178,6 @@ impl From<HookError> for i64 {
             | HookError::BypassedPort(_) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
-            HookError::ResponseError(ResponseError::DnsFailure(code)) => {
-                use dns_lookup::{LookupError, LookupErrorKind};
-                error!("dns failed with code {}", code);
-                // Some of the codes of Unix doesn't match FreeBSD/macOS so we re-use the library
-                // to return valid codes.
-                let error = LookupError::new(code);
-                let code = match error.kind() {
-                    LookupErrorKind::IO => libc::EAI_SYSTEM,
-                    _ => error.error_num(),
-                };
-                return code.into();
-            }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
@@ -215,11 +203,14 @@ impl From<HookError> for i64 {
                 ResponseError::NotDirectory(_) => libc::ENOTDIR,
                 ResponseError::NotFile(_) => libc::EISDIR,
                 ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
-                ResponseError::DnsFailure(_) => libc::EIO,
                 ResponseError::Remote(remote) => match remote {
                     // So far only encountered when trying to make requests from golang.
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
+                },
+                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
+                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                    _ => libc::EAI_FAIL,
                 },
             },
             HookError::DNSNoName => libc::EFAULT,
@@ -260,6 +251,14 @@ impl From<HookError> for i32 {
 }
 
 impl From<HookError> for *mut FILE {
+    fn from(fail: HookError) -> Self {
+        let _ = i64::from(fail);
+
+        ptr::null_mut()
+    }
+}
+
+impl From<HookError> for *mut c_char {
     fn from(fail: HookError) -> Self {
         let _ = i64::from(fail);
 
