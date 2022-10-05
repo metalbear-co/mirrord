@@ -179,7 +179,7 @@ jobs:
       - run: |
           cd vscode-ext
           npm install          
-          vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target ddarwin-x64
+          vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
           vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -187,7 +187,7 @@ jobs:
           cd vscode-ext
           npm install
           mkdir /tmp/vscode-ext
-          vsce package -o /tmp/vscode-ext/vscode-ext-darmwin-arm64 --target darwin-arm64
+          vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
           tsc && vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -197,7 +197,7 @@ jobs:
           path: |
             /tmp/vscode-ext/vscode-ext-linux-x64
             /tmp/vscode-ext/vscode-ext-darwin-x64
-            /tmp/vscode-ext/vscode-ext-darmwin-arm64
+            /tmp/vscode-ext/vscode-ext-darwin-arm64
           if-no-files-found: error
 
   release_intellij_plugin:
@@ -230,7 +230,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: intellij-ext
-          path: ${{ format('build/distributions/mirrord-{0}.zip', steps.version.outputs.version) }}
+          path: build/distributions/mirrord-{{ steps.version.outputs.version }}.zip
           if-no-files-found: error
 
   release_gh:
@@ -278,7 +278,7 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
           mv /tmp/artifacts/intellij-ext/mirrord-{{ steps.version.outputs.version }}.zip /tmp/release/
-          mv /tmp/vscode-ext/* /tmp/release
+          mv /tmp/artifacts/vscode-ext/* /tmp/release
 
       # Consider to add changelog generation..
       - name: Release
