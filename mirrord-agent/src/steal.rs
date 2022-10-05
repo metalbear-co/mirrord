@@ -145,6 +145,7 @@ where
 enum IPTableFormatter {
     Normal,
     Linkerd,
+    Istio,
 }
 
 impl IPTableFormatter {
@@ -156,6 +157,11 @@ impl IPTableFormatter {
             .any(|rule| rule.contains("-j PROXY_INIT_OUTPUT"))
         {
             Ok(IPTableFormatter::Linkerd)
+        } else if output
+            .iter()
+            .any(|rule| rule.contains("-j ISTIO_OUTPUT"))
+        {
+            Ok(IPTableFormatter::Istio)
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -164,7 +170,7 @@ impl IPTableFormatter {
     fn entrypoint(&self) -> &str {
         match self {
             IPTableFormatter::Normal => "PREROUTING",
-            IPTableFormatter::Linkerd => "OUTPUT",
+            IPTableFormatter::Linkerd | IPTableFormatter::Istio  => "OUTPUT",
         }
     }
 
@@ -176,7 +182,7 @@ impl IPTableFormatter {
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
-            IPTableFormatter::Linkerd => format!("-o lo {}", redirect_rule),
+            IPTableFormatter::Linkerd | IPTableFormatter::Istio => format!("-o lo {}", redirect_rule),
         }
     }
 }
