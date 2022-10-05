@@ -8,6 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
+- Release CI: add extensions as artifacts, closes [[#355](https://github.com/metalbear-co/mirrord/issues/355)]
 - Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
 
 ### Changed
