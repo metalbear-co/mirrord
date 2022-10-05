@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - `getaddrinfo` now uses [`trust-dns-resolver`](https://docs.rs/trust-dns-resolver/latest/trust_dns_resolver/) when resolving DNS (previously it would do a `getaddrinfo` call in mirrord-agent that could result in incompatibility between the mirrored pod and the user environments).
+- Support clusters running Istio. Closes [[#485](https://github.com/metalbear-co/mirrord/issues/485)].
 
 ## 3.0.11-alpha
 
