@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Fixed
-- Support clusters running Istio. Closes [[[#485](https://github.com/metalbear-co/mirrord/issues/485)]].
+- Support clusters running Istio. Closes [[#485](https://github.com/metalbear-co/mirrord/issues/485)].
 
 ### Changed
 - Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
