@@ -95,6 +95,7 @@ mod tests {
         Go18,
         Go19,
         Dotnet6,
+        Rust,
     }
 
     struct TestProcess {
@@ -246,15 +247,14 @@ mod tests {
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
                 FileOps::Dotnet6 => vec!["dotnet-e2e/fileops/bin/Release/net6.0/fileops"],
+                FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
             }
         }
 
         fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                FileOps::Go18 => process.assert_stderr(),
-                FileOps::Go19 => process.assert_stderr(),
-                FileOps::Dotnet6 => process.assert_stderr(),
+                _ => process.assert_stderr(),
             }
         }
     }
@@ -706,7 +706,7 @@ mod tests {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Dotnet6)] ops: FileOps,
+        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Dotnet6, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -880,7 +880,7 @@ mod tests {
             .run(&service.target, Some(&service.namespace), Some(flags))
             .await;
 
-        process.wait_for_line(Duration::from_secs(30), "daemon subscribed");
+        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
         send_requests(&url, true).await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
@@ -1296,5 +1296,16 @@ mod tests {
         #[values("env")] target_test: &str,
     ) {
         test_dotnet(service, target_test).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_listen_localhost(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
+        let mut process = run(node_command, &service.target, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_stderr();
     }
 }

@@ -5,6 +5,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
+use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
@@ -23,8 +24,8 @@ pub enum ResponseError {
     #[error("IO failed for remote operation with `{0}!")]
     RemoteIO(RemoteIOError),
 
-    #[error("DNS resolve failed with return code`{0}`")]
-    DnsFailure(i32),
+    #[error("IO failed for remote operation with `{0}!")]
+    DnsLookup(DnsLookupError),
 
     #[error("Remote operation failed with `{0}`")]
     Remote(#[from] RemoteError),
@@ -62,6 +63,14 @@ pub struct RemoteIOError {
     pub kind: ErrorKindInternal,
 }
 
+/// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
+/// mirrord-agent.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+#[error("Failed performing `getaddrinfo` with {kind:?}!")]
+pub struct DnsLookupError {
+    pub kind: ResolveErrorKindInternal,
+}
+
 impl From<io::Error> for ResponseError {
     fn from(io_error: io::Error) -> Self {
         Self::RemoteIO(RemoteIOError {
@@ -71,12 +80,16 @@ impl From<io::Error> for ResponseError {
     }
 }
 
-impl From<dns_lookup::LookupError> for ResponseError {
-    fn from(error: dns_lookup::LookupError) -> Self {
-        Self::DnsFailure(error.error_num())
+impl From<ResolveError> for ResponseError {
+    fn from(fail: ResolveError) -> Self {
+        match fail.kind().to_owned() {
+            ResolveErrorKind::Io(io_fail) => io_fail.into(),
+            other => Self::DnsLookup(DnsLookupError {
+                kind: From::from(other),
+            }),
+        }
     }
 }
-
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ErrorKindInternal {
@@ -122,6 +135,16 @@ pub enum ErrorKindInternal {
     Other,
 }
 
+/// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
+pub enum ResolveErrorKindInternal {
+    Message(String),
+    NoConnections,
+    NoRecordsFound(u16),
+    Proto,
+    Timeout,
+}
+
 impl const From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
         match error_kind {
@@ -165,6 +188,24 @@ impl const From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::UnexpectedEof => ErrorKindInternal::UnexpectedEof,
             io::ErrorKind::OutOfMemory => ErrorKindInternal::OutOfMemory,
             io::ErrorKind::Other => ErrorKindInternal::Other,
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl From<ResolveErrorKind> for ResolveErrorKindInternal {
+    fn from(error_kind: ResolveErrorKind) -> Self {
+        match error_kind {
+            ResolveErrorKind::Message(message) => {
+                ResolveErrorKindInternal::Message(message.to_string())
+            }
+            ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
+            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
+            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
+                ResolveErrorKindInternal::NoRecordsFound(response_code.into())
+            }
+            ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
+            ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
             _ => unimplemented!(),
         }
     }
