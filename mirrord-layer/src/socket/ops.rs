@@ -1,4 +1,5 @@
 use alloc::ffi::CString;
+use core::{ffi::CStr, mem};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -7,12 +8,11 @@ use std::{
     sync::Arc,
 };
 
-use libc::{c_int, sockaddr, socklen_t};
+use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
-use trust_dns_resolver::config::Protocol;
 
 use super::{hooks::*, *};
 use crate::{
@@ -489,14 +489,49 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", skip(raw_node, raw_service, raw_hints))]
 pub(super) fn getaddrinfo(
-    node: Option<String>,
-    service: Option<String>,
-    protocol: Option<Protocol>,
-    ai_protocol: i32,
-    ai_socktype: i32,
-) -> HookResult<*mut libc::addrinfo> {
+    raw_node: *const c_char,
+    raw_service: *const c_char,
+    raw_hints: *const libc::addrinfo,
+) -> Detour<*mut libc::addrinfo> {
+    // Bypass when any of these type conversions fail.
+    let node = (!raw_node.is_null())
+        .then(|| unsafe { CStr::from_ptr(raw_node) }.to_str())
+        .transpose()
+        .map_err(|fail| {
+            warn!("Failed converting raw_node from `c_char` with {:#?}", fail);
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from);
+
+    let service = (!raw_service.is_null())
+        .then(|| unsafe { CStr::from_ptr(raw_service) }.to_str())
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting raw_service from `c_char` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from);
+
+    // TODO(alex) [high] 2022-10-06: Figure out better way of ffi null pointers.
+    let raw_hints = raw_hints
+        .is_null()
+        .then(|| unsafe { *raw_hints })
+        .unwrap_or_else(|| unsafe { mem::zeroed() });
+
+    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
+    let libc::addrinfo {
+        ai_socktype,
+        ai_protocol,
+        ..
+    } = raw_hints;
+
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
@@ -543,9 +578,9 @@ pub(super) fn getaddrinfo(
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .ok_or(HookError::DNSNoName);
+        .ok_or(HookError::DNSNoName)?;
 
     debug!("getaddrinfo -> result {:#?}", result);
 
-    result
+    Detour::Success(result)
 }

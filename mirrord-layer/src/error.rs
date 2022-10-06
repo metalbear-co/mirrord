@@ -22,18 +22,6 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Failed to `Lock` resource!")]
     LockError,
 
-    #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
-    BypassedPort(u16),
-
-    #[error("mirrord-layer: Socket operation called with type `{0}` that is not handled by us!")]
-    BypassedType(i32),
-
-    #[error("mirrord-layer: Socket operation called with domain `{0}` that is not handled by us!")]
-    BypassedDomain(i32),
-
-    #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
-    SocketInvalidState(RawFd),
-
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
 
@@ -49,14 +37,8 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
 
-    #[error("mirrord-layer: Failed converting `sockaddr`!")]
-    AddressConversion,
-
     #[error("mirrord-layer: Converting int failed with `{0}`!")]
     TryFromInt(#[from] std::num::TryFromIntError),
-
-    #[error("mirrord-layer: Failed request to create socket with domain `{0}`!")]
-    UnsupportedDomain(i32),
 
     #[error("mirrord-layer: Creating `CString` failed with `{0}`!")]
     Null(#[from] std::ffi::NulError),
@@ -170,12 +152,10 @@ impl From<HookError> for i64 {
         // To get a better sense of what I mean by this, imagine if we forget to check
         // `BypassedDomain` in `socket::hooks::socket_detour` (we would error out, instead of
         // bypassing as expected).
+        //
+        // ADD(alex) [high] 2022-10-06: Remove these comments after `Bypass` is done.
         match fail {
-            HookError::SocketInvalidState(_)
-            | HookError::LocalFDNotFound(_)
-            | HookError::BypassedType(_)
-            | HookError::BypassedDomain(_)
-            | HookError::BypassedPort(_) => {
+            HookError::LocalFDNotFound(_) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             HookError::ResponseError(ResponseError::NotFound(_))
@@ -215,12 +195,6 @@ impl From<HookError> for i64 {
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
-            HookError::AddressConversion => libc::EINVAL,
-            HookError::UnsupportedDomain(_) => libc::EINVAL,
-            HookError::BypassedPort(_) => libc::EINVAL,
-            HookError::BypassedType(_) => libc::EINVAL,
-            HookError::BypassedDomain(_) => libc::EINVAL,
-            HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
         };
 

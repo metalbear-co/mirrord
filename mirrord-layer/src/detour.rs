@@ -1,8 +1,8 @@
 use core::{
     convert,
-    ops::{ControlFlow, FromResidual, Residual, Try},
+    ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, error::Error, ops::Deref, os::unix::prelude::*};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*};
 
 use tracing::warn;
 
@@ -73,6 +73,7 @@ pub(crate) enum Bypass {
     LocalFdNotFound(RawFd),
     AddressConversion,
     InvalidState(RawFd),
+    CStrConversion,
 }
 
 // TODO(alex) [high] 2022-10-04: No need for so much generics, the enum should be just what it needs
@@ -104,7 +105,7 @@ impl<S> Try for Detour<S> {
 impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Detour<convert::Infallible>) -> Self {
         match residual {
-            Detour::Success(f) => unreachable!(),
+            Detour::Success(_) => unreachable!(),
             Detour::Bypass(b) => Detour::Bypass(b),
             Detour::Error(e) => Detour::Error(e),
         }
@@ -173,20 +174,6 @@ impl<S> Detour<S> {
             Detour::Error(e) => Detour::Error(e),
         }
     }
-
-    pub(crate) fn bypass_value(self) -> Option<Bypass> {
-        match self {
-            Detour::Bypass(b) => Some(b),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn success_value(self) -> Option<S> {
-        match self {
-            Detour::Success(s) => Some(s),
-            _ => None,
-        }
-    }
 }
 
 pub(crate) trait OptionExt {
@@ -204,18 +191,4 @@ impl<T> OptionExt for Option<T> {
             None => Detour::Bypass(value),
         }
     }
-}
-
-fn baz(
-    c: ControlFlow<Bypass, Result<String, HookError>>,
-) -> ControlFlow<Bypass, Result<String, HookError>> {
-    let a = c?.and_then(|x| Ok(x));
-
-    ControlFlow::Continue(a)
-}
-
-fn foo(hook: Detour<String>) -> Detour<String> {
-    let h = hook?;
-
-    todo!()
 }

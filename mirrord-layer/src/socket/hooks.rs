@@ -1,15 +1,13 @@
 use alloc::ffi::CString;
-use std::{ffi::CStr, os::unix::io::RawFd};
+use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_macro::{hook_fn, hook_guard_fn};
-use socket2::SockAddr;
-use tracing::{error, info, trace, warn};
-use trust_dns_resolver::config::Protocol;
+use tracing::{error, info, trace};
 
 use super::ops::*;
-use crate::{detour::DetourGuard, error::HookError, replace, socket::ProtocolExt};
+use crate::{detour::DetourGuard, replace};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -230,55 +228,13 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_hints: *const libc::addrinfo,
     out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
-    let node = match (!raw_node.is_null())
-        .then(|| CStr::from_ptr(raw_node).to_str())
-        .transpose()
-        .map_err(|fail| {
-            error!("Failed converting raw_node from `c_char` with {:#?}", fail);
-
-            libc::EAI_MEMORY
-        }) {
-        Ok(node) => node.map(String::from),
-        Err(fail) => return fail,
-    };
-
-    let service = match (!raw_service.is_null())
-        .then(|| CStr::from_ptr(raw_service).to_str())
-        .transpose()
-        .map_err(|fail| {
-            error!(
-                "Failed converting raw_service from `c_char` with {:#?}",
-                fail
-            );
-
-            libc::EAI_MEMORY
-        }) {
-        Ok(service) => service.map(String::from),
-        Err(fail) => return fail,
-    };
-
-    let protocol = match (!raw_hints.is_null())
-        .then(|| Protocol::try_from_raw((*raw_hints).ai_protocol))
-        .transpose()
-        .map_err(i32::from)
-    {
-        Ok(protocol) => protocol,
-        Err(fail) => return fail,
-    };
-
-    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
-    let libc::addrinfo {
-        ai_socktype,
-        ai_protocol,
-        ..
-    } = *raw_hints;
-
-    let (Ok(result) | Err(result)) = getaddrinfo(node, service, protocol, ai_protocol, ai_socktype)
+    let (Ok(result) | Err(result)) = getaddrinfo(raw_node, raw_service, raw_hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
             0
         })
+        .bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
         .map_err(From::from);
 
     result
