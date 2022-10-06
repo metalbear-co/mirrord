@@ -3034,8 +3034,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempdir",
+ "tokio",
  "tokio-util 0.7.4",
- "trust-dns-resolver",
  "wsl",
 ]
 

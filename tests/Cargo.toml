@@ -12,7 +12,7 @@ doctest = false
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
-trust-dns-resolver.workspace = true
+tokio.workspace = true
 serde_json.workspace = true
 mirrord = { artifact = "bin", bin = true, path = "../mirrord-cli" }
 serde = "1"
