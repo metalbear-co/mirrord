@@ -110,7 +110,7 @@ fn sip_check(binary_path: &str) -> Result<()> {
 
     let sliced_path = complete_path.to_str().ok_or_else(|| {
         anyhow!(
-            "Failed to convert path to string: {}",
+            "Failed to convert path to a string slice: {}",
             binary_path.to_string()
         )
     })?;
@@ -129,9 +129,8 @@ fn exec(args: &ExecArgs) -> Result<()> {
         args.binary, args.binary_args
     );
 
-    if cfg!(target_os = "macos") {
-        sip_check(&args.binary)?;
-    }
+    #[cfg(target_os = "macos")]
+    sip_check(&args.binary)?;
 
     if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
