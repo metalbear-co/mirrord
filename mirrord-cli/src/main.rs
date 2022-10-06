@@ -11,9 +11,11 @@ use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use rand::distributions::{Alphanumeric, DistString};
+use regex::RegexSet;
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use which::which;
 
 mod config;
 
@@ -93,11 +95,44 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn sip_check(binary_path: &str) -> Result<()> {
+    info!("Checking SIP status");
+    let sip_set = RegexSet::new(&[
+        r"/System/.*",
+        r"/bin/.*",
+        r"/sbin/.*",
+        r"/usr/.*",
+        r"/var/.*",
+        r"/Applications/.*",
+    ])?;
+    let complete_path = which(binary_path)?;
+
+    let sliced_path = complete_path.to_str().ok_or_else(|| {
+        anyhow!(
+            "Failed to convert path to string: {}",
+            binary_path.to_string()
+        )
+    })?;
+
+    if sip_set.is_match(sliced_path) {
+        println!("[WARNING]: Provided binary: {:?} is located in a SIP directory. mirrord might fail to load into it.
+        >> for more info visit https://support.apple.com/en-us/HT204899", binary_path);
+    }
+
+    Ok(())
+}
+
 fn exec(args: &ExecArgs) -> Result<()> {
     info!(
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
+
+    if cfg!(target_os = "macos") {
+        sip_check(&args.binary)?;
+    }
+
     if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
@@ -107,7 +142,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
     }
 
     if let Some(pod) = &args.pod_name {
-        // TODO: do we need a print here or just a log is fine?
         println!("[WARNING]: DEPRECATED - `--pod-name` is deprecated, consider using `--target instead.\nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
         std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", pod);
     }
