@@ -11,11 +11,11 @@ use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use rand::distributions::{Alphanumeric, DistString};
-use regex::RegexSet;
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
-use which::which;
+#[cfg(target_os = "macos")]
+use {regex::RegexSet, which::which};
 
 mod config;
 
