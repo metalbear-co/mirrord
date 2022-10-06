@@ -14,7 +14,7 @@ kube.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
-mirrord = { artifact = "bin", bin = true, path = "../mirrord-cli" }
+mirrord = { artifact = "bin", path = "../mirrord-cli" }
 serde = "1"
 futures.workspace = true
 rstest = "*"
