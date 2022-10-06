@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+3.0.12-alpha
+
 ### Added
 - Release CI: add extensions as artifacts, closes [[#355](https://github.com/metalbear-co/mirrord/issues/355)]
 - mirrord-cli: added a SIP protection check for macos binaries [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
