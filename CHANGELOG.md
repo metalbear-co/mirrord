@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
-- mirrord-cli: added a SIP protection check for macos binaries [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
+- mirrord-cli: added a SIP protection check for macos binaries, closes [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
 
 ### Fixed
 - Fixed unused dependencies issue, closes [[#494](https://github.com/metalbear-co/mirrord/issues/494)]
