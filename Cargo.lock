@@ -1533,10 +1533,12 @@ dependencies = [
  "mirrord-common",
  "mirrord-layer",
  "rand 0.8.5",
+ "regex",
  "reqwest",
  "semver",
  "tracing",
  "tracing-subscriber",
+ "which 4.3.0",
 ]
 
 [[package]]
@@ -3494,6 +3496,7 @@ dependencies = [
  "ipnet",
  "lazy_static",
  "rand 0.8.5",
+ "serde",
  "smallvec",
  "thiserror",
  "tinyvec",
@@ -3515,6 +3518,7 @@ dependencies = [
  "lru-cache",
  "parking_lot",
  "resolv-conf",
+ "serde",
  "smallvec",
  "thiserror",
  "tokio",
@@ -3607,6 +3611,7 @@ dependencies = [
  "form_urlencoded",
  "idna 0.3.0",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
