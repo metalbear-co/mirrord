@@ -14,7 +14,7 @@ use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
 use crate::{
-    detour::Bypass,
+    detour::{Bypass, Detour},
     error::{HookError, HookResult},
 };
 
@@ -135,9 +135,9 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> HookResult<()> {
-    if address.is_null() {
-        Ok(())
+) -> Detour<i32> {
+    let result = if address.is_null() {
+        Ok(0)
     } else if address_len.is_null() {
         Err(HookError::NullPointer)
     } else {
@@ -154,8 +154,10 @@ fn fill_address(
             *address_len = os_address.len();
         }
 
-        Ok(())
-    }
+        Ok(0)
+    }?;
+
+    Detour::Success(result)
 }
 
 pub(crate) trait ProtocolExt {

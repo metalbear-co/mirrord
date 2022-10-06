@@ -32,41 +32,19 @@ pub(crate) unsafe extern "C" fn bind_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    let address = SockAddr::init(|storage, len| {
-        storage.copy_from_nonoverlapping(raw_address.cast(), 1);
-        len.copy_from_nonoverlapping(&address_length, 1);
+    let (Ok(result) | Err(result)) = bind(sockfd, raw_address, address_length)
+        .bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
+        .map_err(From::from);
 
-        Ok(())
-    })
-    .map_err(HookError::from);
-
-    match address {
-        Ok(((), address)) => {
-            let (Ok(result) | Err(result)) = bind(sockfd, address)
-                .bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
-                .map_err(From::from);
-            result
-        }
-        Err(_) => {
-            warn!("bind_detour -> Could not convert address, bypassing!");
-
-            FN_BIND(sockfd, raw_address, address_length)
-        }
-    }
+    result
 }
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    let (Ok(result) | Err(result)) =
-        listen(sockfd, backlog)
-            .map(|()| 0)
-            .map_err(|fail| match fail {
-                HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
-                    warn!("listen_detour -> bypassed with {:#?}", fail);
-                    FN_LISTEN(sockfd, backlog)
-                }
-                other => other.into(),
-            });
+    let (Ok(result) | Err(result)) = listen(sockfd, backlog)
+        .bypass_with(|_| FN_LISTEN(sockfd, backlog))
+        .map_err(From::from);
+
     result
 }
 
@@ -76,28 +54,11 @@ pub(crate) unsafe extern "C" fn connect_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    // TODO: Is this conversion safe?
-    let address = SockAddr::new(*(raw_address as *const _), address_length);
-    let address = address.as_socket().ok_or(HookError::AddressConversion);
+    let (Ok(result) | Err(result)) = connect(sockfd, raw_address, address_length)
+        .bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
+        .map_err(From::from);
 
-    match address {
-        Ok(address) => {
-            let (Ok(result) | Err(result)) = connect(sockfd, address).map_err(|fail| match fail {
-                HookError::LocalFDNotFound(_) | HookError::BypassedPort(_) => {
-                    warn!("connect_detour -> bypassed with {:#?}", fail);
-                    FN_CONNECT(sockfd, raw_address, address_length)
-                }
-                other => other.into(),
-            });
-
-            result
-        }
-        Err(_) => {
-            warn!("connect_detour -> Could not convert address, bypassing!");
-
-            FN_CONNECT(sockfd, raw_address, address_length)
-        }
-    }
+    result
 }
 
 #[hook_guard_fn]
@@ -107,13 +68,9 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     address_len: *mut socklen_t,
 ) -> c_int {
     let (Ok(result) | Err(result)) = getpeername(sockfd, address, address_len)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
-                FN_GETPEERNAME(sockfd, address, address_len)
-            }
-            other => other.into(),
-        });
+        .bypass_with(|_| FN_GETPEERNAME(sockfd, address, address_len))
+        .map_err(From::from);
+
     result
 }
 
@@ -122,15 +79,11 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> i32 {
+) -> c_int {
     let (Ok(result) | Err(result)) = getsockname(sockfd, address, address_len)
-        .map(|()| 0)
-        .map_err(|fail| match fail {
-            HookError::LocalFDNotFound(_) | HookError::SocketInvalidState(_) => {
-                FN_GETSOCKNAME(sockfd, address, address_len)
-            }
-            other => other.into(),
-        });
+        .bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
+        .map_err(From::from);
+
     result
 }
 
@@ -139,20 +92,15 @@ pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> i32 {
+) -> c_int {
     let accept_result = FN_ACCEPT(sockfd, address, address_len);
 
     if accept_result == -1 {
         accept_result
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
-            .map_err(|fail| match fail {
-                HookError::SocketInvalidState(_) | HookError::LocalFDNotFound(_) => accept_result,
-                other => {
-                    error!("accept error is {:#?}", other);
-                    other.into()
-                }
-            });
+            .bypass(accept_result)
+            .map_err(From::from);
 
         result
     }
@@ -161,24 +109,19 @@ pub(crate) unsafe extern "C" fn accept_detour(
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn accept4_detour(
-    sockfd: i32,
+    sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    flags: i32,
-) -> i32 {
+    flags: c_int,
+) -> c_int {
     let accept_result = FN_ACCEPT4(sockfd, address, address_len, flags);
 
     if accept_result == -1 {
         accept_result
     } else {
         let (Ok(result) | Err(result)) = accept(sockfd, address, address_len, accept_result)
-            .map_err(|fail| match fail {
-                HookError::SocketInvalidState(_) | HookError::LocalFDNotFound(_) => accept_result,
-                other => {
-                    error!("accept4 error is {:#?}", other);
-                    other.into()
-                }
-            });
+            .bypass(accept_result)
+            .map_err(From::from);
 
         result
     }
@@ -188,11 +131,11 @@ pub(crate) unsafe extern "C" fn accept4_detour(
 #[hook_guard_fn]
 #[allow(non_snake_case)]
 pub(super) unsafe extern "C" fn uv__accept4_detour(
-    sockfd: i32,
+    sockfd: c_int,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    flags: i32,
-) -> i32 {
+    flags: c_int,
+) -> c_int {
     trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
 
     accept4_detour(sockfd, address, address_len, flags)
@@ -213,10 +156,8 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     } else {
         let (Ok(result) | Err(result)) = fcntl(fd, cmd, fcntl_result)
             .map(|()| fcntl_result)
-            .map_err(|fail| match fail {
-                HookError::LocalFDNotFound(_) => fcntl_result,
-                other => other.into(),
-            });
+            .bypass(fcntl_result)
+            .map_err(From::from);
 
         trace!("fcntl_detour -> result {:#?}", result);
         result
@@ -230,13 +171,10 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     if dup_result == -1 {
         dup_result
     } else {
-        let (Ok(result) | Err(result)) =
-            dup(fd, dup_result)
-                .map(|()| dup_result)
-                .map_err(|fail| match fail {
-                    HookError::LocalFDNotFound(_) => dup_result,
-                    _ => fail.into(),
-                });
+        let (Ok(result) | Err(result)) = dup(fd, dup_result)
+            .map(|()| dup_result)
+            .bypass(dup_result)
+            .map_err(From::from);
 
         trace!("dup_detour -> result {:#?}", result);
         result
@@ -254,13 +192,10 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
     if dup2_result == -1 {
         dup2_result
     } else {
-        let (Ok(result) | Err(result)) =
-            dup(oldfd, dup2_result)
-                .map(|()| dup2_result)
-                .map_err(|fail| match fail {
-                    HookError::LocalFDNotFound(_) => dup2_result,
-                    _ => fail.into(),
-                });
+        let (Ok(result) | Err(result)) = dup(oldfd, dup2_result)
+            .map(|()| dup2_result)
+            .bypass(dup2_result)
+            .map_err(From::from);
 
         trace!("dup2_detour -> result {:#?}", result);
         result
@@ -275,13 +210,10 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
     if dup3_result == -1 {
         dup3_result
     } else {
-        let (Ok(result) | Err(result)) =
-            dup(oldfd, dup3_result)
-                .map(|()| dup3_result)
-                .map_err(|fail| match fail {
-                    HookError::LocalFDNotFound(_) => dup3_result,
-                    _ => fail.into(),
-                });
+        let (Ok(result) | Err(result)) = dup(oldfd, dup3_result)
+            .map(|()| dup3_result)
+            .bypass(dup3_result)
+            .map_err(From::from);
 
         trace!("dup3_detour -> result {:#?}", result);
         result

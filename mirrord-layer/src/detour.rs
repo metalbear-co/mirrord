@@ -137,6 +137,13 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
+    pub(crate) fn bypass<U>(self, value: U) -> Result<U, HookError>
+    where
+        U: From<S>,
+    {
+        self.bypass_with(|_| value)
+    }
+
     pub(crate) fn bypass_with<U, F: FnOnce(Bypass) -> U>(self, op: F) -> Result<U, HookError>
     where
         U: From<S>,
@@ -151,6 +158,22 @@ impl<S> Detour<S> {
         }
     }
 
+    pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
+        match self {
+            Detour::Success(s) => op(s),
+            Detour::Bypass(b) => Detour::Bypass(b),
+            Detour::Error(e) => Detour::Error(e),
+        }
+    }
+
+    pub(crate) fn map<U, F: FnOnce(S) -> U>(self, op: F) -> Detour<U> {
+        match self {
+            Detour::Success(s) => Detour::Success(op(s)),
+            Detour::Bypass(b) => Detour::Bypass(b),
+            Detour::Error(e) => Detour::Error(e),
+        }
+    }
+
     pub(crate) fn bypass_value(self) -> Option<Bypass> {
         match self {
             Detour::Bypass(b) => Some(b),
@@ -162,6 +185,23 @@ impl<S> Detour<S> {
         match self {
             Detour::Success(s) => Some(s),
             _ => None,
+        }
+    }
+}
+
+pub(crate) trait OptionExt {
+    type Opt;
+
+    fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
+}
+
+impl<T> OptionExt for Option<T> {
+    type Opt = T;
+
+    fn bypass(self, value: Bypass) -> Detour<T> {
+        match self {
+            Some(v) => Detour::Success(v),
+            None => Detour::Bypass(value),
         }
     }
 }
