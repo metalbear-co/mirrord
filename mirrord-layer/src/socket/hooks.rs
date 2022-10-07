@@ -1,5 +1,5 @@
 use alloc::ffi::CString;
-use core::mem;
+use core::{ffi::CStr, mem};
 use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
@@ -229,14 +229,18 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_hints: *const libc::addrinfo,
     out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
-    let (Ok(result) | Err(result)) = getaddrinfo(raw_node, raw_service, mem::transmute(raw_hints))
-        .map(|c_addr_info_ptr| {
-            out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+    let rawish_node = (!raw_node.is_null()).then(|| CStr::from_ptr(raw_node));
+    let rawish_service = (!raw_service.is_null()).then(|| CStr::from_ptr(raw_service));
 
-            0
-        })
-        .bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
-        .map_err(From::from);
+    let (Ok(result) | Err(result)) =
+        getaddrinfo(rawish_node, rawish_service, mem::transmute(raw_hints))
+            .map(|c_addr_info_ptr| {
+                out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
+
+                0
+            })
+            .bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
+            .map_err(From::from);
 
     result
 }

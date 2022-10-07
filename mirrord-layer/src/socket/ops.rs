@@ -491,13 +491,13 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
 /// for the equivalent of this function).
 #[tracing::instrument(level = "trace", skip(raw_node, raw_service, raw_hints))]
 pub(super) fn getaddrinfo(
-    raw_node: *const c_char,
-    raw_service: *const c_char,
+    raw_node: Option<&CStr>,
+    raw_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
     // Bypass when any of these type conversions fail.
-    let node = (!raw_node.is_null())
-        .then(|| unsafe { CStr::from_ptr(raw_node) }.to_str())
+    let node = raw_node
+        .map(CStr::to_str)
         .transpose()
         .map_err(|fail| {
             warn!("Failed converting raw_node from `c_char` with {:#?}", fail);
@@ -506,8 +506,8 @@ pub(super) fn getaddrinfo(
         })?
         .map(String::from);
 
-    let service = (!raw_service.is_null())
-        .then(|| unsafe { CStr::from_ptr(raw_service) }.to_str())
+    let service = raw_service
+        .map(CStr::to_str)
         .transpose()
         .map_err(|fail| {
             warn!(
@@ -519,14 +519,11 @@ pub(super) fn getaddrinfo(
         })?
         .map(String::from);
 
-    // TODO(alex) [mid] 2022-10-06: Figure out better way of ffi null pointers.
     let raw_hints = raw_hints
         .cloned()
         .unwrap_or_else(|| unsafe { mem::zeroed() });
 
     // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
-    //
-    // FIXME(alex) [high] 2022-10-06: Something broke around here? Tests fail.
     let libc::addrinfo {
         ai_socktype,
         ai_protocol,
