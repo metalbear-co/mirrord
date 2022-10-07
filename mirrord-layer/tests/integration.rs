@@ -109,6 +109,7 @@ impl LayerConnection {
 enum Application {
     // TODO: add more applications.
     PythonFlaskHTTP,
+    PythonFastApiHTTP,
 }
 
 impl Application {
@@ -134,7 +135,8 @@ impl Application {
 
     async fn get_executable(&self) -> String {
         match self {
-            Application::PythonFlaskHTTP => Self::get_python3_executable().await,
+            Application::PythonFlaskHTTP  => Self::get_python3_executable().await,
+            Application::PythonFastApiHTTP => String::from("uvicorn"),
         }
     }
 
@@ -147,6 +149,12 @@ impl Application {
                 println!("using flask server from {:?}", app_path);
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonFastApiHTTP => vec![
+                String::from("--port=80"),
+                String::from("--host=0.0.0.0"),
+                String::from("--app-dir=tests/apps/"),
+                String::from("app_fastapi:app"),
+            ]
         }
     }
 }
@@ -183,7 +191,11 @@ fn dylib_path() -> PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
 async fn test_mirroring_with_http(
-    #[values(Application::PythonFlaskHTTP)] application: Application, // TODO: add more apps.
+    #[values(
+        Application::PythonFlaskHTTP,
+        Application::PythonFastApiHTTP,
+    )]
+    application: Application, // TODO: add more apps.
     dylib_path: &PathBuf,
 ) {
     let mut env = HashMap::new();
@@ -214,16 +226,16 @@ async fn test_mirroring_with_http(
     println!("Application subscribed to port, sending tcp messages.");
 
     layer_connection
-        .send_connection_then_data("GET / HTTP/1.1\r\n\r\n")
+        .send_connection_then_data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await;
     layer_connection
-        .send_connection_then_data("POST / HTTP/1.1\r\n\r\npost-data")
+        .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
         .await;
     layer_connection
-        .send_connection_then_data("PUT / HTTP/1.1\r\n\r\nput-data")
+        .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
         .await;
     layer_connection
-        .send_connection_then_data("DELETE / HTTP/1.1\r\n\r\ndelete-data")
+        .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
 
     println!("Done sending messages, waiting for server to exit.");
@@ -234,6 +246,7 @@ async fn test_mirroring_with_http(
     assert!(&stdout_str.contains("POST: Request completed"));
     assert!(&stdout_str.contains("PUT: Request completed"));
     assert!(&stdout_str.contains("DELETE: Request completed"));
-    assert!(output.stderr.is_empty());
+    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(!&stderr_str.to_lowercase().contains("error"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
 }

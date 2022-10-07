@@ -189,6 +189,8 @@ jobs:
           cache-on-failure: true
       - uses: actions/setup-python@v3
       - run: pip3 install flask
+      - run: pip3 install fastapi
+      - run: pip3 install uvicorn[standard]
       - name: download layer
         uses: actions/download-artifact@v3
         with:
@@ -214,6 +216,8 @@ jobs:
       - run: npm install express
       - uses: actions/setup-python@v3
       - run: pip3 install flask
+      - run: pip3 install fastapi
+      - run: pip3 install uvicorn[standard]
       - run: cargo +nightly build -p mirrord-layer
       - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
 
