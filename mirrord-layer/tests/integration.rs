@@ -12,6 +12,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::{ChildStdout, Command},
 };
+use mirrord_protocol::tcp::TcpClose;
 
 struct LayerConnection {
     codec: Framed<TcpStream, DaemonCodec>,
@@ -98,10 +99,21 @@ impl LayerConnection {
             .unwrap();
     }
 
+    /// Send the layer a message telling it the target got a new incoming connection.
+    /// There is no such actual connection, because there is no target, but the layer should start
+    /// a mirror connection with the application.
+    /// Return the id of the new connection.
+    async fn send_close(&mut self, connection_id: u64) {
+        self.codec.send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+            connection_id
+        }))).await.unwrap();
+    }
+
     /// Tell the layer there is a new incoming connection, then send data "from that connection".
     async fn send_connection_then_data(&mut self, message_data: &str) {
         let new_connection_id = self.send_new_connection().await;
         self.send_tcp_data(message_data, new_connection_id).await;
+        self.send_close(new_connection_id).await;
     }
 }
 
