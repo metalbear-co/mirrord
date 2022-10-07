@@ -187,6 +187,18 @@ jobs:
         with:
           key: ubuntu-latest
           cache-on-failure: true
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.0"
+      - run: |
+          cd mirrord-layer/tests/apps/app_go
+          go build -o 18
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd mirrord-layer/tests/apps/app_go
+          go build -o 19
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -217,6 +229,12 @@ jobs:
         with:
           key: macos-12
           cache-on-failure: true
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd mirrord-layer/tests/apps/app_go
+          go build -o 19
       - uses: actions/setup-node@v3
         with:
           node-version: 14

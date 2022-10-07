@@ -111,6 +111,7 @@ enum Application {
     PythonFlaskHTTP,
     PythonFastApiHTTP,
     NodeHTTP,
+    Go19HTTP,
 }
 
 impl Application {
@@ -139,6 +140,7 @@ impl Application {
             Application::PythonFlaskHTTP => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
+            Application::Go19HTTP => String::from("tests/apps/app_go/19"),
         }
     }
 
@@ -161,6 +163,7 @@ impl Application {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::Go19HTTP => vec![],
         }
     }
 }
@@ -200,7 +203,8 @@ async fn test_mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
-        Application::NodeHTTP
+        Application::NodeHTTP,
+        Application::Go19HTTP
     )]
     application: Application, // TODO: add more apps.
     dylib_path: &PathBuf,
