@@ -12,6 +12,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   Addresses but does not
   close [[#472](https://github.com/metalbear-co/mirrord/issues/472)] (more integration tests still needed).
 
+### Fixed
+- Release CI: Fix paths for release artifacts
+
 ## 3.0.13-alpha
 
 ### Added
