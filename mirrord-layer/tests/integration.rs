@@ -11,7 +11,6 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     process::{ChildStdout, Command},
-    select,
 };
 
 struct LayerConnection {
@@ -283,16 +282,17 @@ async fn test_mirroring_with_http(
         .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
         .await;
     wait_for_output("PUT: Request completed", &mut child_out).await;
+
     layer_connection
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
-    wait_for_output("DELETE: Request completed", &mut child_out).await;
 
-    println!("Done sending messages, waiting for server to exit.");
-    // The server exits after receiving DELETE.
+    // For the DELETE request, don't try to read from the running process, so that we don't try to
+    // read from `child_out` after the process is done (not sure what happens in that case).
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(stdout_str.contains("DELETE: Request completed"));
+    assert!(!&stdout_str.to_lowercase().contains("error"));
     let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(!&stderr_str.to_lowercase().contains("error"));
-    assert!(!&stdout_str.to_lowercase().contains("error"));
 }
