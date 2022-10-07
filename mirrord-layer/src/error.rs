@@ -9,7 +9,6 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
-// use crate::pod_api::Target;
 
 #[derive(Error, Debug)]
 pub(crate) enum HookError {

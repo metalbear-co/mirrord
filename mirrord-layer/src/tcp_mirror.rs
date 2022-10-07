@@ -124,6 +124,7 @@ impl TcpHandler for TcpMirrorHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
         let stream = self.create_local_stream(&tcp_connection).await?;
+        debug!("Handling new connection: local stream: {:?}.", &stream);
 
         let (sender, receiver) = channel::<Vec<u8>>(1000);
 
