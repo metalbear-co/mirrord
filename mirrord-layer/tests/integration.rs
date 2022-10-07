@@ -8,9 +8,10 @@ use mirrord_protocol::{
 };
 use rstest::{fixture, rstest};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
-    process::Command,
+    process::{ChildStdout, Command},
+    select,
 };
 
 struct LayerConnection {
@@ -168,6 +169,36 @@ impl Application {
     }
 }
 
+/// Should only be called inside timeout.
+/// Continue waiting for new lines and reading them and only return when wanted_str is found.
+/// Also: panic if output contains the word "error".
+async fn wait_for_output(wanted_str: &str, child_out: &mut BufReader<&mut ChildStdout>) {
+    println!("Looking for string \"{wanted_str}\" in application stdout.");
+    let mut line = String::new();
+    // Continue waiting for and reading lines until wanted_str is found.
+    loop {
+        match child_out.read_line(&mut line).await {
+            Ok(num_bytes) if num_bytes == 0 => {
+                panic!("Reached EOF before finding \"{wanted_str}\"");
+            }
+            Ok(_) => {
+                print!("{line}");
+                if line.to_lowercase().contains("error") {
+                    panic!("Found the word \"error\" in the application's stdout. Failing test.")
+                }
+                if line.contains(wanted_str) {
+                    println!("Found wanted string!");
+                    return;
+                }
+            }
+            Err(_) => {
+                panic!("Error reading app's stdout.");
+            }
+        }
+        line.clear();
+    }
+}
+
 /// Return the path to the existing layer lib, or build it first and return the path, according to
 /// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
 /// When testing locally the lib should be rebuilt on each run so that when developers make changes
@@ -224,7 +255,7 @@ async fn test_mirroring_with_http(
     env.insert("MIRRORD_FILE_OPS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
     env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
-    let server = Command::new(executable)
+    let mut server = Command::new(executable)
         .args(application.get_args())
         .envs(env)
         .stdout(Stdio::piped())
@@ -236,28 +267,31 @@ async fn test_mirroring_with_http(
     // Accept the connection from the layer and verify initial messages.
     let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     println!("Application subscribed to port, sending tcp messages.");
+    let mut child_out = BufReader::new(server.stdout.as_mut().unwrap());
 
+    // The other three requests must complete before sending DELETE, because the server exists on
+    // receiving DELETE.
     layer_connection
         .send_connection_then_data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await;
+    wait_for_output("GET: Request completed", &mut child_out).await;
     layer_connection
         .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
         .await;
+    wait_for_output("POST: Request completed", &mut child_out).await;
     layer_connection
         .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
         .await;
+    wait_for_output("PUT: Request completed", &mut child_out).await;
     layer_connection
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
+    wait_for_output("DELETE: Request completed", &mut child_out).await;
 
     println!("Done sending messages, waiting for server to exit.");
     // The server exits after receiving DELETE.
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(&stdout_str.contains("GET: Request completed"));
-    assert!(&stdout_str.contains("POST: Request completed"));
-    assert!(&stdout_str.contains("PUT: Request completed"));
-    assert!(&stdout_str.contains("DELETE: Request completed"));
     let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(!&stderr_str.to_lowercase().contains("error"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
