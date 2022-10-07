@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.13-alpha
+
 ### Added
 - mirrord-cli: added a SIP protection check for macos binaries, closes [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
 
@@ -16,7 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Remove building of arm64 Docker image from the release CI
 
-3.0.12-alpha
+## 3.0.12-alpha
 
 ### Added
 - Release CI: add extensions as artifacts, closes [[#355](https://github.com/metalbear-co/mirrord/issues/355)]
