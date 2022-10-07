@@ -118,8 +118,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Login to GitHub Container Registry
@@ -137,7 +135,7 @@ jobs:
         with:
           context: .
           file: mirrord-agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord:latest
@@ -186,8 +184,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: |
           cd vscode-ext
-          npm install
-          mkdir /tmp/vscode-ext
+          npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
           vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
         env:
@@ -205,6 +202,10 @@ jobs:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
+      - name: Get release version
+        run: |
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
+        id: version
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v3
         with:

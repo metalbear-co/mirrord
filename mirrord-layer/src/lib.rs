@@ -9,6 +9,7 @@
 #![feature(async_closure)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
+#![feature(trait_alias)]
 
 extern crate alloc;
 use std::{
@@ -17,13 +18,13 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
+use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
-use kube::api::Portforwarder;
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
@@ -34,7 +35,6 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
-use rand::Rng;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -51,6 +51,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{common::HookMessage, file::FileHandler};
 
 mod common;
+mod connection;
 mod detour;
 mod error;
 mod file;
@@ -150,23 +151,7 @@ fn init(config: LayerConfig) {
 
     info!("Initializing mirrord-layer!");
 
-    let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
-
-    info!("Using port `{connection_port:?}` for communication");
-
-    let port_forwarder = RUNTIME
-        .block_on(pod_api::create_agent(config.clone(), connection_port))
-        .unwrap_or_else(|err| match err {
-            LayerError::KubeError(kube::Error::HyperError(err)) => {
-                eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
-
-                match err.into_cause() {
-                    Some(cause) => panic!("{}", cause),
-                    None => panic!("mirrord got KubeError::HyperError"),
-                }
-            }
-            _ => panic!("failed to create agent: {}", err),
-        });
+    let connection = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -187,12 +172,7 @@ fn init(config: LayerConfig) {
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
-    RUNTIME.block_on(start_layer_thread(
-        port_forwarder,
-        receiver,
-        config,
-        connection_port,
-    ));
+    RUNTIME.block_on(start_layer_thread(connection, receiver, config));
 }
 
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
@@ -402,18 +382,15 @@ async fn thread_loop(
     graceful_exit!();
 }
 
-#[tracing::instrument(level = "trace", skip(pf, receiver))]
+#[tracing::instrument(level = "trace", skip(connection, receiver))]
 async fn start_layer_thread(
-    mut pf: Portforwarder,
+    connection: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
-    connection_port: u16,
 ) {
-    let port = pf.take_stream(connection_port).unwrap(); // TODO: Make port configurable
-
     // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
     // -layer)
-    let mut codec = actix_codec::Framed::new(port, ClientCodec::new());
+    let mut codec = actix_codec::Framed::new(connection, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
         config.feature.env.exclude.map(|exclude| exclude.join(";")),

@@ -493,7 +493,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
 pub(super) fn getaddrinfo(
     raw_node: *const c_char,
     raw_service: *const c_char,
-    raw_hints: *const libc::addrinfo,
+    raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
     // Bypass when any of these type conversions fail.
     let node = (!raw_node.is_null())
@@ -520,8 +520,8 @@ pub(super) fn getaddrinfo(
         .map(String::from);
 
     // TODO(alex) [mid] 2022-10-06: Figure out better way of ffi null pointers.
-    let raw_hints = (!raw_hints.is_null())
-        .then(|| unsafe { *raw_hints })
+    let raw_hints = raw_hints
+        .cloned()
         .unwrap_or_else(|| unsafe { mem::zeroed() });
 
     // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.

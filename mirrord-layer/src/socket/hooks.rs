@@ -1,4 +1,5 @@
 use alloc::ffi::CString;
+use core::mem;
 use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
@@ -228,7 +229,7 @@ unsafe extern "C" fn getaddrinfo_detour(
     raw_hints: *const libc::addrinfo,
     out_addr_info: *mut *mut libc::addrinfo,
 ) -> c_int {
-    let (Ok(result) | Err(result)) = getaddrinfo(raw_node, raw_service, raw_hints)
+    let (Ok(result) | Err(result)) = getaddrinfo(raw_node, raw_service, mem::transmute(raw_hints))
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
 
