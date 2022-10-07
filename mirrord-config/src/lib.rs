@@ -39,6 +39,10 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_TARGET_NAMESPACE", default = "default")]
     pub target_namespace: Option<String>,
 
+    /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    #[config(env = "MIRRORD_CONNECT_TCP")]
+    pub connect_tcp: Option<String>,
+
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,
@@ -256,6 +260,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 container: Some("test".to_owned()),
             },
+            connect_tcp: None,
         };
 
         assert_eq!(config, expect);

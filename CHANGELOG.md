@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Layer integration test. Tests the layer's loading and hooking in an http mirroring simulation with a flask web app. 
+  Addresses but does not
+  close [[#472](https://github.com/metalbear-co/mirrord/issues/472)] (more integration tests still needed).
+
 ## 3.0.13-alpha
 
 ### Added

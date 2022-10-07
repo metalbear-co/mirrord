@@ -51,6 +51,7 @@ mirrord-common = { version = "0.1.0", path = "../mirrord-common" }
 
 [dev-dependencies]
 rstest = "*"
+test-cdylib = "*"
 
 [lib]
 crate_type = ["cdylib"]
