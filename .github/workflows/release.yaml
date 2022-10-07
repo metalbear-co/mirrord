@@ -184,8 +184,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: |
           cd vscode-ext
-          npm install
-          mkdir /tmp/vscode-ext
+          npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
           vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
         env:
@@ -194,15 +193,19 @@ jobs:
         with:
           name: vscode-ext
           path: |
-            /tmp/vscode-ext/vscode-ext-linux-x64
-            /tmp/vscode-ext/vscode-ext-darwin-x64
-            /tmp/vscode-ext/vscode-ext-darwin-arm64
+            /tmp/artifacts/vscode-ext/vscode-ext-linux-x64
+            /tmp/artifacts/vscode-ext/vscode-ext-darwin-x64
+            /tmp/artifacts/vscode-ext/vscode-ext-darwin-arm64
           if-no-files-found: error
 
   release_intellij_plugin:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
+      - name: Get release version        
+        run: |
+          echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
+        id: version
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v3
         with:
