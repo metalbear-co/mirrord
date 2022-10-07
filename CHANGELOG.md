@@ -8,15 +8,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
+- Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
+
+## 3.0.14-alpha
+
+### Added
 - Layer integration test. Tests the layer's loading and hooking in an http mirroring simulation with a flask web app. 
   Addresses but does not
   close [[#472](https://github.com/metalbear-co/mirrord/issues/472)] (more integration tests still needed).
+
+### Fixed
+- Release CI: Fix paths for release artifacts
 
 ## 3.0.13-alpha
 
 ### Added
 - mirrord-cli: added a SIP protection check for macos binaries, closes [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
-- Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
 
 ### Fixed
 - Fixed unused dependencies issue, closes [[#494](https://github.com/metalbear-co/mirrord/issues/494)]
