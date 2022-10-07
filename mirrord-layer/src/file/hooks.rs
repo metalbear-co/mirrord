@@ -14,14 +14,6 @@ use crate::{
     replace,
 };
 
-/// Hook for `libc::open`.
-///
-/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    open_logic(raw_path, open_flags)
-}
-
 /// Implementation of open_detour, used in open_detour and openat_detour
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
@@ -32,6 +24,14 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
         .map_err(From::from);
 
     result
+}
+
+/// Hook for `libc::open`.
+///
+/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
+    open_logic(raw_path, open_flags)
 }
 
 /// Hook for `libc::fopen`.
@@ -58,28 +58,12 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// mirrord-layer.
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let mode = match CStr::from_ptr(raw_mode)
-        .to_str()
-        .map(String::from)
-        .map_err(HookError::from)
-    {
-        Ok(mode) => mode,
-        Err(fail) => return fail.into(),
-    };
+    let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
-    let open_files = OPEN_FILES.lock().unwrap();
-    let open_file = open_files.get_key_value(&fd);
-
-    if let Some((local_fd, remote_fd)) = open_file {
-        let open_options = OpenOptionsInternalExt::from_mode(mode);
-
-        let fdopen_result = fdopen(local_fd, *remote_fd, open_options);
-
-        let (Ok(result) | Err(result)) = fdopen_result.map_err(From::from);
-        result
-    } else {
-        FN_FDOPEN(fd, raw_mode)
-    }
+    let (Ok(result) | Err(result)) = fdopen(fd, rawish_mode)
+        .bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+        .map_err(From::from);
+    result
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.

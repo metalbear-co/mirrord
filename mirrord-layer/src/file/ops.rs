@@ -17,6 +17,21 @@ use crate::{
     HookMessage, ENABLED_FILE_RO_OPS,
 };
 
+#[tracing::instrument(level = "error")]
+fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
+    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
+    error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    blocking_send_file_message(HookMessageFile::Close(Close {
+        fd,
+        file_channel_tx,
+    }))?;
+
+    file_channel_rx.blocking_recv()?.map_err(From::from)
+}
+
 fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
 }
@@ -111,19 +126,62 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     Detour::Success(local_file_fd)
 }
 
-#[tracing::instrument(level = "error")]
-fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
-    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
-    error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
+/// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
+#[tracing::instrument(level = "info")]
+pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
+    let open_options: OpenOptionsInternal = rawish_mode
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `rawish_mode` from `CStr` with {:#?}",
+                fail
+            );
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+            Bypass::CStrConversion
+        })?
+        .map(String::from)
+        .map(OpenOptionsInternalExt::from_mode)
+        .unwrap_or_default();
 
-    blocking_send_file_message(HookMessageFile::Close(Close {
-        fd,
-        file_channel_tx,
-    }))?;
+    let local_file_fd = open(rawish_path, open_options)?;
+    let open_files = OPEN_FILES.lock().unwrap();
 
-    file_channel_rx.blocking_recv()?.map_err(From::from)
+    let result = open_files
+        .get_key_value(&local_file_fd)
+        .ok_or(HookError::LocalFDNotFound(local_file_fd))
+        // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
+        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+
+    Detour::Success(result)
+}
+
+#[tracing::instrument(level = "info")]
+pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
+    let _open_options: OpenOptionsInternal = rawish_mode
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `rawish_mode` from `CStr` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from)
+        .map(OpenOptionsInternalExt::from_mode)
+        .unwrap_or_default();
+
+    // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
+    // here.
+    let result = OPEN_FILES
+        .lock()?
+        .get_key_value(&fd)
+        .ok_or(Bypass::LocalFdNotFound(fd))
+        .map(|(local_fd, _)| *local_fd as *const FILE as *mut _)?;
+
+    Detour::Success(result)
 }
 
 #[tracing::instrument(level = "info")]
@@ -169,47 +227,6 @@ pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Re
     OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
 
     Ok(local_file_fd)
-}
-
-/// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
-#[tracing::instrument(level = "info")]
-pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
-    let mode = rawish_mode
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `rawish_mode` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .unwrap_or_default();
-
-    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
-    let local_file_fd = open(rawish_path, open_options)?;
-    let open_files = OPEN_FILES.lock().unwrap();
-
-    let result = open_files
-        .get_key_value(&local_file_fd)
-        .ok_or(HookError::LocalFDNotFound(local_file_fd))
-        // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
-
-    Detour::Success(result)
-}
-
-#[tracing::instrument(level = "info")]
-pub(crate) fn fdopen(
-    local_fd: &RawFd,
-    remote_fd: usize,
-    _open_options: OpenOptionsInternal,
-) -> Result<*mut FILE> {
-    // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
-    // here.
-    Ok(local_fd as *const _ as *mut _)
 }
 
 /// Blocking wrapper around `libc::read` call.
