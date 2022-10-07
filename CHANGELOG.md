@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Release CI: Fix checkout action position in intelliJ release.
+
 ## 3.0.14-alpha
 
 ### Added

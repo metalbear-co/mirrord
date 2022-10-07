@@ -202,11 +202,11 @@ jobs:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v2
       - name: Get release version
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
-        id: version
-      - uses: actions/checkout@v2
+        id: version      
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
