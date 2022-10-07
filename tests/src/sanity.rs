@@ -711,7 +711,6 @@ mod tests {
             FileOps::Python,
             FileOps::Go18,
             FileOps::Go19,
-            FileOps::Dotnet6,
             FileOps::Rust
         )]
         ops: FileOps,
