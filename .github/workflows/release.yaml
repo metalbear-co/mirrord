@@ -193,16 +193,16 @@ jobs:
         with:
           name: vscode-ext
           path: |
-            /tmp/artifacts/vscode-ext/vscode-ext-linux-x64
-            /tmp/artifacts/vscode-ext/vscode-ext-darwin-x64
-            /tmp/artifacts/vscode-ext/vscode-ext-darwin-arm64
+            /tmp/vscode-ext/vscode-ext-linux-x64
+            /tmp/vscode-ext/vscode-ext-darwin-x64
+            /tmp/vscode-ext/vscode-ext-darwin-arm64
           if-no-files-found: error
 
   release_intellij_plugin:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
-      - name: Get release version        
+      - name: Get release version
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
         id: version
