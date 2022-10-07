@@ -290,12 +290,12 @@ mod tests {
         // docker build -t test . -f mirrord-agent/Dockerfile
         // minikube load image test:latest
         let mut env = HashMap::new();
-        env.insert("COMPlus_EnableDiagnostics", "0");
+        env.insert("COMPlus_EnableDiagnostics", "1");
         env.insert("MIRRORD_AGENT_IMAGE", "test");
         env.insert("MIRRORD_CHECK_VERSION", "false");
-        env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
+        env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=trace");
         env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-        env.insert("RUST_LOG", "warn,mirrord=debug");
+        env.insert("RUST_LOG", "warn,mirrord=trace");
         let server = Command::new(path)
             .args(args.clone())
             .envs(env)
@@ -711,6 +711,7 @@ mod tests {
             FileOps::Python,
             FileOps::Go18,
             FileOps::Go19,
+            FileOps::Dotnet6,
             FileOps::Rust
         )]
         ops: FileOps,
