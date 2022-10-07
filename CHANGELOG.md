@@ -13,6 +13,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Fixed unused dependencies issue, closes [[#494](https://github.com/metalbear-co/mirrord/issues/494)]
 
+### Changed
+- Remove building of arm64 Docker image from the release CI
+
 3.0.12-alpha
 
 ### Added
