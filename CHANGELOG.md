@@ -7,12 +7,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- mirrord-cli: added a SIP protection check for macos binaries, closes [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
+- Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
+
+### Fixed
+- Fixed unused dependencies issue, closes [[#494](https://github.com/metalbear-co/mirrord/issues/494)]
+
 3.0.12-alpha
 
 ### Added
 - Release CI: add extensions as artifacts, closes [[#355](https://github.com/metalbear-co/mirrord/issues/355)]
-- mirrord-cli: added a SIP protection check for macos binaries [[#412](https://github.com/metalbear-co/mirrord/issues/412)]
-- Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
 
 ### Changed
 - Remote operations that fail logged on `info` level instead of `error` because having a file not found, connection failed, etc can be part of a valid successful flow.
@@ -22,7 +27,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - `getaddrinfo` now uses [`trust-dns-resolver`](https://docs.rs/trust-dns-resolver/latest/trust_dns_resolver/) when resolving DNS (previously it would do a `getaddrinfo` call in mirrord-agent that could result in incompatibility between the mirrored pod and the user environments).
 - Support clusters running Istio. Closes [[#485](https://github.com/metalbear-co/mirrord/issues/485)].
-- Fixed unused dependencies issue, closes [[#494](https://github.com/metalbear-co/mirrord/issues/494)]
 
 ## 3.0.11-alpha
 
