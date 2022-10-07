@@ -110,6 +110,7 @@ enum Application {
     // TODO: add more applications.
     PythonFlaskHTTP,
     PythonFastApiHTTP,
+    NodeHTTP,
 }
 
 impl Application {
@@ -135,8 +136,9 @@ impl Application {
 
     async fn get_executable(&self) -> String {
         match self {
-            Application::PythonFlaskHTTP  => Self::get_python3_executable().await,
+            Application::PythonFlaskHTTP => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
+            Application::NodeHTTP => String::from("node"),
         }
     }
 
@@ -154,7 +156,11 @@ impl Application {
                 String::from("--host=0.0.0.0"),
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
-            ]
+            ],
+            Application::NodeHTTP => {
+                app_path.push("app_node.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
         }
     }
 }
@@ -194,6 +200,7 @@ async fn test_mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
+        Application::NodeHTTP
     )]
     application: Application, // TODO: add more apps.
     dylib_path: &PathBuf,
@@ -210,6 +217,7 @@ async fn test_mirroring_with_http(
     env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
+    env.insert("MIRRORD_FILE_OPS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
     env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
     let server = Command::new(executable)

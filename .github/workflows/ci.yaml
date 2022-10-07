@@ -187,6 +187,10 @@ jobs:
         with:
           key: ubuntu-latest
           cache-on-failure: true
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - run: pip3 install fastapi
@@ -213,6 +217,9 @@ jobs:
         with:
           key: macos-12
           cache-on-failure: true
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
       - run: npm install express
       - uses: actions/setup-python@v3
       - run: pip3 install flask
