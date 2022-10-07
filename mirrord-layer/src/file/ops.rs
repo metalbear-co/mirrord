@@ -1,3 +1,4 @@
+use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
@@ -11,13 +12,33 @@ use tracing::error;
 use super::*;
 use crate::{
     common::blocking_send_hook_message,
+    detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
-    HookMessage,
+    HookMessage, ENABLED_FILE_RO_OPS,
 };
 
 fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
 }
+
+fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
+    let path = rawish_path
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `rawish_path` from `CStr` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(PathBuf::from)
+        .ok_or(HookError::NullPointer)?;
+
+    Detour::Success(path)
+}
+
 /// Blocking wrapper around `libc::open` call.
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory
@@ -28,8 +49,24 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
 ///
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
-#[tracing::instrument(level = "info")]
-pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<RawFd> {
+#[tracing::instrument(level = "trace")]
+pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
+    let path = path_from_rawish(rawish_path)?;
+
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
+        Detour::Bypass(Bypass::IgnoredFile(path.clone()))?
+    } else if path.is_relative() {
+        // Calls with non absolute paths are sent to libc::open.
+        Detour::Bypass(Bypass::RelativePath(path.clone()))?
+    };
+
+    let read_only = ENABLED_FILE_RO_OPS
+        .get()
+        .expect("Should be set during initialization!");
+    if *read_only && !open_options.is_read_only() {
+        Detour::Bypass(Bypass::ReadOnly(path.clone()))?
+    };
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let requesting_file = Open {
@@ -71,7 +108,7 @@ pub(crate) fn open(path: PathBuf, open_options: OpenOptionsInternal) -> Result<R
 
     OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
 
-    Ok(local_file_fd)
+    Detour::Success(local_file_fd)
 }
 
 #[tracing::instrument(level = "error")]
@@ -136,15 +173,32 @@ pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Re
 
 /// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
 #[tracing::instrument(level = "info")]
-pub(crate) fn fopen(path: PathBuf, open_options: OpenOptionsInternal) -> Result<*mut FILE> {
-    let local_file_fd = open(path, open_options)?;
+pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
+    let mode = rawish_mode
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `rawish_mode` from `CStr` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from)
+        .unwrap_or_default();
+
+    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
+    let local_file_fd = open(rawish_path, open_options)?;
     let open_files = OPEN_FILES.lock().unwrap();
 
-    open_files
+    let result = open_files
         .get_key_value(&local_file_fd)
         .ok_or(HookError::LocalFDNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)
+        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+
+    Detour::Success(result)
 }
 
 #[tracing::instrument(level = "info")]

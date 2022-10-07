@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -57,29 +57,15 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-fn from_raw_address(raw_address: *const sockaddr, address_len: socklen_t) -> Detour<SocketAddr> {
-    unsafe {
-        SockAddr::init(|storage, len| {
-            storage.copy_from_nonoverlapping(raw_address.cast(), 1);
-            len.copy_from_nonoverlapping(&address_len, 1);
-
-            Ok(())
-        })
-    }
-    .ok()
-    .and_then(|((), address)| address.as_socket())
-    .bypass(Bypass::AddressConversion)
-}
-
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 #[tracing::instrument(level = "trace")]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
-    address_len: socklen_t,
+    address_length: socklen_t,
 ) -> Detour<i32> {
-    let requested_address = from_raw_address(raw_address, address_len)?;
+    let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
 
     if is_ignored_port(requested_port) {
@@ -271,9 +257,9 @@ fn connect_outgoing<const TYPE: ConnectType>(
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
-    address_len: socklen_t,
+    address_length: socklen_t,
 ) -> Detour<i32> {
-    let remote_address = from_raw_address(raw_address, address_len)?;
+    let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
 
     if is_ignored_port(remote_address.port()) {
         Err(Bypass::Port(remote_address.port()))?
@@ -489,29 +475,32 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", skip(raw_node, raw_service, raw_hints))]
+#[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
-    raw_node: Option<&CStr>,
-    raw_service: Option<&CStr>,
+    rawish_node: Option<&CStr>,
+    rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
     // Bypass when any of these type conversions fail.
-    let node = raw_node
+    let node = rawish_node
         .map(CStr::to_str)
         .transpose()
         .map_err(|fail| {
-            warn!("Failed converting raw_node from `c_char` with {:#?}", fail);
+            warn!(
+                "Failed converting `rawish_node` from `CStr` with {:#?}",
+                fail
+            );
 
             Bypass::CStrConversion
         })?
         .map(String::from);
 
-    let service = raw_service
+    let service = rawish_service
         .map(CStr::to_str)
         .transpose()
         .map_err(|fail| {
             warn!(
-                "Failed converting raw_service from `c_char` with {:#?}",
+                "Failed converting `raw_service` from `CStr` with {:#?}",
                 fail
             );
 

@@ -14,7 +14,7 @@ use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
 use crate::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
 };
 
@@ -184,5 +184,25 @@ impl ProtocolExt for Protocol {
             Protocol::Tcp => Ok(libc::IPPROTO_TCP),
             _ => todo!(),
         }
+    }
+}
+
+pub(crate) trait SocketAddrExt {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr>;
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
+        unsafe {
+            SockAddr::init(|storage, len| {
+                storage.copy_from_nonoverlapping(raw_address.cast(), 1);
+                len.copy_from_nonoverlapping(&address_length, 1);
+
+                Ok(())
+            })
+        }
+        .ok()
+        .and_then(|((), address)| address.as_socket())
+        .bypass(Bypass::AddressConversion)
     }
 }

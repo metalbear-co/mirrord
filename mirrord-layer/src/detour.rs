@@ -2,7 +2,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use tracing::warn;
 
@@ -65,7 +65,7 @@ impl<T> HookFn<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Bypass {
     Port(u16),
     Type(i32),
@@ -74,6 +74,9 @@ pub(crate) enum Bypass {
     AddressConversion,
     InvalidState(RawFd),
     CStrConversion,
+    IgnoredFile(PathBuf),
+    RelativePath(PathBuf),
+    ReadOnly(PathBuf),
 }
 
 // TODO(alex) [high] 2022-10-04: No need for so much generics, the enum should be just what it needs

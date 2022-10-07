@@ -11,7 +11,7 @@ use crate::{
     close_detour,
     error::HookError,
     file::ops::{access, lseek, open, read, write},
-    replace, ENABLED_FILE_RO_OPS,
+    replace,
 };
 
 /// Hook for `libc::open`.
@@ -24,33 +24,14 @@ pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags:
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    let path = match CStr::from_ptr(raw_path)
-        .to_str()
-        .map_err(HookError::from)
-        .map(PathBuf::from)
-    {
-        Ok(path) => path,
-        Err(fail) => return fail.into(),
-    };
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
 
-    // Calls with non absolute paths are sent to libc::open.
-    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
-        FN_OPEN(raw_path, open_flags)
-    } else {
-        debug!("open_logic -> path {path:#?}");
+    let (Ok(result) | Err(result)) = open(rawish_path, open_options)
+        .bypass_with(|_| FN_OPEN(raw_path, open_flags))
+        .map_err(From::from);
 
-        let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
-        let read_only = ENABLED_FILE_RO_OPS
-            .get()
-            .expect("Should be set during initialization!");
-        if *read_only && !open_options.is_read_only() {
-            return FN_OPEN(raw_path, open_flags);
-        }
-        let open_result = open(path, open_options);
-
-        let (Ok(result) | Err(result)) = open_result.map_err(From::from);
-        result
-    }
+    result
 }
 
 /// Hook for `libc::fopen`.
@@ -61,42 +42,14 @@ pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
 ) -> *mut FILE {
-    let path = match CStr::from_ptr(raw_path)
-        .to_str()
-        .map_err(HookError::from)
-        .map(PathBuf::from)
-    {
-        Ok(path) => path,
-        Err(fail) => return fail.into(),
-    };
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
-    let mode = match CStr::from_ptr(raw_mode)
-        .to_str()
-        .map(String::from)
-        .map_err(HookError::from)
-    {
-        Ok(mode) => mode,
-        Err(fail) => return fail.into(),
-    };
+    let (Ok(result) | Err(result)) = fopen(rawish_path, rawish_mode)
+        .bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
+        .map_err(From::from);
 
-    if IGNORE_FILES.is_match(path.to_str().unwrap()) || !path.is_absolute() {
-        FN_FOPEN(raw_path, raw_mode)
-    } else {
-        debug!("fopen_detour -> path {path:#?} | mode {mode:#?}");
-
-        let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_mode(mode);
-
-        let read_only = ENABLED_FILE_RO_OPS
-            .get()
-            .expect("Should be set during initialization!");
-        if *read_only && !open_options.is_read_only() {
-            return FN_FOPEN(raw_path, raw_mode);
-        }
-        let fopen_result = fopen(path, open_options);
-
-        let (Ok(result) | Err(result)) = fopen_result.map_err(From::from);
-        result
-    }
+    result
 }
 
 /// Hook for `libc::fdopen`.
