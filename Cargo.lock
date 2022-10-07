@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.22",
@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1578,7 +1578,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macro"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2604,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.0.12-alpha"
+version = "3.0.13-alpha"
 dependencies = [
  "libc",
 ]
