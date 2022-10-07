@@ -99,7 +99,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-layer
+          cargo test -p mirrord-layer --lib
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -167,11 +167,63 @@ jobs:
           key: ubuntu-latest
       - run: sudo apt install -y libpcap-dev cmake
       - run: cargo +nightly build --manifest-path=./Cargo.toml
+      - name: upload layer
+        uses: actions/upload-artifact@v3
+        with:
+          name: layer-lib
+          path: target/debug/libmirrord_layer.so
+          if-no-files-found: error
+
+  integration_tests:
+    runs-on: ubuntu-latest
+    needs: [build_mirrord]
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.so
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ubuntu-latest
+          cache-on-failure: true
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - name: download layer
+        uses: actions/download-artifact@v3
+        with:
+          name: layer-lib
+          path: target/debug/
+      - run: cargo +nightly test --test integration
+
+  integration_tests_macos:
+    runs-on: macos-12
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.dylib
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: macos-12
+          cache-on-failure: true
+      - run: npm install express
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - run: cargo +nightly build -p mirrord-layer
+      - run: cargo +nightly test --test integration
 
   e2e:
     runs-on: ubuntu-latest
     name: e2e
-    needs: [build_mirrord, test_agent_image]
+    needs: [build_mirrord, test_agent_image, integration_tests]
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -282,7 +334,7 @@ jobs:
   e2e_macos:
     runs-on: macos-12
     name: e2e macOS
-    needs: [build_mirrord, test_agent_image]
+    needs: [build_mirrord, test_agent_image, integration_tests_macos]
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
