@@ -269,7 +269,7 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileRespo
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
-    let reading_file = ReadLine {
+    let reading_file = Read {
         remote_fd,
         buffer_size,
         file_channel_tx,
