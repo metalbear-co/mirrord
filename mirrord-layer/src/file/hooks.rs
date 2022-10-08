@@ -1,9 +1,15 @@
+/// FFI functions that override the `libc` calls (see `file` module documentation on how to
+/// enable/disable these).
+///
+/// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
+/// that is not being hooked (`strace` the program to check).
 use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
+use tracing::debug;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
@@ -13,9 +19,15 @@ use crate::{
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
+#[tracing::instrument(level = "trace")]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+
+    debug!(
+        "open_logic -> rawish_path {:#?} | open_options {:#?}",
+        rawish_path, open_options
+    );
 
     let (Ok(result) | Err(result)) = open(rawish_path, open_options)
         .bypass_with(|_| FN_OPEN(raw_path, open_flags))

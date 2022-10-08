@@ -82,6 +82,7 @@
         "MIRRORD_AGENT_IMAGE_PULL_POLICY": "Always",
         "MIRRORD_ACCEPT_INVALID_CERTIFICATES": "true",
         "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=trace",
+        "MIRRORD_FILE_RO_OPS": "false",
         "RUST_BACKTRACE": "short"
       }
     }

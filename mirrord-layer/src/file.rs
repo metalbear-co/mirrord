@@ -1,3 +1,9 @@
+/// File operations on remote pod.
+///
+/// Read-only file operations are enabled by default, you can turn it off by setting
+/// `MIRRORD_FILE_RO_OPS` to `false`.
+///
+/// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 use core::fmt;
 use std::{
     collections::HashMap,
@@ -52,6 +58,12 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/opt/.*",
         r"^/home/iojs/.*",
         r"^/home/runner/.*",
+        // dotnet: `/tmp/clr-debug-pipe-1`
+        r"^.*clr-.*-pipe-.*",
+        // dotnet: `/home/{username}/{project}.pdb`
+        r".*\.pdb",
+        // dotnet: `/home/{username}/{project}.dll`
+        r".*\.dll",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r".*/package.json",
