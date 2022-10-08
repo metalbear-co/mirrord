@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.17-alpha
+
+- Release CI: Remove another failing step
+
 ## 3.0.16-alpha
 
 ### Fixed
