@@ -92,7 +92,7 @@ fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
 
     let capture = RawCapture::from_interface_name(&interface)?;
     capture.set_filter(rawsocket::filter::build_drop_always())?;
-
+    capture.ignore_outgoing()?;
     Ok(capture)
 }
 
