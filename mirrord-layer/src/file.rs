@@ -346,7 +346,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Seek {
-            fd,
+            remote_fd: fd,
             seek_from,
             file_channel_tx,
         } = seek;
@@ -474,7 +474,7 @@ pub struct ReadLine {
 
 #[derive(Debug)]
 pub struct Seek {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) seek_from: SeekFrom,
     pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
 }

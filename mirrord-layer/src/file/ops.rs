@@ -281,11 +281,31 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadLineFileR
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
+pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
+    let remote_fd = OPEN_FILES
+        .lock()
+        .unwrap()
+        .get(&local_fd)
+        .cloned()
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+
+    let seek_from = match whence {
+        libc::SEEK_SET => SeekFrom::Start(offset as u64),
+        libc::SEEK_CUR => SeekFrom::Current(offset),
+        libc::SEEK_END => SeekFrom::End(offset),
+        invalid => {
+            warn!(
+                "lseek -> potential invalid value {:#?} for whence {:#?}",
+                invalid, whence
+            );
+            return Detour::Bypass(Bypass::CStrConversion);
+        }
+    };
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let seeking_file = Seek {
-        fd,
+        remote_fd,
         seek_from,
         file_channel_tx,
     };
@@ -293,7 +313,7 @@ pub(crate) fn lseek(fd: usize, seek_from: SeekFrom) -> Result<u64> {
     blocking_send_file_message(HookMessageFile::Seek(seeking_file))?;
 
     let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
-    Ok(result_offset)
+    Detour::Success(result_offset)
 }
 
 #[tracing::instrument(level = "trace", skip(write_bytes))]

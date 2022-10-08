@@ -1,10 +1,9 @@
-use std::{ffi::CStr, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, ptr, slice};
+use std::{ffi::CStr, os::unix::io::RawFd, path::PathBuf, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
-use tracing::error;
 
 use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
 use crate::{
@@ -199,6 +198,19 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     result
 }
 
+/// Hook for `libc::lseek`.
+///
+/// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
+    let (Ok(result) | Err(result)) = lseek(fd, offset, whence)
+        .map(|offset| i64::try_from(offset).unwrap())
+        .bypass_with(|_| FN_LSEEK(fd, offset, whence))
+        .map_err(From::from);
+
+    result
+}
+
 /// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
@@ -240,36 +252,6 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
         local_fd
     } else {
         FN_FILENO(file_stream)
-    }
-}
-
-/// Hook for `libc::lseek`.
-///
-/// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-
-    if let Some(remote_fd) = remote_fd {
-        let seek_from = match whence {
-            libc::SEEK_SET => SeekFrom::Start(offset as u64),
-            libc::SEEK_CUR => SeekFrom::Current(offset),
-            libc::SEEK_END => SeekFrom::End(offset),
-            invalid => {
-                error!(
-                    "lseek_detour -> potential invalid value {:#?} for whence {:#?}",
-                    invalid, whence
-                );
-                return -1;
-            }
-        };
-
-        let lseek_result = lseek(remote_fd, seek_from).map(|offset| offset.try_into().unwrap());
-
-        let (Ok(result) | Err(result)) = lseek_result.map_err(From::from);
-        result
-    } else {
-        FN_LSEEK(fd, offset, whence)
     }
 }
 
