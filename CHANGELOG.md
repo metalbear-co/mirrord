@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Release image for armv7 (Cloud ARM)
+
 ## 3.0.18-alpha
 
 ### Changed
