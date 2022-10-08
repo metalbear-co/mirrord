@@ -10,6 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Release image for armv7 (Cloud ARM)
 
+### Fixed
+- Release for non-amd64 arch failed because of lack of QEMU step in the github action. Re-added it
 ## 3.0.18-alpha
 
 ### Changed
