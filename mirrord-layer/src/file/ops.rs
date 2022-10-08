@@ -1,7 +1,7 @@
 use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse,
@@ -16,6 +16,33 @@ use crate::{
     error::{HookError, HookResult as Result},
     HookMessage, ENABLED_FILE_RO_OPS,
 };
+
+/// The pair `shm_open`, `shm_unlink` are used to create a temporary file (in `/dev/shm/`), and then
+/// remove it, as we only care about the `fd`. This is done to preserve `open_flags`, as
+/// `memfd_create` will always return a `File` with read and write permissions.
+#[tracing::instrument(level = "trace")]
+unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: usize) -> Detour<RawFd> {
+    let local_file_fd = unsafe {
+        // `mode` is access rights: user, root, ...
+        let local_file_fd = libc::shm_open(
+            fake_local_file_name.as_ptr(),
+            O_RDONLY | O_CREAT,
+            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
+        );
+
+        libc::shm_unlink(fake_local_file_name.as_ptr());
+
+        local_file_fd
+    };
+
+    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
+    if local_file_fd == -1 {
+        let _ = close_remote_file_on_failure(remote_fd)?;
+        Detour::Error(HookError::LocalFileCreation(remote_fd))
+    } else {
+        Detour::Success(local_file_fd)
+    }
+}
 
 #[tracing::instrument(level = "error")]
 fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
@@ -98,28 +125,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
     // the fd to a string.
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
-
-    // The pair `shm_open`, `shm_unlink` are used to create a temporary file
-    // (in `/dev/shm/`), and then remove it, as we only care about the `fd`. This is done to
-    // preserve `open_flags`, as `memfd_create` will always return a `File` with read and write
-    // permissions.
-    let local_file_fd = unsafe {
-        // `mode` is access rights: user, root, ...
-        let local_file_fd = libc::shm_open(
-            fake_local_file_name.as_ptr(),
-            O_RDONLY | O_CREAT,
-            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
-        );
-
-        libc::shm_unlink(fake_local_file_name.as_ptr());
-
-        local_file_fd
-    };
-
-    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
-    if local_file_fd == -1 {
-        let _ = close_remote_file_on_failure(remote_fd)?;
-    }
+    let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
     OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
 
@@ -145,9 +151,8 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
         .unwrap_or_default();
 
     let local_file_fd = open(rawish_path, open_options)?;
-    let open_files = OPEN_FILES.lock().unwrap();
-
-    let result = open_files
+    let result = OPEN_FILES
+        .lock()?
         .get_key_value(&local_file_fd)
         .ok_or(HookError::LocalFDNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
@@ -156,7 +161,7 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "info")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let _open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -184,49 +189,47 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "info")]
-pub(crate) fn openat(path: PathBuf, open_flags: c_int, relative_fd: usize) -> Result<RawFd> {
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+#[tracing::instrument(level = "trace")]
+pub(crate) fn openat(
+    fd: RawFd,
+    rawish_path: Option<&CStr>,
+    open_options: OpenOptionsInternal,
+) -> Detour<RawFd> {
+    let path = path_from_rawish(rawish_path)?;
 
-    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+    // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
+    // call is propagated to `open`.
+    if path.is_absolute() || fd == AT_FDCWD {
+        open(rawish_path, open_options)
+    } else {
+        // Relative path requires special handling, we must identify the relative part (relative to
+        // what).
+        let remote_fd = OPEN_FILES
+            .lock()?
+            .get(&fd)
+            .cloned()
+            // Bypass if we're not managing the relative part.
+            .ok_or(Bypass::LocalFdNotFound(fd))?;
 
-    let requesting_file = OpenRelative {
-        relative_fd,
-        path,
-        open_options,
-        file_channel_tx,
-    };
+        let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
-    blocking_send_file_message(HookMessageFile::OpenRelative(requesting_file))?;
+        let requesting_file = OpenRelative {
+            relative_fd: remote_fd,
+            path,
+            open_options,
+            file_channel_tx,
+        };
 
-    let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
-    let fake_file_name = CString::new(remote_fd.to_string())?;
+        blocking_send_file_message(HookMessageFile::OpenRelative(requesting_file))?;
 
-    // The pair `shm_open`, `shm_unlink` are used to create a temporary file
-    // (in `/dev/shm/`), and then remove it, as we only care about the `fd`. This is done to
-    // preserve `open_flags`, as `memfd_create` will always return a `File` with read and write
-    // permissions.
-    let local_file_fd = unsafe {
-        // `mode` is access rights: user, root.
-        let local_file_fd = libc::shm_open(
-            fake_file_name.as_ptr(),
-            O_RDONLY | O_CREAT,
-            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
-        );
+        let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
+        let fake_local_file_name = CString::new(remote_fd.to_string())?;
+        let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        libc::shm_unlink(fake_file_name.as_ptr());
+        OPEN_FILES.lock()?.insert(local_file_fd, remote_fd);
 
-        local_file_fd
-    };
-
-    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
-    if local_file_fd == -1 {
-        let _ = close_remote_file_on_failure(remote_fd)?;
+        Detour::Success(local_file_fd)
     }
-
-    OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
-
-    Ok(local_file_fd)
 }
 
 /// Blocking wrapper around `libc::read` call.

@@ -4,7 +4,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
 use crate::{
@@ -77,39 +77,14 @@ pub(crate) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path = match CStr::from_ptr(raw_path)
-        .to_str()
-        .map_err(HookError::from)
-        .map(PathBuf::from)
-    {
-        Ok(path) => path,
-        Err(fail) => return fail.into(),
-    };
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
 
-    debug!("openat_detour -> path {:#?}", path);
+    let (Ok(result) | Err(result)) = openat(fd, rawish_path, open_options)
+        .bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
+        .map_err(From::from);
 
-    // `openat` behaves the same as `open` when the path is absolute.
-    // when called with AT_FDCWD, the call is propagated to `open`.
-
-    if path.is_absolute() || fd == AT_FDCWD {
-        open_logic(raw_path, open_flags)
-    } else {
-        // Relative path requires special handling, we must identify the relative part (relative to
-        // what).
-        let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-
-        // Are we managing the relative part?
-        if let Some(remote_fd) = remote_fd {
-            let openat_result = openat(path, open_flags, remote_fd);
-
-            let (Ok(result) | Err(result)) = openat_result.map_err(From::from);
-            result
-        } else {
-            // Nope, it's relative outside of our hands.
-
-            FN_OPENAT(fd, raw_path, open_flags)
-        }
-    }
+    result
 }
 
 /// Hook for `libc::read`.

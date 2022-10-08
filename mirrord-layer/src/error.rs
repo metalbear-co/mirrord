@@ -47,6 +47,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
+
+    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
+    LocalFileCreation(usize),
 }
 
 #[derive(Error, Debug)]
@@ -195,6 +198,7 @@ impl From<HookError> for i64 {
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
+            HookError::LocalFileCreation(_) => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
