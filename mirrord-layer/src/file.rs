@@ -375,7 +375,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Write {
-            fd,
+            remote_fd: fd,
             write_bytes,
             file_channel_tx,
         } = write;
@@ -424,7 +424,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Access {
-            pathname,
+            path: pathname,
             mode,
             file_channel_tx,
         } = access;
@@ -480,7 +480,7 @@ pub struct Seek {
 }
 
 pub struct Write {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) write_bytes: Vec<u8>,
     pub(crate) file_channel_tx: ResponseChannel<WriteFileResponse>,
 }
@@ -488,7 +488,7 @@ pub struct Write {
 impl fmt::Debug for Write {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Write")
-            .field("fd", &self.fd)
+            .field("fd", &self.remote_fd)
             .field("write_bytes (length)", &self.write_bytes.len())
             .field("file_channel_tx", &self.file_channel_tx)
             .finish()
@@ -503,7 +503,7 @@ pub struct Close {
 
 #[derive(Debug)]
 pub struct Access {
-    pub(crate) pathname: PathBuf,
+    pub(crate) path: PathBuf,
     pub(crate) mode: u8,
     pub(crate) file_channel_tx: ResponseChannel<AccessFileResponse>,
 }

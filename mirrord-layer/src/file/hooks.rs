@@ -1,14 +1,13 @@
-use std::{ffi::CStr, os::unix::io::RawFd, path::PathBuf, ptr, slice};
+use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
 
-use super::{ops::*, OpenOptionsInternalExt, IGNORE_FILES, OPEN_FILES};
+use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_detour,
-    error::HookError,
     file::ops::{access, lseek, open, read, write},
     replace,
 };
@@ -211,6 +210,73 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
     result
 }
 
+/// Implementation of write_detour, used in  write_detour
+pub(crate) unsafe extern "C" fn write_logic(
+    fd: RawFd,
+    buffer: *const c_void,
+    count: size_t,
+) -> ssize_t {
+    // WARN: Be veeery careful here, you cannot construct the `Vec` directly, as the buffer
+    // allocation is handled on the C side.
+    let write_bytes =
+        (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
+
+    let (Ok(result) | Err(result)) = write(fd, write_bytes)
+        .bypass_with(|_| FN_WRITE(fd, buffer, count))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::write`.
+///
+/// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn write_detour(
+    fd: RawFd,
+    buffer: *const c_void,
+    count: size_t,
+) -> ssize_t {
+    // Avoid writing to `std(in|out|err)`.
+    if fd > 2 {
+        write_logic(fd, buffer, count)
+    } else {
+        FN_WRITE(fd, buffer, count)
+    }
+}
+
+/// Implementation of access_detour, used in access_detour and faccessat_detour
+unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+
+    let (Ok(result) | Err(result)) = access(rawish_path, mode as u8)
+        .bypass_with(|_| FN_ACCESS(raw_path, mode))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::access`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
+    access_logic(raw_path, mode)
+}
+
+/// Hook for `libc::faccessat`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn faccessat_detour(
+    dirfd: RawFd,
+    pathname: *const c_char,
+    mode: c_int,
+    flags: c_int,
+) -> c_int {
+    if dirfd == AT_FDCWD && (flags == AT_EACCESS || flags == 0) {
+        access_logic(pathname, mode)
+    } else {
+        FN_FACCESSAT(dirfd, pathname, mode, flags)
+    }
+}
+
 /// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
@@ -252,93 +318,6 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
         local_fd
     } else {
         FN_FILENO(file_stream)
-    }
-}
-
-/// Hook for `libc::write`.
-///
-/// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn write_detour(
-    fd: RawFd,
-    buffer: *const c_void,
-    count: size_t,
-) -> ssize_t {
-    // Avoid writing to `std(in|out|err)`.
-    if fd > 2 {
-        write_logic(fd, buffer, count)
-    } else {
-        FN_WRITE(fd, buffer, count)
-    }
-}
-
-/// Implementation of write_detour, used in  write_detour
-pub(crate) unsafe extern "C" fn write_logic(
-    fd: RawFd,
-    buffer: *const c_void,
-    count: size_t,
-) -> ssize_t {
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-
-    if let Some(remote_fd) = remote_fd {
-        if buffer.is_null() {
-            return -1;
-        }
-
-        // WARN: Be veeery careful here, you cannot construct the `Vec` directly, as the
-        // buffer allocation is handled on the C side.
-        let outside_buffer = slice::from_raw_parts(buffer as *const u8, count);
-        let write_bytes = outside_buffer.to_vec();
-
-        let write_result = write(remote_fd, write_bytes);
-
-        let (Ok(result) | Err(result)) = write_result.map_err(From::from);
-        result
-    } else {
-        FN_WRITE(fd, buffer, count)
-    }
-}
-
-/// Hook for `libc::access`.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn access_detour(raw_path: *const c_char, mode: c_int) -> c_int {
-    access_logic(raw_path, mode)
-}
-
-/// Implementation of access_detour, used in access_detour and faccessat_detour
-unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    let path = match CStr::from_ptr(raw_path)
-        .to_str()
-        .map_err(HookError::from)
-        .map(PathBuf::from)
-    {
-        Ok(path) => path,
-        Err(fail) => return fail.into(),
-    };
-
-    // Calls with non absolute paths are sent to libc::open.
-    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) || !path.is_absolute() {
-        FN_ACCESS(raw_path, mode)
-    } else {
-        let access_result = access(path, mode as u8);
-
-        let (Ok(result) | Err(result)) = access_result.map_err(From::from);
-        result
-    }
-}
-
-/// Hook for `libc::faccessat`.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn faccessat_detour(
-    dirfd: RawFd,
-    pathname: *const c_char,
-    mode: c_int,
-    flags: c_int,
-) -> c_int {
-    if dirfd == AT_FDCWD && (flags == AT_EACCESS || flags == 0) {
-        access_logic(pathname, mode)
-    } else {
-        FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
 }
 

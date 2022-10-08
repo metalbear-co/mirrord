@@ -77,6 +77,7 @@ pub(crate) enum Bypass {
     IgnoredFile(PathBuf),
     RelativePath(PathBuf),
     ReadOnly(PathBuf),
+    EmptyBuffer,
 }
 
 // TODO(alex) [high] 2022-10-04: No need for so much generics, the enum should be just what it needs

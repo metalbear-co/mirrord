@@ -317,19 +317,26 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
 }
 
 #[tracing::instrument(level = "trace", skip(write_bytes))]
-pub(crate) fn write(fd: usize, write_bytes: Vec<u8>) -> Result<isize> {
+pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
+    let remote_fd = OPEN_FILES
+        .lock()
+        .unwrap()
+        .get(&local_fd)
+        .cloned()
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let writing_file = Write {
-        fd,
-        write_bytes,
+        remote_fd,
+        write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?,
         file_channel_tx,
     };
 
     blocking_send_file_message(HookMessageFile::Write(writing_file))?;
 
     let WriteFileResponse { written_amount } = file_channel_rx.blocking_recv()??;
-    Ok(written_amount.try_into()?)
+    Detour::Success(written_amount.try_into()?)
 }
 
 #[tracing::instrument(level = "trace")]
@@ -347,12 +354,21 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
     Ok(0)
 }
 
-#[tracing::instrument(level = "info")]
-pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
+#[tracing::instrument(level = "trace")]
+pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
+    let path = path_from_rawish(rawish_path)?;
+
+    if IGNORE_FILES.is_match(path.to_str().unwrap_or_default()) {
+        Detour::Bypass(Bypass::IgnoredFile(path.clone()))?
+    } else if path.is_relative() {
+        // Calls with non absolute paths are sent to libc::open.
+        Detour::Bypass(Bypass::RelativePath(path.clone()))?
+    };
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let access = Access {
-        pathname,
+        path,
         mode,
         file_channel_tx,
     };
@@ -361,5 +377,5 @@ pub(crate) fn access(pathname: PathBuf, mode: u8) -> Result<c_int> {
 
     file_channel_rx.blocking_recv()??;
 
-    Ok(0)
+    Detour::Success(0)
 }
