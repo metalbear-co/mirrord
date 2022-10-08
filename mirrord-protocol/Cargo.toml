@@ -19,4 +19,4 @@ bytes.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 serde = { version = "1", features = ["derive"] }
-bincode =  { version = "2.0.0-rc.1", features = ["serde"] }
+bincode =  { version = "2.0.0-rc.2", features = ["serde"] }
