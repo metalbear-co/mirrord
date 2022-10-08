@@ -22,29 +22,41 @@ def kill_later():
         kill(getpid(), SIGTERM)
     threading.Thread(target=kill_thread).start()
 
+done = [False] * 4
 
 @app.route("/", methods=["GET"])
 def get():
     print("GET: Request completed")
+    done[0] = True
+    if done[1] and done[2] and done[3]:
+        kill_later()
     return "GET"
 
 
 @app.route("/", methods=["POST"])
 def post():
     print("POST: Request completed")
+    done[1] = True
+    if done[0] and done[2] and done[3]:
+        kill_later()
     return "POST"
 
 
 @app.route("/", methods=["PUT"])
 def put():
     print("PUT: Request completed")
+    done[2] = True
+    if done[0] and done[1] and done[3]:
+        kill_later()
     return "PUT"
 
 
 @app.route("/", methods=["DELETE"])
 def delete():
     print("DELETE: Request completed")
-    kill_later()
+    done[3] = True
+    if done[0] and done[1] and done[2]:
+        kill_later()
     return "DELETE"
 
 

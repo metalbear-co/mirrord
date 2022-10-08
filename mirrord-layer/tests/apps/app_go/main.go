@@ -27,9 +27,14 @@ func main() {
 	fmt.Println(os.Environ())
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+	var done [4]bool;
 	r.GET("/", func(c *gin.Context) {
 		fmt.Println("GET: Request completed")
 		c.String(http.StatusOK, "GET")
+		done[0] = true;
+		if done[1] && done[2] && done[3] {
+		    defer os.Exit(0)
+		}
 	})
 
 	r.POST("/", func(c *gin.Context) {
@@ -39,19 +44,28 @@ func main() {
 		}
 		fmt.Println("POST: Request completed")
 		c.String(http.StatusOK, "POST")
+		done[1] = true;
+		if done[0] && done[2] && done[3] {
+		    defer os.Exit(0)
+		}
 	})
 
 	r.PUT("/", func(c *gin.Context) {
 		fmt.Println("PUT: Request completed")
 		c.String(http.StatusOK, "PUT")
+		done[2] = true;
+		if done[0] && done[1] && done[3] {
+		    defer os.Exit(0)
+		}
 	})
 
 	r.DELETE("/", func(c *gin.Context) {
 		fmt.Println("DELETE: Request completed")
-		defer func() {
-			os.Exit(0)
-		}()
 		c.String(http.StatusOK, "DELETE")
+		done[3] = true;
+		if done[0] && done[1] && done[2] {
+		    defer os.Exit(0)
+		}
 	})
 
 	fmt.Println("Server listening on port 80")
