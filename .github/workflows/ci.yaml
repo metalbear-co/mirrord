@@ -119,6 +119,21 @@ jobs:
           name: test
           path: /tmp/test.tar
 
+  check_cross_agent_image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: mirrord-agent/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: false
+  
   test_mirrord_layer_cli:
     strategy:
       matrix:
