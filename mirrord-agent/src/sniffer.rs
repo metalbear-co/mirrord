@@ -91,6 +91,11 @@ fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
     debug!("prepare_sniffer -> Preparing interface.");
 
     let capture = RawCapture::from_interface_name(&interface)?;
+    // We start with a BPF that drops everything so we won't receive *EVERYTHING*
+    // as we don't know what the layer will ask us to listen for, so this is essentially setting
+    // it to none
+    // we ofc could've done this when a layer connected, but I (A.H) thought it'd make more sense
+    // to have this shared among layers (potentially, in the future) - fme.
     capture.set_filter(rawsocket::filter::build_drop_always())?;
     capture.ignore_outgoing()?;
     Ok(capture)
