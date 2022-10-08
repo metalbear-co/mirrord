@@ -5,12 +5,10 @@ use std::{
     path::PathBuf,
 };
 
-use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
-use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -93,7 +91,7 @@ fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
     debug!("prepare_sniffer -> Preparing interface.");
 
     let capture = RawCapture::from_interface_name(&interface)?;
-    capture.set_filter(rawsocket::filter::build_drop_filter());
+    capture.set_filter(rawsocket::filter::build_drop_always())?;
 
     Ok(capture)
 }
@@ -247,9 +245,7 @@ impl TCPConnectionSniffer {
                     } else { break; }
                 },
                 packet = self.raw_capture.next() => {
-                    if let Some(packet) = packet {
-                        self.handle_packet(packet?).await?;
-                    } else { break; }
+                    self.handle_packet(packet?).await?;
                 }
                 _ = cancel_token.cancelled() => {
                     break;
@@ -325,7 +321,7 @@ impl TCPConnectionSniffer {
         if ports.is_empty() {
             debug!("packet_worker -> empty ports, setting dummy bpf");
             self.raw_capture
-                .set_filter(rawsocket::filter::build_drop_filter())?
+                .set_filter(rawsocket::filter::build_drop_always())?
         } else {
             self.raw_capture
                 .set_filter(rawsocket::filter::build_tcp_port_filter(&ports))?

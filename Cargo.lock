@@ -227,7 +227,7 @@ dependencies = [
 [[package]]
 name = "bs-filter"
 version = "0.1.0"
-source = "git+https://github.com/metalbear-co/rawsocket.git#93272f53dc02dff9486b54ae0899ef5e32ac9a67"
+source = "git+https://github.com/metalbear-co/rawsocket.git#5453d0736d3c421ad9cfdaff6ead8005c92b98d2"
 dependencies = [
  "libc",
  "thiserror",
@@ -2459,7 +2459,7 @@ dependencies = [
 [[package]]
 name = "rawsocket"
 version = "0.1.0"
-source = "git+https://github.com/metalbear-co/rawsocket.git#93272f53dc02dff9486b54ae0899ef5e32ac9a67"
+source = "git+https://github.com/metalbear-co/rawsocket.git#5453d0736d3c421ad9cfdaff6ead8005c92b98d2"
 dependencies = [
  "bs-filter",
  "ipnetwork 0.20.0",
