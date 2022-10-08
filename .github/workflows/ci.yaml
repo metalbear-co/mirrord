@@ -119,26 +119,6 @@ jobs:
           name: test
           path: /tmp/test.tar
   
-  build_cross_image:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v1
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Build
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: mirrord-agent/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: false
-
   test_mirrord_layer_cli:
     strategy:
       matrix:
