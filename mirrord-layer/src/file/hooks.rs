@@ -8,7 +8,9 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, ReadLineFileResponse};
+use mirrord_protocol::{
+    OpenOptionsInternal, ReadFileResponse, ReadLimitedFileResponse, ReadLineFileResponse,
+};
 use tracing::debug;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
@@ -209,6 +211,35 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     result
 }
 
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn pread_detour(
+    fd: RawFd,
+    out_buffer: *mut c_void,
+    amount_to_read: size_t,
+    offset: off_t,
+) -> ssize_t {
+    let (Ok(result) | Err(result)) = pread(fd, amount_to_read as usize, offset as u64)
+        .map(|read_file| {
+            let ReadLimitedFileResponse { bytes, read_amount } = read_file;
+            let fixed_read = amount_to_read.min(read_amount);
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
+            // copy to buffer if we have something to copy.
+            //
+            // Callers can check for EOF by using `ferror`.
+            if read_amount > 0 {
+                let bytes_slice = &bytes[0..fixed_read];
+
+                ptr::copy(bytes_slice.as_ptr().cast(), out_buffer, bytes_slice.len());
+            }
+            fixed_read as ssize_t
+        })
+        .bypass_with(|_| FN_PREAD(fd, out_buffer, amount_to_read, offset))
+        .map_err(From::from);
+
+    result
+}
+
 /// Hook for `libc::lseek`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
@@ -342,6 +373,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
     let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
     let _ = replace!(interceptor, "fgets", fgets_detour, FnFgets, FN_FGETS);
+    let _ = replace!(interceptor, "pread", pread_detour, FnPread, FN_PREAD);
     let _ = replace!(interceptor, "ferror", ferror_detour, FnFerror, FN_FERROR);
     let _ = replace!(interceptor, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);

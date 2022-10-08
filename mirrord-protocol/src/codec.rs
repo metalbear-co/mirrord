@@ -36,6 +36,13 @@ pub struct ReadLineFileRequest {
     pub buffer_size: usize,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadLimitedFileRequest {
+    pub remote_fd: usize,
+    pub buffer_size: usize,
+    pub start_from: u64,
+}
+
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
 // specific thing).
 //
@@ -162,6 +169,7 @@ pub enum FileRequest {
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
     ReadLine(ReadLineFileRequest),
+    ReadLimited(ReadLimitedFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     Close(CloseFileRequest),
@@ -198,6 +206,12 @@ pub struct ReadLineFileResponse {
     pub read_amount: usize,
 }
 
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+pub struct ReadLimitedFileResponse {
+    pub bytes: Vec<u8>,
+    pub read_amount: usize,
+}
+
 impl fmt::Debug for ReadFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadFileResponse")
@@ -210,6 +224,15 @@ impl fmt::Debug for ReadFileResponse {
 impl fmt::Debug for ReadLineFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadLineFileResponse")
+            .field("bytes (length)", &self.bytes.len())
+            .field("read_amount", &self.read_amount)
+            .finish()
+    }
+}
+
+impl fmt::Debug for ReadLimitedFileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadLimitedFileResponse")
             .field("bytes (length)", &self.bytes.len())
             .field("read_amount", &self.read_amount)
             .finish()
@@ -240,6 +263,7 @@ pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
     ReadLine(RemoteResult<ReadLineFileResponse>),
+    ReadLimited(RemoteResult<ReadLimitedFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),

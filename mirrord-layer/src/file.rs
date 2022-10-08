@@ -20,8 +20,8 @@ use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    ReadLineFileRequest, ReadLineFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    ReadLimitedFileRequest, ReadLimitedFileResponse, ReadLineFileRequest, ReadLineFileResponse,
+    RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -143,6 +143,7 @@ pub struct FileHandler {
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
     read_line_queue: ResponseDeque<ReadLineFileResponse>,
+    read_limited_queue: ResponseDeque<ReadLimitedFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
@@ -193,6 +194,24 @@ impl FileHandler {
                     )
                 })
             }
+            ReadLimited(read) => {
+                // The debug message is too big if we just log it directly.
+                let _ = read
+                    .as_ref()
+                    .inspect(|success| {
+                        debug!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
+                    })
+                    .inspect_err(|fail| {
+                        error!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
+                    });
+
+                pop_send(&mut self.read_limited_queue, read).inspect_err(|fail| {
+                    error!(
+                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
+                        fail,
+                    )
+                })
+            }
             Seek(seek) => {
                 debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
                 pop_send(&mut self.seek_queue, seek)
@@ -230,6 +249,7 @@ impl FileHandler {
 
             Read(read) => self.handle_hook_read(read, codec).await,
             ReadLine(read) => self.handle_hook_read_line(read, codec).await,
+            ReadLimited(read) => self.handle_hook_read_limited(read, codec).await,
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
@@ -346,6 +366,34 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::ReadLine(read_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, codec))]
+    async fn handle_hook_read_limited(
+        &mut self,
+        read: ReadLimited,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let ReadLimited {
+            remote_fd,
+            buffer_size,
+            start_from,
+            file_channel_tx,
+        } = read;
+
+        self.read_limited_queue.push_back(file_channel_tx);
+
+        let read_file_request = ReadLimitedFileRequest {
+            remote_fd,
+            buffer_size,
+            start_from,
+        };
+
+        let request = ClientMessage::FileRequest(FileRequest::ReadLimited(read_file_request));
         codec.send(request).await.map_err(From::from)
     }
 
@@ -485,6 +533,14 @@ pub struct ReadLine {
 }
 
 #[derive(Debug)]
+pub struct ReadLimited {
+    pub(crate) remote_fd: usize,
+    pub(crate) buffer_size: usize,
+    pub(crate) start_from: u64,
+    pub(crate) file_channel_tx: ResponseChannel<ReadLimitedFileResponse>,
+}
+
+#[derive(Debug)]
 pub struct Seek {
     pub(crate) remote_fd: usize,
     pub(crate) seek_from: SeekFrom,
@@ -526,6 +582,7 @@ pub enum HookMessageFile {
     OpenRelative(OpenRelative),
     Read(Read),
     ReadLine(ReadLine),
+    ReadLimited(ReadLimited),
     Seek(Seek),
     Write(Write),
     Close(Close),

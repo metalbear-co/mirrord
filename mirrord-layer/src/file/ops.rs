@@ -3,8 +3,8 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+    ReadLimitedFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::error;
@@ -276,6 +276,33 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadLineFileR
     };
 
     blocking_send_file_message(HookMessageFile::ReadLine(reading_file))?;
+
+    Detour::Success(file_channel_rx.blocking_recv()??)
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn pread(
+    local_fd: RawFd,
+    buffer_size: usize,
+    offset: u64,
+) -> Detour<ReadLimitedFileResponse> {
+    // We're only interested in files that are paired with mirrord-agent.
+    let remote_fd = OPEN_FILES
+        .lock()?
+        .get(&local_fd)
+        .cloned()
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let reading_file = ReadLimited {
+        remote_fd,
+        buffer_size,
+        start_from: offset,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::ReadLimited(reading_file))?;
 
     Detour::Success(file_channel_rx.blocking_recv()??)
 }
