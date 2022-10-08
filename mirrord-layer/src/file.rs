@@ -295,14 +295,17 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Read {
-            fd,
+            remote_fd,
             buffer_size,
             file_channel_tx,
         } = read;
 
         self.read_queue.push_back(file_channel_tx);
 
-        let read_file_request = ReadFileRequest { fd, buffer_size };
+        let read_file_request = ReadFileRequest {
+            remote_fd,
+            buffer_size,
+        };
 
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
         codec.send(request).await.map_err(From::from)
@@ -454,7 +457,7 @@ pub struct OpenRelative {
 
 #[derive(Debug)]
 pub struct Read {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
     pub(crate) file_channel_tx: ResponseChannel<ReadFileResponse>,
 }

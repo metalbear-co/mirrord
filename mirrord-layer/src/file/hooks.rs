@@ -96,11 +96,8 @@ pub(crate) unsafe extern "C" fn read_detour(
     out_buffer: *mut c_void,
     count: size_t,
 ) -> ssize_t {
-    // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-
-    if let Some(remote_fd) = remote_fd {
-        let read_result = read(remote_fd, count).map(|read_file| {
+    let (Ok(result) | Err(result)) = read(fd, count)
+        .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
@@ -113,14 +110,12 @@ pub(crate) unsafe extern "C" fn read_detour(
 
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
             // `read` call being repeated.
-            read_amount.try_into().unwrap()
-        });
+            ssize_t::try_from(read_amount).unwrap()
+        })
+        .bypass_with(|_| FN_READ(fd, out_buffer, count))
+        .map_err(From::from);
 
-        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
-        result
-    } else {
-        FN_READ(fd, out_buffer, count)
-    }
+    result
 }
 
 /// Hook for `libc::fread`.
@@ -137,14 +132,13 @@ pub(crate) unsafe extern "C" fn fread_detour(
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
 
-    // We're only interested in files that are handled by `mirrord-agent`.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-    if let Some(remote_fd) = remote_fd {
-        let read_result = read(remote_fd, element_size * number_of_elements).map(|read_file| {
+    let read_amount = element_size * number_of_elements;
+    let (Ok(result) | Err(result)) = read(fd, read_amount)
+        .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
-            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
-            // copy to buffer if we have something to copy.
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
+            // buffer if we have something to copy.
             if read_amount > 0 {
                 let read_ptr = bytes.as_ptr();
                 let out_buffer = out_buffer.cast();
@@ -154,13 +148,11 @@ pub(crate) unsafe extern "C" fn fread_detour(
             // TODO: The function fread() does not distinguish between end-of-file and error,
             // and callers must use feof(3) and ferror(3) to determine which occurred.
             read_amount
-        });
+        })
+        .bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream))
+        .map_err(From::from);
 
-        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
-        result
-    } else {
-        FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
-    }
+    result
 }
 
 /// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,

@@ -26,7 +26,7 @@ pub struct LogMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadFileRequest {
-    pub fd: usize,
+    pub remote_fd: usize,
     pub buffer_size: usize,
 }
 

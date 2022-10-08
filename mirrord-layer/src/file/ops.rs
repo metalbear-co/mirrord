@@ -237,19 +237,25 @@ pub(crate) fn openat(
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn read(fd: usize, read_amount: usize) -> Result<ReadFileResponse> {
+pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileResponse> {
+    // We're only interested in files that are paired with mirrord-agent.
+    let remote_fd = OPEN_FILES
+        .lock()?
+        .get(&local_fd)
+        .cloned()
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let reading_file = Read {
-        fd,
+        remote_fd,
         buffer_size: read_amount,
         file_channel_tx,
     };
 
     blocking_send_file_message(HookMessageFile::Read(reading_file))?;
 
-    let read_file_response = file_channel_rx.blocking_recv()??;
-    Ok(read_file_response)
+    Detour::Success(file_channel_rx.blocking_recv()??)
 }
 
 #[tracing::instrument(level = "trace")]

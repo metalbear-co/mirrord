@@ -56,8 +56,11 @@ impl FileManager {
                 let open_result = self.open_relative(relative_fd, path, open_options);
                 Ok(FileResponse::Open(open_result))
             }
-            FileRequest::Read(ReadFileRequest { fd, buffer_size }) => {
-                let read_result = self.read(fd, buffer_size);
+            FileRequest::Read(ReadFileRequest {
+                remote_fd,
+                buffer_size,
+            }) => {
+                let read_result = self.read(remote_fd, buffer_size);
                 Ok(FileResponse::Read(read_result))
             }
             FileRequest::ReadLine(ReadLineFileRequest { fd, buffer_size }) => {
