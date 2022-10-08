@@ -259,19 +259,25 @@ pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileRespon
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(fd: usize, buffer_size: usize) -> Result<ReadLineFileResponse> {
+pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadLineFileResponse> {
+    // We're only interested in files that are paired with mirrord-agent.
+    let remote_fd = OPEN_FILES
+        .lock()?
+        .get(&local_fd)
+        .cloned()
+        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let reading_file = ReadLine {
-        fd,
+        remote_fd,
         buffer_size,
         file_channel_tx,
     };
 
     blocking_send_file_message(HookMessageFile::ReadLine(reading_file))?;
 
-    let read_file_response = file_channel_rx.blocking_recv()??;
-    Ok(read_file_response)
+    Detour::Success(file_channel_rx.blocking_recv()??)
 }
 
 #[tracing::instrument(level = "trace")]

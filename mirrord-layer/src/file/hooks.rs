@@ -131,8 +131,8 @@ pub(crate) unsafe extern "C" fn fread_detour(
 ) -> size_t {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
-
     let read_amount = element_size * number_of_elements;
+
     let (Ok(result) | Err(result)) = read(fd, read_amount)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
@@ -166,15 +166,13 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
 
-    // We're only interested in files that are handled by `mirrord-agent`.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
-    if let Some(remote_fd) = remote_fd {
-        // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
-        // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
-        // `capacity` here.
-        let buffer_size = (capacity - 1) as usize;
+    // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
+    // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
+    // `capacity` here.
+    let buffer_size = (capacity - 1) as usize;
 
-        let read_result = fgets(remote_fd, buffer_size).map(|read_file| {
+    let (Ok(result) | Err(result)) = fgets(fd, buffer_size)
+        .map(|read_file| {
             let ReadLineFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
@@ -194,13 +192,11 @@ pub(crate) unsafe extern "C" fn fgets_detour(
             } else {
                 ptr::null_mut()
             }
-        });
+        })
+        .bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
+        .map_err(From::from);
 
-        let (Ok(result) | Err(result)) = read_result.map_err(From::from);
-        result
-    } else {
-        FN_FGETS(out_buffer, capacity, file_stream)
-    }
+    result
 }
 
 /// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).

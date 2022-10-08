@@ -32,7 +32,7 @@ pub struct ReadFileRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLineFileRequest {
-    pub fd: usize,
+    pub remote_fd: usize,
     pub buffer_size: usize,
 }
 

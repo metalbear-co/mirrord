@@ -63,8 +63,11 @@ impl FileManager {
                 let read_result = self.read(remote_fd, buffer_size);
                 Ok(FileResponse::Read(read_result))
             }
-            FileRequest::ReadLine(ReadLineFileRequest { fd, buffer_size }) => {
-                let read_result = self.read_line(fd, buffer_size);
+            FileRequest::ReadLine(ReadLineFileRequest {
+                remote_fd,
+                buffer_size,
+            }) => {
+                let read_result = self.read_line(remote_fd, buffer_size);
                 Ok(FileResponse::ReadLine(read_result))
             }
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {

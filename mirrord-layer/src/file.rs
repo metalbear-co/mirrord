@@ -321,14 +321,17 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let ReadLine {
-            fd,
+            remote_fd,
             buffer_size,
             file_channel_tx,
         } = read_line;
 
         self.read_line_queue.push_back(file_channel_tx);
 
-        let read_file_request = ReadLineFileRequest { fd, buffer_size };
+        let read_file_request = ReadLineFileRequest {
+            remote_fd,
+            buffer_size,
+        };
 
         let request = ClientMessage::FileRequest(FileRequest::ReadLine(read_file_request));
         codec.send(request).await.map_err(From::from)
@@ -464,7 +467,7 @@ pub struct Read {
 
 #[derive(Debug)]
 pub struct ReadLine {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
     pub(crate) file_channel_tx: ResponseChannel<ReadLineFileResponse>,
 }
