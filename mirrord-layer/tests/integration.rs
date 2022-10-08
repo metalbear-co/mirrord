@@ -47,7 +47,11 @@ impl LayerConnection {
     /// Handle flask's 2 process behaviour.
     async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
         let mut codec = Self::accept_library_connection(listener).await;
-        let msg = match codec.next().await {
+        println!("get_initialized_connection -> codec created");
+
+        let next = codec.next().await;
+        println!("get_initialized_connection -> next {next:#?}");
+        let msg = match next {
             Some(option) => option.unwrap(),
             None => {
                 // Python runs in 2 processes, only one of which is the application. The library is
