@@ -3,8 +3,8 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
-    ReadLimitedFileResponse, SeekFileResponse, WriteFileResponse,
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::error;
@@ -259,7 +259,7 @@ pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileRespon
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadLineFileResponse> {
+pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = OPEN_FILES
         .lock()?
@@ -281,11 +281,7 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadLineFileR
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn pread(
-    local_fd: RawFd,
-    buffer_size: usize,
-    offset: u64,
-) -> Detour<ReadLimitedFileResponse> {
+pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = OPEN_FILES
         .lock()?

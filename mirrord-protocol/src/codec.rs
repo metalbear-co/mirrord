@@ -200,39 +200,9 @@ pub struct ReadFileResponse {
     pub read_amount: usize,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct ReadLineFileResponse {
-    pub bytes: Vec<u8>,
-    pub read_amount: usize,
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct ReadLimitedFileResponse {
-    pub bytes: Vec<u8>,
-    pub read_amount: usize,
-}
-
 impl fmt::Debug for ReadFileResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadFileResponse")
-            .field("bytes (length)", &self.bytes.len())
-            .field("read_amount", &self.read_amount)
-            .finish()
-    }
-}
-
-impl fmt::Debug for ReadLineFileResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadLineFileResponse")
-            .field("bytes (length)", &self.bytes.len())
-            .field("read_amount", &self.read_amount)
-            .finish()
-    }
-}
-
-impl fmt::Debug for ReadLimitedFileResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadLimitedFileResponse")
             .field("bytes (length)", &self.bytes.len())
             .field("read_amount", &self.read_amount)
             .finish()
@@ -262,8 +232,8 @@ pub type RemoteResult<T> = Result<T, ResponseError>;
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
-    ReadLine(RemoteResult<ReadLineFileResponse>),
-    ReadLimited(RemoteResult<ReadLimitedFileResponse>),
+    ReadLine(RemoteResult<ReadFileResponse>),
+    ReadLimited(RemoteResult<ReadFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     Close(RemoteResult<CloseFileResponse>),

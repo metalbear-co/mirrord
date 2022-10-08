@@ -20,8 +20,8 @@ use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    ReadLimitedFileRequest, ReadLimitedFileResponse, ReadLineFileRequest, ReadLineFileResponse,
-    RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -142,8 +142,8 @@ pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
-    read_line_queue: ResponseDeque<ReadLineFileResponse>,
-    read_limited_queue: ResponseDeque<ReadLimitedFileResponse>,
+    read_line_queue: ResponseDeque<ReadFileResponse>,
+    read_limited_queue: ResponseDeque<ReadFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
@@ -529,7 +529,7 @@ pub struct Read {
 pub struct ReadLine {
     pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
-    pub(crate) file_channel_tx: ResponseChannel<ReadLineFileResponse>,
+    pub(crate) file_channel_tx: ResponseChannel<ReadFileResponse>,
 }
 
 #[derive(Debug)]
@@ -537,7 +537,7 @@ pub struct ReadLimited {
     pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
     pub(crate) start_from: u64,
-    pub(crate) file_channel_tx: ResponseChannel<ReadLimitedFileResponse>,
+    pub(crate) file_channel_tx: ResponseChannel<ReadFileResponse>,
 }
 
 #[derive(Debug)]

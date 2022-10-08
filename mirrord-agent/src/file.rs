@@ -10,9 +10,8 @@ use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLimitedFileResponse,
-    ReadLineFileRequest, ReadLineFileResponse, RemoteResult, ResponseError, SeekFileRequest,
-    SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
 };
 use tracing::{debug, error, trace};
 
@@ -216,7 +215,7 @@ impl FileManager {
         &mut self,
         fd: usize,
         buffer_size: usize,
-    ) -> RemoteResult<ReadLineFileResponse> {
+    ) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -241,7 +240,7 @@ impl FileManager {
 
                             // We handle the extra bytes in the `fgets` hook, so here we can just
                             // return the full buffer.
-                            let response = ReadLineFileResponse {
+                            let response = ReadFileResponse {
                                 bytes: buffer.into_bytes(),
                                 read_amount,
                             };
@@ -262,7 +261,7 @@ impl FileManager {
         fd: usize,
         buffer_size: usize,
         start_from: u64,
-    ) -> RemoteResult<ReadLimitedFileResponse> {
+    ) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -276,7 +275,7 @@ impl FileManager {
                     let read_result = reader.read(&mut buffer).and_then(|read_amount| {
                         // We handle the extra bytes in the `pread` hook, so here we can just
                         // return the full buffer.
-                        let response = ReadLimitedFileResponse {
+                        let response = ReadFileResponse {
                             bytes: buffer,
                             read_amount,
                         };

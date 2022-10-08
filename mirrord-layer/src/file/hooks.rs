@@ -8,9 +8,7 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{
-    OpenOptionsInternal, ReadFileResponse, ReadLimitedFileResponse, ReadLineFileResponse,
-};
+use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse};
 use tracing::debug;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
@@ -185,7 +183,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
 
     let (Ok(result) | Err(result)) = fgets(fd, buffer_size)
         .map(|read_file| {
-            let ReadLineFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse { bytes, read_amount } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
@@ -220,7 +218,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
 ) -> ssize_t {
     let (Ok(result) | Err(result)) = pread(fd, amount_to_read as usize, offset as u64)
         .map(|read_file| {
-            let ReadLimitedFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = amount_to_read.min(read_amount);
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
