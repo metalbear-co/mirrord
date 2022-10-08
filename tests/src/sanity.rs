@@ -606,6 +606,7 @@ mod tests {
         }
     }
 
+    #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
