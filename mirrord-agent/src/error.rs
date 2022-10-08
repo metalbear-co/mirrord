@@ -67,9 +67,6 @@ pub enum AgentError {
     #[error("Errno failed with `{0}`")]
     Errno(#[from] nix::errno::Errno),
 
-    #[error("Pcap failed with `{0}`")]
-    Pcap(#[from] pcap::Error),
-
     #[error("Path failed with `{0}`")]
     StripPrefixError(#[from] std::path::StripPrefixError),
 
