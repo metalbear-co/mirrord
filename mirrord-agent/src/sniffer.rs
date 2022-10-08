@@ -5,12 +5,10 @@ use std::{
     path::PathBuf,
 };
 
-use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
-use pcap::{Active, Capture, Device, Linktype, PacketCodec, PacketStream};
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -18,6 +16,7 @@ use pnet::packet::{
     tcp::{TcpFlags, TcpPacket},
     Packet,
 };
+use rawsocket::RawCapture;
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
@@ -30,9 +29,6 @@ use crate::{
     runtime::set_namespace,
     util::{ClientID, IndexAllocator, Subscriptions},
 };
-
-const DUMMY_BPF: &str =
-    "tcp dst port 1 and tcp src port 1 and dst host 8.1.2.3 and src host 8.1.2.3";
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub struct TcpSessionIdentifier {
@@ -91,37 +87,17 @@ fn is_closed_connection(flags: u16) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-#[derive(Debug, Clone)]
-pub struct TcpManagerCodec;
-
-impl PacketCodec for TcpManagerCodec {
-    type Item = Vec<u8>;
-
-    fn decode(&mut self, packet: pcap::Packet) -> Self::Item {
-        packet.data.to_vec()
-    }
-}
-
-fn prepare_sniffer(interface: String) -> Result<Capture<Active>, AgentError> {
+fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
     debug!("prepare_sniffer -> Preparing interface.");
 
-    let interface_names_match = |iface: &Device| iface.name == interface;
-    let interfaces = Device::list()?;
-
-    let interface = interfaces
-        .into_iter()
-        .find(interface_names_match)
-        .ok_or_else(|| AgentError::NotFound("Interface not found!".to_string()))?;
-
-    let mut capture = Capture::from_device(interface)?
-        .immediate_mode(true)
-        .open()?;
-
-    capture.set_datalink(Linktype::ETHERNET)?;
-    // Set a dummy filter that shouldn't capture anything. This makes the code easier.
-    capture.filter(DUMMY_BPF, true)?;
-    capture = capture.setnonblock()?;
-
+    let capture = RawCapture::from_interface_name(&interface)?;
+    // We start with a BPF that drops everything so we won't receive *EVERYTHING*
+    // as we don't know what the layer will ask us to listen for, so this is essentially setting
+    // it to none
+    // we ofc could've done this when a layer connected, but I (A.H) thought it'd make more sense
+    // to have this shared among layers (potentially, in the future) - fme.
+    capture.set_filter(rawsocket::filter::build_drop_always())?;
+    capture.ignore_outgoing()?;
     Ok(capture)
 }
 
@@ -161,17 +137,6 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
             bytes: tcp_packet.payload().to_vec(),
         },
     ))
-}
-/// Build a filter of format: "tcp port (80 or 443 or 50 or 90)"
-fn format_bpf(ports: &[u16]) -> String {
-    format!(
-        "tcp port ({})",
-        ports
-            .iter()
-            .map(|p| p.to_string())
-            .collect::<Vec<String>>()
-            .join(" or ")
-    )
 }
 
 #[derive(Debug)]
@@ -268,7 +233,7 @@ pub struct TCPConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientID>,
     receiver: Receiver<SnifferCommand>,
     client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
-    stream: PacketStream<Active, TcpManagerCodec>,
+    raw_capture: RawCapture,
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
     connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
@@ -284,10 +249,8 @@ impl TCPConnectionSniffer {
                         self.handle_command(command).await?;
                     } else { break; }
                 },
-                packet = self.stream.next() => {
-                    if let Some(packet) = packet {
-                        self.handle_packet(packet?).await?;
-                    } else { break; }
+                packet = self.raw_capture.next() => {
+                    self.handle_packet(packet?).await?;
                 }
                 _ = cancel_token.cancelled() => {
                     break;
@@ -312,12 +275,11 @@ impl TCPConnectionSniffer {
         }
 
         debug!("preparing sniffer");
-        let sniffer = prepare_sniffer(interface)?;
-        let codec = TcpManagerCodec {};
-        let stream = sniffer.stream(codec)?;
+        let raw_capture = prepare_sniffer(interface)?;
+
         Ok(TCPConnectionSniffer {
             receiver,
-            stream,
+            raw_capture,
             port_subscriptions: Subscriptions::new(),
             client_senders: HashMap::new(),
             sessions: TCPSessionMap::new(),
@@ -360,16 +322,14 @@ impl TCPConnectionSniffer {
 
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
-        let sniffer = self.stream.capture_mut();
 
         if ports.is_empty() {
             debug!("packet_worker -> empty ports, setting dummy bpf");
-            sniffer.filter(DUMMY_BPF, true)?
+            self.raw_capture
+                .set_filter(rawsocket::filter::build_drop_always())?
         } else {
-            let bpf = format_bpf(&ports);
-            debug!("packet_worker -> setting bpf to {:?}", &bpf);
-
-            sniffer.filter(&bpf, true)?
+            self.raw_capture
+                .set_filter(rawsocket::filter::build_tcp_port_filter(&ports))?
         };
         Ok(())
     }

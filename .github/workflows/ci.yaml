@@ -29,7 +29,6 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
-      - run: sudo apt install libpcap-dev cmake
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
 
@@ -80,7 +79,6 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
-      - run: sudo apt install -y libpcap-dev cmake
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_mirrord_layer:
@@ -165,7 +163,6 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ubuntu-latest
-      - run: sudo apt install -y libpcap-dev cmake
       - run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -242,9 +239,6 @@ jobs:
         with:
           node-version: 14
       - run: npm install express
-      - run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libpcap-dev cmake
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - run: pip3 install fastapi

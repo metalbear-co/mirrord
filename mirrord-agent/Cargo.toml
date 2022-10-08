@@ -19,7 +19,6 @@ containerd-client = {git = "https://github.com/containerd/rust-extensions", rev=
 tokio.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
-pcap = { version = "0.10", features =["capture-stream"] }
 pnet = "0.31"
 nix.workspace = true
 clap.workspace = true
@@ -42,6 +41,7 @@ faccess = "0.2"
 bytes = "1.2"
 regex = "1"
 socket2 = "0.4"
+rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 
 [dev-dependencies]
 mockall = "0.11"
