@@ -7,11 +7,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-## Changed
+## 3.0.18-alpha
+
+### Changed
 - Replaced `pcap` dependency with our own `rawsocket` to make cross compiling faster and easier.
 
 ## 3.0.17-alpha
 
+### Fixed
 - Release CI: Remove another failing step
 
 ## 3.0.16-alpha
