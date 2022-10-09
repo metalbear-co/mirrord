@@ -17,6 +17,18 @@ use crate::{
     HookMessage, ENABLED_FILE_RO_OPS,
 };
 
+#[tracing::instrument(level = "trace")]
+fn get_remote_fd(local_fd: RawFd) -> Detour<usize> {
+    Detour::Success(
+        OPEN_FILES
+            .lock()?
+            .get(&local_fd)
+            .cloned()
+            // Bypass if we're not managing the relative part.
+            .ok_or(Bypass::LocalFdNotFound(local_fd))?,
+    )
+}
+
 /// The pair `shm_open`, `shm_unlink` are used to create a temporary file (in `/dev/shm/`), and then
 /// remove it, as we only care about the `fd`. This is done to preserve `open_flags`, as
 /// `memfd_create` will always return a `File` with read and write permissions.
@@ -204,12 +216,7 @@ pub(crate) fn openat(
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
         // what).
-        let remote_fd = OPEN_FILES
-            .lock()?
-            .get(&fd)
-            .cloned()
-            // Bypass if we're not managing the relative part.
-            .ok_or(Bypass::LocalFdNotFound(fd))?;
+        let remote_fd = get_remote_fd(fd)?;
 
         let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -239,11 +246,7 @@ pub(crate) fn openat(
 #[tracing::instrument(level = "trace")]
 pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = OPEN_FILES
-        .lock()?
-        .get(&local_fd)
-        .cloned()
-        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+    let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -262,11 +265,7 @@ pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileRespon
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = OPEN_FILES
-        .lock()?
-        .get(&local_fd)
-        .cloned()
-        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+    let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -285,11 +284,7 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileRespo
 #[tracing::instrument(level = "trace")]
 pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = OPEN_FILES
-        .lock()?
-        .get(&local_fd)
-        .cloned()
-        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+    let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -307,12 +302,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<
 
 #[tracing::instrument(level = "trace")]
 pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
-    let remote_fd = OPEN_FILES
-        .lock()
-        .unwrap()
-        .get(&local_fd)
-        .cloned()
-        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+    let remote_fd = get_remote_fd(local_fd)?;
 
     let seek_from = match whence {
         libc::SEEK_SET => SeekFrom::Start(offset as u64),
@@ -343,12 +333,7 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
 
 #[tracing::instrument(level = "trace", skip(write_bytes))]
 pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
-    let remote_fd = OPEN_FILES
-        .lock()
-        .unwrap()
-        .get(&local_fd)
-        .cloned()
-        .ok_or(Bypass::LocalFdNotFound(local_fd))?;
+    let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
