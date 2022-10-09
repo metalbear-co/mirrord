@@ -272,15 +272,13 @@ impl FileManager {
 
                     let mut buffer = vec![0; buffer_size];
 
-                    let read_result = reader.read(&mut buffer).and_then(|read_amount| {
+                    let read_result = reader.read(&mut buffer).map(|read_amount| {
                         // We handle the extra bytes in the `pread` hook, so here we can just
                         // return the full buffer.
-                        let response = ReadFileResponse {
+                        ReadFileResponse {
                             bytes: buffer,
                             read_amount,
-                        };
-
-                        Ok(response)
+                        }
                     })?;
 
                     Ok(read_result)
