@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Changed
+- Don't report InProgress io error as error (log as info)
+
 ## 3.0.19-alpha
 
 ### Added
