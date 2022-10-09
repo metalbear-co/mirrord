@@ -250,6 +250,7 @@ pub(crate) fn read(local_fd: RawFd, read_amount: usize) -> Detour<ReadFileRespon
     let reading_file = Read {
         remote_fd,
         buffer_size: read_amount,
+        start_from: 0,
         file_channel_tx,
     };
 
@@ -272,6 +273,7 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileRespo
     let reading_file = Read {
         remote_fd,
         buffer_size,
+        start_from: 0,
         file_channel_tx,
     };
 
@@ -291,7 +293,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
-    let reading_file = ReadLimited {
+    let reading_file = Read {
         remote_fd,
         buffer_size,
         start_from: offset,

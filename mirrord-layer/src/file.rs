@@ -330,6 +330,7 @@ impl FileHandler {
             remote_fd,
             buffer_size,
             file_channel_tx,
+            ..
         } = read;
 
         self.read_queue.push_back(file_channel_tx);
@@ -356,6 +357,7 @@ impl FileHandler {
             remote_fd,
             buffer_size,
             file_channel_tx,
+            ..
         } = read_line;
 
         self.read_line_queue.push_back(file_channel_tx);
@@ -372,13 +374,13 @@ impl FileHandler {
     #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_read_limited(
         &mut self,
-        read: ReadLimited,
+        read: Read<ReadFileResponse>,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
     ) -> Result<()> {
-        let ReadLimited {
+        let Read {
             remote_fd,
             buffer_size,
             start_from,
@@ -522,15 +524,9 @@ pub struct OpenRelative {
 pub struct Read<T> {
     pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
-    pub(crate) file_channel_tx: ResponseChannel<T>,
-}
-
-#[derive(Debug)]
-pub struct ReadLimited {
-    pub(crate) remote_fd: usize,
-    pub(crate) buffer_size: usize,
+    // TODO(alex): Only used for `pread`.
     pub(crate) start_from: u64,
-    pub(crate) file_channel_tx: ResponseChannel<ReadFileResponse>,
+    pub(crate) file_channel_tx: ResponseChannel<T>,
 }
 
 #[derive(Debug)]
@@ -575,7 +571,7 @@ pub enum HookMessageFile {
     OpenRelative(OpenRelative),
     Read(Read<ReadFileResponse>),
     ReadLine(Read<ReadFileResponse>),
-    ReadLimited(ReadLimited),
+    ReadLimited(Read<ReadFileResponse>),
     Seek(Seek),
     Write(Write),
     Close(Close),
