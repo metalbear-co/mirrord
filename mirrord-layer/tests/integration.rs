@@ -15,9 +15,9 @@ use mirrord_protocol::{
 };
 use rstest::{fixture, rstest};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    process::{ChildStdout, Command},
+    process::Command,
 };
 
 struct LayerConnection {
@@ -196,7 +196,7 @@ fn build_go_app() {
     let original_dir = env::current_dir().unwrap();
     let go_app_path = Path::new("tests/apps/app_go");
     env::set_current_dir(go_app_path).unwrap();
-    let server = process::Command::new("go")
+    process::Command::new("go")
         .args(vec!["build", "-o", "19"])
         .output()
         .expect("Failed to build Go test app.");
