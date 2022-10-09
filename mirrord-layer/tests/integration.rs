@@ -195,7 +195,7 @@ async fn test_mirroring_with_http(
     // Python executable it starts a new process, and we don't want the lib to be loaded into that.
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
-    env.insert("RUST_LOG", "warn,mirrord=debug");
+    env.insert("RUST_LOG", "warn,mirrord=trace");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
