@@ -128,7 +128,6 @@ impl LayerConnection {
 
 #[derive(Debug)]
 enum Application {
-    // TODO: add more applications.
     PythonFlaskHTTP,
     PythonFastApiHTTP,
     NodeHTTP,
@@ -242,7 +241,7 @@ async fn test_mirroring_with_http(
         Application::NodeHTTP,
         Application::Go19HTTP
     )]
-    application: Application, // TODO: add more apps.
+    application: Application,
     dylib_path: &PathBuf,
 ) {
     let mut env = HashMap::new();
