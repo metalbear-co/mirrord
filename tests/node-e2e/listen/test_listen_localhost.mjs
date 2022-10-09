@@ -31,7 +31,7 @@ const listen = () => {
         data.toString()
       );
 
-      socket.write(d);
+      socket.write(data);
     });
 
     socket.on("close", () => {
