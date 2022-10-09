@@ -194,7 +194,7 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test --test integration
+      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
@@ -215,7 +215,7 @@ jobs:
       - uses: actions/setup-python@v3
       - run: pip3 install flask
       - run: cargo +nightly build -p mirrord-layer
-      - run: cargo +nightly test --test integration
+      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
