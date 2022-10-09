@@ -190,16 +190,16 @@ impl Application {
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
-#[cfg(test)]
 #[ctor::ctor]
 fn build_go_app() {
     let original_dir = env::current_dir().unwrap();
     let go_app_path = Path::new("tests/apps/app_go");
     env::set_current_dir(go_app_path).unwrap();
-    process::Command::new("go")
+    let output = process::Command::new("go")
         .args(vec!["build", "-o", "19"])
         .output()
         .expect("Failed to build Go test app.");
+    assert!(output.status.success(), "Building Go test app failed.");
     env::set_current_dir(original_dir).unwrap();
 }
 
