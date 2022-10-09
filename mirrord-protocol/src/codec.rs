@@ -282,7 +282,7 @@ impl Decoder for ClientCodec {
                 src.advance(read);
                 Ok(Some(message))
             }
-            Err(DecodeError::UnexpectedEnd) => Ok(None),
+            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
             Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
         }
     }
@@ -333,7 +333,7 @@ impl Decoder for DaemonCodec {
                 src.advance(read);
                 Ok(Some(message))
             }
-            Err(DecodeError::UnexpectedEnd) => Ok(None),
+            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
             Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
         }
     }
