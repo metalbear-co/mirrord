@@ -9,8 +9,8 @@ use std::{
     path::PathBuf,
 };
 
-static FILE_CONTENTS: &'static str = "Hello, I am the file you're reading!";
-static FILE_PATH: &'static str = "/app/test_file.txt";
+static FILE_CONTENTS: &str = "Hello, I am the file you're reading!";
+static FILE_PATH: &str = "/app/test_file.txt";
 
 fn create_test_file() {
     unsafe {
