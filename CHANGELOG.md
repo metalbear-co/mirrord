@@ -7,8 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- `pread` hook (used by `dotnet`);
+
 ## Changed
 - Don't report InProgress io error as error (log as info)
+- mirrord-layer: Added some `dotnet` files to `IGNORE_FILES` regex set;
+- mirrord-layer: Added the `Detour` type for use in the `ops` modules instead of `HookResult`. This type supports returning a `Bypass` to avoid manually checking if a hook actually failed or if we should just bypass it;
 
 ## 3.0.19-alpha
 
@@ -41,7 +46,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## 3.0.14-alpha
 
 ### Added
-- Layer integration test. Tests the layer's loading and hooking in an http mirroring simulation with a flask web app. 
+- Layer integration test. Tests the layer's loading and hooking in an http mirroring simulation with a flask web app.
   Addresses but does not
   close [[#472](https://github.com/metalbear-co/mirrord/issues/472)] (more integration tests still needed).
 

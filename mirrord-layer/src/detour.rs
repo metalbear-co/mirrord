@@ -65,6 +65,7 @@ impl<T> HookFn<T> {
     }
 }
 
+/// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Bypass {
     Port(u16),
@@ -80,11 +81,23 @@ pub(crate) enum Bypass {
     EmptyBuffer,
 }
 
-// TODO(alex) [high] 2022-10-04: No need for so much generics, the enum should be just what it needs
-// to be.
+/// `ControlFlow`-like enum to be used by hooks.
+///
+/// Conversion from `Result`:
+/// - `Result::Ok` -> `Detour::Success`
+/// - `Result::Err` -> `Detour::Error`
+///
+/// Conversion from `Option`:
+/// - `Option::Some` -> `Detour::Success`
+/// - `Option::None` -> `Detour::Bypass`
+#[derive(Debug)]
 pub(crate) enum Detour<S = ()> {
+    /// Equivalent to `Result::Ok`
     Success(S),
+    // Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
+    // (errors that can be recovered from in the hook FFI).
     Bypass(Bypass),
+    /// Equivalent to `Result::Err`
     Error(HookError),
 }
 
@@ -180,6 +193,7 @@ impl<S> Detour<S> {
     }
 }
 
+/// Extends `Option<T>` with the `Option::bypass` function.
 pub(crate) trait OptionExt {
     type Opt;
 
