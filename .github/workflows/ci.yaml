@@ -189,12 +189,6 @@ jobs:
           cache-on-failure: true
       - uses: actions/setup-go@v3
         with:
-          go-version: "1.18.0"
-      - run: |
-          cd mirrord-layer/tests/apps/app_go
-          go build -o 18
-      - uses: actions/setup-go@v3
-        with:
           go-version: "1.19.0"
       - run: |
           cd mirrord-layer/tests/apps/app_go

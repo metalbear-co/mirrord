@@ -1,4 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    path::{Path, PathBuf},
+    process,
+    process::Stdio,
+    time::Duration,
+};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -180,6 +187,21 @@ impl Application {
             Application::Go19HTTP => vec![],
         }
     }
+}
+
+/// For running locally, so that new developers don't have the extra step of building the go app
+/// before running the tests.
+#[cfg(test)]
+#[ctor::ctor]
+fn build_go_app() {
+    let original_dir = env::current_dir().unwrap();
+    let go_app_path = Path::new("tests/apps/app_go");
+    env::set_current_dir(go_app_path).unwrap();
+    let server = process::Command::new("go")
+        .args(vec!["build", "-o", "19"])
+        .output()
+        .expect("Failed to build Go test app.");
+    env::set_current_dir(original_dir).unwrap();
 }
 
 /// Return the path to the existing layer lib, or build it first and return the path, according to
