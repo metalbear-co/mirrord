@@ -1,4 +1,4 @@
-use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
+use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;
@@ -29,9 +29,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: Failed to find local fd `{0}`!")]
-    LocalFDNotFound(RawFd),
 
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
@@ -157,9 +154,6 @@ impl From<HookError> for i64 {
         //
         // ADD(alex) [high] 2022-10-06: Remove these comments after `Bypass` is done.
         match fail {
-            HookError::LocalFDNotFound(_) => {
-                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
-            }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
@@ -178,7 +172,6 @@ impl From<HookError> for i64 {
             HookError::RecvError(_) => libc::EBADMSG,
             HookError::Null(_) => libc::EINVAL,
             HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::LocalFDNotFound(..) => libc::EBADF,
             HookError::EmptyHookSender => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,

@@ -167,7 +167,7 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
     let result = OPEN_FILES
         .lock()?
         .get_key_value(&local_file_fd)
-        .ok_or(HookError::LocalFDNotFound(local_file_fd))
+        .ok_or(Bypass::LocalFdNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
 

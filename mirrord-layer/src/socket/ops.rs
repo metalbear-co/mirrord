@@ -269,7 +269,7 @@ pub(super) fn connect(
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))?
+            .ok_or(Bypass::LocalFdNotFound(sockfd))?
     };
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
