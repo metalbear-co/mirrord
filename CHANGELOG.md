@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't report InProgress io error as error (log as info)
 - mirrord-layer: Added some `dotnet` files to `IGNORE_FILES` regex set;
 - mirrord-layer: Added the `Detour` type for use in the `ops` modules instead of `HookResult`. This type supports returning a `Bypass` to avoid manually checking if a hook actually failed or if we should just bypass it;
+- mirrord-protocol: Reduce duplicated types around `read` operation;
 
 ## 3.0.19-alpha
 

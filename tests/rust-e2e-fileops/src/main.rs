@@ -83,6 +83,7 @@ fn test_fgets() {
     };
 }
 
+// TODO(alex) [high] 2022-10-09: `pread` test.
 fn main() {
     create_test_file();
 

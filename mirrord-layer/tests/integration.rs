@@ -185,7 +185,7 @@ fn dylib_path() -> PathBuf {
 /// traffic to the application.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(60))]
+#[timeout(Duration::from_secs(20))]
 async fn test_mirroring_with_http(
     #[values(Application::PythonFlaskHTTP)] application: Application, // TODO: add more apps.
     dylib_path: &PathBuf,
