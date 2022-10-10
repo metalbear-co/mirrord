@@ -484,7 +484,7 @@ impl RuntimeDataProvider for DeploymentData {
             })?;
 
         // convert to key value pair
-        let deployment_labels = deployment_labels
+        let formatted_deployments_labels = deployment_labels
             .iter()
             .map(|(key, value)| format!("{}={}", key, value))
             .collect::<Vec<String>>()
@@ -492,7 +492,7 @@ impl RuntimeDataProvider for DeploymentData {
 
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let deployment_pods = pod_api
-            .list(&ListParams::default().labels(&deployment_labels))
+            .list(&ListParams::default().labels(&formatted_deployments_labels))
             .await
             .map_err(LayerError::KubeError)?;
 
