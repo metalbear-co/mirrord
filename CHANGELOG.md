@@ -16,6 +16,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are 
   now also integration tests in other files.
 
+### Fixed
+- Fix IntelliJ Extension artifact - use glob pattern
+
 ## 3.0.19-alpha
 
 ### Added
