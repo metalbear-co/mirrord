@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+    "sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,6 +15,8 @@ func main() {
 	fmt.Println(os.Environ())
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+    server := &http.Server{Addr: ":80", Handler: r}
+
     done := make(map[string]bool)
     done["GET"] = false
     done["POST"] = false
@@ -32,7 +35,7 @@ func main() {
                 }
                 fmt.Printf("All done after %s.\n", method)
                 fmt.Println("done map:", done)
-                os.Exit(0)
+                server.Shutdown(c)
             }()
         }
     }
@@ -43,5 +46,15 @@ func main() {
 	r.DELETE("/", get_handler("DELETE"))
 
 	fmt.Println("Server listening on port 80")
-	r.Run(":80")
+
+    serverDone := &sync.WaitGroup{}
+    serverDone.Add(1)
+    go func() {
+        defer serverDone.Done()
+        if err := server.ListenAndServe(); err != http.ErrServerClosed {
+            fmt.Println("Error: Go app can't start listening.")
+            os.Exit(1)
+        }
+    }()
+    serverDone.Wait()
 }
