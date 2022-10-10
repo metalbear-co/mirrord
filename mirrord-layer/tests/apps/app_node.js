@@ -2,7 +2,13 @@ const express = require("express");
 const process = require("process");
 const app = express();
 const PORT = 80;
-var done = new Array(4).fill(false);
+
+var done = {
+  "GET": false,
+  "POST": false,
+  "PUT": false,
+  "DELETE": false,
+}
 
 
 function exit() {
@@ -10,37 +16,21 @@ function exit() {
   process.exit();
 }
 
-app.get("/", (req, res) => {
-  console.log("GET: Request completed");
-  res.send("GET");
-  done[0] = true;
-  if (done[1] && done[2] && done[3])
-    exit();
-});
+function get_handler(method) {
+  return function (req, res) {
+    console.log(method + ": Request completed");
+    res.send(method);
+    done[method] = true;
+    if (Object.values(done).every(Boolean))
+      exit();
+  }
+}
 
-app.post("/", (req, res) => {
-  console.log("POST: Request completed");
-  res.send("POST");
-  done[1] = true;
-  if (done[0] && done[2] && done[3])
-    exit();
-});
+app.get("/", get_handler("GET"));
+app.post("/", get_handler("POST"));
+app.put("/", get_handler("PUT"));
+app.delete("/", get_handler("DELETE"));
 
-app.put("/", (req, res) => {
-  console.log("PUT: Request completed");
-  res.send("PUT");
-  done[2] = true;
-  if (done[0] && done[1] && done[3])
-    exit();
-});
-
-app.delete("/", (req, res) => {
-  console.log("DELETE: Request completed");
-  res.send("DELETE");
-  done[3] = true;
-  if (done[0] && done[1] && done[2])
-    exit();
-});
 
 var server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);

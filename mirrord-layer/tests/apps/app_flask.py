@@ -1,10 +1,12 @@
-from os import getpid, kill
-from signal import SIGTERM
-import time
-from flask import Flask
 import logging
 import sys
 import threading
+import time
+from enum import Enum, unique
+from os import getpid, kill
+from signal import SIGTERM
+
+from flask import Flask
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -16,48 +18,51 @@ cli.show_server_banner = lambda *x: print("Server listening on port 80")
 app = Flask(__name__)
 
 
+@unique
+class HttpMethod(Enum):
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    DELETE = "DELETE"
+
+
+done = {method: False for method in HttpMethod}
+
+
 def kill_later():
     def kill_thread():
         time.sleep(1)
         kill(getpid(), SIGTERM)
+
     threading.Thread(target=kill_thread).start()
 
-done = [False] * 4
+
+def handle_request(method: HttpMethod):
+    print(f'{method}: Request completed')
+    done[method] = True
+    if all(done.values()):
+        kill_later()
+    return str(method)
+
 
 @app.route("/", methods=["GET"])
 def get():
-    print("GET: Request completed")
-    done[0] = True
-    if done[1] and done[2] and done[3]:
-        kill_later()
-    return "GET"
+    return handle_request(HttpMethod.GET)
 
 
 @app.route("/", methods=["POST"])
 def post():
-    print("POST: Request completed")
-    done[1] = True
-    if done[0] and done[2] and done[3]:
-        kill_later()
-    return "POST"
+    return handle_request(HttpMethod.POST)
 
 
 @app.route("/", methods=["PUT"])
 def put():
-    print("PUT: Request completed")
-    done[2] = True
-    if done[0] and done[1] and done[3]:
-        kill_later()
-    return "PUT"
+    return handle_request(HttpMethod.PUT)
 
 
 @app.route("/", methods=["DELETE"])
 def delete():
-    print("DELETE: Request completed")
-    done[3] = True
-    if done[0] and done[1] and done[2]:
-        kill_later()
-    return "DELETE"
+    return handle_request(HttpMethod.DELETE)
 
 
 if __name__ == "__main__":

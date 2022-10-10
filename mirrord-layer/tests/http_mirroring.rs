@@ -294,5 +294,6 @@ async fn test_mirroring_with_http(
     assert!(stdout_str.contains("DELETE: Request completed"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
     let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    println!("stderr:\n{stderr_str}");
     assert!(!&stderr_str.to_lowercase().contains("error"));
 }
