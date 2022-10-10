@@ -42,6 +42,7 @@ pub(super) struct ExecArgs {
     pub pod_name: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
+    /// WARNING: [DEPRECATED] Consider using `--target-namespace` instead.
     #[clap(
         short = 'n',
         requires = "pod",
