@@ -1,25 +1,16 @@
-import logging
-import sys
 import threading
 import time
 from enum import Enum, unique
 from os import getpid, kill
 from signal import SIGTERM
 
-from flask import Flask
+from fastapi import FastAPI, Response
 
-log = logging.getLogger("werkzeug")
-log.disabled = True
-
-cli = sys.modules["flask.cli"]
-
-cli.show_server_banner = lambda *x: print("Server listening on port 80")
-
-app = Flask(__name__)
+app = FastAPI()
 
 
 @unique
-class HttpMethod(Enum):
+class HttpMethod(str, Enum):
     GET = "GET"
     POST = "POST"
     PUT = "PUT"
@@ -42,28 +33,24 @@ def handle_request(method: HttpMethod):
     done[method] = True
     if all(done.values()):
         kill_later()
-    return str(method)
+    return Response(content=method, media_type="text/plain")
 
 
-@app.route("/", methods=["GET"])
+@app.get("/")
 def get():
     return handle_request(HttpMethod.GET)
 
 
-@app.route("/", methods=["POST"])
+@app.post("/")
 def post():
     return handle_request(HttpMethod.POST)
 
 
-@app.route("/", methods=["PUT"])
+@app.put("/")
 def put():
     return handle_request(HttpMethod.PUT)
 
 
-@app.route("/", methods=["DELETE"])
+@app.delete("/")
 def delete():
     return handle_request(HttpMethod.DELETE)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=80)

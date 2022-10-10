@@ -15,6 +15,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Added some `dotnet` files to `IGNORE_FILES` regex set;
 - mirrord-layer: Added the `Detour` type for use in the `ops` modules instead of `HookResult`. This type supports returning a `Bypass` to avoid manually checking if a hook actually failed or if we should just bypass it;
 - mirrord-protocol: Reduce duplicated types around `read` operation;
+- Layer integration tests for more apps. Closes
+  [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+- Rename http mirroring tests from `integration` to `http_mirroring` since there are
+  now also integration tests in other files.
 
 ## 3.0.19-alpha
 
