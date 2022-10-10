@@ -1,8 +1,17 @@
 [package]
 name = "mirrord-common"
-version = "0.1.0"
-edition = "2021"
-publish = false
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,4 +20,4 @@ atty = "0.2.14"
 colored = "2.0.0"
 spinoff = "0.5.4"
 tracing = "0.1.36"
-tracing-subscriber = { version = "0.3.15", features = ["env-filter", "registry"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "registry"] }
