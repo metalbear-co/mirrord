@@ -189,7 +189,9 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
-    std::env::set_var(MIRRORD_PROGRESS_ENV, "standard");
+    if std::env::var(MIRRORD_PROGRESS_ENV).is_err() {
+        std::env::set_var(MIRRORD_PROGRESS_ENV, "standard");
+    }
 
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
