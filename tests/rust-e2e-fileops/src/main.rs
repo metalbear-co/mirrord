@@ -13,11 +13,7 @@ static FILE_CONTENTS: &str = "Hello, I am the file you're reading!";
 static FILE_PATH: &str = "/app/test_file.txt";
 
 fn create_test_file() {
-    unsafe {
-        let p = CString::new(FILE_PATH).unwrap();
-        let fd = libc::open(p.as_ptr(), libc::O_CREAT | libc::O_RDWR);
-        println!("fd {fd:#?}");
-    };
+    println!(">> Creating test file {FILE_PATH:#?} with contents {FILE_CONTENTS:#?}");
 
     let path = PathBuf::new().join("/").join("app").join("test_file.txt");
     let mut file = OpenOptions::new()
@@ -35,6 +31,8 @@ fn create_test_file() {
 }
 
 fn test_open_read_only() {
+    println!(">> test_open_read_only");
+
     OpenOptions::new()
         .read(true)
         .open(FILE_PATH)
@@ -42,6 +40,8 @@ fn test_open_read_only() {
 }
 
 fn test_open_read_write() {
+    println!(">> test_open_read_write");
+
     OpenOptions::new()
         .read(true)
         .write(true)
@@ -50,6 +50,8 @@ fn test_open_read_write() {
 }
 
 fn test_open_read_contents() {
+    println!(">> test_open_read_contents");
+
     let mut file = OpenOptions::new()
         .read(true)
         .open(FILE_PATH)
@@ -64,6 +66,8 @@ fn test_open_read_contents() {
 }
 
 fn test_fgets() {
+    println!(">> test_fgets");
+
     let file = OpenOptions::new()
         .read(true)
         .open(FILE_PATH)
