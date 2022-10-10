@@ -231,11 +231,11 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew publishPlugin
-      # - uses: actions/upload-artifact@v3
-      #   with:
-      #     name: intellij-ext
-      #     path: intellij-ext/build/distributions/mirrord-${{ steps.version.outputs.version }}.zip
-      #     if-no-files-found: error
+      - uses: actions/upload-artifact@v3
+        with:
+          name: intellij-ext
+          path: intellij-ext/build/distributions/*.zip
+          if-no-files-found: error
 
   release_gh:
     needs:
@@ -282,6 +282,7 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
           mv /tmp/artifacts/vscode-ext/* /tmp/release/
+          mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
       # Consider to add changelog generation..
       - name: Release

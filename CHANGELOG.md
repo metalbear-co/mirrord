@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## Changed
 - Don't report InProgress io error as error (log as info)
 
+### Fixed
+- Fix IntelliJ Extension artifact - use glob pattern
+
 ## 3.0.19-alpha
 
 ### Added
