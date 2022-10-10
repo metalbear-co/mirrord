@@ -9,6 +9,7 @@ members = [
     "mirrord-layer",
     "mirrord-cli",
     "mirrord-macro",
+    "mirrord-progress",
     "sample/rust",
     "tests",
     "tests/rust-e2e-fileops"
