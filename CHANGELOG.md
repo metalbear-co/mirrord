@@ -13,6 +13,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## Changed
 - Don't report InProgress io error as error (log as info)
+- Rename http mirroring tests from `integration` to `http_mirroring` since there are 
+  now also integration tests in other files.
 
 ## 3.0.19-alpha
 

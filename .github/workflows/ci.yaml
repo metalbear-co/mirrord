@@ -206,7 +206,7 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
@@ -238,7 +238,7 @@ jobs:
       - run: pip3 install fastapi
       - run: pip3 install uvicorn[standard]
       - run: cargo +nightly build -p mirrord-layer
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
