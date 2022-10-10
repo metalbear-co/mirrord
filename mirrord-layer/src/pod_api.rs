@@ -473,11 +473,9 @@ impl RuntimeDataProvider for DeploymentData {
             .await
             .map_err(LayerError::KubeError)?;
 
-        let pod_label = deployment
+        let deployment_labels = deployment
             .spec
-            .and_then(|spec| spec.template.metadata)
-            .and_then(|metadata| metadata.labels)
-            .and_then(|labels| labels.get("app").cloned())
+            .and_then(|spec| spec.selector.match_labels)
             .ok_or_else(|| {
                 LayerError::DeploymentNotFound(format!(
                     "Label for deployment: {}, not found!",
@@ -485,9 +483,16 @@ impl RuntimeDataProvider for DeploymentData {
                 ))
             })?;
 
+        // convert to key value pair
+        let deployment_labels = deployment_labels
+            .iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect::<Vec<String>>()
+            .join(",");
+
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let deployment_pods = pod_api
-            .list(&ListParams::default().labels(&format!("app={}", pod_label)))
+            .list(&ListParams::default().labels(&deployment_labels))
             .await
             .map_err(LayerError::KubeError)?;
 
