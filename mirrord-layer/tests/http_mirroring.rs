@@ -7,7 +7,7 @@ use std::{
 };
 
 use rstest::rstest;
-use tokio::{net::TcpListener, process::Command};
+use tokio::{net::TcpListener};
 
 mod common;
 
@@ -51,14 +51,7 @@ async fn test_mirroring_with_http(
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr);
-    let server = Command::new(executable)
-        .args(application.get_args())
-        .envs(env)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    println!("Started application.");
+    let mut test_process = TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
     let mut layer_connection =
@@ -77,18 +70,13 @@ async fn test_mirroring_with_http(
     layer_connection
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
-
-    let output = server.wait_with_output().await.unwrap();
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    println!("{stdout_str}");
-    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-    println!("stderr:\n{stderr_str}");
-    assert!(stdout_str.contains("GET: Request completed"));
-    assert!(stdout_str.contains("POST: Request completed"));
-    assert!(stdout_str.contains("PUT: Request completed"));
-    assert!(stdout_str.contains("DELETE: Request completed"));
-    assert!(!&stdout_str.to_lowercase().contains("error"));
-    assert!(!&stderr_str.to_lowercase().contains("error"));
+    test_process.child.wait().await.unwrap();
+    test_process.assert_stdout_contains("GET: Request completed");
+    test_process.assert_stdout_contains("POST: Request completed");
+    test_process.assert_stdout_contains("PUT: Request completed");
+    test_process.assert_stdout_contains("DELETE: Request completed");
+    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr();
 }
 
 /// Run the http mirroring test only on MacOS, because of a known crash on Linux.
