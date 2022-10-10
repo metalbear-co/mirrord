@@ -122,7 +122,7 @@ fn dylib_path() -> PathBuf {
 /// doesn't go through the layer unnecessarily.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(20))]
+#[timeout(Duration::from_secs(60))]
 async fn test_self_connect(dylib_path: &PathBuf) {
     let mut env = HashMap::new();
     let application = Application {};
