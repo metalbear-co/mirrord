@@ -243,7 +243,7 @@ async fn test_mirroring_with_http(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        Application::Go19HTTP
+        // Application::Go19HTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
