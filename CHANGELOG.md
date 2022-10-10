@@ -7,8 +7,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Layer integration tests for more apps. Closes
+  [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+
 ## Changed
 - Don't report InProgress io error as error (log as info)
+- Rename http mirroring tests from `integration` to `http_mirroring` since there are 
+  now also integration tests in other files.
 
 ## 3.0.19-alpha
 

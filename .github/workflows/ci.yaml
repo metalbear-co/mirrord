@@ -177,45 +177,70 @@ jobs:
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.so
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v2             # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1         # Install rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v1          # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
           key: ubuntu-latest
           cache-on-failure: true
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - name: download layer
+      - uses: actions/setup-go@v3             # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.19.0"
+      - run: |                                # Build Go app to test http mirroring with.
+          cd mirrord-layer/tests/apps/app_go
+          go build -o 19
+      - uses: actions/setup-node@v3           # For http mirroring test.
+        with:
+          node-version: 14
+      - run: npm install express              # For http mirroring test with node.
+      - uses: actions/setup-python@v3         # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask               # For http mirroring test with Flask.
+      - run: pip3 install fastapi             # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard]   # For http mirroring test with FastAPI.
+      - name: download layer                  # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      # Run `http_mirroring` and `self_connect` integration tests of `mirrord-layer`.
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.dylib
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v2             # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1         # Install Rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v1          # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
           key: macos-12
           cache-on-failure: true
-      - run: npm install express
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - run: cargo +nightly build -p mirrord-layer
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      - uses: actions/setup-go@v3             # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.19.0"
+      - run: |                                # Build Go app to test http mirroring with.
+          cd mirrord-layer/tests/apps/app_go
+          go build -o 19
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express              # For http mirroring test with node.
+      - uses: actions/setup-python@v3         # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask               # For http mirroring test with Flask.
+      - run: pip3 install fastapi             # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard]   # For http mirroring test with FastAPI.
+      - run: cargo +nightly build -p mirrord-layer  # Build layer lib. The tests load it into the apps.
+      # Run `http_mirroring` and `self_connect` integration tests of `mirrord-layer`.
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
