@@ -30,6 +30,8 @@ func main() {
                         return
                     }
                 }
+                fmt.Printf("All done after %s.\n", method)
+                fmt.Println("done map:", done)
                 os.Exit(0)
             }()
         }
