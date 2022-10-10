@@ -19,5 +19,5 @@ edition.workspace = true
 atty = "0.2.14"
 colored = "2.0.0"
 spinoff = "0.5.4"
-tracing = "0.1.36"
+tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "registry"] }
