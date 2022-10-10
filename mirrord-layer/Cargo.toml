@@ -46,7 +46,7 @@ socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
-mirrord-common = { version = "0.1.0", path = "../mirrord-common" }
+mirrord-common = { path = "../mirrord-common" }
 
 
 [dev-dependencies]
