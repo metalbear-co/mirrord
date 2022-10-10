@@ -10,6 +10,37 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
 
+## Changed
+- Don't report InProgress io error as error (log as info)
+
+## 3.0.19-alpha
+
+### Added
+- Release image for armv7 (Cloud ARM)
+
+### Fixed
+- Release for non-amd64 arch failed because of lack of QEMU step in the github action. Re-added it
+
+## 3.0.18-alpha
+
+### Changed
+- Replaced `pcap` dependency with our own `rawsocket` to make cross compiling faster and easier.
+
+## 3.0.17-alpha
+
+### Fixed
+- Release CI: Remove another failing step
+
+## 3.0.16-alpha
+
+### Fixed
+- Release CI: Temporarily comment out failing step
+
+## 3.0.15-alpha
+
+### Fixed
+- Release CI: Fix checkout action position in intelliJ release.
+
 ## 3.0.14-alpha
 
 ### Added

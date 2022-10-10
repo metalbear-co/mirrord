@@ -118,6 +118,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Login to GitHub Container Registry
@@ -135,7 +138,7 @@ jobs:
         with:
           context: .
           file: mirrord-agent/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: |
             ghcr.io/metalbear-co/mirrord:latest
@@ -185,11 +188,11 @@ jobs:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v2
       - name: Get release version
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
-        id: version
-      - uses: actions/checkout@v2
+        id: version      
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
@@ -211,6 +214,11 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew publishPlugin
+      # - uses: actions/upload-artifact@v3
+      #   with:
+      #     name: intellij-ext
+      #     path: intellij-ext/build/distributions/mirrord-${{ steps.version.outputs.version }}.zip
+      #     if-no-files-found: error
 
   release_gh:
     needs:
@@ -255,6 +263,8 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
+          mv /tmp/artifacts/vscode-ext/* /tmp/release/
 
       # Consider to add changelog generation..
       - name: Release

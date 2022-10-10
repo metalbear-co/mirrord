@@ -611,7 +611,7 @@ mod tests {
         }
     }
 
-    #[ignore] // TODO: create integration test instead.
+    #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
