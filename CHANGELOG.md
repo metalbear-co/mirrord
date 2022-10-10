@@ -15,6 +15,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't report InProgress io error as error (log as info)
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are 
   now also integration tests in other files.
+- Make the outgoing traffic with many requests test tolerate up to one reset.
+  Closes [[#473](https://github.com/metalbear-co/mirrord/issues/473)].
 
 ## 3.0.19-alpha
 

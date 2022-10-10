@@ -22,6 +22,7 @@ const hostList = [
 let requestIndex = 0;
 
 function makeRequests() {
+  let failures = 0;
   hostList.forEach((host) => {
     const options = {
       hostname: host,
@@ -38,21 +39,33 @@ function makeRequests() {
         `>> ${requestIndex} ${host} statusCode ${response.statusCode}`
       );
 
-      response.on("data", (data) => {
-        process.stdout.write(`>> received ${data.slice(0, 4)}`);
-      });
-
       response.on("error", (fail) => {
-        process.stderr.write(`>> response from ${host} failed with ${fail}`);
-        throw fail;
+        console.log(`>> response from ${host} failed with ${fail}`);
+        if (fail.errno !== -104 || fail.code !== 'ECONNRESET') {
+          console.log("This is not a tolerated error, fail test.")
+          throw fail;
+        }
+        if (++failures > 1) {
+          console.log("Too many failed requests, failing test.");
+          throw fail;
+        } else {
+          console.log("Allowing one failed request, not to fail the CI on random resets.");
+        }
       });
     });
 
     request.on("error", (fail) => {
-      process.stderr.write(
-        `>> request to ${requestIndex} ${host} failed with ${fail}`
-      );
-      throw fail;
+      console.log(`>> request to ${requestIndex} ${host} failed with ${fail}`);
+      if (fail.errno !== -104 || fail.code !== 'ECONNRESET') {
+        console.log("This is not a tolerated error, fail test.")
+        throw fail;
+      }
+      if (++failures > 1) {
+        console.log("Too many failed requests, failing test.");
+        throw fail;
+      } else {
+        console.log("Allowing one failed request, not to fail the CI on random resets.");
+      }
     });
 
     request.end();
