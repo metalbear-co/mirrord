@@ -1,4 +1,11 @@
-use std::{collections::HashMap, env, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    path::{Path, PathBuf},
+    process,
+    process::Stdio,
+    time::Duration,
+};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -47,11 +54,7 @@ impl LayerConnection {
     /// Handle flask's 2 process behaviour.
     async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
         let mut codec = Self::accept_library_connection(listener).await;
-        println!("get_initialized_connection -> codec created");
-
-        let next = codec.next().await;
-        println!("get_initialized_connection -> next {next:#?}");
-        let msg = match next {
+        let msg = match codec.next().await {
             Some(option) => option.unwrap(),
             None => {
                 // Python runs in 2 processes, only one of which is the application. The library is
@@ -187,18 +190,19 @@ impl Application {
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
-// #[ctor::ctor]
-// fn build_go_app() {
-//     let original_dir = env::current_dir().unwrap();
-//     let go_app_path = Path::new("tests/apps/app_go");
-//     env::set_current_dir(go_app_path).unwrap();
-//     let output = process::Command::new("go")
-//         .args(vec!["build", "-o", "19"])
-//         .output()
-//         .expect("Failed to build Go test app.");
-//     assert!(output.status.success(), "Building Go test app failed.");
-//     env::set_current_dir(original_dir).unwrap();
-// }
+#[cfg(target_os = "macos")]
+#[ctor::ctor]
+fn build_go_app() {
+    let original_dir = env::current_dir().unwrap();
+    let go_app_path = Path::new("tests/apps/app_go");
+    env::set_current_dir(go_app_path).unwrap();
+    let output = process::Command::new("go")
+        .args(vec!["build", "-o", "19"])
+        .output()
+        .expect("Failed to build Go test app.");
+    assert!(output.status.success(), "Building Go test app failed.");
+    env::set_current_dir(original_dir).unwrap();
+}
 
 /// Return the path to the existing layer lib, or build it first and return the path, according to
 /// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
@@ -230,13 +234,12 @@ fn dylib_path() -> PathBuf {
 /// traffic to the application.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(60))]
+#[timeout(Duration::from_secs(20))]
 async fn test_mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
-        Application::NodeHTTP,
-        Application::Go19HTTP
+        Application::NodeHTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
@@ -246,7 +249,7 @@ async fn test_mirroring_with_http(
     // Python executable it starts a new process, and we don't want the lib to be loaded into that.
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
-    env.insert("RUST_LOG", "warn,mirrord=trace");
+    env.insert("RUST_LOG", "warn,mirrord=debug");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
@@ -285,12 +288,21 @@ async fn test_mirroring_with_http(
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
     println!("{stdout_str}");
+    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    println!("stderr:\n{stderr_str}");
     assert!(stdout_str.contains("GET: Request completed"));
     assert!(stdout_str.contains("POST: Request completed"));
     assert!(stdout_str.contains("PUT: Request completed"));
     assert!(stdout_str.contains("DELETE: Request completed"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
-    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-    println!("stderr:\n{stderr_str}");
     assert!(!&stderr_str.to_lowercase().contains("error"));
+}
+
+/// Run the http mirroring test only on MacOS, because of a known crash on Linux.
+#[cfg(target_os = "macos")]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(20))]
+async fn test_mirroring_with_http_go(dylib_path: &PathBuf) {
+    test_mirroring_with_http(Application::Go19HTTP, dylib_path).await;
 }
