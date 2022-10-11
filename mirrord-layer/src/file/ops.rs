@@ -191,13 +191,16 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
         .map(OpenOptionsInternalExt::from_mode)
         .unwrap_or_default();
 
+    debug!("fdopen -> open_options {_open_options:#?}");
+
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
     let result = OPEN_FILES
         .lock()?
         .get_key_value(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))
-        .map(|(local_fd, _)| *local_fd as *const FILE as *mut _)?;
+        .inspect(|(local_fd, remote_fd)| debug!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
+        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
 
     Detour::Success(result)
 }

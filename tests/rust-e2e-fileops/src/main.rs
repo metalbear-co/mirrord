@@ -3,24 +3,24 @@
 extern crate alloc;
 use alloc::ffi::CString;
 use std::{
-    fs::OpenOptions,
+    fs::{DirBuilder, OpenOptions},
     io::{Read, Write},
     os::unix::prelude::*,
-    path::PathBuf,
 };
 
 static FILE_CONTENTS: &str = "Hello, I am the file you're reading!";
-static FILE_PATH: &str = "/app/test_file.txt";
+static FILE_PATH: &str = "/tmp/test_file.txt";
 
 fn create_test_file() {
-    println!(">> Creating test file {FILE_PATH:#?} with contents {FILE_CONTENTS:#?}");
+    println!(">> Creating /app");
 
-    let path = PathBuf::new().join("/").join("app").join("test_file.txt");
+    // let _ = DirBuilder::new().create("/app2").expect("Created /app");
+
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(path)
+        .open(FILE_PATH)
         .expect("Open or create test file!");
 
     let amount = file
@@ -87,12 +87,12 @@ fn test_fgets() {
     };
 }
 
-// TODO(alex) [high] 2022-10-09: `pread` test.
+// TODO(alex) [mid] 2022-10-09: `pread` test.
 fn main() {
     create_test_file();
 
-    test_open_read_only();
-    test_open_read_write();
-    test_open_read_contents();
+    // test_open_read_only();
+    // test_open_read_write();
+    // test_open_read_contents();
     test_fgets();
 }

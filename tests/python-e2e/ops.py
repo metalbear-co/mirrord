@@ -64,18 +64,5 @@ class FileOpsTest(unittest.TestCase):
             w_file.write(TEXT)
         return file_path, file_name
 
-    def test_fgets(self):
-        """
-        Seeks character by character in a file with Lorem Ipsum text in "/tmp" and verifies the concatenation of the text.
-        """
-        read_str = ""
-        file_path, _ = self._create_new_tmp_file()
-        self.assertFalse(self._check_path_exists_on_host(file_path))
-        with open(file_path, "r+") as rw_file:
-            while read_str != TEXT:
-                read_str += rw_file.read(1)
-            self.assertEqual(read_str, TEXT)
-
-
 if __name__ == "__main__":
     unittest.main()
