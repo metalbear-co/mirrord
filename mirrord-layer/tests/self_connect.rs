@@ -20,7 +20,8 @@ async fn test_self_connect(dylib_path: &PathBuf) {
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr);
-    let mut test_process = TestProcess::start_process(executable, application.get_args(), env).await;
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
     let mut layer_connection =

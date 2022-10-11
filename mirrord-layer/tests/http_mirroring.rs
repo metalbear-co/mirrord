@@ -6,7 +6,7 @@ use std::{
 };
 
 use rstest::rstest;
-use tokio::{net::TcpListener};
+use tokio::net::TcpListener;
 
 mod common;
 
@@ -50,7 +50,8 @@ async fn test_mirroring_with_http(
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr);
-    let mut test_process = TestProcess::start_process(executable, application.get_args(), env).await;
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
     let mut layer_connection =

@@ -1,6 +1,10 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio};
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, Mutex},
+};
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
@@ -11,12 +15,10 @@ use mirrord_protocol::{
 };
 use rstest::fixture;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
-    process::Command,
+    process::{Child, Command},
 };
-use tokio::io::{AsyncReadExt, BufReader};
-use tokio::process::Child;
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -88,7 +90,11 @@ impl TestProcess {
         }
     }
 
-    pub async fn start_process(executable: String, args: Vec<String>, env: HashMap<&str, &str>) -> TestProcess {
+    pub async fn start_process(
+        executable: String,
+        args: Vec<String>,
+        env: HashMap<&str, &str>,
+    ) -> TestProcess {
         let child = Command::new(executable)
             .args(args)
             .envs(env)
@@ -121,7 +127,6 @@ impl TestProcess {
     pub async fn wait(&mut self) {
         self.child.take().unwrap().wait().await.unwrap();
     }
-
 }
 
 pub struct LayerConnection {
