@@ -49,7 +49,6 @@ impl LayerConnection {
     }
 }
 
-
 /// Return the path to the existing layer lib, or build it first and return the path, according to
 /// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
 /// When testing locally the lib should be rebuilt on each run so that when developers make changes
