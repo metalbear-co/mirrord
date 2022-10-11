@@ -377,47 +377,6 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  e2e_macos:
-    runs-on: macos-12
-    name: e2e macOS
-    needs:
-      [build_mirrord, test_agent_image, integration_tests_macos, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: macos-latest
-          cache-on-failure: true
-      - run: npm install express
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - run: pip3 install fastapi
-      - run: pip3 install uvicorn[standard]
-      - name: setup cluster requirements
-        run: brew install docker colima kubectl
-      - name: create cluster
-        run: colima start --kubernetes --network-address --cpu 3 --memory 8
-      - name: download image
-        uses: actions/download-artifact@v2
-        with:
-          name: test
-          path: /tmp
-      - name: load image
-        run: docker load --input /tmp/test.tar
-      - name: cargo test
-        run: cargo test -p tests test_mirror_http_traffic
-      - name: Collect container logs
-        if: ${{ failure() }}
-        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
-
   build_intellij_plugin:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -448,7 +407,6 @@ jobs:
         integration_tests_macos,
         integration_tests,
         e2e,
-        e2e_macos,
         test_mirrord_layer_cli,
         test_agent,
         lint,
@@ -464,7 +422,6 @@ jobs:
       (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
       (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
       (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-      (needs.e2e_macos.result == 'success' || needs.e2e_macos.result == 'skipped') &&
       (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
       (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
       (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&

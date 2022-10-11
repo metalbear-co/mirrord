@@ -20,6 +20,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't report InProgress io error as error (log as info)
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are 
   now also integration tests in other files.
+- Delete useless `e2e_macos` CI job.
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
