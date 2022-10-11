@@ -268,8 +268,9 @@ mod tests {
     }
 
     /// Helper for printing the config schema.
-    /// 
-    /// Run it with `cargo test -p mirrord-config --ignored print_schema --features schema -- --nocapture`
+    ///
+    /// Run it with `cargo test -p mirrord-config --ignored print_schema --features schema --
+    /// --nocapture`
     #[cfg(feature = "schema")]
     #[test]
     #[ignore]
