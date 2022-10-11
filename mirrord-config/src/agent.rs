@@ -4,6 +4,7 @@ use serde::Deserialize;
 use crate::config::source::MirrordConfigSource;
 
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[config(map_to = AgentConfig)]
 pub struct AgentFileConfig {

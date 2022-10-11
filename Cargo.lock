@@ -1674,6 +1674,7 @@ dependencies = [
  "mirrord-config-derive",
  "mirrord-macro",
  "rstest",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml 0.9.13",
