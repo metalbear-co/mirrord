@@ -4,6 +4,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingConfig {
     Mirror,

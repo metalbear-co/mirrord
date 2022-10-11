@@ -13,6 +13,7 @@ pub trait MirrordToggleableConfig: MirrordConfig + Default {
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum ToggleableConfig<T> {
     Enabled(bool),
@@ -41,6 +42,7 @@ where
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum VecOrSingle<T> {
     Single(T),
