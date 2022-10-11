@@ -165,7 +165,9 @@ impl TaskProgress {
     }
 
     /// Finish the task without changing the description.
-    pub fn done(self) {}
+    pub fn done(mut self) {
+        self.set_done(None, false);
+    }
 
     /// Finish the task with the given message.
     pub fn done_with(mut self, text: &str) {
