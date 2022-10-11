@@ -13,7 +13,7 @@ use termspin::{spinner::dots, Group, Line, Loop, SharedFrames};
 
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
-pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_ENABLE_PROGRESS";
+pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
 /// `ProgressMode` specifies the way progress is reported
 /// by [`TaskProgress`].
