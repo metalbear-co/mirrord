@@ -33,7 +33,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
-
+    let current_binary = env::current_exe().unwrap();
     let set = RegexSet::new([
         r".*\.so",
         r".*\.d",
@@ -56,6 +56,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         // ignore regexes, maybe other "project runners" will do the same.
         r".*/package.json",
         &current_dir.to_string_lossy(),
+        &current_binary.to_string_lossy(),
     ])
     .unwrap();
 

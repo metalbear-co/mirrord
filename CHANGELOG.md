@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Layer integration tests for more apps. Closes
   [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+- mirrord-layer: ignore opening self-binary (temporal SDK calculates the hash of the binary, and it fails because it happens remotely)
 
 ## Changed
 - Don't report InProgress io error as error (log as info)
