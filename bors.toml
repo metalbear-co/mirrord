@@ -1,0 +1,5 @@
+status = [
+  "CI"
+]
+use_squash_merge = true
+required_approvals = 1

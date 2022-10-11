@@ -2,13 +2,13 @@ name: IntelliJ Extension CI
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, staging, trying]
     paths:
-      - 'intellij-ext/**'
+      - "intellij-ext/**"
   pull_request:
-    branches: [main]
+    branches: [main, staging, trying]
     paths:
-      - 'intellij-ext/**'
+      - "intellij-ext/**"
 jobs:
   build_intellij_plugin:
     runs-on: ubuntu-latest
@@ -26,3 +26,14 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
+  # We need some "accummulation" job here because bors fails (timeouts) to
+  # listen on matrix builds.
+  # Hence, we have some kind of dummy here that bors can listen on
+  ci-success:
+    name: ci
+    if: ${{ success() }}
+    needs: [build_intellij_plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        run: exit 0
