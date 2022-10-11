@@ -16,6 +16,9 @@ tests/go-e2e-outgoing/go-e2e-outgoing
 tests/go-e2e-dns/go-e2e-dns
 
 mirrord-layer/tests/apps/app_go/19
+mirrord-layer/tests/apps/app_go/app_go
+mirrord-layer/tests/apps/self_open/self_open
+mirrord-layer/tests/apps/self_open/19
 
 ### VSCode ###
 .vscode/*
