@@ -190,6 +190,7 @@ impl Application {
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
+#[cfg(target_os = "macos")]
 #[ctor::ctor]
 fn build_go_app() {
     let original_dir = env::current_dir().unwrap();
@@ -239,7 +240,6 @@ async fn test_mirroring_with_http(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        Application::Go19HTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
@@ -296,4 +296,13 @@ async fn test_mirroring_with_http(
     assert!(stdout_str.contains("DELETE: Request completed"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
     assert!(!&stderr_str.to_lowercase().contains("error"));
+}
+
+/// Run the http mirroring test only on MacOS, because of a known crash on Linux.
+#[cfg(target_os = "macos")]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(20))]
+async fn test_mirroring_with_http_go(dylib_path: &PathBuf) {
+    test_mirroring_with_http(Application::Go19HTTP, dylib_path).await;
 }
