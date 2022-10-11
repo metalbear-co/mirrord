@@ -3,19 +3,18 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, staging, trying]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
   pull_request:
-    branches: [main]
+    branches: [main, staging, trying]
     paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
-
+      - "vscode-ext/**"
+      - "intellij-ext/**"
+      - "CHANGELOG.md"
 
 jobs:
   lint:
@@ -118,7 +117,7 @@ jobs:
         with:
           name: test
           path: /tmp/test.tar
-  
+
   test_mirrord_layer_cli:
     strategy:
       matrix:
@@ -177,24 +176,24 @@ jobs:
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.so
     steps:
-      - uses: actions/checkout@v2             # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1         # Install rust.
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2          # Restore rust cache from earlier runs to avoid recompiling dependencies.
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
           cache-on-failure: true
-      - uses: actions/setup-node@v3           # For http mirroring test.
+      - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
-      - run: npm install express              # For http mirroring test with node.
-      - uses: actions/setup-python@v3         # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask               # For http mirroring test with Flask.
-      - run: pip3 install fastapi             # For http mirroring test with FastAPI.
-      - run: pip3 install uvicorn[standard]   # For http mirroring test with FastAPI.
-      - name: download layer                  # Download layer lib built in the `build_mirrord` job.
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
           name: layer-lib
@@ -207,30 +206,30 @@ jobs:
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.dylib
     steps:
-      - uses: actions/checkout@v2             # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1         # Install Rust.
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install Rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2          # Restore rust cache from earlier runs to avoid recompiling dependencies.
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
           cache-on-failure: true
-      - uses: actions/setup-go@v3             # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19.0"
-      - run: |                                # Build Go app to test http mirroring with.
+      - run: | # Build Go app to test http mirroring with.
           cd mirrord-layer/tests/apps/app_go
           go build -o 19
       - uses: actions/setup-node@v3
         with:
           node-version: 14
-      - run: npm install express              # For http mirroring test with node.
-      - uses: actions/setup-python@v3         # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask               # For http mirroring test with Flask.
-      - run: pip3 install fastapi             # For http mirroring test with FastAPI.
-      - run: pip3 install uvicorn[standard]   # For http mirroring test with FastAPI.
-      - run: cargo +nightly build -p mirrord-layer  # Build layer lib. The tests load it into the apps.
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
       # Run `http_mirroring` and `self_connect` integration tests of `mirrord-layer`.
       - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
 
@@ -362,3 +361,28 @@ jobs:
       - name: Collect container logs
         if: ${{ failure() }}
         run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
+
+  # We need some "accummulation" job here because bors fails (timeouts) to
+  # listen on matrix builds.
+  # Hence, we have some kind of dummy here that bors can listen on
+  ci-success:
+    name: ci
+    if: ${{ success() }}
+    needs:
+      [
+        build_mirrord,
+        test_agent_image,
+        integration_tests_macos,
+        integration_tests,
+        e2e,
+        e2e_macos,
+        test_mirrord_layer_cli,
+        test_agent,
+        lint,
+        test_mirrord_config,
+        test_mirrord_protocol,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        run: exit 0
