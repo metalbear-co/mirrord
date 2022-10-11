@@ -11,7 +11,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Layer integration tests with more apps (testing with Go only on MacOS because of
   known crash on Linux - [[#380](https://github.com/metalbear-co/mirrord/issues/380)]).
   Closes [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+- Added progress reporting to the CLI.
 - CI: use [bors](https://bors.tech/) for merging! woohoo.
+
 
 ## Changed
 - Don't report InProgress io error as error (log as info)

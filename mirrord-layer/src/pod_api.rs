@@ -13,6 +13,7 @@ use kube::{
     Client, Config,
 };
 use mirrord_config::LayerConfig;
+use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
@@ -47,6 +48,8 @@ pub(crate) async fn create_agent(
     config: LayerConfig,
     connection_port: u16,
 ) -> Result<Portforwarder> {
+    let progress = TaskProgress::new("agent initializing...");
+
     let _guard = EnvVarGuard::new();
     let LayerConfig {
         target,
@@ -104,6 +107,7 @@ pub(crate) async fn create_agent(
             &pod_api,
             agent_image,
             connection_port,
+            &progress,
         )
         .await?
     } else {
@@ -128,13 +132,18 @@ pub(crate) async fn create_agent(
             runtime_data,
             &job_api,
             connection_port,
+            &progress,
         )
         .await?
     };
-    pod_api
+    let port_forwarder = pod_api
         .portforward(&pod_name, &[connection_port])
         .await
-        .map_err(LayerError::KubeError)
+        .map_err(LayerError::KubeError)?;
+
+    progress.done_with("agent running");
+
+    Ok(port_forwarder)
 }
 
 fn get_agent_name() -> String {
@@ -196,7 +205,10 @@ async fn create_ephemeral_container_agent(
     pod_api: &Api<Pod>,
     agent_image: String,
     connection_port: u16,
+    progress: &TaskProgress,
 ) -> Result<String> {
+    let container_progress = progress.subtask("creating ephemeral container...");
+
     warn!("Ephemeral Containers is an experimental feature
               >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
 
@@ -261,6 +273,10 @@ async fn create_ephemeral_container_agent(
         .fields(&format!("metadata.name={}", &runtime_data.pod_name))
         .timeout(60);
 
+    container_progress.done_with("container created");
+
+    let container_progress = progress.subtask("waiting for container to be ready...");
+
     let stream = watcher(pod_api.clone(), params).applied_objects();
     pin!(stream);
 
@@ -275,6 +291,8 @@ async fn create_ephemeral_container_agent(
 
     wait_for_agent_startup(pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
 
+    container_progress.done_with("container is ready");
+
     debug!("container is ready");
     Ok(runtime_data.pod_name.to_string())
 }
@@ -286,7 +304,9 @@ async fn create_job_pod_agent(
     runtime_data: RuntimeData,
     job_api: &Api<Job>,
     connection_port: u16,
+    progress: &TaskProgress,
 ) -> Result<String> {
+    let pod_progress = progress.subtask("creating agent pod...");
     let mirrord_agent_job_name = get_agent_name();
 
     let mut agent_command_line = vec![
@@ -370,6 +390,10 @@ async fn create_job_pod_agent(
         .labels(&format!("job-name={}", mirrord_agent_job_name))
         .timeout(60);
 
+    pod_progress.done_with("agent pod created");
+
+    let pod_progress = progress.subtask("waiting for pod to be ready...");
+
     let stream = watcher(pod_api.clone(), params).applied_objects();
     pin!(stream);
 
@@ -394,6 +418,9 @@ async fn create_job_pod_agent(
         .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
 
     wait_for_agent_startup(pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+
+    pod_progress.done_with("pod is ready");
+
     Ok(pod_name)
 }
 
