@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
+- Use LabelSelector instead of app=* to select pods from deployments
 
 ## 3.0.19-alpha
 
