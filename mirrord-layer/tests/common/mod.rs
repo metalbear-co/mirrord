@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::Child;
 
 pub struct TestProcess {
-    pub child: Child,
+    pub child: Option<Child>,
     stderr: Arc<Mutex<String>>,
     stdout: Arc<Mutex<String>>,
 }
@@ -27,6 +27,10 @@ pub struct TestProcess {
 impl TestProcess {
     pub fn get_stdout(&self) -> String {
         self.stdout.lock().unwrap().clone()
+    }
+
+    pub fn assert_stderr_empty(&self) {
+        assert!(self.stderr.lock().unwrap().is_empty());
     }
 
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
@@ -78,7 +82,7 @@ impl TestProcess {
             }
         });
         TestProcess {
-            child,
+            child: Some(child),
             stderr: stderr_data,
             stdout: stdout_data,
         }
@@ -106,6 +110,16 @@ impl TestProcess {
 
     pub fn assert_no_error_in_stderr(&self) {
         assert!(!self.stderr.lock().unwrap().to_lowercase().contains("error"));
+    }
+
+    pub async fn wait_assert_success(&mut self) {
+        let awaited_child = self.child.take();
+        let output = awaited_child.unwrap().wait_with_output().await.unwrap();
+        assert!(output.status.success());
+    }
+
+    pub async fn wait(&mut self) {
+        self.child.take().unwrap().wait().await.unwrap();
     }
 
 }

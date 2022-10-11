@@ -2,7 +2,6 @@ use std::{
     env,
     path::{Path, PathBuf},
     process,
-    process::Stdio,
     time::Duration,
 };
 
@@ -70,7 +69,7 @@ async fn test_mirroring_with_http(
     layer_connection
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
-    test_process.child.wait().await.unwrap();
+    test_process.wait().await;
     test_process.assert_stdout_contains("GET: Request completed");
     test_process.assert_stdout_contains("POST: Request completed");
     test_process.assert_stdout_contains("PUT: Request completed");

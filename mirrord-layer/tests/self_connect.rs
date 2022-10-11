@@ -1,7 +1,7 @@
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
-use tokio::{net::TcpListener, process::Command};
+use tokio::net::TcpListener;
 
 mod common;
 
@@ -20,23 +20,14 @@ async fn test_self_connect(dylib_path: &PathBuf) {
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr);
-    let server = Command::new(executable)
-        .args(application.get_args())
-        .envs(env)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    println!("Started application.");
+    let mut test_process = TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
     let mut layer_connection =
         LayerConnection::get_initialized_connection(&listener, application.get_app_port()).await;
     println!("Application subscribed to port, sending tcp messages.");
     assert!(layer_connection.is_ended().await);
-    let output = server.wait_with_output().await.unwrap();
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(output.stderr.is_empty());
-    assert!(!&stdout_str.to_lowercase().contains("error"));
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stdout();
 }
