@@ -79,6 +79,8 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
+        with:
+          shared-key: ubuntu-latest
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_mirrord_layer:
@@ -162,7 +164,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ubuntu-latest
+          shared-key: ubuntu-latest
       - run: cargo +nightly build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -185,7 +187,7 @@ jobs:
           target: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v1          # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
-          key: ubuntu-latest
+          shared-key: ubuntu-latest
           cache-on-failure: true
       # TODO: Uncomment when go is enabled.
       # - uses: actions/setup-go@v3             # Install Go for http mirroring tests with a Go webserver.
@@ -223,7 +225,7 @@ jobs:
           target: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v1          # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
-          key: macos-12
+          shared-key: macos-12
           cache-on-failure: true
       # TODO: Uncomment when go is enabled.
       # - uses: actions/setup-go@v3             # Install Go for http mirroring tests with a Go webserver.
