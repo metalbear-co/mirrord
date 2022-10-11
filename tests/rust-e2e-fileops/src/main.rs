@@ -87,7 +87,28 @@ fn test_fgets() {
     };
 }
 
-// TODO(alex) [mid] 2022-10-09: `pread` test.
+fn test_pread() {
+    println!(">> test_pread");
+
+    let file = OpenOptions::new()
+        .read(true)
+        .open(FILE_PATH)
+        .expect("pread!");
+
+    let fd = file.as_raw_fd();
+
+    unsafe {
+        let mode = CString::new("r").expect("valid C string");
+        let (buffer, length, _capacity) = vec![0i8; 1500].into_raw_parts();
+
+        if libc::pread(fd, buffer.cast(), length, 1) < 1 {
+            let file_stream = libc::fdopen(fd, mode.as_ptr());
+            let error_code = libc::ferror(file_stream);
+            assert_eq!(error_code, 0);
+        }
+    };
+}
+
 fn main() {
     create_test_file();
 
@@ -95,4 +116,5 @@ fn main() {
     test_open_read_write();
     test_open_read_contents();
     test_fgets();
+    test_pread();
 }
