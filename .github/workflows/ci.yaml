@@ -232,7 +232,7 @@ jobs:
       - run: pip3 install uvicorn[standard]   # For http mirroring test with FastAPI.
       - run: cargo +nightly build -p mirrord-layer  # Build layer lib. The tests load it into the apps.
       # Run `http_mirroring` and `self_connect` integration tests of `mirrord-layer`.
-      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer -- --nocapture
 
   e2e:
     runs-on: ubuntu-latest
