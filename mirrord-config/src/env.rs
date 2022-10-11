@@ -21,7 +21,7 @@ pub struct EnvFileConfig {
 
     /// Set or override environment variables.
     #[serde(rename = "override")]
-    pub overrides: Option<HashMap<String, String>>
+    pub overrides: Option<HashMap<String, String>>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
