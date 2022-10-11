@@ -439,7 +439,6 @@ jobs:
   # Hence, we have some kind of dummy here that bors can listen on
   ci-success:
     name: ci
-    if: ${{ success() }}
     needs:
       [
         build_mirrord,
@@ -456,6 +455,20 @@ jobs:
         build_intellij_plugin,
       ]
     runs-on: ubuntu-latest
+    if: |
+      always() &&
+      (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
+      (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+      (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
+      (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.e2e_macos.result == 'success' || needs.e2e_macos.result == 'skipped') &&
+      (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+      (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+      (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
+      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped')
     steps:
       - name: CI succeeded
         run: exit 0
