@@ -118,7 +118,7 @@ jobs:
         with:
           name: test
           path: /tmp/test.tar
-  
+
   test_mirrord_layer_cli:
     strategy:
       matrix:
@@ -200,7 +200,7 @@ jobs:
           name: layer-lib
           path: target/debug/
       # Run `http_mirroring` and `self_connect` integration tests of `mirrord-layer`.
-      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer
+      - run: cargo +nightly test --test http_mirroring --test self_connect -p mirrord-layer -- --nocapture
 
   integration_tests_macos:
     runs-on: macos-12
