@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
@@ -16,6 +18,10 @@ pub struct EnvFileConfig {
 
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
+
+    /// Set or override environment variables.
+    #[serde(rename = "override")]
+    pub overrides: Option<HashMap<String, String>>
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -23,6 +29,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
         Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value(),
+            overrides: None,
         })
     }
 }
