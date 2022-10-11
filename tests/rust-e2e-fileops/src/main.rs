@@ -91,8 +91,8 @@ fn test_fgets() {
 fn main() {
     create_test_file();
 
-    // test_open_read_only();
-    // test_open_read_write();
-    // test_open_read_contents();
+    test_open_read_only();
+    test_open_read_write();
+    test_open_read_contents();
     test_fgets();
 }
