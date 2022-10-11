@@ -21,6 +21,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are 
   now also integration tests in other files.
 - Delete useless `e2e_macos` CI job.
+- Integration tests also display test process output (with mirrord logs) when they 
+  time out.
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
