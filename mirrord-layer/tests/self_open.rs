@@ -104,8 +104,9 @@ async fn test_self_open(dylib_path: &PathBuf) {
     let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     assert!(layer_connection.is_ended().await);
     let output = server.wait_with_output().await.unwrap();
-    assert!(output.status.success());
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+    println!("{}", stdout_str);
+    assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(!&stdout_str.to_lowercase().contains("error"));
 }
