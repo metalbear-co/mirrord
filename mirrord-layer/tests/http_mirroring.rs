@@ -288,12 +288,12 @@ async fn test_mirroring_with_http(
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
     println!("{stdout_str}");
+    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    println!("stderr:\n{stderr_str}");
     assert!(stdout_str.contains("GET: Request completed"));
     assert!(stdout_str.contains("POST: Request completed"));
     assert!(stdout_str.contains("PUT: Request completed"));
     assert!(stdout_str.contains("DELETE: Request completed"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
-    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-    println!("stderr:\n{stderr_str}");
     assert!(!&stderr_str.to_lowercase().contains("error"));
 }
