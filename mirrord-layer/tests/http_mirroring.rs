@@ -1,11 +1,4 @@
-use std::{
-    collections::HashMap,
-    env,
-    path::{Path, PathBuf},
-    process,
-    process::Stdio,
-    time::Duration,
-};
+use std::{collections::HashMap, env, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -243,7 +236,7 @@ async fn test_mirroring_with_http(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        // Application::Go19HTTP
+        Application::Go19HTTP
     )]
     application: Application,
     dylib_path: &PathBuf,

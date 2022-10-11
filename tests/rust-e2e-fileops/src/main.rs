@@ -3,7 +3,7 @@
 extern crate alloc;
 use alloc::ffi::CString;
 use std::{
-    fs::{DirBuilder, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Write},
     os::unix::prelude::*,
 };
