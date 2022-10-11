@@ -16,10 +16,10 @@ use termspin::{spinner::dots, Group, Line, Loop, SharedFrames};
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_ENABLE_PROGRESS";
 
 /// `ProgressMode` specifies the way progress is reported
-/// by [`PrintProgress`].
+/// by [`TaskProgress`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProgressMode {
-    /// Display dynamic progress with spinners and colors.
+    /// Display dynamic progress with spinners.
     Standard,
     /// Display simple human-readable messages in new lines.
     Simple,
@@ -90,7 +90,7 @@ pub struct TaskProgress {
 }
 
 impl TaskProgress {
-    /// Report the progress of a new task with the given description. 
+    /// Report the progress of a new task with the given description.
     ///
     /// By default the task is considered failed if it goes out of
     /// scope without `done` being called.
@@ -184,7 +184,7 @@ impl TaskProgress {
 
     /// If set to `true` (default), the task is considered failed
     /// if it gets dropped.
-    /// 
+    ///
     /// Set this to `false` if the task cannot fail, or failure
     /// is not important.
     pub fn fail_on_drop(mut self, fail: bool) -> Self {
