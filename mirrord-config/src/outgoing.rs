@@ -9,6 +9,7 @@ use crate::{
 };
 
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[config(map_to = OutgoingConfig)]
 pub struct OutgoingFileConfig {
