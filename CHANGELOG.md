@@ -8,10 +8,25 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
+- Layer integration tests for more apps. Closes
+  [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+
+## Changed
+- Don't report InProgress io error as error (log as info)
+- Rename http mirroring tests from `integration` to `http_mirroring` since there are 
+  now also integration tests in other files.
+
+### Fixed
+- Fix IntelliJ Extension artifact - use glob pattern
+
+## 3.0.19-alpha
+
+### Added
 - Release image for armv7 (Cloud ARM)
 
 ### Fixed
 - Release for non-amd64 arch failed because of lack of QEMU step in the github action. Re-added it
+
 ## 3.0.18-alpha
 
 ### Changed

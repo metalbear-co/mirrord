@@ -1,9 +1,16 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    path::{Path, PathBuf},
+    process,
+    process::Stdio,
+    time::Duration,
+};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage,
 };
 use rstest::{fixture, rstest};
@@ -98,17 +105,33 @@ impl LayerConnection {
             .unwrap();
     }
 
+    /// Send the layer a message telling it the target got a new incoming connection.
+    /// There is no such actual connection, because there is no target, but the layer should start
+    /// a mirror connection with the application.
+    /// Return the id of the new connection.
+    async fn send_close(&mut self, connection_id: u64) {
+        self.codec
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id,
+            })))
+            .await
+            .unwrap();
+    }
+
     /// Tell the layer there is a new incoming connection, then send data "from that connection".
     async fn send_connection_then_data(&mut self, message_data: &str) {
         let new_connection_id = self.send_new_connection().await;
         self.send_tcp_data(message_data, new_connection_id).await;
+        self.send_close(new_connection_id).await;
     }
 }
 
 #[derive(Debug)]
 enum Application {
-    // TODO: add more applications.
     PythonFlaskHTTP,
+    PythonFastApiHTTP,
+    NodeHTTP,
+    Go19HTTP,
 }
 
 impl Application {
@@ -135,6 +158,9 @@ impl Application {
     async fn get_executable(&self) -> String {
         match self {
             Application::PythonFlaskHTTP => Self::get_python3_executable().await,
+            Application::PythonFastApiHTTP => String::from("uvicorn"),
+            Application::NodeHTTP => String::from("node"),
+            Application::Go19HTTP => String::from("tests/apps/app_go/19"),
         }
     }
 
@@ -147,9 +173,35 @@ impl Application {
                 println!("using flask server from {:?}", app_path);
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::PythonFastApiHTTP => vec![
+                String::from("--port=80"),
+                String::from("--host=0.0.0.0"),
+                String::from("--app-dir=tests/apps/"),
+                String::from("app_fastapi:app"),
+            ],
+            Application::NodeHTTP => {
+                app_path.push("app_node.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
+            Application::Go19HTTP => vec![],
         }
     }
 }
+
+/// For running locally, so that new developers don't have the extra step of building the go app
+/// before running the tests.
+// #[ctor::ctor]
+// fn build_go_app() {
+//     let original_dir = env::current_dir().unwrap();
+//     let go_app_path = Path::new("tests/apps/app_go");
+//     env::set_current_dir(go_app_path).unwrap();
+//     let output = process::Command::new("go")
+//         .args(vec!["build", "-o", "19"])
+//         .output()
+//         .expect("Failed to build Go test app.");
+//     assert!(output.status.success(), "Building Go test app failed.");
+//     env::set_current_dir(original_dir).unwrap();
+// }
 
 /// Return the path to the existing layer lib, or build it first and return the path, according to
 /// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
@@ -183,7 +235,13 @@ fn dylib_path() -> PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
 async fn test_mirroring_with_http(
-    #[values(Application::PythonFlaskHTTP)] application: Application, // TODO: add more apps.
+    #[values(
+        Application::PythonFlaskHTTP,
+        Application::PythonFastApiHTTP,
+        Application::NodeHTTP,
+        // Application::Go19HTTP
+    )]
+    application: Application,
     dylib_path: &PathBuf,
 ) {
     let mut env = HashMap::new();
@@ -198,6 +256,7 @@ async fn test_mirroring_with_http(
     env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
+    env.insert("MIRRORD_FILE_OPS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
     env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
     let server = Command::new(executable)
@@ -214,26 +273,27 @@ async fn test_mirroring_with_http(
     println!("Application subscribed to port, sending tcp messages.");
 
     layer_connection
-        .send_connection_then_data("GET / HTTP/1.1\r\n\r\n")
+        .send_connection_then_data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await;
     layer_connection
-        .send_connection_then_data("POST / HTTP/1.1\r\n\r\npost-data")
+        .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
         .await;
     layer_connection
-        .send_connection_then_data("PUT / HTTP/1.1\r\n\r\nput-data")
+        .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
         .await;
     layer_connection
-        .send_connection_then_data("DELETE / HTTP/1.1\r\n\r\ndelete-data")
+        .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
 
-    println!("Done sending messages, waiting for server to exit.");
-    // The server exits after receiving DELETE.
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    assert!(&stdout_str.contains("GET: Request completed"));
-    assert!(&stdout_str.contains("POST: Request completed"));
-    assert!(&stdout_str.contains("PUT: Request completed"));
-    assert!(&stdout_str.contains("DELETE: Request completed"));
-    assert!(output.stderr.is_empty());
+    println!("{stdout_str}");
+    assert!(stdout_str.contains("GET: Request completed"));
+    assert!(stdout_str.contains("POST: Request completed"));
+    assert!(stdout_str.contains("PUT: Request completed"));
+    assert!(stdout_str.contains("DELETE: Request completed"));
     assert!(!&stdout_str.to_lowercase().contains("error"));
+    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+    println!("stderr:\n{stderr_str}");
+    assert!(!&stderr_str.to_lowercase().contains("error"));
 }

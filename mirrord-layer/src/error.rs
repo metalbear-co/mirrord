@@ -184,6 +184,9 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
+            HookError::IO(ref e) if (e.raw_os_error() == Some(libc::EINPROGRESS)) => {
+                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
+            }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
 
