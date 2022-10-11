@@ -24,6 +24,7 @@ use crate::{
 
 /// This is the root struct for mirrord-layer's configuration
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {
@@ -264,5 +265,16 @@ mod tests {
         };
 
         assert_eq!(config, expect);
+    }
+
+    /// Helper for printing the config schema.
+    /// 
+    /// Run it with `cargo test -p mirrord-config --ignored print_schema --features schema -- --nocapture`
+    #[cfg(feature = "schema")]
+    #[test]
+    #[ignore]
+    fn print_schema() {
+        let schema = schemars::schema_for!(LayerFileConfig);
+        println!("{}", serde_json::to_string_pretty(&schema).unwrap());
     }
 }
