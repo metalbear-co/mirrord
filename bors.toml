@@ -1,5 +1,3 @@
-status = [
-  "CI"
-]
+status = ["ci"]
 use_squash_merge = true
 required_approvals = 1
