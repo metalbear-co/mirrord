@@ -222,7 +222,7 @@ jobs:
       - run: |                                # Build Go app to test http mirroring with.
           cd mirrord-layer/tests/apps/self_open
           go build -o 19
-          cd mirrord-layer/tests/apps/app_go
+          cd ../app_go
           go build -o 19
       - uses: actions/setup-node@v3
         with:

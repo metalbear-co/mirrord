@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_protocol::{tcp::LayerTcp, ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use rstest::{fixture, rstest};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -89,7 +89,7 @@ async fn test_self_open(dylib_path: &PathBuf) {
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
     env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
     let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    app_path.push("tests/apps/self_open/self_open");
+    app_path.push("tests/apps/self_open/19");
     let server = Command::new(app_path)
         .envs(env)
         .current_dir("/tmp") // if it's the same as the binary it will ignore it by that.
