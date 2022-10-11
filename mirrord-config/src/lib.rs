@@ -272,7 +272,7 @@ mod tests {
     /// Run it with:
     ///
     /// ```sh
-    /// cargo test -p mirrord-config --ignored print_schema --features schema -- --nocapture
+    /// cargo test -p mirrord-config print_schema --features schema -- --ignored --nocapture
     /// ```
     #[cfg(feature = "schema")]
     #[test]
