@@ -10,6 +10,7 @@ use clap::Parser;
 use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
+use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
@@ -44,6 +45,7 @@ use std::env::temp_dir;
 use mac::temp_dir;
 
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
+    let progress = TaskProgress::new("initializing mirrord layer...");
     let library_file = env!("MIRRORD_LAYER_FILE");
     let library_path = Path::new(library_file);
 
@@ -74,6 +76,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     file.write_all(bytes).unwrap();
 
     debug!("Extracted library file to {:?}", &file_path);
+    progress.done_with("layer initialized");
     Ok(file_path)
 }
 

@@ -9,10 +9,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - `pread` hook (used by `dotnet`);
+- mirrord-layer: ignore opening self-binary (temporal SDK calculates the hash of the binary, and it fails because it happens remotely)
 - Layer integration tests with more apps (testing with Go only on MacOS because of
   known crash on Linux - [[#380](https://github.com/metalbear-co/mirrord/issues/380)]).
   Closes [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
+- Added progress reporting to the CLI.
 - CI: use [bors](https://bors.tech/) for merging! woohoo.
+
 
 ## Changed
 - Don't report InProgress io error as error (log as info)
@@ -23,6 +26,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are
   now also integration tests in other files.
+- Delete useless `e2e_macos` CI job.
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
