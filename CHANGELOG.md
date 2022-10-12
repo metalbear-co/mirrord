@@ -34,7 +34,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
 - Use LabelSelector instead of app=* to select pods from deployments
-- Added another protection [to not execute in child processes from k8s auth](https://github.com/metalbear-co/mirrord/issues/531) by setting an env flag to avodi loading then removing it after executing the api.
+- Added another protection [to not execute in child processes from k8s auth](https://github.com/metalbear-co/mirrord/issues/531) by setting an env flag to avoid loading then removing it after executing the api.
 ## 3.0.19-alpha
 
 ### Added
