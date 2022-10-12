@@ -23,6 +23,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Integration tests also display test process output (with mirrord logs) when they 
   time out.
 - CI: mirrord-layer UT and integration run in same job.
+- .devcontainer: Added missing dependencies and also kind for running e2e tests.
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
