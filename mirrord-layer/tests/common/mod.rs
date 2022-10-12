@@ -1,17 +1,133 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, Mutex},
+};
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
+use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage,
 };
 use rstest::fixture;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
-    process::Command,
+    process::{Child, Command},
 };
+
+pub struct TestProcess {
+    pub child: Option<Child>,
+    stderr: Arc<Mutex<String>>,
+    stdout: Arc<Mutex<String>>,
+}
+
+impl TestProcess {
+    pub fn get_stdout(&self) -> String {
+        self.stdout.lock().unwrap().clone()
+    }
+
+    pub fn assert_stderr_empty(&self) {
+        assert!(self.stderr.lock().unwrap().is_empty());
+    }
+
+    pub fn assert_log_level(&self, stderr: bool, level: &str) {
+        if stderr {
+            assert!(!self.stderr.lock().unwrap().contains(level));
+        } else {
+            assert!(!self.stdout.lock().unwrap().contains(level));
+        }
+    }
+
+    fn from_child(mut child: Child) -> TestProcess {
+        let stderr_data = Arc::new(Mutex::new(String::new()));
+        let stdout_data = Arc::new(Mutex::new(String::new()));
+        let child_stderr = child.stderr.take().unwrap();
+        let child_stdout = child.stdout.take().unwrap();
+        let stderr_data_reader = stderr_data.clone();
+        let stdout_data_reader = stdout_data.clone();
+        let pid = child.id().unwrap();
+
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(child_stderr);
+            let mut buf = [0; 1024];
+            loop {
+                let n = reader.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+
+                let string = String::from_utf8_lossy(&buf[..n]);
+                eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
+                {
+                    stderr_data_reader.lock().unwrap().push_str(&string);
+                }
+            }
+        });
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(child_stdout);
+            let mut buf = [0; 1024];
+            loop {
+                let n = reader.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                let string = String::from_utf8_lossy(&buf[..n]);
+                print!("stdout {:?} {pid}: {}", Utc::now(), string);
+                {
+                    stdout_data_reader.lock().unwrap().push_str(&string);
+                }
+            }
+        });
+        TestProcess {
+            child: Some(child),
+            stderr: stderr_data,
+            stdout: stdout_data,
+        }
+    }
+
+    pub async fn start_process(
+        executable: String,
+        args: Vec<String>,
+        env: HashMap<&str, &str>,
+    ) -> TestProcess {
+        let child = Command::new(executable)
+            .args(args)
+            .envs(env)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        println!("Started application.");
+        TestProcess::from_child(child)
+    }
+
+    pub fn assert_stdout_contains(&self, string: &str) {
+        assert!(self.stdout.lock().unwrap().contains(string));
+    }
+
+    pub fn assert_no_error_in_stdout(&self) {
+        assert!(!self.stdout.lock().unwrap().to_lowercase().contains("error"));
+    }
+
+    pub fn assert_no_error_in_stderr(&self) {
+        assert!(!self.stderr.lock().unwrap().to_lowercase().contains("error"));
+    }
+
+    pub async fn wait_assert_success(&mut self) {
+        let awaited_child = self.child.take();
+        let output = awaited_child.unwrap().wait_with_output().await.unwrap();
+        assert!(output.status.success());
+    }
+
+    pub async fn wait(&mut self) {
+        self.child.take().unwrap().wait().await.unwrap();
+    }
+}
 
 pub struct LayerConnection {
     codec: Framed<TcpStream, DaemonCodec>,
