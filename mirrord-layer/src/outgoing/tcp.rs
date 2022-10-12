@@ -17,7 +17,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -203,7 +203,7 @@ impl TcpOutgoingHandler {
     ) -> Result<(), LayerError> {
         match response {
             DaemonTcpOutgoing::Connect(connect) => {
-                trace!("Connect -> connect {:#?}", connect);
+                debug!("Connect -> connect {:#?}", connect);
 
                 let response = async move { connect }
                     .and_then(
@@ -272,7 +272,7 @@ impl TcpOutgoingHandler {
             }
             DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
-                trace!("Read -> read {:?}", read);
+                debug!("Read -> read {:?}", read);
                 let DaemonRead {
                     connection_id,
                     bytes,
@@ -293,7 +293,7 @@ impl TcpOutgoingHandler {
             }
             DaemonTcpOutgoing::Close(connection_id) => {
                 // (agent) failed to perform some operation.
-                trace!("Close -> connection_id {:?}", connection_id);
+                debug!("Close -> connection_id {:?}", connection_id);
                 self.mirrors.remove(&connection_id);
 
                 Ok(())
