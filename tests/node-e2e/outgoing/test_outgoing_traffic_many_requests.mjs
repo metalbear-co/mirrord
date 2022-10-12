@@ -39,13 +39,13 @@ function makeRequests() {
       );
 
       response.on("error", (fail) => {
-        process.stderr.write(`>> response from ${host} failed with ${fail}`);
+        console.log(`>> response from ${host} failed with ${fail}`);
         throw fail;
       });
     });
 
     request.on("error", (fail) => {
-      process.stderr.write(
+      console.log(
         `>> request to ${requestIndex} ${host} failed with ${fail}`
       );
       throw fail;
