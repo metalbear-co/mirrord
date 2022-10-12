@@ -30,7 +30,7 @@ fn build_go_app() {
 /// traffic to the application.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(20))]
+#[timeout(Duration::from_secs(60))]
 async fn test_mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
@@ -79,7 +79,7 @@ async fn test_mirroring_with_http(
 #[cfg(target_os = "macos")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(20))]
+#[timeout(Duration::from_secs(60))]
 async fn test_mirroring_with_http_go(dylib_path: &PathBuf) {
     test_mirroring_with_http(Application::Go19HTTP, dylib_path).await;
 }
