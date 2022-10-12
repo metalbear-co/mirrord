@@ -2,7 +2,7 @@ use std::{
     self,
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{prelude::*, BufReader, SeekFrom},
+    io::{prelude::*, BufReader, BufWriter, SeekFrom},
     path::PathBuf,
 };
 
@@ -12,6 +12,7 @@ use mirrord_protocol::{
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    WriteLimitedFileRequest,
 };
 use tracing::{debug, error, trace};
 
@@ -86,6 +87,14 @@ impl FileManager {
             FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
                 let write_result = self.write(fd, write_bytes);
                 Ok(FileResponse::Write(write_result))
+            }
+            FileRequest::WriteLimited(WriteLimitedFileRequest {
+                remote_fd,
+                start_from,
+                write_bytes,
+            }) => {
+                let write_result = self.write_limited(remote_fd, start_from, write_bytes);
+                Ok(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => {
                 let close_result = self.close(fd);
@@ -282,6 +291,32 @@ impl FileManager {
                     })?;
 
                     Ok(read_result)
+                } else {
+                    Err(ResponseError::NotFile(fd))
+                }
+            })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn write_limited(
+        &mut self,
+        fd: usize,
+        start_from: u64,
+        buffer: Vec<u8>,
+    ) -> RemoteResult<WriteFileResponse> {
+        self.open_files
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))
+            .and_then(|remote_file| {
+                if let RemoteFile::File(file) = remote_file {
+                    let mut writer = BufWriter::new(std::io::Write::by_ref(file));
+                    let _ = writer.seek(SeekFrom::Start(start_from))?;
+
+                    let write_result = writer
+                        .write(&buffer)
+                        .map(|written_amount| WriteFileResponse { written_amount })?;
+
+                    Ok(write_result)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
