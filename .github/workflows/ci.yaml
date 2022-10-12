@@ -318,6 +318,38 @@ jobs:
           cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
           cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
           cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
       - name: Collect logs
         if: ${{ failure() }}
         run: |
