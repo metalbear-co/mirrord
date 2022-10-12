@@ -306,7 +306,15 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+        run: |
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
       - name: switch minikube runtime
         run: |
           minikube delete
@@ -314,42 +322,42 @@ jobs:
           minikube image load /tmp/test.tar
       - name: test with docker runtime
         run: |
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
-          cargo test --lib tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
+          cargo test -p tests tests::test_outgoing_traffic_many_requests_enabled
       - name: Collect logs
         if: ${{ failure() }}
         run: |
