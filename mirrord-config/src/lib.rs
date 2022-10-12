@@ -22,6 +22,8 @@ use crate::{
     pod::PodFileConfig, util::VecOrSingle,
 };
 
+pub const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
+
 /// This is the root struct for mirrord-layer's configuration
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

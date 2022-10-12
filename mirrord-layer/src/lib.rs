@@ -26,6 +26,7 @@ use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
+    MIRRORD_SKIP_LOAD,
 };
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
@@ -87,6 +88,9 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 #[ctor]
 fn before_init() {
     if !cfg!(test) {
+        if let Ok(Ok(true)) = std::env::var(MIRRORD_SKIP_LOAD).map(|value| value.parse::<bool>()) {
+            return;
+        }
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
 

@@ -12,7 +12,7 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, MIRRORD_SKIP_LOAD};
 use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
@@ -30,8 +30,8 @@ impl EnvVarGuard {
     const ENV_VAR: &str = "LD_PRELOAD";
     #[cfg(target_os = "macos")]
     const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
-
     fn new() -> Self {
+        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
         Self { library }
@@ -41,6 +41,7 @@ impl EnvVarGuard {
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
+        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
     }
 }
 

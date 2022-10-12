@@ -15,7 +15,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added progress reporting to the CLI.
 - CI: use [bors](https://bors.tech/) for merging! woohoo.
 
-
 ## Changed
 - Don't report InProgress io error as error (log as info)
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are 
@@ -23,11 +22,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Delete useless `e2e_macos` CI job.
 - Integration tests also display test process output (with mirrord logs) when they 
   time out.
+- CI: mirrord-layer UT and integration run in same job.
 
 ### Fixed
 - Fix IntelliJ Extension artifact - use glob pattern
 - Use LabelSelector instead of app=* to select pods from deployments
-
+- Added another protection [to not execute in child processes from k8s auth](https://github.com/metalbear-co/mirrord/issues/531) by setting an env flag to avodi loading then removing it after executing the api.
 ## 3.0.19-alpha
 
 ### Added
