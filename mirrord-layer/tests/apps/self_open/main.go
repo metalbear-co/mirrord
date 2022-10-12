@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	_ "net/http" // for dynamic linkage on linux..
 )
 
 func main() {
