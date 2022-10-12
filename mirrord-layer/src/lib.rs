@@ -28,7 +28,6 @@ use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
-    MIRRORD_SKIP_LOAD,
 };
 use mirrord_macro::hook_guard_fn;
 use mirrord_protocol::{
@@ -86,6 +85,8 @@ pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
+
+pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
 #[ctor]
 fn before_init() {

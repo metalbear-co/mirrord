@@ -12,14 +12,17 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
-use mirrord_config::{LayerConfig, MIRRORD_SKIP_LOAD};
+use mirrord_config::LayerConfig;
 use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, info, warn};
 
-use crate::error::{LayerError, Result};
+use crate::{
+    error::{LayerError, Result},
+    MIRRORD_SKIP_LOAD,
+};
 
 struct EnvVarGuard {
     library: String,
