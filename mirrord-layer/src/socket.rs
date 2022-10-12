@@ -13,7 +13,10 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
-use crate::error::{HookError, HookResult};
+use crate::{
+    detour::{Bypass, Detour, OptionExt},
+    error::{HookError, HookResult},
+};
 
 pub(super) mod hooks;
 pub(crate) mod ops;
@@ -98,7 +101,7 @@ pub(crate) enum SocketKind {
 }
 
 impl TryFrom<c_int> for SocketKind {
-    type Error = HookError;
+    type Error = Bypass;
 
     fn try_from(type_: c_int) -> Result<Self, Self::Error> {
         if (type_ & libc::SOCK_STREAM) > 0 {
@@ -106,7 +109,7 @@ impl TryFrom<c_int> for SocketKind {
         } else if (type_ & libc::SOCK_DGRAM) > 0 {
             Ok(SocketKind::Udp(type_))
         } else {
-            Err(HookError::BypassedType(type_))
+            Err(Bypass::Type(type_))
         }
     }
 }
@@ -132,9 +135,9 @@ fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_address: SocketAddr,
-) -> HookResult<()> {
-    if address.is_null() {
-        Ok(())
+) -> Detour<i32> {
+    let result = if address.is_null() {
+        Ok(0)
     } else if address_len.is_null() {
         Err(HookError::NullPointer)
     } else {
@@ -151,8 +154,10 @@ fn fill_address(
             *address_len = os_address.len();
         }
 
-        Ok(())
-    }
+        Ok(0)
+    }?;
+
+    Detour::Success(result)
 }
 
 pub(crate) trait ProtocolExt {
@@ -179,5 +184,25 @@ impl ProtocolExt for Protocol {
             Protocol::Tcp => Ok(libc::IPPROTO_TCP),
             _ => todo!(),
         }
+    }
+}
+
+pub(crate) trait SocketAddrExt {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr>;
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
+        unsafe {
+            SockAddr::init(|storage, len| {
+                storage.copy_from_nonoverlapping(raw_address.cast(), 1);
+                len.copy_from_nonoverlapping(&address_length, 1);
+
+                Ok(())
+            })
+        }
+        .ok()
+        .and_then(|((), address)| address.as_socket())
+        .bypass(Bypass::AddressConversion)
     }
 }

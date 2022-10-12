@@ -1,4 +1,5 @@
 use alloc::ffi::CString;
+use core::{ffi::CStr, mem};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -12,11 +13,11 @@ use mirrord_protocol::dns::LookupRecord;
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
-use trust_dns_resolver::config::Protocol;
 
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    detour::{Detour, OptionExt},
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     tcp::{HookMessageTcp, Listen},
@@ -25,11 +26,11 @@ use crate::{
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[tracing::instrument(level = "trace")]
-pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult<RawFd> {
+pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
-        Err(HookError::BypassedDomain(domain))
+        Err(Bypass::Domain(domain))
     } else {
         Ok(())
     }?;
@@ -53,34 +54,37 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> HookResult
     let mut sockets = SOCKETS.lock()?;
     sockets.insert(socket_fd, Arc::new(new_socket));
 
-    Ok(socket_fd)
+    Detour::Success(socket_fd)
 }
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace")]
-pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
-    let requested_address = address.as_socket().ok_or(HookError::AddressConversion)?;
+#[tracing::instrument(level = "trace", skip(raw_address))]
+pub(super) fn bind(
+    sockfd: c_int,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
+) -> Detour<i32> {
+    let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+    let requested_port = requested_address.port();
+
+    if is_ignored_port(requested_port) {
+        Err(Bypass::Port(requested_address.port()))?;
+    }
 
     let mut socket = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .ok_or(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| {
                 if !matches!(socket.state, SocketState::Initialized) {
-                    Err(HookError::SocketInvalidState(sockfd))
+                    Err(Bypass::InvalidState(sockfd))
                 } else {
                     Ok(socket)
                 }
             })?
     };
-
-    let requested_port = requested_address.port();
-
-    if is_ignored_port(requested_port) {
-        return Err(HookError::BypassedPort(requested_address.port()));
-    }
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
@@ -91,7 +95,7 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             0,
         ))),
-        invalid => Err(HookError::UnsupportedDomain(invalid)),
+        invalid => Err(Bypass::Domain(invalid)),
     }?;
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
@@ -120,8 +124,9 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
             }
         })
     }
-    .map(|(_, address)| address.as_socket())?
-    .ok_or(HookError::AddressConversion)?;
+    .ok()
+    .and_then(|(_, address)| address.as_socket())
+    .bypass(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         requested_port,
@@ -130,18 +135,18 @@ pub(super) fn bind(sockfd: c_int, address: SockAddr) -> HookResult<()> {
 
     SOCKETS.lock()?.insert(sockfd, socket);
 
-    Ok(())
+    Detour::Success(bind_result)
 }
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 #[tracing::instrument(level = "trace")]
-pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
-    let mut socket = {
+pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
+    let mut socket: Arc<UserSocket> = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))?
+            .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
 
     match socket.state {
@@ -168,14 +173,12 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> HookResult<()> {
                 address,
             });
 
-            Ok(())
+            SOCKETS.lock()?.insert(sockfd, socket);
+
+            Detour::Success(listen_result)
         }
-        _ => Err(HookError::SocketInvalidState(sockfd)),
-    }?;
-
-    SOCKETS.lock()?.insert(sockfd, socket);
-
-    Ok(())
+        _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
+    }
 }
 
 // TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
@@ -192,7 +195,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
     mut user_socket_info: Arc<UserSocket>,
-) -> HookResult<i32> {
+) -> Detour<i32> {
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -238,7 +241,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
     SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
-    Ok(connect_result)
+    Detour::Success(connect_result)
 }
 
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
@@ -251,12 +254,22 @@ fn connect_outgoing<const TYPE: ConnectType>(
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
 #[tracing::instrument(level = "trace")]
-pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i32> {
+pub(super) fn connect(
+    sockfd: RawFd,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
+) -> Detour<i32> {
+    let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+
+    if is_ignored_port(remote_address.port()) {
+        Err(Bypass::Port(remote_address.port()))?
+    }
+
     let user_socket_info = {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))?
+            .ok_or(Bypass::LocalFdNotFound(sockfd))?
     };
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
@@ -269,10 +282,6 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
         .copied()
         .expect("Should be set during initialization!");
 
-    (!is_ignored_port(remote_address.port()))
-        .then_some(())
-        .ok_or_else(|| HookError::BypassedPort(remote_address.port()))?;
-
     let raw_connect = |remote_address| {
         let rawish_remote_address = SockAddr::from(remote_address);
         let result = unsafe {
@@ -284,9 +293,9 @@ pub(super) fn connect(sockfd: RawFd, remote_address: SocketAddr) -> HookResult<i
         };
 
         if result != 0 {
-            Err(io::Error::last_os_error())?
+            Detour::Error(Err(io::Error::last_os_error())?)?
         } else {
-            Ok(result)
+            Detour::Success(result)
         }
     };
 
@@ -348,15 +357,15 @@ pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> HookResult<()> {
+) -> Detour<i32> {
     let remote_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Ok(connected.remote_address),
-                _ => Err(HookError::SocketInvalidState(sockfd)),
+                SocketState::Connected(connected) => Detour::Success(connected.remote_address),
+                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
@@ -370,19 +379,17 @@ pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-) -> HookResult<()> {
-    trace!("getsockname -> sockfd {:#?}", sockfd);
-
+) -> Detour<i32> {
     let local_address = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Ok(connected.mirror_address),
-                SocketState::Bound(bound) => Ok(bound.address),
-                SocketState::Listening(bound) => Ok(bound.address),
-                _ => Err(HookError::SocketInvalidState(sockfd)),
+                SocketState::Connected(connected) => Detour::Success(connected.mirror_address),
+                SocketState::Bound(bound) => Detour::Success(bound.address),
+                SocketState::Listening(bound) => Detour::Success(bound.address),
+                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
@@ -400,17 +407,17 @@ pub(super) fn accept(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
-) -> HookResult<RawFd> {
+) -> Detour<RawFd> {
     let (local_address, domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(bound) => {
-                    Ok((bound.address, socket.domain, socket.protocol, socket.type_))
+                    Detour::Success((bound.address, socket.domain, socket.protocol, socket.type_))
                 }
-                _ => Err(HookError::SocketInvalidState(sockfd)),
+                _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
@@ -418,7 +425,7 @@ pub(super) fn accept(
         CONNECTION_QUEUE
             .lock()?
             .get(&sockfd)
-            .ok_or(HookError::LocalFDNotFound(sockfd))
+            .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| socket.address)?
     };
 
@@ -436,28 +443,28 @@ pub(super) fn accept(
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 
-    Ok(new_fd)
+    Detour::Success(new_fd)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> HookResult<()> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Detour<()> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
-        _ => Ok(()),
+        _ => Detour::Success(()),
     }
 }
 
 #[tracing::instrument(level = "trace")]
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
     let dup_socket = SOCKETS
         .lock()?
         .get(&fd)
-        .ok_or(HookError::LocalFDNotFound(fd))?
+        .bypass(Bypass::LocalFdNotFound(fd))?
         .clone();
 
     SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
 
-    Ok(())
+    Detour::Success(())
 }
 
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
@@ -473,12 +480,48 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> HookResult<()> {
 /// for the equivalent of this function).
 #[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
-    node: Option<String>,
-    service: Option<String>,
-    protocol: Option<Protocol>,
-    ai_protocol: i32,
-    ai_socktype: i32,
-) -> HookResult<*mut libc::addrinfo> {
+    rawish_node: Option<&CStr>,
+    rawish_service: Option<&CStr>,
+    raw_hints: Option<&libc::addrinfo>,
+) -> Detour<*mut libc::addrinfo> {
+    // Bypass when any of these type conversions fail.
+    let node = rawish_node
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `rawish_node` from `CStr` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from);
+
+    let service = rawish_service
+        .map(CStr::to_str)
+        .transpose()
+        .map_err(|fail| {
+            warn!(
+                "Failed converting `raw_service` from `CStr` with {:#?}",
+                fail
+            );
+
+            Bypass::CStrConversion
+        })?
+        .map(String::from);
+
+    let raw_hints = raw_hints
+        .cloned()
+        .unwrap_or_else(|| unsafe { mem::zeroed() });
+
+    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
+    let libc::addrinfo {
+        ai_socktype,
+        ai_protocol,
+        ..
+    } = raw_hints;
+
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
     let hook = GetAddrInfoHook {
         node,
@@ -525,9 +568,9 @@ pub(super) fn getaddrinfo(
             unsafe { (*previous).ai_next = current };
             previous
         })
-        .ok_or(HookError::DNSNoName);
+        .ok_or(HookError::DNSNoName)?;
 
     debug!("getaddrinfo -> result {:#?}", result);
 
-    result
+    Detour::Success(result)
 }

@@ -1,4 +1,4 @@
-use std::{env::VarError, os::unix::io::RawFd, ptr, str::ParseBoolError};
+use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use kube::config::InferConfigError;
@@ -21,18 +21,6 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Failed to `Lock` resource!")]
     LockError,
 
-    #[error("mirrord-layer: Socket operation called on port `{0}` that is not handled by us!")]
-    BypassedPort(u16),
-
-    #[error("mirrord-layer: Socket operation called with type `{0}` that is not handled by us!")]
-    BypassedType(i32),
-
-    #[error("mirrord-layer: Socket operation called with domain `{0}` that is not handled by us!")]
-    BypassedDomain(i32),
-
-    #[error("mirrord-layer: Socket `{0}` is in an invalid state!")]
-    SocketInvalidState(RawFd),
-
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
 
@@ -42,20 +30,11 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: Failed to find local fd `{0}`!")]
-    LocalFDNotFound(RawFd),
-
     #[error("mirrord-layer: HOOK_SENDER is `None`!")]
     EmptyHookSender,
 
-    #[error("mirrord-layer: Failed converting `sockaddr`!")]
-    AddressConversion,
-
     #[error("mirrord-layer: Converting int failed with `{0}`!")]
     TryFromInt(#[from] std::num::TryFromIntError),
-
-    #[error("mirrord-layer: Failed request to create socket with domain `{0}`!")]
-    UnsupportedDomain(i32),
 
     #[error("mirrord-layer: Creating `CString` failed with `{0}`!")]
     Null(#[from] std::ffi::NulError),
@@ -65,6 +44,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
     SendErrorHookMessage(#[from] SendError<HookMessage>),
+
+    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
+    LocalFileCreation(usize),
 }
 
 #[derive(Error, Debug)]
@@ -164,19 +146,7 @@ pub(crate) type HookResult<T> = std::result::Result<T, HookError>;
 /// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
-        // TODO: These recoverable errors should probably be a "sub-Error" from `HookError`, so that
-        // we can do a single `match` for them everywhere, and avoid forgetting 1.
-        // To get a better sense of what I mean by this, imagine if we forget to check
-        // `BypassedDomain` in `socket::hooks::socket_detour` (we would error out, instead of
-        // bypassing as expected).
         match fail {
-            HookError::SocketInvalidState(_)
-            | HookError::LocalFDNotFound(_)
-            | HookError::BypassedType(_)
-            | HookError::BypassedDomain(_)
-            | HookError::BypassedPort(_) => {
-                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
-            }
             HookError::ResponseError(ResponseError::NotFound(_))
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
@@ -195,7 +165,6 @@ impl From<HookError> for i64 {
             HookError::RecvError(_) => libc::EBADMSG,
             HookError::Null(_) => libc::EINVAL,
             HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::LocalFDNotFound(..) => libc::EBADF,
             HookError::EmptyHookSender => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,
@@ -217,13 +186,8 @@ impl From<HookError> for i64 {
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
-            HookError::AddressConversion => libc::EINVAL,
-            HookError::UnsupportedDomain(_) => libc::EINVAL,
-            HookError::BypassedPort(_) => libc::EINVAL,
-            HookError::BypassedType(_) => libc::EINVAL,
-            HookError::BypassedDomain(_) => libc::EINVAL,
-            HookError::SocketInvalidState(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
+            HookError::LocalFileCreation(_) => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

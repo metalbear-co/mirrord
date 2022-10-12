@@ -30,12 +30,14 @@ jobs:
             mirrord-layer/**
             mirrord-macro/**
             mirrord-protocol/**
+            tests/**
             Cargo.toml
             Cargo.lock
             .dockerignore
             rust-toolchain.toml
             rustfmt.toml
             .cargo/**
+            .github/workflows/ci.yaml
       - name: get intellij changes
         id: changed-intellij
         uses: tj-actions/changed-files@v32
@@ -263,6 +265,7 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - run: cargo +nightly test -p mirrord-layer
+
 
   e2e:
     runs-on: ubuntu-latest
