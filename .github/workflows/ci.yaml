@@ -3,23 +3,58 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
-
+    branches: [main, staging, trying]
   pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'vscode-ext/**'
-      - 'intellij-ext/**'
-      - 'CHANGELOG.md'
-
+    branches: [main, staging, trying]
 
 jobs:
+  changed_files:
+    runs-on: ubuntu-latest
+    outputs:
+      rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: get changed rs files
+        id: changed-rs
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            **/*.rs
+            mirrord-agent/**
+            mirrord-auth/**
+            mirrord-cli/**
+            mirrord-config/**
+            mirrord-layer/**
+            mirrord-macro/**
+            mirrord-protocol/**
+            tests/**
+            Cargo.toml
+            Cargo.lock
+            .dockerignore
+            rust-toolchain.toml
+            rustfmt.toml
+            .cargo/**
+            .github/workflows/ci.yaml
+      - name: get intellij changes
+        id: changed-intellij
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            intellij-ext/**
+      - name: output test
+        run: |
+          echo ${{ steps.changed-rs.outputs.any_changed }};
+          echo ${{ steps.changed-rs.outputs.all_changed_files }};
+          echo ${{ steps.changed-intellij.outputs.any_changed }};
+          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
+
   lint:
     runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -37,6 +72,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -56,6 +93,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -71,6 +110,8 @@ jobs:
 
   test_agent:
     runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -81,26 +122,10 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
-  test_mirrord_layer:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
-      - run: |
-          cargo test -p mirrord-layer --lib
-
   test_agent_image:
     runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: docker/setup-buildx-action@v2
@@ -118,8 +143,10 @@ jobs:
         with:
           name: test
           path: /tmp/test.tar
-  
+
   test_mirrord_layer_cli:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-12, macos-11]
@@ -153,6 +180,8 @@ jobs:
   build_mirrord:
     runs-on: ubuntu-latest
     name: build mirrord
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -160,7 +189,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ubuntu-latest
       - run: cargo +nightly build --manifest-path=./Cargo.toml
@@ -173,54 +202,82 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-latest
-    needs: [build_mirrord]
+    needs: [build_mirrord, changed_files]
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.so
+      MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
-          key: ubuntu-latest
           cache-on-failure: true
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - name: download layer
+      - uses: actions/setup-node@v3 # For http mirroring test.
+        with:
+          node-version: 14
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd mirrord-layer/tests/apps/self_open
+          go build -o 19
+      - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      - run: cargo +nightly test -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.dylib
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install Rust.
         with:
           profile: minimal
           toolchain: nightly
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
-          key: macos-12
           cache-on-failure: true
-      - run: npm install express
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - run: cargo +nightly build -p mirrord-layer
-      - run: cargo +nightly test --test integration --test self_connect -p mirrord-layer
+      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.19.0"
+      - run: |                                # Build Go app to test http mirroring with.
+          cd mirrord-layer/tests/apps/self_open
+          go build -o 19
+          cd ../app_go
+          go build -o 19
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
+      - run: cargo +nightly test -p mirrord-layer
+
 
   e2e:
     runs-on: ubuntu-latest
     name: e2e
-    needs: [build_mirrord, test_agent_image, integration_tests]
+    needs: [build_mirrord, test_agent_image, integration_tests, changed_files]
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -325,64 +382,57 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  e2e_macos:
-    runs-on: macos-12
-    name: e2e macOS
-    needs: [build_mirrord, test_agent_image, integration_tests_macos]
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+  build_intellij_plugin:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.intellij_changed == 'true'}}
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - name: Setup Java
+        uses: actions/setup-java@v3
         with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: macos-latest
-          cache-on-failure: true
-      - run: npm install express
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - run: pip3 install fastapi
-      - run: pip3 install uvicorn[standard]
-      - uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: "6.0"
-      - run: |
-          cd tests/dotnet-e2e/dns
-          dotnet build --configuration Release
-      - run: |
-          cd tests/dotnet-e2e/env
-          dotnet build --configuration Release
-      - run: |
-          cd tests/dotnet-e2e/fileops
-          dotnet build --configuration Release
-      - run: |
-          cd tests/dotnet-e2e/http
-          dotnet build --configuration Release
-      - run: |
-          cd tests/dotnet-e2e/outgoing
-          dotnet build --configuration Release
-      - name: setup cluster requirements
-        run: brew install docker colima kubectl
-      - name: create cluster
-        run: colima start --kubernetes --network-address --cpu 3 --memory 8
-      - name: download image
-        uses: actions/download-artifact@v2
-        with:
-          name: test
-          path: /tmp
-      - name: load image
-        run: docker load --input /tmp/test.tar
-      - name: cargo test
+          distribution: zulu
+          java-version: 11
+      - name: Build Plugin
+        env:
+          CI_BUILD_PLUGIN: true
         run: |
-          cargo test --package tests test_mirror_http_traffic -- --nocapture
-          cargo test --package tests test_dotnet6_outgoing_traffic_single_request_enabled -- --nocapture
-          cargo test --package tests test_dotnet6_remote_env_vars_works -- --nocapture
-          cargo test --package tests test_dotnet6_dns_lookup -- --nocapture
-          cargo test --package tests --lib -- tests::test_file_ops::agent_1 --nocapture 
-      - name: Collect container logs
-        if: ${{ failure() }}
-        run: for CONTAINER in $(docker ps --format "{{.ID}}"); do echo $CONTAINER && docker logs $CONTAINER; done
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew buildPlugin
+  # We need some "accummulation" job here because bors fails (timeouts) to
+  # listen on matrix builds.
+  # Hence, we have some kind of dummy here that bors can listen on
+  ci-success:
+    name: ci
+    needs:
+      [
+        build_mirrord,
+        test_agent_image,
+        integration_tests_macos,
+        integration_tests,
+        e2e,
+        test_mirrord_layer_cli,
+        test_agent,
+        lint,
+        test_mirrord_config,
+        test_mirrord_protocol,
+        build_intellij_plugin,
+      ]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
+      (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+      (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
+      (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+      (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+      (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
+      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped')
+    steps:
+      - name: CI succeeded
+        run: exit 0

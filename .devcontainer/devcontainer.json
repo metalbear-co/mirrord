@@ -12,9 +12,8 @@
 		"--cap-add=SYS_PTRACE",
 		"--security-opt",
 		"seccomp=unconfined",
-		"--cap-add=SYS_PTRACE",
-		"--security-opt",
-		"seccomp=unconfined"
+		"--init",
+		"--privileged"
 	],
 
 	// Set *default* container specific settings.json values on container create.
@@ -35,6 +34,11 @@
 		"serayuzgur.crates"
 	],
 
+	"features": {
+        "ghcr.io/devcontainers/features/docker-in-docker:1": {
+            "version": "latest"
+        }
+	}
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 

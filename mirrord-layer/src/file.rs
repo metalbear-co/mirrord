@@ -1,3 +1,9 @@
+/// File operations on remote pod.
+///
+/// Read-only file operations are enabled by default, you can turn it off by setting
+/// `MIRRORD_FILE_RO_OPS` to `false`.
+///
+/// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 use core::fmt;
 use std::{
     collections::HashMap,
@@ -14,7 +20,7 @@ use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    ReadLineFileRequest, ReadLineFileResponse, RemoteResult, SeekFileRequest, SeekFileResponse,
+    ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
 use regex::RegexSet;
@@ -33,7 +39,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
-
+    let current_binary = env::current_exe().unwrap();
     let set = RegexSet::new([
         r".*\.so",
         r".*\.d",
@@ -52,10 +58,17 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/opt/.*",
         r"^/home/iojs/.*",
         r"^/home/runner/.*",
+        // dotnet: `/tmp/clr-debug-pipe-1`
+        r"^.*clr-.*-pipe-.*",
+        // dotnet: `/home/{username}/{project}.pdb`
+        r".*\.pdb",
+        // dotnet: `/home/{username}/{project}.dll`
+        r".*\.dll",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r".*/package.json",
         &current_dir.to_string_lossy(),
+        &current_binary.to_string_lossy(),
     ])
     .unwrap();
 
@@ -130,7 +143,8 @@ pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
-    read_line_queue: ResponseDeque<ReadLineFileResponse>,
+    read_line_queue: ResponseDeque<ReadFileResponse>,
+    read_limited_queue: ResponseDeque<ReadFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
@@ -181,6 +195,24 @@ impl FileHandler {
                     )
                 })
             }
+            ReadLimited(read) => {
+                // The debug message is too big if we just log it directly.
+                let _ = read
+                    .as_ref()
+                    .inspect(|success| {
+                        debug!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
+                    })
+                    .inspect_err(|fail| {
+                        error!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
+                    });
+
+                pop_send(&mut self.read_limited_queue, read).inspect_err(|fail| {
+                    error!(
+                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
+                        fail,
+                    )
+                })
+            }
             Seek(seek) => {
                 debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
                 pop_send(&mut self.seek_queue, seek)
@@ -218,6 +250,7 @@ impl FileHandler {
 
             Read(read) => self.handle_hook_read(read, codec).await,
             ReadLine(read) => self.handle_hook_read_line(read, codec).await,
+            ReadLimited(read) => self.handle_hook_read_limited(read, codec).await,
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
@@ -288,21 +321,25 @@ impl FileHandler {
     #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_read(
         &mut self,
-        read: Read,
+        read: Read<ReadFileResponse>,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
     ) -> Result<()> {
         let Read {
-            fd,
+            remote_fd,
             buffer_size,
             file_channel_tx,
+            ..
         } = read;
 
         self.read_queue.push_back(file_channel_tx);
 
-        let read_file_request = ReadFileRequest { fd, buffer_size };
+        let read_file_request = ReadFileRequest {
+            remote_fd,
+            buffer_size,
+        };
 
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
         codec.send(request).await.map_err(From::from)
@@ -311,23 +348,55 @@ impl FileHandler {
     #[tracing::instrument(level = "trace", skip(self, codec))]
     async fn handle_hook_read_line(
         &mut self,
-        read_line: ReadLine,
+        read_line: Read<ReadFileResponse>,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
         >,
     ) -> Result<()> {
-        let ReadLine {
-            fd,
+        let Read {
+            remote_fd,
             buffer_size,
             file_channel_tx,
+            ..
         } = read_line;
 
         self.read_line_queue.push_back(file_channel_tx);
 
-        let read_file_request = ReadLineFileRequest { fd, buffer_size };
+        let read_file_request = ReadLineFileRequest {
+            remote_fd,
+            buffer_size,
+        };
 
         let request = ClientMessage::FileRequest(FileRequest::ReadLine(read_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, codec))]
+    async fn handle_hook_read_limited(
+        &mut self,
+        read: Read<ReadFileResponse>,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let Read {
+            remote_fd,
+            buffer_size,
+            start_from,
+            file_channel_tx,
+        } = read;
+
+        self.read_limited_queue.push_back(file_channel_tx);
+
+        let read_file_request = ReadLimitedFileRequest {
+            remote_fd,
+            buffer_size,
+            start_from,
+        };
+
+        let request = ClientMessage::FileRequest(FileRequest::ReadLimited(read_file_request));
         codec.send(request).await.map_err(From::from)
     }
 
@@ -340,7 +409,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Seek {
-            fd,
+            remote_fd: fd,
             seek_from,
             file_channel_tx,
         } = seek;
@@ -369,7 +438,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Write {
-            fd,
+            remote_fd: fd,
             write_bytes,
             file_channel_tx,
         } = write;
@@ -418,7 +487,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         let Access {
-            pathname,
+            path: pathname,
             mode,
             file_channel_tx,
         } = access;
@@ -453,28 +522,23 @@ pub struct OpenRelative {
 }
 
 #[derive(Debug)]
-pub struct Read {
-    pub(crate) fd: usize,
+pub struct Read<T> {
+    pub(crate) remote_fd: usize,
     pub(crate) buffer_size: usize,
-    pub(crate) file_channel_tx: ResponseChannel<ReadFileResponse>,
-}
-
-#[derive(Debug)]
-pub struct ReadLine {
-    pub(crate) fd: usize,
-    pub(crate) buffer_size: usize,
-    pub(crate) file_channel_tx: ResponseChannel<ReadLineFileResponse>,
+    // TODO(alex): Only used for `pread`.
+    pub(crate) start_from: u64,
+    pub(crate) file_channel_tx: ResponseChannel<T>,
 }
 
 #[derive(Debug)]
 pub struct Seek {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) seek_from: SeekFrom,
     pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
 }
 
 pub struct Write {
-    pub(crate) fd: usize,
+    pub(crate) remote_fd: usize,
     pub(crate) write_bytes: Vec<u8>,
     pub(crate) file_channel_tx: ResponseChannel<WriteFileResponse>,
 }
@@ -482,7 +546,7 @@ pub struct Write {
 impl fmt::Debug for Write {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Write")
-            .field("fd", &self.fd)
+            .field("fd", &self.remote_fd)
             .field("write_bytes (length)", &self.write_bytes.len())
             .field("file_channel_tx", &self.file_channel_tx)
             .finish()
@@ -497,7 +561,7 @@ pub struct Close {
 
 #[derive(Debug)]
 pub struct Access {
-    pub(crate) pathname: PathBuf,
+    pub(crate) path: PathBuf,
     pub(crate) mode: u8,
     pub(crate) file_channel_tx: ResponseChannel<AccessFileResponse>,
 }
@@ -506,8 +570,9 @@ pub struct Access {
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
-    Read(Read),
-    ReadLine(ReadLine),
+    Read(Read<ReadFileResponse>),
+    ReadLine(Read<ReadFileResponse>),
+    ReadLimited(Read<ReadFileResponse>),
     Seek(Seek),
     Write(Write),
     Close(Close),

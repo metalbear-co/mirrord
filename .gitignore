@@ -25,6 +25,11 @@ tests/go-e2e-dns/19
 tests/dotnet-e2e/*/bin
 tests/dotnet-e2e/*/obj
 
+mirrord-layer/tests/apps/app_go/19
+mirrord-layer/tests/apps/app_go/app_go
+mirrord-layer/tests/apps/self_open/self_open
+mirrord-layer/tests/apps/self_open/19
+
 ### VSCode ###
 .vscode/*
 !.vscode/settings.json

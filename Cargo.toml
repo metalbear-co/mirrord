@@ -9,6 +9,7 @@ members = [
     "mirrord-layer",
     "mirrord-cli",
     "mirrord-macro",
+    "mirrord-progress",
     "sample/rust",
     "tests",
     "tests/rust-e2e-fileops"
@@ -16,7 +17,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.0.19-alpha"
+version = "3.0.20-alpha"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
