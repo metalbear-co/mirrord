@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- `pwrite` hook (used by `dotnet`);
+- Added the ability to override environment variables in the config file.
+
 ## 3.0.20-alpha
 
 ### Added
@@ -15,7 +19,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Layer integration tests with more apps (testing with Go only on MacOS because of
   known crash on Linux - [[#380](https://github.com/metalbear-co/mirrord/issues/380)]).
   Closes [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
-- Added the ability to override environment variables in the config file.
 - Added progress reporting to the CLI.
 - CI: use [bors](https://bors.tech/) for merging! woohoo.
 

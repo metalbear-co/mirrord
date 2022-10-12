@@ -109,6 +109,31 @@ fn test_pread() {
     };
 }
 
+fn test_pwrite() {
+    println!(">> test_pwrite");
+
+    let file = OpenOptions::new()
+        .write(true)
+        .open(FILE_PATH)
+        .expect("pwrite!");
+
+    let fd = file.as_raw_fd();
+
+    unsafe {
+        let mode = CString::new("rw").expect("valid C string");
+
+        let data = CString::new("Hello, I am the file you're writing!").expect("valid C string");
+
+        let (buffer, length, _capacity) = data.into_bytes_with_nul().into_raw_parts();
+
+        if libc::pwrite(fd, buffer.cast(), length, 1) < 1 {
+            let file_stream = libc::fdopen(fd, mode.as_ptr());
+            let error_code = libc::ferror(file_stream);
+            assert_eq!(error_code, 0);
+        }
+    };
+}
+
 fn main() {
     create_test_file();
 
@@ -117,4 +142,5 @@ fn main() {
     test_open_read_contents();
     test_fgets();
     test_pread();
+    test_pwrite();
 }
