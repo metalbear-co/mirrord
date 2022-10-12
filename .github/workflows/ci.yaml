@@ -224,6 +224,12 @@ jobs:
       - run: pip3 install flask # For http mirroring test with Flask.
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd mirrord-layer/tests/apps/self_open
+          go build -o 19
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
