@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
 use tokio::net::TcpListener;
