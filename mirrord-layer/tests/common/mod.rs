@@ -249,6 +249,7 @@ pub enum Application {
     PythonFastApiHTTP,
     PythonFlaskHTTP,
     PythonSelfConnect,
+    PythonDontLoad,
 }
 
 impl Application {
@@ -274,9 +275,9 @@ impl Application {
 
     pub async fn get_executable(&self) -> String {
         match self {
-            Application::PythonFlaskHTTP | Application::PythonSelfConnect => {
-                Self::get_python3_executable().await
-            }
+            Application::PythonFlaskHTTP
+            | Application::PythonSelfConnect
+            | Application::PythonDontLoad => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
@@ -290,6 +291,11 @@ impl Application {
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
                 println!("using flask server from {:?}", app_path);
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
+            Application::PythonDontLoad => {
+                app_path.push("dont_load.py");
+                println!("using script from {:?}", app_path);
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::PythonFastApiHTTP => vec![
@@ -316,6 +322,7 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
+            Application::PythonDontLoad => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }

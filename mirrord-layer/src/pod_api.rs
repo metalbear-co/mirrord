@@ -19,7 +19,10 @@ use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, info, warn};
 
-use crate::error::{LayerError, Result};
+use crate::{
+    error::{LayerError, Result},
+    MIRRORD_SKIP_LOAD,
+};
 
 struct EnvVarGuard {
     library: String,
@@ -30,8 +33,8 @@ impl EnvVarGuard {
     const ENV_VAR: &str = "LD_PRELOAD";
     #[cfg(target_os = "macos")]
     const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
-
     fn new() -> Self {
+        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
         Self { library }
@@ -41,6 +44,7 @@ impl EnvVarGuard {
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
+        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
     }
 }
 

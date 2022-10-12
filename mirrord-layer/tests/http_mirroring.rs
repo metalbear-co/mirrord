@@ -1,9 +1,4 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process,
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
 use tokio::net::TcpListener;
@@ -17,6 +12,7 @@ pub use common::*;
 #[cfg(target_os = "macos")]
 #[ctor::ctor]
 fn build_go_app() {
+    use std::{env, path::Path, process};
     let original_dir = env::current_dir().unwrap();
     let go_app_path = Path::new("tests/apps/app_go");
     env::set_current_dir(go_app_path).unwrap();
