@@ -98,7 +98,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 (&config.connect_agent_name, config.connect_agent_port)
             {
                 info!(
-                    "Re using existing agent {:?}, port {:?}",
+                    "Reusing existing agent {:?}, port {:?}",
                     pod_agent_name, agent_port
                 );
                 (pod_agent_name.to_owned(), agent_port)
