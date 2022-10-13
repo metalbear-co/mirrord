@@ -71,7 +71,7 @@ where
     }
 }
 
-fn error_handle(err: LayerError) -> ! {
+fn handle_error(err: LayerError) -> ! {
     match err {
         LayerError::KubeError(kube::Error::HyperError(err)) => {
             eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
@@ -108,7 +108,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 info!("Using port `{agent_port:?}` for communication");
                 let pod_agent_name = match k8s_api.create_agent(agent_port).await {
                     Ok(pod_name) => pod_name,
-                    Err(err) => error_handle(err),
+                    Err(err) => handle_error(err),
                 };
 
                 // Set env var for children to re-use.
@@ -122,7 +122,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
 
         let mut port_forwarder = match k8s_api.port_forward(&pod_agent_name, agent_port).await {
             Ok(port_forwarder) => port_forwarder,
-            Err(err) => error_handle(err),
+            Err(err) => handle_error(err),
         };
 
         AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
