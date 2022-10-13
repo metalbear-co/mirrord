@@ -527,9 +527,7 @@ impl RuntimeData {
 
         let container_id = split
             .next()
-            .ok_or(LayerError::ContainerRuntimeParseError(
-                container_id_full.to_string(),
-            ))?
+            .ok_or_else(|| LayerError::ContainerRuntimeParseError(container_id_full.to_string()))?
             .to_owned();
 
         let container_runtime = container_runtime.to_string();
