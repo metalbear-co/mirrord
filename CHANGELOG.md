@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.0.21-alpha
+
 ### Added
 - `pwrite` hook (used by `dotnet`);
 - Added the ability to override environment variables in the config file.
@@ -17,6 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
 - `/nix/*` path is now ignored for file operations to support NixOS.
 - Shortcut `deploy` for `deployment` in target argument.
+- Added the ability to override environment variables in the config file.
 
 
 ### Changed
