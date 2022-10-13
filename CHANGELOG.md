@@ -14,6 +14,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add "linkerd.io/inject": "disabled" annotation to pod created by mirrord to avoid linkerd auto inject.
 - mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
 - `/nix/*` path is now ignored for file operations to support NixOS.
+- Shortcut `deploy` for `deployment` in target argument.
+
 
 ## Changed
 - Print exit message when terminating application due to an unhandled error in the layer.
