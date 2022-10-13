@@ -240,6 +240,8 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            connect_agent_name: None,
+            connect_agent_port: None,
             target: Some("pod/test-service-abcdefg-abcd".to_owned()),
             target_namespace: Some("default".to_owned()),
             skip_processes: None,
