@@ -97,8 +97,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
             {
+                info!("Re using existing agent {:?}, port {:?}", pod_agent_name, agent_port);
                 (pod_agent_name.to_owned(), agent_port)
             } else {
+                info!("No existing agent, spawning new one.");
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
                 let pod_agent_name = match k8s_api.create_agent(agent_port).await {

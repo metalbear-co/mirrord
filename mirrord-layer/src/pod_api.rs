@@ -478,6 +478,7 @@ pub(crate) struct RuntimeData {
 }
 
 impl RuntimeData {
+    #[tracing::instrument(level = "trace", skip(pod))]
     fn from_pod(pod: &Pod, container_name: &Option<String>) -> Result<Self> {
         let pod_name = pod
             .metadata
@@ -508,19 +509,28 @@ impl RuntimeData {
             })?;
 
         let container_name = chosen_status.name.clone();
-        let container_id = chosen_status
+        let container_id_full = chosen_status
             .container_id
             .as_ref()
             .ok_or(LayerError::ContainerIdNotFound)?
             .to_owned();
 
-        let (container_runtime, socket_path) = match container_id.split("://").next() {
+        let mut split = container_id_full.split("://");
+
+        let (container_runtime, socket_path) = match split.next() {
             Some("docker") => Ok(("docker", "/var/run/docker.sock")),
             Some("containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
             _ => Err(LayerError::ContainerRuntimeParseError(
-                container_id.to_string(),
+                container_id_full.to_string(),
             )),
         }?;
+
+        let container_id = split
+            .next()
+            .ok_or(LayerError::ContainerRuntimeParseError(
+                container_id_full.to_string(),
+            ))?
+            .to_owned();
 
         let container_runtime = container_runtime.to_string();
         let socket_path = socket_path.to_string();
