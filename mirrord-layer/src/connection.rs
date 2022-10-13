@@ -109,6 +109,8 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
                 std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
+                // So children won't show progress as well as it might confuse users
+                std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
                 (pod_agent_name, agent_port)
             }
         };

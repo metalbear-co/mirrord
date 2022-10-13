@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - Reuse agent - first process that runs will create the agent and its children will be able to reuse the same one to avoid creating many agents.
+- Don't print progress for child processes to avoid confusion.
 - Skip istio/linkerd-proxy/init container when mirroring a pod without a specific container name.
 - Add "linkerd.io/inject": "disabled" annotation to pod created by mirrord to avoid linkerd auto inject.
 - mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
