@@ -365,7 +365,7 @@ pub fn dylib_path() -> PathBuf {
 
 pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
     let mut env = HashMap::new();
-    env.insert("RUST_LOG", "warn,mirrord=debug");
+    env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");

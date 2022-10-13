@@ -241,7 +241,7 @@ impl FileHandler {
                     .inspect_err(|fail| {
                         error!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
                     });
-
+                debug!("Queue = {:#?}", self.write_limited_queue);
                 pop_send(&mut self.write_limited_queue, write).inspect_err(|fail| {
                     error!(
                         "handle_daemon_message -> Failed `pop_send` with {:#?}",
@@ -262,6 +262,7 @@ impl FileHandler {
         >,
     ) -> Result<()> {
         use HookMessageFile::*;
+        debug!("Handling HookMessageFile {:#?}", message);
         match message {
             Open(open) => self.handle_hook_open(open, codec).await,
             OpenRelative(open_relative) => {
@@ -487,6 +488,7 @@ impl FileHandler {
             ClientCodec,
         >,
     ) -> Result<()> {
+        debug!("HookMessage::WriteFileLimitedHook");
         let Write {
             remote_fd,
             start_from,
@@ -494,7 +496,15 @@ impl FileHandler {
             file_channel_tx,
         } = write;
 
+        debug!(
+            "HookMessage::WriteFileLimitedHook fd {:#?} | length {:#?}",
+            remote_fd,
+            write_bytes.len()
+        );
+
         self.write_limited_queue.push_back(file_channel_tx);
+
+        debug!("Queue = {:?}", self.write_limited_queue);
 
         let write_file_request = WriteLimitedFileRequest {
             remote_fd,
