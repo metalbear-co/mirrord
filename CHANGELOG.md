@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Reuse agent - first process that runs will create the agent and its children will be able to reuse the same one to avoid creating many agents.
+
 ## 3.0.20-alpha
 
 ### Added

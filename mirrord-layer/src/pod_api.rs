@@ -140,6 +140,7 @@ pub(crate) async fn create_agent(
         )
         .await?
     };
+    let port_forwarder = port_forward(&port_name, connection_port).await?;
     let port_forwarder = pod_api
         .portforward(&pod_name, &[connection_port])
         .await
@@ -774,4 +775,15 @@ impl FromStr for ContainerData {
             container_id: container_id.to_string(),
         })
     }
+}
+
+pub(crate) async fn port_forward(client: &Client, namespace: &str, pod_name: &str, port: u16) -> Result<Portforwarder> {
+    let pod_api: Api<Pod> = Api::namespaced(
+        client.clone(),
+        namespace,
+    );
+    pod_api
+        .portforward(pod_name, &[port])
+        .await
+        .map_err(LayerError::KubeError)
 }

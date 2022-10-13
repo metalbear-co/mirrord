@@ -44,6 +44,14 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
+    /// Agent name that already exists that we can connect to.
+    #[config(env = "MIRRORD_CONNECT_AGENT")]
+    pub connect_agent_name: Option<String>,
+
+    /// Agent listen port that already exists that we can connect to.
+    #[config(env = "MIRRORD_CONNECT_PORT")]
+    pub connect_agent_port: Option<u16>,
+
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,
