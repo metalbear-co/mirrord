@@ -108,9 +108,11 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
 
-    if DEFAULT_IGNORE_PATHS
+    if IGNORE_FILES
+        .get()?
         .is_match(path.to_str().unwrap_or_default())
-        .unwrap_or_default()
+        // TODO(alex) [mid] 2022-10-13: Improve this `unwrap`.
+        .unwrap()
     {
         Detour::Bypass(Bypass::IgnoredFile(path.clone()))?
     } else if path.is_relative() {
@@ -375,7 +377,8 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
 pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
     let path = path_from_rawish(rawish_path)?;
 
-    if DEFAULT_IGNORE_PATHS
+    if IGNORE_FILES
+        .get()?
         .is_match(path.to_str().unwrap_or_default())
         .unwrap_or_default()
     {

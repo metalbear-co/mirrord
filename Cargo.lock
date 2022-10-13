@@ -1739,7 +1739,6 @@ dependencies = [
  "mirrord-protocol",
  "nix 0.24.2",
  "rand 0.8.5",
- "regex",
  "rstest",
  "serde_json",
  "socket2",

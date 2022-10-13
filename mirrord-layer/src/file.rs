@@ -6,12 +6,12 @@
 /// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 use core::fmt;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
 use fancy_regex::Regex;
@@ -24,7 +24,6 @@ use mirrord_protocol::{
     ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse,
 };
-use regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -35,13 +34,17 @@ use crate::{
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-/// Regex that ignores system files + files in the current working directory.
-static DEFAULT_IGNORE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
+// TODO(alex) [high] 2022-10-13: Accept include/exclude lists from user, then mix it with our
+// default ignore list.
+//
+// 1. `include` means to exclude everything else;
+// 2. `exclude` adds to our defaults;
+fn init_default_ignore() -> Regex {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
-    let rules = [
+    let default_rules = [
         r"(?<so_files>^.+\.so$)|",
         r"(?<d_files>^.+\.d$)|",
         r"(?<pyc_files>^.+\.pyc$)|",
@@ -76,8 +79,11 @@ static DEFAULT_IGNORE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
     .into_iter()
     .collect::<String>();
 
-    Regex::new(&rules).unwrap()
-});
+    Regex::new(&default_rules).unwrap()
+}
+
+/// Regex that ignores system files + files in the current working directory.
+static IGNORE_FILES: OnceLock<Regex> = OnceLock::new();
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
