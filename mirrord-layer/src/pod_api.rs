@@ -252,8 +252,8 @@ impl KubernetesAPI {
 
     async fn create_job_pod_agent(
         &self,
-        agent_image: String,
         runtime_data: RuntimeData,
+        agent_image: String,
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String> {
@@ -394,7 +394,7 @@ impl KubernetesAPI {
             )
             .await?
         } else {
-            self.create_job_pod_agent(agent_image, runtime_data, connection_port, &progress)
+            self.create_job_pod_agent(runtime_data, agent_image, connection_port, &progress)
                 .await?
         };
         progress.done_with("agent running");
@@ -508,19 +508,28 @@ impl RuntimeData {
             })?;
 
         let container_name = chosen_status.name.clone();
-        let container_id = chosen_status
+        let container_id_full = chosen_status
             .container_id
             .as_ref()
             .ok_or(LayerError::ContainerIdNotFound)?
             .to_owned();
 
-        let (container_runtime, socket_path) = match container_id.split("://").next() {
+        let mut split = container_id_full.split("://");
+
+        let (container_runtime, socket_path) = match split.next() {
             Some("docker") => Ok(("docker", "/var/run/docker.sock")),
             Some("containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
             _ => Err(LayerError::ContainerRuntimeParseError(
-                container_id.to_string(),
+                container_id_full.to_string(),
             )),
         }?;
+
+        let container_id = split
+            .next()
+            .ok_or(LayerError::ContainerRuntimeParseError(
+                container_id_full.to_string(),
+            ))?
+            .to_owned();
 
         let container_runtime = container_runtime.to_string();
         let socket_path = socket_path.to_string();
@@ -681,7 +690,9 @@ impl FromStr for Target {
     fn from_str(target: &str) -> Result<Target> {
         let mut split = target.split('/');
         match split.next() {
-            Some("deployment") | Some("deploy") => DeploymentTarget::from_split(&mut split).map(Target::Deployment),
+            Some("deployment") | Some("deploy") => {
+                DeploymentTarget::from_split(&mut split).map(Target::Deployment)
+            }
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(LayerError::InvalidTarget(format!(
                 "Provided target: {:?} is neither a pod or a deployment.",
