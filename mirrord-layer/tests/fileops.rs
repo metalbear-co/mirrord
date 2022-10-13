@@ -134,7 +134,6 @@ async fn test_pread(
         TestProcess::start_process(executable, application.get_args(), env).await;
 
     let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
 }
