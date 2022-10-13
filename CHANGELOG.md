@@ -9,6 +9,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - Reuse agent - first process that runs will create the agent and its children will be able to reuse the same one to avoid creating many agents.
+- Skip istio/linkerd-proxy/init container when mirroring a pod without a specific container name.
+- Add "linkerd.io/inject": "disabled" annotation to pod created by mirrord to avoid linkerd auto inject.
+- mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
+- `/nix/*` path is now ignored for file operations to support NixOS.
+
+## Changed
+- Print exit message when terminating application due to an unhandled error in the layer.
+- mirrord-layer: refactored `pod_api.rs` to be more maintainble.
+- Use kube config namespace by default.
 
 ## 3.0.20-alpha
 

@@ -384,7 +384,7 @@ async fn thread_loop(
         }
     }
 
-    graceful_exit!();
+    graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
 #[tracing::instrument(level = "trace", skip(connection, receiver))]
@@ -522,7 +522,6 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::pod_api::*;
 
     #[rstest]
     #[case("test", Some(vec!["foo".to_string()]))]
@@ -543,30 +542,5 @@ mod tests {
         #[case] skip_processes: Option<Vec<String>>,
     ) {
         assert!(!should_load(given_process, skip_processes));
-    }
-
-    #[rstest]
-    #[case("pod/foobaz", Target::Pod(PodData {pod_name: "foobaz".to_string(), container_name: None}))]
-    #[case("deployment/foobaz", Target::Deployment(DeploymentData {deployment: "foobaz".to_string()}))]
-    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentData {deployment: "nginx-deployment".to_string()}))]
-    #[case("pod/foo/container/baz", Target::Pod(PodData { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
-    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
-        let target = target.parse::<Target>().unwrap();
-        assert_eq!(target, expected)
-    }
-
-    #[rstest]
-    #[should_panic(expected = "InvalidTarget")]
-    #[case::panic("deployment/foobaz/blah")]
-    #[should_panic(expected = "InvalidTarget")]
-    #[case::panic("pod/foo/baz")]
-    fn test_target_parse_fails(#[case] target: &str) {
-        let target = target.parse::<pod_api::Target>().unwrap();
-        assert_eq!(
-            target,
-            Target::Deployment(DeploymentData {
-                deployment: "foobaz".to_string()
-            })
-        )
     }
 }
