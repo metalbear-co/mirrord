@@ -97,7 +97,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
             {
-                info!("Re using existing agent {:?}, port {:?}", pod_agent_name, agent_port);
+                info!(
+                    "Re using existing agent {:?}, port {:?}",
+                    pod_agent_name, agent_port
+                );
                 (pod_agent_name.to_owned(), agent_port)
             } else {
                 info!("No existing agent, spawning new one.");

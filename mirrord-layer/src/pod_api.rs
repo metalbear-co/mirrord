@@ -478,7 +478,6 @@ pub(crate) struct RuntimeData {
 }
 
 impl RuntimeData {
-    #[tracing::instrument(level = "trace", skip(pod))]
     fn from_pod(pod: &Pod, container_name: &Option<String>) -> Result<Self> {
         let pod_name = pod
             .metadata
