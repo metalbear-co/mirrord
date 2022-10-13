@@ -1,11 +1,11 @@
-use std::{f32::consts::E, str::FromStr};
+use std::{collections::HashSet, str::FromStr};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::Deployment,
     batch::v1::Job,
-    core::v1::{EphemeralContainer, Pod},
+    core::v1::{ContainerStatus, EphemeralContainer, Pod},
 };
 use kube::{
     api::{Api, ListParams, LogParams, Portforwarder, PostParams},
@@ -17,7 +17,7 @@ use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     error::{LayerError, Result},
@@ -50,16 +50,18 @@ impl Drop for EnvVarGuard {
 
 /// Return the agent image to use
 fn agent_image(config: &LayerConfig) -> String {
-    config.agent.image.unwrap_or_else(|| {
+    if let Some(image) = &config.agent.image {
+        image.clone()
+    } else {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-    })
+    }
 }
 
 /// Return target based on layer config.
 fn target(config: &LayerConfig) -> Result<Target> {
-    if let Some(target) = config.target {
+    if let Some(target) = &config.target {
         target.parse()
-    } else if let Some(pod_name) = config.pod.name {
+    } else if let Some(pod_name) = &config.pod.name {
         warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
         \nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
         // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
@@ -74,6 +76,29 @@ fn target(config: &LayerConfig) -> Result<Target> {
     }
 }
 
+/// Choose container logic:
+/// 1. Try to find based on given name
+/// 2. Try to find first container in pod that isn't a mesh side car
+/// 3. Take first container in pod
+fn choose_container<'a>(
+    container_name: &Option<String>,
+    container_statuses: &'a [ContainerStatus],
+) -> Option<&'a ContainerStatus> {
+    if let Some(name) = container_name {
+        container_statuses
+            .iter()
+            .find(|&status| &status.name == name)
+    } else {
+        let skip_names =
+            HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]);
+        // Choose any container that isn't part of the skip list
+        container_statuses
+            .iter()
+            .find(|&status| !skip_names.contains(status.name.as_str()))
+            .or_else(|| container_statuses.first())
+    }
+}
+
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
@@ -81,7 +106,7 @@ pub(crate) struct KubernetesAPI {
 }
 
 impl KubernetesAPI {
-    async fn new(config: &LayerConfig) -> Result<Self> {
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
         let _guard = EnvVarGuard::new();
         let client = if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
@@ -104,8 +129,8 @@ impl KubernetesAPI {
         K: kube::Resource,
         <K as kube::Resource>::DynamicType: Default,
     {
-        if let Some(namespace) = self.config.agent.namespace {
-            Api::namespaced(self.client.clone(), &namespace)
+        if let Some(namespace) = &self.config.agent.namespace {
+            Api::namespaced(self.client.clone(), namespace)
         } else {
             Api::default_namespaced(self.client.clone())
         }
@@ -117,11 +142,11 @@ impl KubernetesAPI {
         K: kube::Resource,
         <K as kube::Resource>::DynamicType: Default,
     {
-        if let Some(namespace) = self.config.target_namespace {
-            Api::namespaced(self.client.clone(), &namespace)
-        } else if let Some(namespace) = self.config.pod.namespace {
+        if let Some(namespace) = &self.config.target_namespace {
+            Api::namespaced(self.client.clone(), namespace)
+        } else if let Some(namespace) = &self.config.pod.namespace {
             // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
-            Api::namespaced(self.client.clone(), &namespace)
+            Api::namespaced(self.client.clone(), namespace)
         } else {
             Api::default_namespaced(self.client.clone())
         }
@@ -177,7 +202,7 @@ impl KubernetesAPI {
         let mut spec = ephemeral_containers_subresource
             .spec
             .as_mut()
-            .ok_or_else(|| LayerError::PodSpecNotFound(runtime_data.pod_name.clone()))?;
+            .ok_or(LayerError::PodSpecNotFound)?;
 
         spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
             Some(mut ephemeral_containers) => {
@@ -258,7 +283,8 @@ impl KubernetesAPI {
                         },
                         "annotations":
                         {
-                            "sidecar.istio.io/inject": "false"
+                            "sidecar.istio.io/inject": "false",
+                            "linkerd.io/inject": "disabled"
                         }
                     },
                     "spec": {
@@ -268,7 +294,8 @@ impl KubernetesAPI {
                             "metadata": {
                                 "annotations":
                                 {
-                                    "sidecar.istio.io/inject": "false"
+                                    "sidecar.istio.io/inject": "false",
+                                    "linkerd.io/inject": "disabled"
                                 }
                             },
 
@@ -367,21 +394,18 @@ impl KubernetesAPI {
             )
             .await?
         } else {
-            // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
-            let job_api: Api<Job> = self.get_agent_api();
-
             self.create_job_pod_agent(agent_image, runtime_data, connection_port, &progress)
                 .await?
         };
         progress.done_with("agent running");
 
-        self.port_forward(connect_pod_name, connection_port)
+        self.port_forward(&connect_pod_name, connection_port).await
     }
 
-    async fn port_forward(pod_name: &str, port: u16) -> Result<Portforwarder> {
+    async fn port_forward(&self, pod_name: &str, port: u16) -> Result<Portforwarder> {
         let pod_api: Api<Pod> = self.get_agent_api();
         pod_api
-            .portforward(&pod_name, &[port])
+            .portforward(pod_name, &[port])
             .await
             .map_err(LayerError::KubeError)
     }
@@ -444,104 +468,6 @@ async fn wait_for_agent_startup(
     Ok(())
 }
 
-async fn create_ephemeral_container_agent(
-    config: &LayerConfig,
-    runtime_data: RuntimeData,
-    pod_api: &Api<Pod>,
-    agent_image: String,
-    connection_port: u16,
-    progress: &TaskProgress,
-) -> Result<String> {
-    let container_progress = progress.subtask("creating ephemeral container...");
-
-    warn!("Ephemeral Containers is an experimental feature
-              >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
-
-    let mirrord_agent_name = get_agent_name();
-
-    let mut agent_command_line = vec![
-        "./mirrord-agent".to_string(),
-        "-l".to_string(),
-        connection_port.to_string(),
-        "-e".to_string(),
-    ];
-    if let Some(timeout) = config.agent.communication_timeout {
-        agent_command_line.push("-t".to_string());
-        agent_command_line.push(timeout.to_string());
-    }
-
-    let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
-        "name": mirrord_agent_name,
-        "image": agent_image,
-        "securityContext": {
-            "capabilities": {
-                "add": ["NET_RAW", "NET_ADMIN"],
-            },
-            "privileged": true,
-        },
-        "imagePullPolicy": config.agent.image_pull_policy,
-        "targetContainerName": runtime_data.container_name,
-        "env": [{"name": "RUST_LOG", "value": config.agent.log_level}],
-        "command": agent_command_line,
-    }))?;
-    debug!("Requesting ephemeral_containers_subresource");
-
-    let mut ephemeral_containers_subresource = pod_api
-        .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
-        .await
-        .map_err(LayerError::KubeError)?;
-
-    let mut spec = ephemeral_containers_subresource
-        .spec
-        .as_mut()
-        .ok_or_else(|| LayerError::PodSpecNotFound(runtime_data.pod_name.clone()))?;
-
-    spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
-        Some(mut ephemeral_containers) => {
-            ephemeral_containers.push(ephemeral_container);
-            Some(ephemeral_containers)
-        }
-        None => Some(vec![ephemeral_container]),
-    };
-
-    pod_api
-        .replace_subresource(
-            "ephemeralcontainers",
-            &runtime_data.pod_name,
-            &PostParams::default(),
-            to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
-        )
-        .await
-        .map_err(LayerError::KubeError)?;
-
-    let params = ListParams::default()
-        .fields(&format!("metadata.name={}", &runtime_data.pod_name))
-        .timeout(60);
-
-    container_progress.done_with("container created");
-
-    let container_progress = progress.subtask("waiting for container to be ready...");
-
-    let stream = watcher(pod_api.clone(), params).applied_objects();
-    pin!(stream);
-
-    while let Some(Ok(pod)) = stream.next().await {
-        if is_ephemeral_container_running(pod, &mirrord_agent_name) {
-            debug!("container ready");
-            break;
-        } else {
-            debug!("container not ready yet");
-        }
-    }
-
-    wait_for_agent_startup(pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
-
-    container_progress.done_with("container is ready");
-
-    debug!("container is ready");
-    Ok(runtime_data.pod_name.to_string())
-}
-
 pub(crate) struct RuntimeData {
     pod_name: String,
     node_name: String,
@@ -551,54 +477,61 @@ pub(crate) struct RuntimeData {
     socket_path: String,
 }
 
-// START | DEPRECATED: - Scheduled for removal on [28/10/2022]
 impl RuntimeData {
-    async fn from_k8s(
-        client: &Client,
-        pod_name: &str,
-        pod_namespace: &str,
-        container_name: &Option<String>,
-    ) -> Result<Self> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), pod_namespace);
-        let pod = pod_api.get(pod_name).await?;
-        let node_name = &pod.spec.unwrap().node_name;
-        let container_statuses = &pod.status.unwrap().container_statuses.unwrap();
-        let container_info = if let Some(container_name) = container_name {
-            &container_statuses
-                .iter()
-                .find(|&status| &status.name == container_name)
-                .ok_or_else(|| LayerError::ContainerNotFound(container_name.clone()))?
-                .container_id
-        } else {
-            info!("No container name specified, defaulting to first container found");
-            &container_statuses.first().unwrap().container_id
-        };
-
-        let container_info = container_info
+    fn from_pod(pod: &Pod, container_name: &Option<String>) -> Result<Self> {
+        let pod_name = pod
+            .metadata
+            .name
             .as_ref()
-            .unwrap()
-            .split("://")
-            .collect::<Vec<&str>>();
-
-        let (container_runtime, socket_path) = match container_info.first() {
-            Some(&"docker") => ("docker", "/var/run/docker.sock"),
-            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
-            _ => panic!("unsupported container runtime"),
-        };
-
-        let container_id = container_info.last().unwrap();
-
-        let container_name = container_name
+            .ok_or(LayerError::PodNameNotFound)?
+            .to_owned();
+        let node_name = pod
+            .spec
             .as_ref()
-            .unwrap_or_else(|| &container_statuses.first().unwrap().name);
+            .ok_or(LayerError::PodSpecNotFound)?
+            .node_name
+            .as_ref()
+            .ok_or(LayerError::NodeNotFound)?
+            .to_owned();
+        let container_statuses = pod
+            .status
+            .as_ref()
+            .ok_or(LayerError::PodStatusNotFound)?
+            .container_statuses
+            .as_ref()
+            .ok_or(LayerError::ContainerStatusNotFound)?;
+        let chosen_status =
+            choose_container(container_name, container_statuses).ok_or_else(|| {
+                LayerError::ContainerNotFound(
+                    container_name.clone().unwrap_or_else(|| "None".to_string()),
+                )
+            })?;
+
+        let container_name = chosen_status.name.clone();
+        let container_id = chosen_status
+            .container_id
+            .as_ref()
+            .ok_or(LayerError::ContainerIdNotFound)?
+            .to_owned();
+
+        let (container_runtime, socket_path) = match container_id.split("://").next() {
+            Some("docker") => Ok(("docker", "/var/run/docker.sock")),
+            Some("containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
+            _ => Err(LayerError::ContainerRuntimeParseError(
+                container_id.to_string(),
+            )),
+        }?;
+
+        let container_runtime = container_runtime.to_string();
+        let socket_path = socket_path.to_string();
 
         Ok(RuntimeData {
-            container_id: container_id.to_string(),
-            container_runtime: container_runtime.to_string(),
-            node_name: node_name.as_ref().unwrap().to_string(),
-            socket_path: socket_path.to_string(),
-            pod_name: pod_name.to_string(),
-            container_name: container_name.clone(),
+            pod_name,
+            node_name,
+            container_id,
+            container_runtime,
+            container_name,
+            socket_path,
         })
     }
 }
@@ -613,9 +546,9 @@ pub(crate) struct DeploymentTarget {
 #[async_trait]
 impl RuntimeDataProvider for DeploymentTarget {
     async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
-        let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
+        let deployment_api: Api<Deployment> = client.get_target_pod_api();
         let deployment = deployment_api
-            .get(&self.deployment)
+            .get(&self.deployment_name)
             .await
             .map_err(LayerError::KubeError)?;
 
@@ -625,7 +558,7 @@ impl RuntimeDataProvider for DeploymentTarget {
             .ok_or_else(|| {
                 LayerError::DeploymentNotFound(format!(
                     "Label for deployment: {}, not found!",
-                    self.deployment.clone()
+                    self.deployment_name.clone()
                 ))
             })?;
 
@@ -636,7 +569,7 @@ impl RuntimeDataProvider for DeploymentTarget {
             .collect::<Vec<String>>()
             .join(",");
 
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+        let pod_api: Api<Pod> = client.get_target_pod_api();
         let deployment_pods = pod_api
             .list(&ListParams::default().labels(&formatted_deployments_labels))
             .await
@@ -645,77 +578,11 @@ impl RuntimeDataProvider for DeploymentTarget {
         let first_pod = deployment_pods.items.first().ok_or_else(|| {
             LayerError::DeploymentNotFound(format!(
                 "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
-                self.deployment.clone()
+                self.deployment_name.clone()
             ))
         })?;
 
-        let pod_name = first_pod.clone().metadata.name.ok_or_else(|| {
-            LayerError::DeploymentNotFound(format!(
-                "Failed to fetch the name of the default pod in deployment {}, pod {:?}",
-                self.deployment.clone(),
-                first_pod.clone()
-            ))
-        })?;
-
-        let (
-            container_name,
-            ContainerData {
-                container_runtime,
-                socket_path,
-                container_id,
-            },
-        ) = || -> Option<(String, String)> {
-            let container_name = first_pod
-                .clone()
-                .spec?
-                .containers
-                .first()
-                .map(|container| container.name.clone())?;
-            let container_runtime_and_id = first_pod
-                .clone()
-                .status?
-                .container_statuses?
-                .first()?
-                .container_id
-                .clone()?;
-
-            Some((container_name, container_runtime_and_id))
-        }()
-        .ok_or_else(|| {
-            LayerError::ContainerNotFound(format!(
-                "Failed to fetch container for pod {:?}, deployment {}",
-                first_pod.clone(),
-                self.deployment.clone()
-            ))
-        })
-        .and_then(|(container_name, container_runtime_and_id)| {
-            Ok((
-                container_name,
-                container_runtime_and_id.parse::<ContainerData>()?,
-            ))
-        })?;
-
-        let node_name = first_pod
-            .clone()
-            .spec
-            .and_then(|spec| spec.node_name)
-            .ok_or_else(|| {
-                LayerError::NodeNotFound(format!(
-                    "Target: {:?} | Pod: {:?} | Container: {}",
-                    self.clone(),
-                    first_pod.clone(),
-                    container_name.clone()
-                ))
-            })?;
-
-        Ok(RuntimeData {
-            node_name,
-            pod_name,
-            container_name,
-            container_id,
-            container_runtime,
-            socket_path,
-        })
+        RuntimeData::from_pod(first_pod, &self.container_name)
     }
 }
 
@@ -751,57 +618,8 @@ impl RuntimeDataProvider for PodTarget {
     async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
         let pod_api: Api<Pod> = client.get_target_pod_api();
         let pod = pod_api.get(&self.pod_name).await?;
-        let (
-            container_name,
-            ContainerData {
-                container_runtime,
-                socket_path,
-                container_id,
-            },
-        ) = || -> Option<(String, String)> {
-            let container_statuses = &pod.clone().status?.container_statuses?;
-            let container_name = if let Some(container_name) = self.container_name.clone() {
-                container_name
-            } else {
-                pod.clone()
-                    .spec?
-                    .containers
-                    .first()
-                    .map(|container| container.name.clone())?
-            };
-            let container_runtime_and_id = container_statuses
-                .iter()
-                .find(|&status| status.name == container_name)?
-                .container_id
-                .clone()?;
-            Some((container_name, container_runtime_and_id))
-        }()
-        .ok_or_else(|| {
-            LayerError::ContainerNotFound(format!(
-                "Failed to fetch container for pod {:#?}",
-                self.clone(),
-            ))
-        })
-        .and_then(|(container_name, container_runtime_and_id)| {
-            Ok((
-                container_name,
-                container_runtime_and_id.parse::<ContainerData>()?,
-            ))
-        })?;
 
-        let node_name = pod
-            .spec
-            .and_then(|spec| spec.node_name)
-            .ok_or_else(|| LayerError::NodeNotFound(format!("{:?}", self.clone())))?;
-
-        Ok(RuntimeData {
-            container_id,
-            container_runtime,
-            node_name,
-            socket_path,
-            pod_name: self.pod_name.clone(),
-            container_name,
-        })
+        RuntimeData::from_pod(&pod, &self.container_name)
     }
 }
 
@@ -861,7 +679,7 @@ impl FromStr for Target {
     type Err = LayerError;
 
     fn from_str(target: &str) -> Result<Target> {
-        let split = target.split('/');
+        let mut split = target.split('/');
         match split.next() {
             Some("deployment") => DeploymentTarget::from_split(&mut split).map(Target::Deployment),
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
@@ -873,37 +691,36 @@ impl FromStr for Target {
     }
 }
 
-pub(crate) struct ContainerData {
-    container_runtime: String,
-    socket_path: String,
-    container_id: String,
-}
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
 
-impl FromStr for ContainerData {
-    type Err = LayerError;
-    fn from_str(input: &str) -> Result<Self> {
-        let container_runtime_and_id = input.split("://").collect::<Vec<&str>>();
-        let (container_runtime, socket_path) = match container_runtime_and_id.first() {
-            Some(&"docker") => ("docker", "/var/run/docker.sock"),
-            Some(&"containerd") => ("containerd", "/run/containerd/containerd.sock"),
-            _ => {
-                return Err(LayerError::ContainerRuntimeParseError(
-                    "unsupported container runtime".to_owned(),
-                ))
-            }
-        };
+    use super::*;
 
-        let container_id = container_runtime_and_id.last().ok_or_else(|| {
-            LayerError::ContainerRuntimeParseError(format!(
-                "Failed while parsing container_id for {}",
-                input
-            ))
-        })?;
+    #[rstest]
+    #[case("pod/foobaz", Target::Pod(PodTarget {pod_name: "foobaz".to_string(), container_name: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment_name: "foobaz".to_string(), container_name: None}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment_name: "nginx-deployment".to_string(), container_name: None}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
+    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment_name: "nginx-deployment".to_string(), container_name: Some("container-name".to_string())}))]
+    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(target, expected)
+    }
 
-        Ok(ContainerData {
-            container_runtime: container_runtime.to_string(),
-            socket_path: socket_path.to_string(),
-            container_id: container_id.to_string(),
-        })
+    #[rstest]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("deployment/foobaz/blah")]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("pod/foo/baz")]
+    fn test_target_parse_fails(#[case] target: &str) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(
+            target,
+            Target::Deployment(DeploymentTarget {
+                deployment_name: "foobaz".to_string(),
+                container_name: None
+            })
+        )
     }
 }
