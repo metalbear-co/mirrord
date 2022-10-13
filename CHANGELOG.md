@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- `/nix/*` path is now ignored for file operations to support NixOS.
+
 ## 3.0.20-alpha
 
 ### Added
