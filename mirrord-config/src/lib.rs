@@ -37,7 +37,7 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
     pub target: Option<String>,
 
-    #[config(env = "MIRRORD_TARGET_NAMESPACE", default = "default")]
+    #[config(env = "MIRRORD_TARGET_NAMESPACE")]
     pub target_namespace: Option<String>,
 
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.

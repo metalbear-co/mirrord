@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Use KubeConfig namespace for target instead of "default", closes [[#557](https://github.com/metalbear-co/mirrord/issues/557)]
+
 ## 3.0.20-alpha
 
 ### Added

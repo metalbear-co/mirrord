@@ -64,13 +64,19 @@ pub(crate) async fn create_agent(
         ..
     } = config.clone();
 
-    let client = if accept_invalid_certificates {
-        let mut config = Config::infer().await?;
-        config.accept_invalid_certs = true;
+    let (target_namespace, client) = if accept_invalid_certificates {
+        let mut kube_config = Config::infer().await?;
+        kube_config.accept_invalid_certs = true;
         warn!("Accepting invalid certificates");
-        Client::try_from(config).map_err(LayerError::KubeError)?
+        (
+            target_namespace.unwrap_or(kube_config.default_namespace.clone()),
+            Client::try_from(kube_config).map_err(LayerError::KubeError)?,
+        )
     } else {
-        Client::try_default().await.map_err(LayerError::KubeError)?
+        (
+            "default".to_string(),
+            Client::try_default().await.map_err(LayerError::KubeError)?,
+        )
     };
 
     let agent_image = agent.image.unwrap_or_else(|| {
