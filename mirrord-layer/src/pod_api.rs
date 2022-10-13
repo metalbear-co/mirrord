@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{f32::consts::E, str::FromStr};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
@@ -48,106 +48,347 @@ impl Drop for EnvVarGuard {
     }
 }
 
-pub(crate) async fn create_agent(
-    config: LayerConfig,
-    connection_port: u16,
-) -> Result<Portforwarder> {
-    let progress = TaskProgress::new("agent initializing...");
-
-    let _guard = EnvVarGuard::new();
-    let LayerConfig {
-        target,
-        target_namespace,
-        agent,
-        pod,
-        accept_invalid_certificates,
-        ..
-    } = config.clone();
-
-    let client = if accept_invalid_certificates {
-        let mut config = Config::infer().await?;
-        config.accept_invalid_certs = true;
-        warn!("Accepting invalid certificates");
-        Client::try_from(config).map_err(LayerError::KubeError)?
-    } else {
-        Client::try_default().await.map_err(LayerError::KubeError)?
-    };
-
-    let agent_image = agent.image.unwrap_or_else(|| {
+/// Return the agent image to use
+fn agent_image(config: &LayerConfig) -> String {
+    config.agent.image.unwrap_or_else(|| {
         concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-    });
+    })
+}
 
-    // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
-    let (runtime_data, pod_api): (RuntimeData, Api<Pod>) = match (&target, &pod.name) {
-        (Some(target), None) => (
-            target
-                .parse::<Target>()?
-                .runtime_data(&client, &target_namespace)
-                .await?,
-            Api::namespaced(
-                client.clone(),
-                agent.namespace.as_ref().unwrap_or(&target_namespace),
-            ),
-        ),
-        (None, Some(pod_name)) => {
-            warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
-                \nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
-            (
-                RuntimeData::from_k8s(&client, pod_name, &pod.namespace, &pod.container).await?,
-                Api::namespaced(
-                    client.clone(),
-                    agent.namespace.as_ref().unwrap_or(&pod.namespace),
-                ),
-            )
-        }
-        _ => unreachable!(),
-    };
-    // END
-
-    let pod_name = if agent.ephemeral {
-        create_ephemeral_container_agent(
-            &config,
-            runtime_data,
-            &pod_api,
-            agent_image,
-            connection_port,
-            &progress,
-        )
-        .await?
-    } else {
+/// Return target based on layer config.
+fn target(config: &LayerConfig) -> Result<Target> {
+    if let Some(target) = config.target {
+        target.parse()
+    } else if let Some(pod_name) = config.pod.name {
+        warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
+        \nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
         // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
-        let job_api: Api<Job> = match target {
-            Some(_) => Api::namespaced(
-                client.clone(),
-                agent.namespace.as_ref().unwrap_or(&target_namespace),
-            ),
-            None if pod.name.is_some() => Api::namespaced(
-                client.clone(),
-                agent.namespace.as_ref().unwrap_or(&pod.namespace),
-            ),
-            None => unreachable!(),
+        Ok(Target::Pod(PodTarget {
+            pod_name: pod_name.clone(),
+            container_name: config.pod.container.clone(),
+        }))
+    } else {
+        Err(LayerError::InvalidTarget(
+            "No target specified. Please set the `MIRRORD_IMPERSONATED_TARGET` environment variable.".to_string(),
+        ))
+    }
+}
+
+pub(crate) struct KubernetesAPI {
+    client: Client,
+    config: LayerConfig,
+    _guard: EnvVarGuard,
+}
+
+impl KubernetesAPI {
+    async fn new(config: &LayerConfig) -> Result<Self> {
+        let _guard = EnvVarGuard::new();
+        let client = if config.accept_invalid_certificates {
+            let mut config = Config::infer().await?;
+            config.accept_invalid_certs = true;
+            warn!("Accepting invalid certificates");
+            Client::try_from(config).map_err(LayerError::KubeError)?
+        } else {
+            Client::try_default().await.map_err(LayerError::KubeError)?
         };
-        // END
+        Ok(Self {
+            client,
+            config: config.clone(),
+            _guard,
+        })
+    }
 
-        create_job_pod_agent(
-            &config,
-            agent_image,
-            &pod_api,
-            runtime_data,
-            &job_api,
-            connection_port,
-            &progress,
-        )
-        .await?
-    };
-    let port_forwarder = pod_api
-        .portforward(&pod_name, &[connection_port])
-        .await
-        .map_err(LayerError::KubeError)?;
+    /// Create a Kubernetes API subject to the namespace of the agent
+    fn get_agent_api<K>(&self) -> Api<K>
+    where
+        K: kube::Resource,
+        <K as kube::Resource>::DynamicType: Default,
+    {
+        if let Some(namespace) = self.config.agent.namespace {
+            Api::namespaced(self.client.clone(), &namespace)
+        } else {
+            Api::default_namespaced(self.client.clone())
+        }
+    }
 
-    progress.done_with("agent running");
+    /// Create a Kubernetes API subject to the namespace of the target pod.
+    fn get_target_pod_api<K>(&self) -> Api<K>
+    where
+        K: kube::Resource,
+        <K as kube::Resource>::DynamicType: Default,
+    {
+        if let Some(namespace) = self.config.target_namespace {
+            Api::namespaced(self.client.clone(), &namespace)
+        } else if let Some(namespace) = self.config.pod.namespace {
+            // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
+            Api::namespaced(self.client.clone(), &namespace)
+        } else {
+            Api::default_namespaced(self.client.clone())
+        }
+    }
 
-    Ok(port_forwarder)
+    async fn create_ephemeral_container_agent(
+        &self,
+        runtime_data: RuntimeData,
+        agent_image: String,
+        connection_port: u16,
+        progress: &TaskProgress,
+    ) -> Result<String> {
+        let container_progress = progress.subtask("creating ephemeral container...");
+
+        warn!("Ephemeral Containers is an experimental feature
+                  >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
+
+        let mirrord_agent_name = get_agent_name();
+
+        let mut agent_command_line = vec![
+            "./mirrord-agent".to_string(),
+            "-l".to_string(),
+            connection_port.to_string(),
+            "-e".to_string(),
+        ];
+        if let Some(timeout) = self.config.agent.communication_timeout {
+            agent_command_line.push("-t".to_string());
+            agent_command_line.push(timeout.to_string());
+        }
+
+        let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
+            "name": mirrord_agent_name,
+            "image": agent_image,
+            "securityContext": {
+                "capabilities": {
+                    "add": ["NET_RAW", "NET_ADMIN"],
+                },
+                "privileged": true,
+            },
+            "imagePullPolicy": self.config.agent.image_pull_policy,
+            "targetContainerName": runtime_data.container_name,
+            "env": [{"name": "RUST_LOG", "value": self.config.agent.log_level}],
+            "command": agent_command_line,
+        }))?;
+        debug!("Requesting ephemeral_containers_subresource");
+
+        let pod_api = self.get_target_pod_api();
+        let mut ephemeral_containers_subresource: Pod = pod_api
+            .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let mut spec = ephemeral_containers_subresource
+            .spec
+            .as_mut()
+            .ok_or_else(|| LayerError::PodSpecNotFound(runtime_data.pod_name.clone()))?;
+
+        spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
+            Some(mut ephemeral_containers) => {
+                ephemeral_containers.push(ephemeral_container);
+                Some(ephemeral_containers)
+            }
+            None => Some(vec![ephemeral_container]),
+        };
+
+        pod_api
+            .replace_subresource(
+                "ephemeralcontainers",
+                &runtime_data.pod_name,
+                &PostParams::default(),
+                to_vec(&ephemeral_containers_subresource).map_err(LayerError::from)?,
+            )
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let params = ListParams::default()
+            .fields(&format!("metadata.name={}", &runtime_data.pod_name))
+            .timeout(60);
+
+        container_progress.done_with("container created");
+
+        let container_progress = progress.subtask("waiting for container to be ready...");
+
+        let stream = watcher(pod_api.clone(), params).applied_objects();
+        pin!(stream);
+
+        while let Some(Ok(pod)) = stream.next().await {
+            if is_ephemeral_container_running(pod, &mirrord_agent_name) {
+                debug!("container ready");
+                break;
+            } else {
+                debug!("container not ready yet");
+            }
+        }
+
+        wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+
+        container_progress.done_with("container is ready");
+
+        debug!("container is ready");
+        Ok(runtime_data.pod_name.to_string())
+    }
+
+    async fn create_job_pod_agent(
+        &self,
+        agent_image: String,
+        runtime_data: RuntimeData,
+        connection_port: u16,
+        progress: &TaskProgress,
+    ) -> Result<String> {
+        let pod_progress = progress.subtask("creating agent pod...");
+        let mirrord_agent_job_name = get_agent_name();
+
+        let mut agent_command_line = vec![
+            "./mirrord-agent".to_string(),
+            "--container-id".to_string(),
+            runtime_data.container_id,
+            "--container-runtime".to_string(),
+            runtime_data.container_runtime,
+            "-l".to_string(),
+            connection_port.to_string(),
+        ];
+        if let Some(timeout) = self.config.agent.communication_timeout {
+            agent_command_line.push("-t".to_string());
+            agent_command_line.push(timeout.to_string());
+        }
+
+        let agent_pod: Job =
+            serde_json::from_value(json!({ // Only Jobs support self deletion after completion
+                    "metadata": {
+                        "name": mirrord_agent_job_name,
+                        "labels": {
+                            "app": "mirrord"
+                        },
+                        "annotations":
+                        {
+                            "sidecar.istio.io/inject": "false"
+                        }
+                    },
+                    "spec": {
+                    "ttlSecondsAfterFinished": self.config.agent.ttl,
+
+                        "template": {
+                            "metadata": {
+                                "annotations":
+                                {
+                                    "sidecar.istio.io/inject": "false"
+                                }
+                            },
+
+                    "spec": {
+                        "hostPID": true,
+                        "nodeName": runtime_data.node_name,
+                        "restartPolicy": "Never",
+                        "volumes": [
+                            {
+                                "name": "sockpath",
+                                "hostPath": {
+                                    "path": runtime_data.socket_path
+                                }
+                            }
+                        ],
+                        "containers": [
+                            {
+                                "name": "mirrord-agent",
+                                "image": agent_image,
+                                "imagePullPolicy": self.config.agent.image_pull_policy,
+                                "securityContext": {
+                                    "privileged": true,
+                                },
+                                "volumeMounts": [
+                                    {
+                                        "mountPath": runtime_data.socket_path,
+                                        "name": "sockpath"
+                                    }
+                                ],
+                                "command": agent_command_line,
+                                "env": [{"name": "RUST_LOG", "value": self.config.agent.log_level}],
+                            }
+                        ]
+                    }
+                }
+            }
+                }
+            ))?;
+        let job_api = self.get_agent_api();
+
+        job_api
+            .create(&PostParams::default(), &agent_pod)
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let params = ListParams::default()
+            .labels(&format!("job-name={}", mirrord_agent_job_name))
+            .timeout(60);
+
+        pod_progress.done_with("agent pod created");
+
+        let pod_progress = progress.subtask("waiting for pod to be ready...");
+
+        let pod_api: Api<Pod> = self.get_agent_api();
+
+        let stream = watcher(pod_api.clone(), params).applied_objects();
+        pin!(stream);
+
+        while let Some(Ok(pod)) = stream.next().await {
+            if let Some(status) = &pod.status && let Some(phase) = &status.phase {
+                        debug!("Pod Phase = {phase:?}");
+                    if phase == "Running" {
+                        break;
+                    }
+                }
+        }
+
+        let pods = pod_api
+            .list(&ListParams::default().labels(&format!("job-name={}", mirrord_agent_job_name)))
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let pod_name = pods
+            .items
+            .first()
+            .and_then(|pod| pod.metadata.name.clone())
+            .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
+
+        wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+
+        pod_progress.done_with("pod is ready");
+
+        Ok(pod_name)
+    }
+
+    pub async fn create_agent(&self, connection_port: u16) -> Result<Portforwarder> {
+        let progress = TaskProgress::new("agent initializing...");
+        let agent_image = agent_image(&self.config);
+        let runtime_data = self.get_runtime_data().await?;
+        let connect_pod_name = if self.config.agent.ephemeral {
+            self.create_ephemeral_container_agent(
+                runtime_data,
+                agent_image,
+                connection_port,
+                &progress,
+            )
+            .await?
+        } else {
+            // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
+            let job_api: Api<Job> = self.get_agent_api();
+
+            self.create_job_pod_agent(agent_image, runtime_data, connection_port, &progress)
+                .await?
+        };
+        progress.done_with("agent running");
+
+        self.port_forward(connect_pod_name, connection_port)
+    }
+
+    async fn port_forward(pod_name: &str, port: u16) -> Result<Portforwarder> {
+        let pod_api: Api<Pod> = self.get_agent_api();
+        pod_api
+            .portforward(&pod_name, &[port])
+            .await
+            .map_err(LayerError::KubeError)
+    }
+    async fn get_runtime_data(&self) -> Result<RuntimeData> {
+        let target = target(&self.config)?;
+        target.runtime_data(self).await
+    }
 }
 
 fn get_agent_name() -> String {
@@ -301,133 +542,6 @@ async fn create_ephemeral_container_agent(
     Ok(runtime_data.pod_name.to_string())
 }
 
-async fn create_job_pod_agent(
-    config: &LayerConfig,
-    agent_image: String,
-    pod_api: &Api<Pod>,
-    runtime_data: RuntimeData,
-    job_api: &Api<Job>,
-    connection_port: u16,
-    progress: &TaskProgress,
-) -> Result<String> {
-    let pod_progress = progress.subtask("creating agent pod...");
-    let mirrord_agent_job_name = get_agent_name();
-
-    let mut agent_command_line = vec![
-        "./mirrord-agent".to_string(),
-        "--container-id".to_string(),
-        runtime_data.container_id,
-        "--container-runtime".to_string(),
-        runtime_data.container_runtime,
-        "-l".to_string(),
-        connection_port.to_string(),
-    ];
-    if let Some(timeout) = config.agent.communication_timeout {
-        agent_command_line.push("-t".to_string());
-        agent_command_line.push(timeout.to_string());
-    }
-
-    let agent_pod: Job =
-        serde_json::from_value(json!({ // Only Jobs support self deletion after completion
-                "metadata": {
-                    "name": mirrord_agent_job_name,
-                    "labels": {
-                        "app": "mirrord"
-                    },
-                    "annotations":
-                    {
-                        "sidecar.istio.io/inject": "false"
-                    }
-                },
-                "spec": {
-                "ttlSecondsAfterFinished": config.agent.ttl,
-
-                    "template": {
-                        "metadata": {
-                            "annotations":
-                            {
-                                "sidecar.istio.io/inject": "false"
-                            }
-                        },
-
-                "spec": {
-                    "hostPID": true,
-                    "nodeName": runtime_data.node_name,
-                    "restartPolicy": "Never",
-                    "volumes": [
-                        {
-                            "name": "sockpath",
-                            "hostPath": {
-                                "path": runtime_data.socket_path
-                            }
-                        }
-                    ],
-                    "containers": [
-                        {
-                            "name": "mirrord-agent",
-                            "image": agent_image,
-                            "imagePullPolicy": config.agent.image_pull_policy,
-                            "securityContext": {
-                                "privileged": true,
-                            },
-                            "volumeMounts": [
-                                {
-                                    "mountPath": runtime_data.socket_path,
-                                    "name": "sockpath"
-                                }
-                            ],
-                            "command": agent_command_line,
-                            "env": [{"name": "RUST_LOG", "value": config.agent.log_level}],
-                        }
-                    ]
-                }
-            }
-        }
-            }
-        ))?;
-    job_api
-        .create(&PostParams::default(), &agent_pod)
-        .await
-        .map_err(LayerError::KubeError)?;
-
-    let params = ListParams::default()
-        .labels(&format!("job-name={}", mirrord_agent_job_name))
-        .timeout(60);
-
-    pod_progress.done_with("agent pod created");
-
-    let pod_progress = progress.subtask("waiting for pod to be ready...");
-
-    let stream = watcher(pod_api.clone(), params).applied_objects();
-    pin!(stream);
-
-    while let Some(Ok(pod)) = stream.next().await {
-        if let Some(status) = &pod.status && let Some(phase) = &status.phase {
-                    debug!("Pod Phase = {phase:?}");
-                if phase == "Running" {
-                    break;
-                }
-            }
-    }
-
-    let pods = pod_api
-        .list(&ListParams::default().labels(&format!("job-name={}", mirrord_agent_job_name)))
-        .await
-        .map_err(LayerError::KubeError)?;
-
-    let pod_name = pods
-        .items
-        .first()
-        .and_then(|pod| pod.metadata.name.clone())
-        .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
-
-    wait_for_agent_startup(pod_api, &pod_name, "mirrord-agent".to_string()).await?;
-
-    pod_progress.done_with("pod is ready");
-
-    Ok(pod_name)
-}
-
 pub(crate) struct RuntimeData {
     pod_name: String,
     node_name: String,
@@ -491,13 +605,14 @@ impl RuntimeData {
 // END
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DeploymentData {
-    pub deployment: String,
+pub(crate) struct DeploymentTarget {
+    pub deployment_name: String,
+    pub container_name: Option<String>,
 }
 
 #[async_trait]
-impl RuntimeDataProvider for DeploymentData {
-    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
+impl RuntimeDataProvider for DeploymentTarget {
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
         let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
         let deployment = deployment_api
             .get(&self.deployment)
@@ -606,75 +721,35 @@ impl RuntimeDataProvider for DeploymentData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Target {
-    Deployment(DeploymentData),
-    Pod(PodData),
+    Deployment(DeploymentTarget),
+    Pod(PodTarget),
 }
 
 #[async_trait]
 trait RuntimeDataProvider {
-    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData>;
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData>;
 }
 
-impl Target {
-    pub async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
+#[async_trait]
+impl RuntimeDataProvider for Target {
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
         match self {
-            Target::Pod(pod) => pod.runtime_data(client, namespace).await,
-            Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
-        }
-    }
-}
-
-impl FromStr for DeploymentData {
-    type Err = LayerError;
-
-    fn from_str(input: &str) -> Result<Self> {
-        let target_data = input.split('/').collect::<Vec<&str>>();
-        match target_data.first() {
-            Some(&"deployment") if target_data.len() == 2 => Ok(DeploymentData {
-                deployment: target_data[1].to_string(),
-            }),
-            _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {:?} is not a deployment.",
-                input
-            ))),
+            Target::Deployment(deployment) => deployment.runtime_data(client).await,
+            Target::Pod(pod) => pod.runtime_data(client).await,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PodData {
+pub(crate) struct PodTarget {
     pub pod_name: String,
     pub container_name: Option<String>,
 }
 
-impl FromStr for PodData {
-    type Err = LayerError;
-
-    fn from_str(input: &str) -> Result<Self> {
-        let target_data = input.split('/').collect::<Vec<&str>>();
-        match target_data.first() {
-            Some(&"pod") if target_data.len() == 2 => Ok(PodData {
-                pod_name: target_data[1].to_string(),
-                container_name: None,
-            }),
-            Some(&"pod") if target_data.len() == 4 && target_data[2] == "container" => {
-                Ok(PodData {
-                    pod_name: target_data[1].to_string(),
-                    container_name: Some(target_data[3].to_string()),
-                })
-            }
-            _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {:?} is neither a pod or a deployment.",
-                input
-            ))),
-        }
-    }
-}
-
 #[async_trait]
-impl RuntimeDataProvider for PodData {
-    async fn runtime_data(&self, client: &Client, namespace: &str) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+impl RuntimeDataProvider for PodTarget {
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
+        let pod_api: Api<Pod> = client.get_target_pod_api();
         let pod = pod_api.get(&self.pod_name).await?;
         let (
             container_name,
@@ -730,14 +805,71 @@ impl RuntimeDataProvider for PodData {
     }
 }
 
+trait FromSplit {
+    fn from_split(split: &mut std::str::Split<char>) -> Result<Self>
+    where
+        Self: Sized;
+}
+
+impl FromSplit for DeploymentTarget {
+    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
+        let deployment_name = split.next().ok_or_else(|| {
+            LayerError::InvalidTarget("Deployment target must have a deployment name".to_string())
+        })?;
+        match (split.next(), split.next()) {
+            (Some("container"), Some(container_name)) => {
+                Ok(Self {
+                    deployment_name: deployment_name.to_string(),
+                    container_name: Some(container_name.to_string()),
+                })
+            },
+            (None, None) => Ok(Self {
+                deployment_name: deployment_name.to_string(),
+                container_name: None,
+            }),
+            _ => Err(LayerError::InvalidTarget(
+                "Deployment target must be in the format deployment/<deployment_name>[/container/<container_name>]"
+                    .to_string(),
+            )),
+        }
+    }
+}
+
+impl FromSplit for PodTarget {
+    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
+        let pod_name = split.next().ok_or_else(|| {
+            LayerError::InvalidTarget("Deployment target must have a deployment name".to_string())
+        })?;
+        match (split.next(), split.next()) {
+            (Some("container"), Some(container_name)) => Ok(Self {
+                pod_name: pod_name.to_string(),
+                container_name: Some(container_name.to_string()),
+            }),
+            (None, None) => Ok(Self {
+                pod_name: pod_name.to_string(),
+                container_name: None,
+            }),
+            _ => Err(LayerError::InvalidTarget(
+                "Pod target must be in the format pod/<pod_name>[/container/<container_name>]"
+                    .to_string(),
+            )),
+        }
+    }
+}
+
 impl FromStr for Target {
     type Err = LayerError;
 
-    fn from_str(target: &str) -> Result<Self> {
-        target
-            .parse::<DeploymentData>()
-            .map(Target::Deployment)
-            .or_else(|_| target.parse::<PodData>().map(Target::Pod))
+    fn from_str(target: &str) -> Result<Target> {
+        let split = target.split('/');
+        match split.next() {
+            Some("deployment") => DeploymentTarget::from_split(&mut split).map(Target::Deployment),
+            Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
+            _ => Err(LayerError::InvalidTarget(format!(
+                "Provided target: {:?} is neither a pod or a deployment.",
+                target
+            ))),
+        }
     }
 }
 

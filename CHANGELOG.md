@@ -6,7 +6,11 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+### Added
+- mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
 
+### Changed
+- mirrord-layer: refactored `pod_api.rs` to be more maintainble.
 ## 3.0.20-alpha
 
 ### Added
