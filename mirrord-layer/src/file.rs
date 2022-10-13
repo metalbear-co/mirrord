@@ -6,7 +6,7 @@
 /// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 use core::fmt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     io::SeekFrom,
     os::unix::io::RawFd,
@@ -14,6 +14,7 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
+use fancy_regex::Regex;
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
@@ -35,46 +36,47 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 /// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
+static DEFAULT_IGNORE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
-    let set = RegexSet::new([
-        r".*\.so",
-        r".*\.d",
-        r".*\.pyc",
-        r".*\.py",
-        r".*\.js",
-        r".*\.pth",
-        r".*\.plist",
-        r".*venv\.cfg",
-        r"^/proc/.*",
-        r"^/sys/.*",
-        r"^/lib/.*",
-        r"^/etc/.*",
-        r"^/usr/.*",
-        r"^/dev/.*",
-        r"^/opt/.*",
+    let rules = [
+        r"(?<so_files>^.+\.so$)|",
+        r"(?<d_files>^.+\.d$)|",
+        r"(?<pyc_files>^.+\.pyc$)|",
+        r"(?<py_files>^.+\.py$)|",
+        r"(?<js_files>^.+\.js$)|",
+        r"(?<pth_files>^.+\.pth$)|",
+        r"(?<plist_files>^.+\.plist$)|",
+        r"(?<cfg_files>^.*venv\.cfg$)|",
+        r"(?<proc_path>^/proc/.*$)|",
+        r"(?<sys_path>^/sys/.*$)|",
+        r"(?<lib_path>^/lib/.*$)|",
+        r"(?<etc_path>^/etc/.*$)|",
+        r"(?<usr_path>^/usr/.*$)|",
+        r"(?<dev_path>^/dev/.*$)|",
+        r"(?<opt_path>^/opt/.*$)|",
         // support for nixOS.
-        r"^/nix/.*",
-        r"^/home/iojs/.*",
-        r"^/home/runner/.*",
+        r"(?<nix_path>^/nix/.*$)|",
+        r"(?<iojs_path>^/home/iojs/.*$)|",
+        r"(?<runner_path>^/home/runner/.*$)|",
         // dotnet: `/tmp/clr-debug-pipe-1`
-        r"^.*clr-.*-pipe-.*",
+        r"(?<clr_files>^.*clr-.*-pipe-.*$)|",
         // dotnet: `/home/{username}/{project}.pdb`
-        r".*\.pdb",
+        r"(?<pdb_files>^.*\.pdb$)|",
         // dotnet: `/home/{username}/{project}.dll`
-        r".*\.dll",
+        r"(?<dll_files>^.*\.dll$)|",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
-        r".*/package.json",
-        &current_dir.to_string_lossy(),
-        &current_binary.to_string_lossy(),
-    ])
-    .unwrap();
+        r"(?<package_json>^.*/package.json$)|",
+        &format!("(^.*{}.*$)|", current_dir.to_string_lossy()),
+        &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
+    ]
+    .into_iter()
+    .collect::<String>();
 
-    set
+    Regex::new(&rules).unwrap()
 });
 
 type LocalFd = RawFd;
