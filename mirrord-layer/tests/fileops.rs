@@ -109,3 +109,40 @@ async fn test_self_open(dylib_path: &PathBuf) {
     assert!(output.stderr.is_empty());
     assert!(!&stdout_str.to_lowercase().contains("error"));
 }
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+async fn test_pread(dylib_path: &PathBuf) {
+    let mut env = HashMap::new();
+    env.insert("RUST_LOG", "warn,mirrord=debug");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
+    env.insert("MIRRORD_CONNECT_TCP", &addr);
+    env.insert("MIRRORD_REMOTE_DNS", "false");
+    env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
+    env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
+
+    let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    app_path.push("../target/debug/fileops");
+
+    println!("App path: {:?}", app_path);
+
+    let server = Command::new(app_path)
+        .envs(env)
+        .current_dir("/tmp")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    assert!(layer_connection.is_ended().await);
+    let output = server.wait_with_output().await.unwrap();
+    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+    println!("{}", stdout_str);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+}
