@@ -381,7 +381,7 @@ impl KubernetesAPI {
         Ok(pod_name)
     }
 
-    pub async fn create_agent(&self, connection_port: u16) -> Result<Portforwarder> {
+    pub(crate) async fn create_agent(&self, connection_port: u16) -> Result<String> {
         let progress = TaskProgress::new("agent initializing...");
         let agent_image = agent_image(&self.config);
         let runtime_data = self.get_runtime_data().await?;
@@ -399,10 +399,10 @@ impl KubernetesAPI {
         };
         progress.done_with("agent running");
 
-        self.port_forward(&connect_pod_name, connection_port).await
+        Ok(connect_pod_name)
     }
 
-    async fn port_forward(&self, pod_name: &str, port: u16) -> Result<Portforwarder> {
+    pub(crate) async fn port_forward(&self, pod_name: &str, port: u16) -> Result<Portforwarder> {
         let pod_api: Api<Pod> = self.get_agent_api();
         pod_api
             .portforward(pod_name, &[port])
