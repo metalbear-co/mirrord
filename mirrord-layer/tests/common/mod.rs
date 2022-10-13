@@ -250,6 +250,7 @@ pub enum Application {
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonDontLoad,
+    RustFileOps,
 }
 
 impl Application {
@@ -281,6 +282,13 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
+            Application::RustFileOps => {
+                format!(
+                    "{}/{}",
+                    String::from(env!("CARGO_MANIFEST_DIR")),
+                    "../target/debug/fileops"
+                )
+            }
         }
     }
 
@@ -313,6 +321,7 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::RustFileOps => vec![],
         }
     }
 
@@ -322,7 +331,9 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonDontLoad => unimplemented!("shouldn't get here"),
+            Application::PythonDontLoad | Application::RustFileOps => {
+                unimplemented!("shouldn't get here")
+            }
             Application::PythonSelfConnect => 1337,
         }
     }
