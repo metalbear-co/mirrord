@@ -264,6 +264,9 @@ jobs:
           go build -o 19
           cd ../app_go
           go build -o 19
+      - run: |
+          cd mirrord-layer/tests/apps/fileops
+          cargo build
       - uses: actions/setup-node@v3
         with:
           node-version: 14
