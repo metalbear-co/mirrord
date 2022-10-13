@@ -10,6 +10,16 @@ use tracing::{error, info};
 
 use super::HookMessage;
 
+const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+
+fn should_ignore(code: Option<i32>) -> bool {
+    if let Some(code) = code {
+        IGNORE_ERROR_CODES.contains(&code)
+    } else {
+        false
+    }
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -166,7 +176,7 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
-            HookError::IO(ref e) if (e.raw_os_error() == Some(libc::EINPROGRESS)) => {
+            HookError::IO(ref e) if (should_ignore(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),

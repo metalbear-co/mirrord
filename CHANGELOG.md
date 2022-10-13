@@ -17,10 +17,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Shortcut `deploy` for `deployment` in target argument.
 
 
-## Changed
+### Changed
 - Print exit message when terminating application due to an unhandled error in the layer.
 - mirrord-layer: refactored `pod_api.rs` to be more maintainble.
 - Use kube config namespace by default.
+- mirrord-layer: Ignore `EAFNOSUPPORT` error reporting (valid scenario).
 
 ## 3.0.20-alpha
 
