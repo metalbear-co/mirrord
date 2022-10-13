@@ -122,6 +122,7 @@ async fn test_pread(dylib_path: &PathBuf) {
     env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
+    env.insert("MIRRORD_FILE_RO_OPS", "true");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
     env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
 
