@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - `/nix/*` path is now ignored for file operations to support NixOS.
 
+## Changed
+- Print exit message when terminating application due to an unhandled error in the layer.
+
 ## 3.0.20-alpha
 
 ### Added

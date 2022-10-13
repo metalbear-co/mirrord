@@ -384,7 +384,7 @@ async fn thread_loop(
         }
     }
 
-    graceful_exit!();
+    graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
 #[tracing::instrument(level = "trace", skip(connection, receiver))]
