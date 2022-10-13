@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: support `-target deployment/deployment_name/container/container_name` flag to run on a specific container.
 - `/nix/*` path is now ignored for file operations to support NixOS.
 - Shortcut `deploy` for `deployment` in target argument.
+- Added the ability to override environment variables in the config file.
 
 
 ### Changed
@@ -33,7 +34,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Layer integration tests with more apps (testing with Go only on MacOS because of
   known crash on Linux - [[#380](https://github.com/metalbear-co/mirrord/issues/380)]).
   Closes [[#472](https://github.com/metalbear-co/mirrord/issues/472)].
-- Added the ability to override environment variables in the config file.
 - Added progress reporting to the CLI.
 - CI: use [bors](https://bors.tech/) for merging! woohoo.
 
