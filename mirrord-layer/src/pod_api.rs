@@ -681,7 +681,7 @@ impl FromStr for Target {
     fn from_str(target: &str) -> Result<Target> {
         let mut split = target.split('/');
         match split.next() {
-            Some("deployment") => DeploymentTarget::from_split(&mut split).map(Target::Deployment),
+            Some("deployment") | Some("deploy") => DeploymentTarget::from_split(&mut split).map(Target::Deployment),
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(LayerError::InvalidTarget(format!(
                 "Provided target: {:?} is neither a pod or a deployment.",
