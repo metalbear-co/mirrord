@@ -2,7 +2,8 @@ use std::{
     self,
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{prelude::*, BufReader, BufWriter, SeekFrom},
+    io::{prelude::*, BufReader, SeekFrom},
+    os::unix::prelude::FileExt,
     path::PathBuf,
 };
 
@@ -276,12 +277,9 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
-                    let _ = reader.seek(SeekFrom::Start(start_from))?;
-
                     let mut buffer = vec![0; buffer_size];
 
-                    let read_result = reader.read(&mut buffer).map(|read_amount| {
+                    let read_result = file.read_at(&mut buffer, start_from).map(|read_amount| {
                         // We handle the extra bytes in the `pread` hook, so here we can just
                         // return the full buffer.
                         ReadFileResponse {
@@ -309,14 +307,11 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut writer = BufWriter::new(std::io::Write::by_ref(file));
-                    let _ = writer.seek(SeekFrom::Start(start_from))?;
-
-                    let write_result = writer
-                        .write(&buffer)
+                    let written_amount = file
+                        .write_at(&buffer, start_from)
                         .map(|written_amount| WriteFileResponse { written_amount })?;
 
-                    Ok(write_result)
+                    Ok(written_amount)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
