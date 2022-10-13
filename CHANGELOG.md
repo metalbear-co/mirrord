@@ -7,11 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- `pwrite` hook (used by `dotnet`);
+
 ## 3.0.21-alpha
 
 ### Added
-- `pwrite` hook (used by `dotnet`);
-- Added the ability to override environment variables in the config file.
 - Reuse agent - first process that runs will create the agent and its children will be able to reuse the same one to avoid creating many agents.
 - Don't print progress for child processes to avoid confusion.
 - Skip istio/linkerd-proxy/init container when mirroring a pod without a specific container name.

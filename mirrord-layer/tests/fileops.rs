@@ -126,7 +126,10 @@ async fn test_pread(
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
     env.insert("MIRRORD_FILE_RO_OPS", "true");
+    *env.entry("MIRRORD_FILE_OPS").or_insert("false") = "true";
+
     let mut test_process =
         TestProcess::start_process(executable, application.get_args(), env).await;
 
