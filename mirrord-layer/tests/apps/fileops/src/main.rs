@@ -8,7 +8,7 @@ static FILE_CONTENTS: &str = "Hello, I am the file you're reading!";
 static FILE_PATH: &str = "/tmp/test_file.txt";
 
 fn create_test_file() {
-    println!(">> Creating /app");
+    println!(">> Creating test file");
 
     let mut file = OpenOptions::new()
         .read(true)
