@@ -9,7 +9,7 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tracing::log::info;
 
-use crate::{error::LayerError, pod_api};
+use crate::{error::LayerError, pod_api::KubernetesAPI};
 
 pub(crate) enum AgentConnection<T>
 where
@@ -71,6 +71,20 @@ where
     }
 }
 
+fn handle_error(err: LayerError) -> ! {
+    match err {
+        LayerError::KubeError(kube::Error::HyperError(err)) => {
+            eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
+
+            match err.into_cause() {
+                Some(cause) => panic!("{}", cause),
+                None => panic!("mirrord got KubeError::HyperError"),
+            }
+        }
+        _ => panic!("failed to create agent in k8s: {}", err),
+    }
+}
+
 pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead + Unpin {
     if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
@@ -78,19 +92,39 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
         AgentConnection::TcpStream(stream)
     } else {
-        let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
-        info!("Using port `{connection_port:?}` for communication");
-        let mut port_forwarder = pod_api::create_agent(config.clone(), connection_port).await.unwrap_or_else(|err| match err {
-            LayerError::KubeError(kube::Error::HyperError(err)) => {
-                eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
+        let k8s_api = KubernetesAPI::new(config).await.unwrap();
+        let (pod_agent_name, agent_port) = {
+            if let (Some(pod_agent_name), Some(agent_port)) =
+                (&config.connect_agent_name, config.connect_agent_port)
+            {
+                info!(
+                    "Reusing existing agent {:?}, port {:?}",
+                    pod_agent_name, agent_port
+                );
+                (pod_agent_name.to_owned(), agent_port)
+            } else {
+                info!("No existing agent, spawning new one.");
+                let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+                info!("Using port `{agent_port:?}` for communication");
+                let pod_agent_name = match k8s_api.create_agent(agent_port).await {
+                    Ok(pod_name) => pod_name,
+                    Err(err) => handle_error(err),
+                };
 
-                match err.into_cause() {
-                    Some(cause) => panic!("{}", cause),
-                    None => panic!("mirrord got KubeError::HyperError"),
-                }
+                // Set env var for children to re-use.
+                std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
+                std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
+                // So children won't show progress as well as it might confuse users
+                std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+                (pod_agent_name, agent_port)
             }
-            _ => panic!("failed to create agent in k8s: {}", err),
-        });
-        AgentConnection::Portforwarder(port_forwarder.take_stream(connection_port).unwrap())
+        };
+
+        let mut port_forwarder = match k8s_api.port_forward(&pod_agent_name, agent_port).await {
+            Ok(port_forwarder) => port_forwarder,
+            Err(err) => handle_error(err),
+        };
+
+        AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
     }
 }
