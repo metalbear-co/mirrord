@@ -105,8 +105,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] InferConfigError),
 
-    #[error("mirrord-layer: Failed to get `Spec` for Pod `{0}`!")]
-    PodSpecNotFound(String),
+    #[error("mirrord-layer: Failed to get `Spec` for Pod!")]
+    PodSpecNotFound,
 
     #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
     JobPodNotFound(String),
@@ -120,8 +120,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Container not found: `{0}`")]
     ContainerNotFound(String),
 
-    #[error("mirrord-layer: Node not found for: `{0}`")]
-    NodeNotFound(String),
+    #[error("mirrord-layer: Node name wasn't found in pod spec")]
+    NodeNotFound,
 
     #[error("mirrord-layer: Deployment: `{0} not found!`")]
     DeploymentNotFound(String),
@@ -131,6 +131,18 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
     ContainerRuntimeParseError(String),
+
+    #[error("mirrord-layer: Pod name not found in response from kube API")]
+    PodNameNotFound,
+
+    #[error("mirrord-layer: Pod status not found in response from kube API")]
+    PodStatusNotFound,
+
+    #[error("mirrord-layer: Container status not found in response from kube API")]
+    ContainerStatusNotFound,
+
+    #[error("mirrord-layer: Container ID not found in response from kube API")]
+    ContainerIdNotFound,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

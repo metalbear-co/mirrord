@@ -9,7 +9,7 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tracing::log::info;
 
-use crate::{error::LayerError, pod_api};
+use crate::{error::LayerError, pod_api::KubernetesAPI};
 
 pub(crate) enum AgentConnection<T>
 where
@@ -80,7 +80,8 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
     } else {
         let connection_port: u16 = rand::thread_rng().gen_range(30000..=65535);
         info!("Using port `{connection_port:?}` for communication");
-        let mut port_forwarder = pod_api::create_agent(config.clone(), connection_port).await.unwrap_or_else(|err| match err {
+        let k8s_api = KubernetesAPI::new(config).await.unwrap();
+        let mut port_forwarder = k8s_api.create_agent(connection_port).await.unwrap_or_else(|err| match err {
             LayerError::KubeError(kube::Error::HyperError(err)) => {
                 eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
 
