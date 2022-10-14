@@ -10,6 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - `pwrite` hook (used by `dotnet`);
 
+## 3.0.22-alpha
+
 ### Changed
 - Exclude internal configuration fields from generated schema.
 
