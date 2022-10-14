@@ -267,6 +267,7 @@ jobs:
       - run: |
           cd mirrord-layer/tests/apps/fileops
           cargo build
+      - run: sudo dtruss ./target/debug/fileops
       - uses: actions/setup-node@v3
         with:
           node-version: 14
