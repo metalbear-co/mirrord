@@ -112,6 +112,8 @@ async fn test_self_open(dylib_path: &PathBuf) {
     assert!(!&stdout_str.to_lowercase().contains("error"));
 }
 
+/// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
+/// matches the expected bytes written.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
@@ -141,68 +143,6 @@ async fn test_pwrite(
             mirrord_protocol::OpenFileRequest {
                 path: "/tmp/test_file.txt".to_string().into(),
                 open_options: mirrord_protocol::OpenOptionsInternal {
-                    read: true,
-                    write: true,
-                    append: false,
-                    truncate: false,
-                    create: true,
-                    create_new: false,
-                },
-            }
-        ))
-    );
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
-            Ok(mirrord_protocol::OpenFileResponse { fd: 1 }),
-        )))
-        .await
-        .unwrap();
-
-    // reply to pwrite
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Write(
-            mirrord_protocol::WriteFileRequest {
-                fd: 1,
-                write_bytes: vec![
-                    72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102,
-                    105, 108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 114, 101, 97, 100, 105,
-                    110, 103, 33
-                ]
-            }
-        ))
-    );
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Write(
-            Ok(mirrord_protocol::WriteFileResponse { written_amount: 36 }),
-        )))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
-            mirrord_protocol::CloseFileRequest { fd: 1 }
-        ))
-    );
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
-            Ok(mirrord_protocol::CloseFileResponse {}),
-        )))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
-            mirrord_protocol::OpenFileRequest {
-                path: "/tmp/test_file.txt".to_string().into(),
-                open_options: mirrord_protocol::OpenOptionsInternal {
                     read: false,
                     write: true,
                     append: false,
@@ -213,7 +153,6 @@ async fn test_pwrite(
             }
         ))
     );
-
     layer_connection
         .codec
         .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
@@ -222,14 +161,12 @@ async fn test_pwrite(
         .await
         .unwrap();
 
-    // reply to pread
-
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(mirrord_protocol::FileRequest::WriteLimited(
             mirrord_protocol::WriteLimitedFileRequest {
                 remote_fd: 1,
-                start_from: 12,
+                start_from: 0,
                 write_bytes: vec![
                     72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102,
                     105, 108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 119, 114, 105, 116, 105,
@@ -238,6 +175,8 @@ async fn test_pwrite(
             }
         ))
     );
+
+    // reply to pwrite
     layer_connection
         .codec
         .send(DaemonMessage::File(
@@ -254,6 +193,7 @@ async fn test_pwrite(
             mirrord_protocol::CloseFileRequest { fd: 1 }
         ))
     );
+
     layer_connection
         .codec
         .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
@@ -261,6 +201,7 @@ async fn test_pwrite(
         )))
         .await
         .unwrap();
+
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
 }
