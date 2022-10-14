@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Exclude internal configuration fields from generated schema.
+
 ## 3.0.21-alpha
 
 ### Added
