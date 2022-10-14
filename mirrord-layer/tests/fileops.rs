@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
-use rstest::{fixture, rstest};
+use rstest::rstest;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -48,30 +48,6 @@ impl LayerConnection {
 
     async fn is_ended(&mut self) -> bool {
         self.codec.next().await.is_none()
-    }
-}
-
-/// Return the path to the existing layer lib, or build it first and return the path, according to
-/// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
-/// When testing locally the lib should be rebuilt on each run so that when developers make changes
-/// they don't have to also manually build the lib before running the tests.
-/// Building is slow on the CI though, so the CI can set the env var and use an artifact of an
-/// earlier job on the same run (there are no code changes in between).
-#[fixture]
-#[once]
-fn dylib_path() -> PathBuf {
-    match std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
-        Ok(path) => {
-            let dylib_path = PathBuf::from(path);
-            println!("Using existing layer lib from: {:?}", dylib_path);
-            assert!(dylib_path.exists());
-            dylib_path
-        }
-        Err(_) => {
-            let dylib_path = test_cdylib::build_current_project();
-            println!("Built library at {:?}", dylib_path);
-            dylib_path
-        }
     }
 }
 
