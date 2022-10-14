@@ -11,6 +11,7 @@ fn test_pwrite() {
 
     let file = OpenOptions::new()
         .write(true)
+        .create(true)
         .open(FILE_PATH)
         .expect("pwrite!");
 
@@ -21,7 +22,7 @@ fn test_pwrite() {
 
         let (buffer, length, _capacity) = data.into_bytes_with_nul().into_raw_parts();
 
-        assert_eq!(libc::pwrite(fd, buffer.cast(), length, 0), 36);
+        assert_eq!(libc::pwrite(fd, buffer.cast(), length, 0), 37);
     };
 }
 

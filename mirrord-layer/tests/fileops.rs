@@ -123,7 +123,7 @@ async fn test_pwrite(
                     write: true,
                     append: false,
                     truncate: false,
-                    create: false,
+                    create: true,
                     create_new: false,
                 },
             }
@@ -157,7 +157,7 @@ async fn test_pwrite(
         .codec
         .send(DaemonMessage::File(
             mirrord_protocol::FileResponse::WriteLimited(Ok(mirrord_protocol::WriteFileResponse {
-                written_amount: 36,
+                written_amount: 37,
             })),
         ))
         .await
