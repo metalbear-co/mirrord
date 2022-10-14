@@ -88,12 +88,43 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
+/// Check if we're running in NixOS or Devbox
+/// if so, add `sh` to the skip list because of https://github.com/metalbear-co/mirrord/issues/531
+fn nix_devbox_patch(config: &mut LayerConfig) {
+    let mut current_skip = config
+        .skip_processes
+        .clone()
+        .map(VecOrSingle::to_vec)
+        .unwrap_or_default();
+    // already contains, doesn't matter
+    if current_skip.contains(&"sh".to_string()) {
+        return;
+    }
+
+    if is_nix_or_devbox() {
+        current_skip.push("sh".into());
+        std::env::set_var("MIRRORD_SKIP_PROCESSES", current_skip.join(";"));
+        config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
+    }
+}
+/// Check if NixOS or Devbox by discrimnating env vars.
+fn is_nix_or_devbox() -> bool {
+    if let Ok(res) = std::env::var("IN_NIX_SHELL") && res.as_str() == "1" {
+        return true;
+    }
+    if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
+        return true;
+    }
+    false
+}
+
 #[ctor]
 fn before_init() {
     if !cfg!(test) {
         if let Ok(Ok(true)) = std::env::var(MIRRORD_SKIP_LOAD).map(|value| value.parse::<bool>()) {
             return;
         }
+
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
 
@@ -105,7 +136,8 @@ fn before_init() {
             .generate_config();
 
         match config {
-            Ok(config) => {
+            Ok(mut config) => {
+                nix_devbox_patch(&mut config);
                 let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
                 if should_load(given_process, skip_processes) {
