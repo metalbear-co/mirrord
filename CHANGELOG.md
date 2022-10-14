@@ -13,6 +13,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Exclude internal configuration fields from generated schema.
 
+### Fixed
+- Issue [#531](https://github.com/metalbear-co/mirrord/issues/531). We now detect NixOS/Devbox usage and add `sh` to skipped list.
 
 ## 3.0.21-alpha
 
