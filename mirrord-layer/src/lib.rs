@@ -107,15 +107,17 @@ fn nix_devbox_patch(config: &mut LayerConfig) {
         config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
     }
 }
+
 /// Check if NixOS or Devbox by discrimnating env vars.
 fn is_nix_or_devbox() -> bool {
     if let Ok(res) = std::env::var("IN_NIX_SHELL") && res.as_str() == "1" {
-        return true;
+        true
     }
-    if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
-        return true;
+    else if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
+        true
+    } else {
+        false
     }
-    false
 }
 
 #[ctor]
