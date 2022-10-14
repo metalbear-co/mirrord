@@ -467,7 +467,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.begin_transaction();
 
     unsafe {
-        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);        
+        let _ = replace!(&mut interceptor, "close_nocancel", close_detour, FnClose, FN_CLOSE);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
