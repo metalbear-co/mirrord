@@ -96,12 +96,8 @@ fn nix_devbox_patch(config: &mut LayerConfig) {
         .clone()
         .map(VecOrSingle::to_vec)
         .unwrap_or_default();
-    // already contains, doesn't matter
-    if current_skip.contains(&"sh".to_string()) {
-        return;
-    }
 
-    if is_nix_or_devbox() {
+    if !current_skip.contains(&"sh".to_string()) && is_nix_or_devbox() {
         current_skip.push("sh".into());
         std::env::set_var("MIRRORD_SKIP_PROCESSES", current_skip.join(";"));
         config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
