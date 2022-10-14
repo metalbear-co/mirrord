@@ -468,7 +468,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);        
-        let _ = replace!(&mut interceptor, "close_nocancel", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(&mut interceptor, "close_nocancel", close_nocancel_detour, FnClose_nocancel, FN_CLOSE_NOCANCEL);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -497,6 +497,29 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// so it tries to do the same for files.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
+    let enabled_file_ops = ENABLED_FILE_OPS
+        .get()
+        .expect("Should be set during initialization!");
+
+    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
+        FN_CLOSE(fd)
+    } else if *enabled_file_ops
+        && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
+        let close_file_result = file::ops::close(remote_fd);
+
+        close_file_result
+            .map_err(|fail| {
+                error!("Failed closing file with {fail:#?}");
+                -1
+            })
+            .unwrap_or_else(|fail| fail)
+    } else {
+        FN_CLOSE(fd)
+    }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     let enabled_file_ops = ENABLED_FILE_OPS
         .get()
         .expect("Should be set during initialization!");
