@@ -40,14 +40,17 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_TARGET_NAMESPACE")]
     pub target_namespace: Option<String>,
 
+    #[cfg_attr(feature = "schema", schemars(skip))]
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
+    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent name that already exists that we can connect to.
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
+    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent listen port that already exists that we can connect to.
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
