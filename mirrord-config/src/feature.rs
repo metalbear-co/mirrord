@@ -2,7 +2,7 @@ use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
 use crate::{
-    config::source::MirrordConfigSource, env::EnvFileConfig, fs::FsConfig,
+    config::source::MirrordConfigSource, env::EnvFileConfig, file::FileSelectConfig, fs::FsConfig,
     network::NetworkFileConfig, util::ToggleableConfig,
 };
 
@@ -22,4 +22,8 @@ pub struct FeatureFileConfig {
     #[serde(default)]
     #[config(nested)]
     pub network: ToggleableConfig<NetworkFileConfig>,
+
+    #[serde(default)]
+    #[config(nested)]
+    pub file_select: ToggleableConfig<FileSelectConfig>,
 }

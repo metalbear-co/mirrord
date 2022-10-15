@@ -17,6 +17,7 @@ use std::{
 use fancy_regex::Regex;
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+use mirrord_config::file::{FileSelect, FileSelectConfig};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
@@ -39,6 +40,22 @@ pub(crate) mod ops;
 //
 // 1. `include` means to exclude everything else;
 // 2. `exclude` adds to our defaults;
+//
+// ADD(alex) [high] 2022-10-14: I think it's possible to have only 1 regex filter:
+// `(?<include>(?!.*\.txt))(?<exclude_absolute>(^\/tmp\/.*$)|(^\/host\/.*$))` for example would let
+// us include everything that has `.txt`, and would exclude based on the second capture group.
+//
+// In words the regex would be: "I want to include /tmp/file.txt, and exclude every other /tmp/*".
+//
+// `(?<include>(?!(\/tmp\/foo\.txt\)|(\/host\/bar\.txt))))(?<exclude>\/tmp\/.*)` another one that
+// doesn't work properly.
+//
+// `(?<include>(?=(\/tmp\/.*)|(\/host\/.*)))(.*)` matches `/tmp/*` and `/host/*`, but refuses
+// everything else.
+pub(crate) fn make_one_true_regex(user_config: FileSelect) -> Regex {
+    todo!()
+}
+
 fn init_default_ignore() -> Regex {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
@@ -83,7 +100,8 @@ fn init_default_ignore() -> Regex {
 }
 
 /// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: OnceLock<Regex> = OnceLock::new();
+static SELECT_FILES_EXCLUDE: OnceLock<Regex> = OnceLock::new();
+pub(crate) static SELECT_FILES: OnceLock<Regex> = OnceLock::new();
 
 type LocalFd = RawFd;
 type RemoteFd = usize;

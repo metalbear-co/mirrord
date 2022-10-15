@@ -5,6 +5,7 @@ pub mod agent;
 pub mod config;
 pub mod env;
 pub mod feature;
+pub mod file;
 pub mod fs;
 pub mod incoming;
 pub mod network;
@@ -260,6 +261,7 @@ mod tests {
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),
                 fs: ToggleableConfig::Config(FsConfig::Write),
+                file_select: ToggleableConfig::Enabled(true),
                 network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
