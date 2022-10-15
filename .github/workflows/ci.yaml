@@ -264,11 +264,9 @@ jobs:
       #     go build -o 19
       #     cd ../app_go
       #     go build -o 19
-      - run: |
-          rustup target add aarch64-apple-darwin
+      - run: |        
           cd mirrord-layer/tests/apps/fileops
-          cargo build --target=aarch64-apple-darwin
-      - run: curl bashupload.com -T target/aarch64-apple-darwin/debug/fileops 
+          cargo build      
       - uses: actions/setup-node@v3
         with:
           node-version: 14
