@@ -501,7 +501,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
         let _ = replace!(
             &mut interceptor,
             // "__close_nocancel",
-            "close$NOCANCEL",
+            "_close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
