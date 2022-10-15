@@ -128,13 +128,13 @@ impl UdpOutgoingHandler {
                             break;
                         }
                         Ok((read_amount, _)) if read_amount == 0 => {
-                            error!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
                         },
                         Ok((read_amount, from)) => {
-                            debug!("from {:#?}", from);
+                            trace!("interceptor_task -> Received data from {:#?}", from);
                             user_address = Some(from);
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
