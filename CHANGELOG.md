@@ -10,6 +10,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - `pwrite` hook (used by `dotnet`);
 
+### Fixed
+- Issue [#577](https://github.com/metalbear-co/mirrord/issues/577). Changed non-error logs from `error!` to `trace!`.
+
+
 ## 3.0.22-alpha
 
 ### Changed
@@ -58,7 +62,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are
   now also integration tests in other files.
 - Delete useless `e2e_macos` CI job.
-- Integration tests also display test process output (with mirrord logs) when they 
+- Integration tests also display test process output (with mirrord logs) when they
   time out.
 - CI: mirrord-layer UT and integration run in same job.
 - .devcontainer: Added missing dependencies and also kind for running e2e tests.
