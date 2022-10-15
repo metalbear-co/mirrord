@@ -107,7 +107,7 @@ impl TcpOutgoingHandler {
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
-                            error!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
