@@ -24,6 +24,7 @@ fn test_pwrite() {
 
         assert_eq!(libc::pwrite(fd, buffer.cast(), length, 0), 37);
     };
+    drop(file);
 }
 
 fn main() {

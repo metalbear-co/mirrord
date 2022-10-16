@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.0.21-alpha"
+version = "3.0.22-alpha"
 dependencies = [
  "libc",
 ]
