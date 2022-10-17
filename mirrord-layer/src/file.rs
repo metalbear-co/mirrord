@@ -35,7 +35,7 @@ use crate::{
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-fn make_default_file_exclude() -> String {
+fn make_default_file_exclude() -> Vec<String> {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
@@ -73,7 +73,8 @@ fn make_default_file_exclude() -> String {
         &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
     ]
     .into_iter()
-    .collect::<String>()
+    .map(String::from)
+    .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -82,9 +83,51 @@ enum FileFilter {
     Include(Regex),
 }
 
+impl FileFilter {
+    #[tracing::instrument(level = "debug")]
+    pub(super) fn new(user_config: FileSelect) -> Regex {
+        let FileSelect { include, exclude } = user_config;
+        let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
+        let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
+        let default_exclude = make_default_file_exclude();
+        let default_exclude_regex = Regex::new(&default_exclude.concat());
+
+        // TODO(alex) [high] 2022-10-17: Finish creating our regex selector.
+        let exclude = exclude
+            .into_iter()
+            // Turn into capture group `(/folder/first.txt)`.
+            .map(|element| format!("({element})"))
+            .chain(default_exclude.into_iter())
+            // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
+            .reduce(|acc, element| format!("{acc}|{element}"))
+            .as_deref()
+            .map(Regex::new)
+            .or(Some(default_exclude_regex))
+            .transpose()
+            .expect("Failed parsing exclude file regex!");
+
+        let include = include
+            .into_iter()
+            // Turn into capture group `(/folder/first.txt)`.
+            .map(|element| format!("({element})"))
+            // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
+            .reduce(|acc, element| format!("{acc}|{element}"))
+            .as_deref()
+            .map(Regex::new)
+            .transpose()
+            .expect("Failed parsing include file regex!");
+
+        include
+            .map(Self::Include)
+            .or_else(|| Some(Self::Exclude(exclude.unwrap())));
+
+        todo!()
+    }
+}
+
 impl Default for FileFilter {
     fn default() -> Self {
-        Self::Exclude(Regex::new(&make_default_file_exclude()).unwrap())
+        Self::Exclude(Regex::new(&make_default_file_exclude().concat()).unwrap())
     }
 }
 
@@ -118,36 +161,18 @@ pub(super) fn make_one_true_regex(user_config: FileSelect) -> Regex {
         .into_iter()
         // Turn into capture group `(/folder/first.txt)`.
         .map(|element| format!("({element})"))
-        .inspect(|element| debug!("map -> {element:#?}"))
+        .chain(default_exclude.into_iter())
         // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-        .reduce(|acc, element| format!("{acc}|{element}"))
-        .inspect(|reduced| debug!("reduce -> {reduced:#?}"))
-        // Regex that excludes only the specified.
-        // `(?=(.*))(/folder/first.txt)|(/folder/second.txt)`
-        .map(|exclude| format!("(?<exclude>(?>{exclude}|{default_exclude}))(?<include>.*)"))
-        // .map(|exclude| format!("(?<exclude>(?=.*))(?<include>{exclude}|{default_exclude})"))
-        .inspect(|done| debug!("done -> {done:#?}"));
+        .reduce(|acc, element| format!("{acc}|{element}"));
 
-    include
+    let include: Option<String> = include
         .into_iter()
         // Turn into capture group `(/folder/first.txt)`.
         .map(|element| format!("({element})"))
-        .inspect(|element| debug!("map -> {element:#?}"))
         // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-        .reduce(|acc, element| format!("{acc}|{element}"))
-        .inspect(|reduced| debug!("reduce -> {reduced:#?}"))
-        // Regex that includes only specified, and excludes everything else
-        // `(?=(/folder/first.txt)|(/folder/second.txt))(.*)`.
-        .map(|include| format!("(?<include>(?={include}))(?<exclude>.*)"))
-        .inspect(|done| debug!("done -> {done:#?}"))
-        .or(exclude)
-        .or(Some(default_exclude))
-        .map(|str_regex| Regex::new(&str_regex))
-        .transpose()
-        .inspect_err(|fail| error!("Failed generating file filter regex with {:#?}", fail))
-        .unwrap()
-        .inspect(|d| debug!("final {d:#?}"))
-        .unwrap()
+        .reduce(|acc, element| format!("{acc}|{element}"));
+
+    todo!()
 }
 
 /// Regex that ignores system files + files in the current working directory.
