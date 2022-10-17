@@ -305,6 +305,24 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<
 }
 
 #[tracing::instrument(level = "trace")]
+pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
+    let remote_fd = get_remote_fd(local_fd)?;
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let writing_file = Write {
+        remote_fd,
+        write_bytes: buffer.to_vec(),
+        start_from: offset,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::WriteLimited(writing_file))?;
+
+    Detour::Success(file_channel_rx.blocking_recv()??)
+}
+
+#[tracing::instrument(level = "trace")]
 pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     let remote_fd = get_remote_fd(local_fd)?;
 
@@ -344,6 +362,7 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
     let writing_file = Write {
         remote_fd,
         write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?,
+        start_from: 0,
         file_channel_tx,
     };
 

@@ -3,11 +3,13 @@ use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
-use rstest::{fixture, rstest};
+use rstest::rstest;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
 };
+mod common;
+pub use common::*;
 
 struct LayerConnection {
     codec: Framed<TcpStream, DaemonCodec>,
@@ -49,30 +51,6 @@ impl LayerConnection {
     }
 }
 
-/// Return the path to the existing layer lib, or build it first and return the path, according to
-/// whether the environment variable MIRRORD_TEST_USE_EXISTING_LIB is set.
-/// When testing locally the lib should be rebuilt on each run so that when developers make changes
-/// they don't have to also manually build the lib before running the tests.
-/// Building is slow on the CI though, so the CI can set the env var and use an artifact of an
-/// earlier job on the same run (there are no code changes in between).
-#[fixture]
-#[once]
-fn dylib_path() -> PathBuf {
-    match std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
-        Ok(path) => {
-            let dylib_path = PathBuf::from(path);
-            println!("Using existing layer lib from: {:?}", dylib_path);
-            assert!(dylib_path.exists());
-            dylib_path
-        }
-        Err(_) => {
-            let dylib_path = test_cdylib::build_current_project();
-            println!("Built library at {:?}", dylib_path);
-            dylib_path
-        }
-    }
-}
-
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -108,4 +86,98 @@ async fn test_self_open(dylib_path: &PathBuf) {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(!&stdout_str.to_lowercase().contains("error"));
+}
+
+/// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
+/// matches the expected bytes written.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+async fn test_pwrite(
+    #[values(Application::RustFileOps)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_RO_OPS", "true");
+    *env.entry("MIRRORD_FILE_OPS").or_insert("false") = "true";
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+    // reply to open
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
+            mirrord_protocol::OpenFileRequest {
+                path: "/tmp/test_file.txt".to_string().into(),
+                open_options: mirrord_protocol::OpenOptionsInternal {
+                    read: false,
+                    write: true,
+                    append: false,
+                    truncate: false,
+                    create: true,
+                    create_new: false,
+                },
+            }
+        ))
+    );
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+            Ok(mirrord_protocol::OpenFileResponse { fd: 1 }),
+        )))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(mirrord_protocol::FileRequest::WriteLimited(
+            mirrord_protocol::WriteLimitedFileRequest {
+                remote_fd: 1,
+                start_from: 0,
+                write_bytes: vec![
+                    72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102,
+                    105, 108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 119, 114, 105, 116, 105,
+                    110, 103, 33, 0
+                ]
+            }
+        ))
+    );
+
+    // reply to pwrite
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(
+            mirrord_protocol::FileResponse::WriteLimited(Ok(mirrord_protocol::WriteFileResponse {
+                written_amount: 37,
+            })),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
+            mirrord_protocol::CloseFileRequest { fd: 1 }
+        ))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
+            Ok(mirrord_protocol::CloseFileResponse {}),
+        )))
+        .await
+        .unwrap();
+
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
 }

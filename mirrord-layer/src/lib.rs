@@ -29,7 +29,7 @@ use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
 };
-use mirrord_macro::hook_guard_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
@@ -498,6 +498,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(
+            &mut interceptor,
+            "close$NOCANCEL",
+            close_nocancel_detour,
+            FnClose_nocancel,
+            FN_CLOSE_NOCANCEL
+        );
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -545,6 +552,12 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     } else {
         FN_CLOSE(fd)
     }
+}
+
+// no need to guard because we call another detour which will do the guard for us.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+    close_detour(fd)
 }
 
 #[cfg(test)]

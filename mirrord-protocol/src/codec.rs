@@ -137,6 +137,13 @@ pub struct WriteFileRequest {
     pub write_bytes: Vec<u8>,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct WriteLimitedFileRequest {
+    pub remote_fd: usize,
+    pub start_from: u64,
+    pub write_bytes: Vec<u8>,
+}
+
 impl fmt::Debug for WriteFileRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WriteFileRequest")
@@ -172,6 +179,7 @@ pub enum FileRequest {
     ReadLimited(ReadLimitedFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
+    WriteLimited(WriteLimitedFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
 }
@@ -234,8 +242,9 @@ pub enum FileResponse {
     Read(RemoteResult<ReadFileResponse>),
     ReadLine(RemoteResult<ReadFileResponse>),
     ReadLimited(RemoteResult<ReadFileResponse>),
-    Seek(RemoteResult<SeekFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
+    WriteLimited(RemoteResult<WriteFileResponse>),
+    Seek(RemoteResult<SeekFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
 }
