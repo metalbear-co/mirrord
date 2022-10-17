@@ -565,6 +565,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+    trace!("Our cheeky mate from Greenpatch Hill {fd:?}");
     close_detour(fd)
 }
 
