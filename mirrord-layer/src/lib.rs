@@ -545,6 +545,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
+    trace!("hey, hey, blinky bill, you'll never catch him standing still, {fd:?}");
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
         FN_CLOSE(fd)
     } else if *enabled_file_ops
