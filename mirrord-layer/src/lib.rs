@@ -29,7 +29,7 @@ use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
 };
-use mirrord_macro::hook_guard_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
@@ -545,7 +545,6 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    trace!("hey, hey, blinky bill, you'll never catch him standing still, {fd:?}");
     if SOCKETS.lock().unwrap().remove(&fd).is_some() {
         FN_CLOSE(fd)
     } else if *enabled_file_ops
@@ -563,9 +562,9 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     }
 }
 
-#[hook_guard_fn]
+// no need to guard because we call another detour which will do the guard for us.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
-    trace!("Our cheeky mate from Greenpatch Hill {fd:?}");
     close_detour(fd)
 }
 
