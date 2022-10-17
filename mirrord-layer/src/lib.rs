@@ -23,7 +23,7 @@ use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
-use frida_gum::{interceptor::Interceptor, Gum, Module};
+use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{
@@ -495,14 +495,6 @@ async fn start_layer_thread(
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
-
-    for export in Module::enumerate_exports("fileops") {
-        println!("export: {:?}", export.name);
-    }
-
-    for export in Module::enumerate_symbols("fileops") {
-        println!("export: {:?}", export.name);
-    }
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);

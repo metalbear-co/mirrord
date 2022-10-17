@@ -285,7 +285,7 @@ impl Application {
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
-                    String::from(env!("CARGO_MANIFEST_DIR")),
+                    env!("CARGO_MANIFEST_DIR"),
                     "../target/debug/fileops"
                 )
             }
