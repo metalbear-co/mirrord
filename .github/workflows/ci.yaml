@@ -238,7 +238,7 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test -p mirrord-layer -- --nocapture
+      - run: cargo +nightly test -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
@@ -276,7 +276,7 @@ jobs:
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - run: cargo +nightly test -p mirrord-layer -- --nocapture
+      - run: cargo +nightly test -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
