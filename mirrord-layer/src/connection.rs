@@ -1,5 +1,6 @@
 use std::{
     pin::Pin,
+    sync::OnceLock,
     task::{Context, Poll},
 };
 
@@ -10,6 +11,8 @@ use tokio::net::TcpStream;
 use tracing::log::info;
 
 use crate::{error::LayerError, pod_api::KubernetesAPI};
+
+pub(crate) static K8S_API: OnceLock<KubernetesAPI> = OnceLock::new();
 
 pub(crate) enum AgentConnection<T>
 where
@@ -93,6 +96,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
         AgentConnection::TcpStream(stream)
     } else {
         let k8s_api = KubernetesAPI::new(config).await.unwrap();
+        K8S_API
+            .set(k8s_api)
+            .expect("Failed to set K8S_API global variable");
+
         let (pod_agent_name, agent_port) = {
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
@@ -106,7 +113,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 info!("No existing agent, spawning new one.");
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
-                let pod_agent_name = match k8s_api.create_agent(agent_port).await {
+                let pod_agent_name = match K8S_API.get().unwrap().create_agent(agent_port).await {
                     Ok(pod_name) => pod_name,
                     Err(err) => handle_error(err),
                 };
@@ -120,11 +127,27 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             }
         };
 
-        let mut port_forwarder = match k8s_api.port_forward(&pod_agent_name, agent_port).await {
+        let mut port_forwarder = match K8S_API
+            .get()
+            .unwrap()
+            .port_forward(&pod_agent_name, agent_port)
+            .await
+        {
             Ok(port_forwarder) => port_forwarder,
             Err(err) => handle_error(err),
         };
 
         AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
+    }
+}
+
+impl<T> Drop for AgentConnection<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn drop(&mut self) {
+        tokio::spawn(async {
+            K8S_API.get().unwrap().resize_deployment_replicas().await;
+        });
     }
 }

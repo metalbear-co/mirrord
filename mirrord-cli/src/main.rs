@@ -100,7 +100,7 @@ fn add_to_preload(path: &str) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn sip_check(binary_path: &str) -> Result<()> {
-    let sip_set = RegexSet::new(&[
+    let sip_set = RegexSet::new([
         r"/System/.*",
         r"/bin/.*",
         r"/sbin/.*",

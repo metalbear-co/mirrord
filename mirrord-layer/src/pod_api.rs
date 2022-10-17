@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, str::FromStr, sync::OnceLock};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
@@ -8,7 +8,7 @@ use k8s_openapi::api::{
     core::v1::{ContainerStatus, EphemeralContainer, Pod},
 };
 use kube::{
-    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
+    api::{Api, ListParams, LogParams, Patch, PatchParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
@@ -23,6 +23,8 @@ use crate::{
     error::{LayerError, Result},
     MIRRORD_SKIP_LOAD,
 };
+
+pub(crate) static DEPLOYMENT_REPLICAS: OnceLock<i32> = OnceLock::new();
 
 struct EnvVarGuard {
     library: String,
@@ -102,6 +104,7 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
+    target: Target,
     _guard: EnvVarGuard,
 }
 
@@ -118,6 +121,7 @@ impl KubernetesAPI {
         };
         Ok(Self {
             client,
+            target: target(config)?,
             config: config.clone(),
             _guard,
         })
@@ -410,8 +414,28 @@ impl KubernetesAPI {
             .map_err(LayerError::KubeError)
     }
     async fn get_runtime_data(&self) -> Result<RuntimeData> {
-        let target = target(&self.config)?;
-        target.runtime_data(self).await
+        match &self.target {
+            Target::Deployment(deployment) => deployment.downsize(self).await?,
+            Target::Pod(_) => {}
+        }
+        self.target.runtime_data(self).await
+    }
+
+    pub(crate) async fn resize_deployment_replicas(&self) {
+        match &self.target {
+            Target::Deployment(deployment) => {
+                deployment.resize(self).await.unwrap();
+            }
+            Target::Pod(_) => {}
+        }
+    }
+}
+
+impl std::fmt::Debug for KubernetesAPI {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KubernetesAPI")
+            .field("config", &self.config)
+            .finish()
     }
 }
 
@@ -597,6 +621,62 @@ impl RuntimeDataProvider for DeploymentTarget {
 pub(crate) enum Target {
     Deployment(DeploymentTarget),
     Pod(PodTarget),
+}
+
+impl DeploymentTarget {
+    async fn downsize(&self, client: &KubernetesAPI) -> Result<()> {
+        debug!("Downsizing target: {:?}", self);
+        let deployment_api: Api<Deployment> = client.get_target_pod_api();
+        let deployment = deployment_api
+            .get(&self.deployment_name)
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        // create a global value for current replicas
+        let current_replicas = deployment
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .ok_or_else(|| {
+                LayerError::DeploymentNotFound(format!(
+                    "Replicas for deployment: {:?}, not found!",
+                    deployment.clone()
+                ))
+            })?;
+
+        DEPLOYMENT_REPLICAS
+            .set(current_replicas)
+            .expect("Failed to set replicas");
+
+        let patch = Patch::Merge(serde_json::json!({
+            "spec": {
+                "replicas": 1
+            }
+        }));
+
+        let patch_params = PatchParams::default();
+        deployment_api
+            .patch(&deployment.metadata.name.unwrap(), &patch_params, &patch)
+            .await
+            .map_err(LayerError::KubeError)?;
+        Ok(())
+    }
+
+    async fn resize(&self, client: &KubernetesAPI) -> Result<()> {
+        let current_replicas = DEPLOYMENT_REPLICAS.get().unwrap();
+        let deployment_api: Api<Deployment> = client.get_target_pod_api();
+        let patch = Patch::Merge(serde_json::json!({
+            "spec": {
+                "replicas": current_replicas
+            }
+        }));
+        let patch_params = PatchParams::default();
+        deployment_api
+            .patch(&self.deployment_name, &patch_params, &patch)
+            .await
+            .map_err(LayerError::KubeError)?;
+        Ok(())
+    }
 }
 
 #[async_trait]
