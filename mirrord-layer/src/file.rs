@@ -17,7 +17,7 @@ use std::{
 use fancy_regex::Regex;
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
-use mirrord_config::file::{FileSelect, FileSelectConfig};
+use mirrord_config::{file::FileSelect, util::VecOrSingle};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
@@ -35,33 +35,12 @@ use crate::{
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-// TODO(alex) [high] 2022-10-13: Accept include/exclude lists from user, then mix it with our
-// default ignore list.
-//
-// 1. `include` means to exclude everything else;
-// 2. `exclude` adds to our defaults;
-//
-// ADD(alex) [high] 2022-10-14: I think it's possible to have only 1 regex filter:
-// `(?<include>(?!.*\.txt))(?<exclude_absolute>(^\/tmp\/.*$)|(^\/host\/.*$))` for example would let
-// us include everything that has `.txt`, and would exclude based on the second capture group.
-//
-// In words the regex would be: "I want to include /tmp/file.txt, and exclude every other /tmp/*".
-//
-// `(?<include>(?!(\/tmp\/foo\.txt\)|(\/host\/bar\.txt))))(?<exclude>\/tmp\/.*)` another one that
-// doesn't work properly.
-//
-// `(?<include>(?=(\/tmp\/.*)|(\/host\/.*)))(.*)` matches `/tmp/*` and `/host/*`, but refuses
-// everything else.
-pub(crate) fn make_one_true_regex(user_config: FileSelect) -> Regex {
-    todo!()
-}
-
-fn init_default_ignore() -> Regex {
+fn make_default_file_exclude() -> String {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
-    let default_rules = [
+    [
         r"(?<so_files>^.+\.so$)|",
         r"(?<d_files>^.+\.d$)|",
         r"(?<pyc_files>^.+\.pyc$)|",
@@ -94,14 +73,85 @@ fn init_default_ignore() -> Regex {
         &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
     ]
     .into_iter()
-    .collect::<String>();
+    .collect::<String>()
+}
 
-    Regex::new(&default_rules).unwrap()
+#[derive(Debug, Clone)]
+enum FileFilter {
+    Exclude(Regex),
+    Include(Regex),
+}
+
+impl Default for FileFilter {
+    fn default() -> Self {
+        Self::Exclude(Regex::new(&make_default_file_exclude()).unwrap())
+    }
+}
+
+// TODO(alex) [high] 2022-10-13: Accept include/exclude lists from user, then mix it with our
+// default ignore list.
+//
+// 1. `include` means to exclude everything else;
+// 2. `exclude` adds to our defaults;
+//
+// ADD(alex) [high] 2022-10-14: I think it's possible to have only 1 regex filter:
+// `(?<include>(?!.*\.txt))(?<exclude_absolute>(^\/tmp\/.*$)|(^\/host\/.*$))` for example would let
+// us include everything that has `.txt`, and would exclude based on the second capture group.
+//
+// In words the regex would be: "I want to include /tmp/file.txt, and exclude every other /tmp/*".
+//
+// `(?<include>(?!(\/tmp\/foo\.txt\)|(\/host\/bar\.txt))))(?<exclude>\/tmp\/.*)` another one that
+// doesn't work properly.
+//
+// `(?<include>(?=(\/tmp\/.*)|(\/host\/.*)))(.*)` matches `/tmp/*` and `/host/*`, but refuses
+// everything else.
+//
+// (?<exclude>(?=.*))(?<include>(^/etc/.*$)|(^/proc/.*))
+#[tracing::instrument(level = "debug")]
+pub(super) fn make_one_true_regex(user_config: FileSelect) -> Regex {
+    let FileSelect { include, exclude } = user_config;
+    let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
+    let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
+    let default_exclude = make_default_file_exclude();
+
+    let exclude: Option<String> = exclude
+        .into_iter()
+        // Turn into capture group `(/folder/first.txt)`.
+        .map(|element| format!("({element})"))
+        .inspect(|element| debug!("map -> {element:#?}"))
+        // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
+        .reduce(|acc, element| format!("{acc}|{element}"))
+        .inspect(|reduced| debug!("reduce -> {reduced:#?}"))
+        // Regex that excludes only the specified.
+        // `(?=(.*))(/folder/first.txt)|(/folder/second.txt)`
+        .map(|exclude| format!("(?<exclude>(?>{exclude}|{default_exclude}))(?<include>.*)"))
+        // .map(|exclude| format!("(?<exclude>(?=.*))(?<include>{exclude}|{default_exclude})"))
+        .inspect(|done| debug!("done -> {done:#?}"));
+
+    include
+        .into_iter()
+        // Turn into capture group `(/folder/first.txt)`.
+        .map(|element| format!("({element})"))
+        .inspect(|element| debug!("map -> {element:#?}"))
+        // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
+        .reduce(|acc, element| format!("{acc}|{element}"))
+        .inspect(|reduced| debug!("reduce -> {reduced:#?}"))
+        // Regex that includes only specified, and excludes everything else
+        // `(?=(/folder/first.txt)|(/folder/second.txt))(.*)`.
+        .map(|include| format!("(?<include>(?={include}))(?<exclude>.*)"))
+        .inspect(|done| debug!("done -> {done:#?}"))
+        .or(exclude)
+        .or(Some(default_exclude))
+        .map(|str_regex| Regex::new(&str_regex))
+        .transpose()
+        .inspect_err(|fail| error!("Failed generating file filter regex with {:#?}", fail))
+        .unwrap()
+        .inspect(|d| debug!("final {d:#?}"))
+        .unwrap()
 }
 
 /// Regex that ignores system files + files in the current working directory.
-static SELECT_FILES_EXCLUDE: OnceLock<Regex> = OnceLock::new();
-pub(crate) static SELECT_FILES: OnceLock<Regex> = OnceLock::new();
+pub(super) static SELECT_FILES: OnceLock<Regex> = OnceLock::new();
 
 type LocalFd = RawFd;
 type RemoteFd = usize;

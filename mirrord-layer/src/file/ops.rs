@@ -104,11 +104,18 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 ///
 /// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
 /// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
 
-    if SELECT_FILES_EXCLUDE
+    debug!(
+        "captures {:#?}",
+        SELECT_FILES
+            .get()?
+            .captures(path.to_str().unwrap_or_default())
+    );
+
+    if !SELECT_FILES
         .get()?
         .is_match(path.to_str().unwrap_or_default())
         // TODO(alex) [mid] 2022-10-13: Improve this `unwrap`.
@@ -151,7 +158,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
 }
 
 /// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
-#[tracing::instrument(level = "info")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -179,7 +186,7 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let _open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -210,7 +217,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn openat(
     fd: RawFd,
     rawish_path: Option<&CStr>,
@@ -377,7 +384,7 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
 pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
     let path = path_from_rawish(rawish_path)?;
 
-    if SELECT_FILES_EXCLUDE
+    if !SELECT_FILES
         .get()?
         .is_match(path.to_str().unwrap_or_default())
         .unwrap_or_default()
