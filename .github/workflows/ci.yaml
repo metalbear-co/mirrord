@@ -238,7 +238,7 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test -p mirrord-layer
+      - run: cargo +nightly test -p mirrord-layer -- --nocapture
 
   integration_tests_macos:
     runs-on: macos-12
@@ -259,14 +259,14 @@ jobs:
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19.0"
-      - run: |                                # Build Go app to test http mirroring with.
+      - run: | # Build Go app to test http mirroring with.
           cd mirrord-layer/tests/apps/self_open
           go build -o 19
           cd ../app_go
           go build -o 19
-      - run: |        
+      - run: |
           cd mirrord-layer/tests/apps/fileops
-          cargo build      
+          cargo build
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -276,8 +276,7 @@ jobs:
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - run: cargo +nightly test -p mirrord-layer
-
+      - run: cargo +nightly test -p mirrord-layer -- --nocapture
 
   e2e:
     runs-on: ubuntu-latest
