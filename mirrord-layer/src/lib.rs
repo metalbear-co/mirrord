@@ -29,9 +29,7 @@ use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
 };
-#[cfg(target_os = "macos")]
-use mirrord_macro::hook_fn;
-use mirrord_macro::hook_guard_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
@@ -500,7 +498,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
-        #[cfg(target_os = "macos")]
         let _ = replace!(
             &mut interceptor,
             "close$NOCANCEL",
@@ -558,7 +555,6 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 }
 
 // no need to guard because we call another detour which will do the guard for us.
-#[cfg(target_os = "macos")]
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
