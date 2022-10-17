@@ -327,6 +327,14 @@ impl KubernetesAPI {
                                 ],
                                 "command": agent_command_line,
                                 "env": [{"name": "RUST_LOG", "value": self.config.agent.log_level}],
+                                "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
+                                {
+                                    "requests":
+                                    {
+                                        "cpu": "10m",
+                                        "memory": "50Mi"
+                                    }
+                                }
                             }
                         ]
                     }
