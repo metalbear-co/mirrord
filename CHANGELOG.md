@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.0
+
 ### Added
 - `pwrite` hook (used by `dotnet`);
 
