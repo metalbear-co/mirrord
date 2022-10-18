@@ -7,17 +7,14 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    env,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{LazyLock, Mutex, OnceLock},
+    sync::{LazyLock, Mutex},
 };
 
-use fancy_regex::Regex;
 use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
-use mirrord_config::{file::FileSelect, util::VecOrSingle};
 use mirrord_protocol::{
     AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
@@ -32,148 +29,9 @@ use crate::{
     error::{LayerError, Result},
 };
 
+pub(crate) mod filter;
 pub(crate) mod hooks;
 pub(crate) mod ops;
-
-fn make_default_file_exclude() -> Vec<String> {
-    // To handle the problem of injecting `open` and friends into project runners (like in a call to
-    // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
-    let current_dir = env::current_dir().unwrap();
-    let current_binary = env::current_exe().unwrap();
-    [
-        r"(?<so_files>^.+\.so$)|",
-        r"(?<d_files>^.+\.d$)|",
-        r"(?<pyc_files>^.+\.pyc$)|",
-        r"(?<py_files>^.+\.py$)|",
-        r"(?<js_files>^.+\.js$)|",
-        r"(?<pth_files>^.+\.pth$)|",
-        r"(?<plist_files>^.+\.plist$)|",
-        r"(?<cfg_files>^.*venv\.cfg$)|",
-        r"(?<proc_path>^/proc/.*$)|",
-        r"(?<sys_path>^/sys/.*$)|",
-        r"(?<lib_path>^/lib/.*$)|",
-        r"(?<etc_path>^/etc/.*$)|",
-        r"(?<usr_path>^/usr/.*$)|",
-        r"(?<dev_path>^/dev/.*$)|",
-        r"(?<opt_path>^/opt/.*$)|",
-        // support for nixOS.
-        r"(?<nix_path>^/nix/.*$)|",
-        r"(?<iojs_path>^/home/iojs/.*$)|",
-        r"(?<runner_path>^/home/runner/.*$)|",
-        // dotnet: `/tmp/clr-debug-pipe-1`
-        r"(?<clr_files>^.*clr-.*-pipe-.*$)|",
-        // dotnet: `/home/{username}/{project}.pdb`
-        r"(?<pdb_files>^.*\.pdb$)|",
-        // dotnet: `/home/{username}/{project}.dll`
-        r"(?<dll_files>^.*\.dll$)|",
-        // TODO: `node` searches for this file in multiple directories, bypassing some of our
-        // ignore regexes, maybe other "project runners" will do the same.
-        r"(?<package_json>^.*/package.json$)|",
-        &format!("(^.*{}.*$)|", current_dir.to_string_lossy()),
-        &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect()
-}
-
-#[derive(Debug, Clone)]
-enum FileFilter {
-    Exclude(Regex),
-    Include(Regex),
-}
-
-impl FileFilter {
-    #[tracing::instrument(level = "debug")]
-    pub(super) fn new(user_config: FileSelect) -> Self {
-        let FileSelect { include, exclude } = user_config;
-        let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
-        let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
-        let default_exclude = make_default_file_exclude();
-        let default_exclude_regex = Regex::new(&default_exclude.concat())
-            .expect("Failed parsing default exclude file regex!");
-
-        // TODO(alex) [high] 2022-10-17: Finish creating our regex selector.
-        let exclude = exclude
-            .into_iter()
-            // Turn into capture group `(/folder/first.txt)`.
-            .map(|element| format!("({element})"))
-            .chain(default_exclude.into_iter())
-            // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-            .reduce(|acc, element| format!("{acc}|{element}"))
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing exclude file regex!")
-            .unwrap_or(default_exclude_regex);
-
-        include
-            .into_iter()
-            // Turn into capture group `(/folder/first.txt)`.
-            .map(|element| format!("({element})"))
-            // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-            .reduce(|acc, element| format!("{acc}|{element}"))
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing include file regex!")
-            .map(Self::Include)
-            .unwrap_or(Self::Exclude(exclude))
-    }
-}
-
-impl Default for FileFilter {
-    fn default() -> Self {
-        Self::Exclude(Regex::new(&make_default_file_exclude().concat()).unwrap())
-    }
-}
-
-// TODO(alex) [high] 2022-10-13: Accept include/exclude lists from user, then mix it with our
-// default ignore list.
-//
-// 1. `include` means to exclude everything else;
-// 2. `exclude` adds to our defaults;
-//
-// ADD(alex) [high] 2022-10-14: I think it's possible to have only 1 regex filter:
-// `(?<include>(?!.*\.txt))(?<exclude_absolute>(^\/tmp\/.*$)|(^\/host\/.*$))` for example would let
-// us include everything that has `.txt`, and would exclude based on the second capture group.
-//
-// In words the regex would be: "I want to include /tmp/file.txt, and exclude every other /tmp/*".
-//
-// `(?<include>(?!(\/tmp\/foo\.txt\)|(\/host\/bar\.txt))))(?<exclude>\/tmp\/.*)` another one that
-// doesn't work properly.
-//
-// `(?<include>(?=(\/tmp\/.*)|(\/host\/.*)))(.*)` matches `/tmp/*` and `/host/*`, but refuses
-// everything else.
-//
-// (?<exclude>(?=.*))(?<include>(^/etc/.*$)|(^/proc/.*))
-#[tracing::instrument(level = "debug")]
-pub(super) fn make_one_true_regex(user_config: FileSelect) -> Regex {
-    let FileSelect { include, exclude } = user_config;
-    let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
-    let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
-    let default_exclude = make_default_file_exclude();
-
-    let exclude: Option<String> = exclude
-        .into_iter()
-        // Turn into capture group `(/folder/first.txt)`.
-        .map(|element| format!("({element})"))
-        .chain(default_exclude.into_iter())
-        // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-        .reduce(|acc, element| format!("{acc}|{element}"));
-
-    let include: Option<String> = include
-        .into_iter()
-        // Turn into capture group `(/folder/first.txt)`.
-        .map(|element| format!("({element})"))
-        // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-        .reduce(|acc, element| format!("{acc}|{element}"));
-
-    todo!()
-}
-
-/// Regex that ignores system files + files in the current working directory.
-pub(super) static SELECT_FILES: OnceLock<Regex> = OnceLock::new();
 
 type LocalFd = RawFd;
 type RemoteFd = usize;

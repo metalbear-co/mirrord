@@ -201,6 +201,20 @@ impl<S> Detour<S> {
             Detour::Error(e) => Detour::Error(e),
         }
     }
+
+    pub(crate) fn is_success(&self) -> bool {
+        match self {
+            Detour::Success(_) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_bypass(&self) -> bool {
+        match self {
+            Detour::Bypass(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Extends `Option<T>` with the `Option::bypass` function.

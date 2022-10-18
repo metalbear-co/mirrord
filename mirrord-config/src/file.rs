@@ -1,5 +1,3 @@
-
-
 use mirrord_config_derive::MirrordConfig;
 use serde::Deserialize;
 
@@ -14,8 +12,8 @@ const EXCLUDE: &str = "MIRRORD_FILE_PATH_EXCLUDE";
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
-#[config(map_to = FileSelect)]
-pub struct FileSelectConfig {
+#[config(map_to = FileFilterConfig)]
+pub struct FileFilterOption {
     // TODO(alex) [low] 2022-10-14: It would be nice if we could set `env = GLOBAL` to avoid
     // repetition, but I think the `config` macro is taking a `Lit`?
     #[config(env = "MIRRORD_FILE_PATH_INCLUDE")]
@@ -25,9 +23,9 @@ pub struct FileSelectConfig {
     pub exclude: Option<VecOrSingle<String>>,
 }
 
-impl MirrordToggleableConfig for FileSelectConfig {
+impl MirrordToggleableConfig for FileFilterOption {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        Ok(FileSelect {
+        Ok(FileFilterConfig {
             include: FromEnv::new(INCLUDE).source_value(),
             exclude: FromEnv::new(EXCLUDE).source_value(),
         })
@@ -54,7 +52,7 @@ mod tests {
         ),
     ) {
         with_env_vars(vec![(INCLUDE, include.0), (EXCLUDE, exclude.0)], || {
-            let env = FileSelectConfig::default().generate_config().unwrap();
+            let env = FileFilterOption::default().generate_config().unwrap();
 
             assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
             assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
@@ -73,7 +71,7 @@ mod tests {
         ),
     ) {
         with_env_vars(vec![(INCLUDE, include.0), (EXCLUDE, exclude.0)], || {
-            let env = ToggleableConfig::<FileSelectConfig>::Enabled(false)
+            let env = ToggleableConfig::<FileFilterOption>::Enabled(false)
                 .generate_config()
                 .unwrap();
 

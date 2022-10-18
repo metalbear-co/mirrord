@@ -22,7 +22,7 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
-use file::OPEN_FILES;
+use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
@@ -50,7 +50,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::HookMessage,
-    file::{make_one_true_regex, FileHandler, SELECT_FILES},
+    file::{filter::FILE_FILTER, FileHandler},
 };
 
 mod common;
@@ -177,7 +177,7 @@ fn init(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
-    SELECT_FILES.get_or_init(|| make_one_true_regex(config.feature.file_select.clone()));
+    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.file_select.clone()));
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 

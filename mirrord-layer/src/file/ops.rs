@@ -9,7 +9,7 @@ use mirrord_protocol::{
 use tokio::sync::oneshot;
 use tracing::error;
 
-use super::*;
+use super::{filter::FILE_FILTER, *};
 use crate::{
     common::blocking_send_hook_message,
     detour::{Bypass, Detour},
@@ -108,21 +108,13 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
 
-    debug!(
-        "captures {:#?}",
-        SELECT_FILES
-            .get()?
-            .captures(path.to_str().unwrap_or_default())
-    );
-
-    if !SELECT_FILES
+    FILE_FILTER
         .get()?
-        .is_match(path.to_str().unwrap_or_default())
-        // TODO(alex) [mid] 2022-10-13: Improve this `unwrap`.
-        .unwrap()
-    {
-        Detour::Bypass(Bypass::IgnoredFile(path.clone()))?
-    } else if path.is_relative() {
+        .continue_filter_or_else(path.to_str().unwrap_or_default(), || {
+            Bypass::IgnoredFile(path.clone())
+        })?;
+
+    if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
@@ -384,13 +376,13 @@ pub(crate) fn close(fd: usize) -> Result<c_int> {
 pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
     let path = path_from_rawish(rawish_path)?;
 
-    if !SELECT_FILES
+    FILE_FILTER
         .get()?
-        .is_match(path.to_str().unwrap_or_default())
-        .unwrap_or_default()
-    {
-        Detour::Bypass(Bypass::IgnoredFile(path.clone()))?
-    } else if path.is_relative() {
+        .continue_filter_or_else(path.to_str().unwrap_or_default(), || {
+            Bypass::IgnoredFile(path.clone())
+        })?;
+
+    if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
