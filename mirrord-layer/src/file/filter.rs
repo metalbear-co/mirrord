@@ -54,14 +54,6 @@ impl FileFilter {
             .unwrap_or(Self::Exclude(exclude))
     }
 
-    #[tracing::instrument(level = "debug")]
-    fn continue_filter(&self, text: &str) -> bool {
-        match self {
-            FileFilter::Exclude(exclude) => exclude.is_match(text).unwrap(),
-            FileFilter::Include(include) => !include.is_match(text).unwrap(),
-        }
-    }
-
     pub(crate) fn continue_filter_or_else<F>(&self, text: &str, op: F) -> Detour<()>
     where
         F: FnOnce() -> Bypass,
