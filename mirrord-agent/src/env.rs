@@ -20,7 +20,7 @@ impl EnvFilter {
         } else {
             select_env_vars
                 .iter()
-                .map(|selector| WildMatch::new(&selector))
+                .map(|selector| WildMatch::new(selector))
                 .collect()
         };
 
@@ -36,7 +36,7 @@ impl EnvFilter {
             }
 
             for selector in &filter_env_vars {
-                exclude.push(WildMatch::new(&selector));
+                exclude.push(WildMatch::new(selector));
             }
 
             exclude
