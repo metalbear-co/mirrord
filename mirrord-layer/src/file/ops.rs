@@ -110,7 +110,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
 
     FILE_FILTER
         .get()?
-        .continue_filter_or_else(path.to_str().unwrap_or_default(), || {
+        .ok_or_else(path.to_str().unwrap_or_default(), || {
             Bypass::IgnoredFile(path.clone())
         })?;
 
@@ -397,7 +397,7 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
 
     FILE_FILTER
         .get()?
-        .continue_filter_or_else(path.to_str().unwrap_or_default(), || {
+        .ok_or_else(path.to_str().unwrap_or_default(), || {
             Bypass::IgnoredFile(path.clone())
         })?;
 
