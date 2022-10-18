@@ -67,15 +67,15 @@ class MirrordListener : ExecutionListener {
                         return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
-                    val fileOps = JCheckBox("File Operations (default: true)")
+                    val fileOps = JCheckBox("File Operations")
                     fileOps.isSelected = true
-                    val remoteDns = JCheckBox("Remote DNS (default: true)")
+                    val remoteDns = JCheckBox("Remote DNS")
                     remoteDns.isSelected = true
-                    val outgoingTraffic = JCheckBox("Outgoing traffic (default: true)")
+                    val outgoingTraffic = JCheckBox("Outgoing Traffic")
                     outgoingTraffic.isSelected = true
-                    val trafficStealing = JCheckBox("Traffic Stealing (default: false)")
+                    val trafficStealing = JCheckBox("Traffic Stealing")
 
-                    val ephemeralContainerCheckBox = JCheckBox("Enable Ephemeral Containers (default: false)")
+                    val ephemeralContainerCheckBox = JCheckBox("Enable Ephemeral Containers")
 
                     val agentRustLog = JTextField(mirrordEnv["MIRRORD_AGENT_RUST_LOG"])
                     val rustLog = JTextField(mirrordEnv["RUST_LOG"])
