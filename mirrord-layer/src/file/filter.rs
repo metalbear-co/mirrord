@@ -53,13 +53,34 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
 /// Regex that ignores system files + files in the current working directory.
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
+/// Holds the `Regex` that is used to either continue or bypass file path operations (such as
+/// `file::ops::open`), according to what the user specified.
+///
+/// The `FileFilter::Include` variant takes precedence and erases whatever the user supplied as
+/// exclude, this means that if the user specifies both, `FileFilter::Exclude` is never constructed.
+///
+/// Warning: Use `FileFilter::new` (or equivalent) when initializing this, otherwise the above
+/// constraint might not be held.
 #[derive(Debug, Clone)]
 pub(crate) enum FileFilter {
+    /// User specified `Regex` containing the file paths that the user wants to include for file
+    /// operations.
+    ///
+    /// Overrides `FileFilter::Exclude`.
     Include(Regex),
+
+    /// Combination of `DEFAULT_EXCLUDE_LIST` and the user's specified `Regex`.
+    ///
+    /// Anything not matched by this `Regex` is considered as included.
     Exclude(Regex),
 }
 
 impl FileFilter {
+    /// Initializes a `FileFilter` based on the user configuration.
+    ///
+    /// - `FileFilter::Include` is returned if the user specified any include path (thus erasing
+    ///   anything passed as exclude);
+    /// - `FileFilter::Exclude` also appends the `DEFAULT_EXCLUDE_LIST` to the user supplied regex;
     #[tracing::instrument(level = "debug")]
     pub(crate) fn new(user_config: FileFilterConfig) -> Self {
         let FileFilterConfig { include, exclude } = user_config;
@@ -100,13 +121,18 @@ impl FileFilter {
             .unwrap_or(Self::Exclude(exclude))
     }
 
+    /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
+    /// converting the result a `Detour`.
+    ///
+    /// `op` is used to lazily initialize a `Bypass` case.
     pub(crate) fn ok_or_else<F>(&self, text: &str, op: F) -> Detour<()>
     where
         F: FnOnce() -> Bypass,
     {
         // Order matters here, as we want to make `include` the most important pattern. If the user
         // specified `include`, then we never want to accidentally allow other paths to pass this
-        // check.
+        // check (this is a corner case that is unlikely to happen, as initialization via
+        // `FileFilter::new` should prevent it from ever seeing the light of day).
         match self {
             FileFilter::Include(include) if include.is_match(text).unwrap() => Detour::Success(()),
             FileFilter::Exclude(exclude) if !exclude.is_match(text).unwrap() => Detour::Success(()),
