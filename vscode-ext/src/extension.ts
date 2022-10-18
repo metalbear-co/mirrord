@@ -26,12 +26,12 @@ function getK8sApi(): CoreV1Api {
 async function changeSettings() {
 	let agentNamespace = globalContext.workspaceState.get<string>('agentNamespace', 'default');
 	let impersonatedPodNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
-	let fileOps = globalContext.workspaceState.get<boolean>('fileOps', false);
+	let fileOps = globalContext.workspaceState.get<boolean>('fileOps', true);
 	let invalidCertificates = globalContext.workspaceState.get<boolean>('invalidCertificates', false);
 	let trafficStealing = globalContext.workspaceState.get<boolean>('trafficStealing', false);
-	let remoteDNS = globalContext.workspaceState.get<boolean>('remoteDNS', false);
-	let outgoingTraffic = globalContext.workspaceState.get<boolean>('outgoingTraffic', false);
-	let includeEnvironmentVariables = globalContext.workspaceState.get<string>('includeEnvironmentVariables', '');
+	let remoteDNS = globalContext.workspaceState.get<boolean>('remoteDNS', true);
+	let outgoingTraffic = globalContext.workspaceState.get<boolean>('outgoingTraffic', true);
+	let includeEnvironmentVariables = globalContext.workspaceState.get<string>('includeEnvironmentVariables', '*');
 	let excludeEnvironmentVariables = globalContext.workspaceState.get<string>('excludeEnvironmentVariables', '');
 
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
@@ -212,7 +212,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', false).toString(),
+						'MIRRORD_FILE_OPS': globalContext.workspaceState.get('fileOps', true).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_FILE_RO_OPS': 'false', // TODO: Add this to settings
 						// eslint-disable-next-line @typescript-eslint/naming-convention
@@ -220,9 +220,9 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_TCP_STEAL_TRAFFIC': globalContext.workspaceState.get('trafficStealing', false).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', false).toString(),
+						'MIRRORD_REMOTE_DNS': globalContext.workspaceState.get('remoteDNS', true).toString(),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', false).toString(),
+						'MIRRORD_TCP_OUTGOING': globalContext.workspaceState.get('outgoingTraffic', true).toString(),
 					}
 				};
 
