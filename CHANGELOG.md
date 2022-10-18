@@ -7,8 +7,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.0
+
+### Added
+- `pwrite` hook (used by `dotnet`);
+
+### Fixed
+- Issue [#577](https://github.com/metalbear-co/mirrord/issues/577). Changed non-error logs from `error!` to `trace!`.
+
+### Changed
+- Agent pod definition now has `requests` specifications to avoid being defaulted to high values. See [#579](https://github.com/metalbear-co/mirrord/issues/579).
+- Change VSCode extension configuration to have file ops, outgoing traffic, DNS, and environment variables turned on by default.
+- update intelliJ extension: toggles + panel for include/exclude env vars
+
+## 3.0.22-alpha
+
 ### Changed
 - Exclude internal configuration fields from generated schema.
+
+### Fixed
+- Issue [#531](https://github.com/metalbear-co/mirrord/issues/531). We now detect NixOS/Devbox usage and add `sh` to skipped list.
 
 ## 3.0.21-alpha
 
@@ -50,7 +68,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Rename http mirroring tests from `integration` to `http_mirroring` since there are
   now also integration tests in other files.
 - Delete useless `e2e_macos` CI job.
-- Integration tests also display test process output (with mirrord logs) when they 
+- Integration tests also display test process output (with mirrord logs) when they
   time out.
 - CI: mirrord-layer UT and integration run in same job.
 - .devcontainer: Added missing dependencies and also kind for running e2e tests.

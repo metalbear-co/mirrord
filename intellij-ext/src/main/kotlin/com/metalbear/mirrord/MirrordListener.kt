@@ -23,6 +23,7 @@ class MirrordListener : ExecutionListener {
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = invalidCertificates.toString()
         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainers.toString()
         mirrordEnv["MIRRORD_SKIP_PROCESSES"] = ""
+        mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = "*"
 
     }
 
@@ -66,20 +67,32 @@ class MirrordListener : ExecutionListener {
                         return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
-                    val fileOpsCheckbox = JCheckBox("Enable File Operations")
-                    val remoteDnsCheckbox = JCheckBox("Enable Remote DNS")
+                    val fileOps = JCheckBox("File Operations")
+                    fileOps.isSelected = true
+                    val remoteDns = JCheckBox("Remote DNS")
+                    remoteDns.isSelected = true
+                    val outgoingTraffic = JCheckBox("Outgoing Traffic")
+                    outgoingTraffic.isSelected = true
+                    val trafficStealing = JCheckBox("Traffic Stealing")
+
                     val ephemeralContainerCheckBox = JCheckBox("Enable Ephemeral Containers")
 
                     val agentRustLog = JTextField(mirrordEnv["MIRRORD_AGENT_RUST_LOG"])
                     val rustLog = JTextField(mirrordEnv["RUST_LOG"])
+                    val excludeEnv = JTextField("")
+                    val includeEnv = JTextField(mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"])
 
                     val panel = customDialogBuilder.createMirrordKubeDialog(
                         pods,
-                        fileOpsCheckbox,
-                        remoteDnsCheckbox,
+                        fileOps,
+                        remoteDns,
+                        outgoingTraffic,
+                        trafficStealing,
                         ephemeralContainerCheckBox,
                         agentRustLog,
-                        rustLog
+                        rustLog,
+                        excludeEnv,
+                        includeEnv,
                     )
                     val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
 
@@ -87,12 +100,16 @@ class MirrordListener : ExecutionListener {
                     if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
                         mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = pods.selectedValue as String
                         mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE"] = choseNamespace as String
-                        mirrordEnv["MIRRORD_FILE_OPS"] = fileOpsCheckbox.isSelected.toString()
+                        mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
+                        mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = trafficStealing.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
-                        mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDnsCheckbox.isSelected.toString()
+                        mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
+                        mirrordEnv["MIRRORD_TCP_OUTGOING"] = outgoingTraffic.isSelected.toString()
+                        mirrordEnv["MIRRORD_UDP_OUTGOING"] = outgoingTraffic.isSelected.toString()
                         mirrordEnv["RUST_LOG"] = rustLog.text.toString()
                         mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
-
+                        mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
+                        mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
 
