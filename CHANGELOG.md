@@ -7,9 +7,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Changed
-- update intelliJ extension: toggles + panel for include/exclude env vars
-
 ## 3.1.0
 
 ### Added
@@ -21,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Agent pod definition now has `requests` specifications to avoid being defaulted to high values. See [#579](https://github.com/metalbear-co/mirrord/issues/579).
 - Change VSCode extension configuration to have file ops, outgoing traffic, DNS, and environment variables turned on by default.
+- update intelliJ extension: toggles + panel for include/exclude env vars
 
 ## 3.0.22-alpha
 
