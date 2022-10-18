@@ -89,7 +89,7 @@ impl FileFilter {
 
         let default_exclude = DEFAULT_EXCLUDE_LIST.as_ref();
         let default_exclude_regex =
-            Regex::new(&default_exclude).expect("Failed parsing default exclude file regex!");
+            Regex::new(default_exclude).expect("Failed parsing default exclude file regex!");
 
         // Converts a list of `String` into one big regex-fied `String`.
         let reduce_to_string = |list: Vec<String>| {

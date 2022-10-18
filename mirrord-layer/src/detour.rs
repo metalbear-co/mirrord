@@ -204,18 +204,12 @@ impl<S> Detour<S> {
 
     /// Convenience function to convert `Detour::Success` to `bool`.
     pub(crate) fn is_success(&self) -> bool {
-        match self {
-            Detour::Success(_) => true,
-            _ => false,
-        }
+        matches!(self, Detour::Success(_))
     }
 
     /// Convenience function to convert `Detour::Bypass` to `bool`.
     pub(crate) fn is_bypass(&self) -> bool {
-        match self {
-            Detour::Bypass(_) => true,
-            _ => false,
-        }
+        matches!(self, Detour::Bypass(_))
     }
 }
 
