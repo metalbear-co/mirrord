@@ -85,12 +85,13 @@ enum FileFilter {
 
 impl FileFilter {
     #[tracing::instrument(level = "debug")]
-    pub(super) fn new(user_config: FileSelect) -> Regex {
+    pub(super) fn new(user_config: FileSelect) -> Self {
         let FileSelect { include, exclude } = user_config;
         let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
         let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
         let default_exclude = make_default_file_exclude();
-        let default_exclude_regex = Regex::new(&default_exclude.concat());
+        let default_exclude_regex = Regex::new(&default_exclude.concat())
+            .expect("Failed parsing default exclude file regex!");
 
         // TODO(alex) [high] 2022-10-17: Finish creating our regex selector.
         let exclude = exclude
@@ -102,11 +103,11 @@ impl FileFilter {
             .reduce(|acc, element| format!("{acc}|{element}"))
             .as_deref()
             .map(Regex::new)
-            .or(Some(default_exclude_regex))
             .transpose()
-            .expect("Failed parsing exclude file regex!");
+            .expect("Failed parsing exclude file regex!")
+            .unwrap_or(default_exclude_regex);
 
-        let include = include
+        include
             .into_iter()
             // Turn into capture group `(/folder/first.txt)`.
             .map(|element| format!("({element})"))
@@ -115,13 +116,9 @@ impl FileFilter {
             .as_deref()
             .map(Regex::new)
             .transpose()
-            .expect("Failed parsing include file regex!");
-
-        include
+            .expect("Failed parsing include file regex!")
             .map(Self::Include)
-            .or_else(|| Some(Self::Exclude(exclude.unwrap())));
-
-        todo!()
+            .unwrap_or(Self::Exclude(exclude))
     }
 }
 
