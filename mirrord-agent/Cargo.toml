@@ -42,6 +42,7 @@ bytes = "1.2"
 regex = "1"
 socket2 = "0.4"
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
+wildmatch = "2"
 
 [dev-dependencies]
 mockall = "0.11"
