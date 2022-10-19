@@ -152,7 +152,20 @@ mod tests {
     use mirrord_config::{file::FileFilterConfig, util::VecOrSingle};
 
     use super::FileFilter;
-    use crate::detour::Bypass;
+    use crate::detour::{Bypass, Detour};
+
+    /// Implementation of helper methods for testing `Detour`.
+    impl<S> Detour<S> {
+        /// Convenience function to convert `Detour::Success` to `bool`.
+        fn is_success(&self) -> bool {
+            matches!(self, Detour::Success(_))
+        }
+
+        /// Convenience function to convert `Detour::Bypass` to `bool`.
+        fn is_bypass(&self) -> bool {
+            matches!(self, Detour::Bypass(_))
+        }
+    }
 
     #[test]
     fn test_include_only_filter() {
