@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.1
+
 ### Fixed
 - IntelliJ plugin crashing on run because both include and exclude were being set for env vars.
 
