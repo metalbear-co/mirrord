@@ -505,6 +505,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
         );
+        let _ = replace!(&mut interceptor, "exit", exit_detour, FnExit, FN_EXIT);
+        let _ = replace!(&mut interceptor, "_exit", _exit_detour, Fn_exit, FN__EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -558,6 +560,22 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
+}
+
+pub(crate) fn exit_logic() {
+    // unimplemented
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn exit_detour() {
+    exit_logic();
+    FN_EXIT();
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn _exit_detour() {
+    exit_logic();
+    FN__EXIT();
 }
 
 #[cfg(test)]

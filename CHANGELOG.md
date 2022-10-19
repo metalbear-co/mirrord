@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+-  `exit` and `_exit` hooks that call a common function (unimplemented: to be used for cleanups etc.) before exiting
+
 ## 3.1.0
 
 ### Added
