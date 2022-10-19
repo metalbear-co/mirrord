@@ -469,18 +469,18 @@ async fn wait_for_agent_startup(
     container_name: String,
     communication_timeout: Option<u16>,
 ) -> Result<()> {
-    let mut logs = pod_api
-        .log_stream(
-            pod_name,
-            &LogParams {
-                follow: true,
-                container: Some(container_name),
-                ..LogParams::default()
-            },
-        )
-        .await?;
-
     let logs_wait = tokio::spawn(async move {
+        let mut logs = pod_api
+            .log_stream(
+                pod_name,
+                &LogParams {
+                    follow: true,
+                    container: Some(container_name),
+                    ..LogParams::default()
+                },
+            )
+            .await?;
+
         while let Some(line) = logs.try_next().await? {
             let line = String::from_utf8_lossy(&line);
             if line.contains("agent ready") {
