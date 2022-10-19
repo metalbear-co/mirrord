@@ -25,6 +25,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender = "0.2"
 frida-gum = { version = "0.8", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
