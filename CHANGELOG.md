@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
+
 ## 3.1.1
 
 ### Fixed
@@ -24,7 +27,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Agent pod definition now has `requests` specifications to avoid being defaulted to high values. See [#579](https://github.com/metalbear-co/mirrord/issues/579).
 - Change VSCode extension configuration to have file ops, outgoing traffic, DNS, and environment variables turned on by default.
 - update intelliJ extension: toggles + panel for include/exclude env vars
-- Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
 
 ## 3.0.22-alpha
 
