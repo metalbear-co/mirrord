@@ -59,7 +59,7 @@ fn agent_image(config: &LayerConfig) -> String {
 
 /// Return target based on layer config.
 fn target(config: &LayerConfig) -> Result<Target> {
-    if let Some(target) = &config.target {
+    if let Some(target) = &config.target.path {
         target.parse()
     } else if let Some(pod_name) = &config.pod.name {
         warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
@@ -142,7 +142,7 @@ impl KubernetesAPI {
         K: kube::Resource,
         <K as kube::Resource>::DynamicType: Default,
     {
-        if let Some(namespace) = &self.config.target_namespace {
+        if let Some(namespace) = &self.config.target.namespace {
             Api::namespaced(self.client.clone(), namespace)
         } else if let Some(namespace) = &self.config.pod.namespace {
             // START | DEPRECATED: - Scheduled for removal on [28/10/2022]

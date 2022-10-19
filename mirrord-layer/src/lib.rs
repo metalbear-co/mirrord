@@ -27,7 +27,8 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{
-    config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
+    config::MirrordConfig, pod::PodConfig, target::TargetConfig, util::VecOrSingle, LayerConfig,
+    LayerFileConfig,
 };
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
@@ -153,17 +154,17 @@ fn before_init() {
 // START | To be removed after deprecated functionality is removed
 fn deprecation_check(config: &LayerConfig) {
     let LayerConfig {
-        target,
+        target: TargetConfig { path, .. },
         pod: PodConfig {
             name, container, ..
         },
         ..
     } = config;
 
-    match (target, name, container) {
+    match (path, name, container) {
         (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
             panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
-            >> EnvVars: {:?}, {:?}, {:?}", target, name, container);
+            >> EnvVars: {:?}, {:?}, {:?}", path, name, container);
         }
         (None, None, _) => {
             panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
