@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Update some texts in documentation, READMEs, and extension package descriptions
-- IntelliJ version check on enabling instead of on project start. Don't check again after less than 3 hours.
+- IntelliJ version check on enabling instead of on project start. Don't check again after less than 3 minutes.
 
 ## 3.1.1
 

@@ -70,7 +70,7 @@ class MirrordEnabler : ToggleAction() {
         val lastCheckEpoch = pc.getLong(LAST_CHECK_KEY, 0)
         val nowUTC = LocalDateTime.now(ZoneOffset.UTC)
         val lastCheckUTCDateTime = LocalDateTime.ofEpochSecond(lastCheckEpoch, 0, ZoneOffset.UTC)
-        if (lastCheckUTCDateTime.isAfter(nowUTC.minusHours(3))) {
+        if (lastCheckUTCDateTime.isAfter(nowUTC.minusMinutes(3))) {
             return // Already checked in the last 3 hours. Don't check again yet.
         }
         val nowEpoch = nowUTC.toEpochSecond(ZoneOffset.UTC)
@@ -79,7 +79,7 @@ class MirrordEnabler : ToggleAction() {
         val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
             notifier(
-                "Your version of mirrord is outdated, you should update.",
+                "Your version of mirrord is outdated, you should update the plugin.",
                 NotificationType.INFORMATION
             )
                 .addAction(object : NotificationAction("Update") {
