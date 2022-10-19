@@ -10,6 +10,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - Added Dotnet suite of tests, closes [[#439](https://github.com/metalbear-co/mirrord/issues/439)]
 
+## 3.1.1
+
+### Fixed
+- IntelliJ plugin crashing on run because both include and exclude were being set for env vars.
+
+
 ## 3.1.0
 
 ### Added
