@@ -84,11 +84,11 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub no_remote_dns: bool,
 
-    /// Binary to execute and mirror traffic into.
+    /// Binary to execute and connect with the remote pod.
     #[clap(value_parser)]
     pub binary: String,
 
-    /// Binary to execute and mirror traffic into.
+    /// Binary to execute and connect with the remote pod.
     #[clap(long, value_parser)]
     pub skip_processes: Option<String>,
 

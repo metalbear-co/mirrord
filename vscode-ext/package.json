@@ -1,7 +1,7 @@
 {
 	"name": "mirrord",
 	"displayName": "mirrord",
-	"description": "Mirror live traffic from your Kubernetes cluster to your local debugged process.",
+	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
 	"version": "3.1.1",
 	"engines": {
