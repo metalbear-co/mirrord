@@ -126,7 +126,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite
+          cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip mirrorring_with_http
 
   test_agent:
     runs-on: ubuntu-latest
