@@ -243,8 +243,8 @@ impl KubernetesAPI {
         }
 
         wait_for_agent_startup(
-            &pod_api,
-            &runtime_data.pod_name,
+            pod_api,
+            runtime_data.pod_name.clone(),
             mirrord_agent_name,
             self.config.agent.communication_timeout,
         )
@@ -389,8 +389,8 @@ impl KubernetesAPI {
             .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
 
         wait_for_agent_startup(
-            &pod_api,
-            &pod_name,
+            pod_api,
+            pod_name.clone(),
             "mirrord-agent".to_string(),
             self.config.agent.communication_timeout,
         )
@@ -464,23 +464,23 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
 }
 
 async fn wait_for_agent_startup(
-    pod_api: &Api<Pod>,
-    pod_name: &str,
+    pod_api: Api<Pod>,
+    pod_name: String,
     container_name: String,
     communication_timeout: Option<u16>,
 ) -> Result<()> {
-    let mut logs = pod_api
-        .log_stream(
-            pod_name,
-            &LogParams {
-                follow: true,
-                container: Some(container_name),
-                ..LogParams::default()
-            },
-        )
-        .await?;
-
     let logs_wait = tokio::spawn(async move {
+        let mut logs = pod_api
+            .log_stream(
+                &pod_name,
+                &LogParams {
+                    follow: true,
+                    container: Some(container_name),
+                    ..LogParams::default()
+                },
+            )
+            .await?;
+
         while let Some(line) = logs.try_next().await? {
             let line = String::from_utf8_lossy(&line);
             if line.contains("agent ready") {
