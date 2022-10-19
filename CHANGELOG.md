@@ -7,6 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Update some texts in documentation, READMEs, and extension package descriptions
+- IntelliJ version check on enabling instead of on project start. Don't check again after less than 3 minutes.
+
+## 3.1.1
+
+### Fixed
+- IntelliJ plugin crashing on run because both include and exclude were being set for env vars.
+
 ## 3.1.0
 
 ### Added
