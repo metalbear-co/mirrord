@@ -65,6 +65,10 @@ class MirrordEnabler : ToggleAction() {
             PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
         }
 
+    /**
+     * Fetch the latest version number, compare to local version. If there is a later version available, notify.
+     * Return early without checking if already performed full check in the last 3 minutes.
+     */
     private fun checkVersion(project: Project) {
         val pc = PropertiesComponent.getInstance() // Don't pass project, to get ide-wide persistence.
         val lastCheckEpoch = pc.getLong(LAST_CHECK_KEY, 0)
@@ -79,7 +83,7 @@ class MirrordEnabler : ToggleAction() {
         val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
             notifier(
-                "Your version of mirrord is outdated, you should update the plugin.",
+                "The version of the mirrord plugin is outdated. Would you like to update it now?",
                 NotificationType.INFORMATION
             )
                 .addAction(object : NotificationAction("Update") {
