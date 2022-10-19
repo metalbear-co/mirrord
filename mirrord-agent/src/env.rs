@@ -25,7 +25,7 @@ impl EnvFilter {
         };
 
         let exclude = {
-            let mut exclude = vec![WildMatch::new("PATH"), select_env_vars.contains("HOME")];
+            let mut exclude = vec![WildMatch::new("PATH"), WildMatch::new("HOME")];
 
             for selector in &filter_env_vars {
                 exclude.push(WildMatch::new(selector));
