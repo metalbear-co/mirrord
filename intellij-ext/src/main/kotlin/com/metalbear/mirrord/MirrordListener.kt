@@ -108,8 +108,12 @@ class MirrordListener : ExecutionListener {
                         mirrordEnv["MIRRORD_UDP_OUTGOING"] = outgoingTraffic.isSelected.toString()
                         mirrordEnv["RUST_LOG"] = rustLog.text.toString()
                         mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = agentRustLog.text.toString()
-                        mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
-                        mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
+                        if (excludeEnv.text.toString().isNotEmpty()) {
+                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
+                        }
+                        if (includeEnv.text.toString().isNotEmpty()) {
+                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
+                        }
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
 
