@@ -493,7 +493,7 @@ async fn wait_for_agent_startup(
 
     tokio::select! {
         log_wait = logs_wait => log_wait?,
-        _ = tokio::time::sleep(Duration::from_secs(communication_timeout.unwrap_or(30) as u64)) => Ok(()),
+        _ = tokio::time::sleep(Duration::from_secs(communication_timeout.unwrap_or(30) as u64)) => Err(LayerError::AgentReadyTimeout),
     }
 }
 
