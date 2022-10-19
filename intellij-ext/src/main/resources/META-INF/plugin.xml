@@ -6,8 +6,9 @@
     <vendor email="hi@metalbear.co" url="https://metalbear.co/">MetalBear</vendor>
 
     <description><![CDATA[
-      mirrord works by letting you select a pod to mirror traffic from.
-      It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
+      mirrord lets you run a local process in the context your Kubernetes cluster. 
+      It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
+      Read more <a href="https://mirrord.dev/docs/overview/introduction/">here</a>.
     ]]></description>
 
     <depends>com.intellij.modules.lang</depends>
