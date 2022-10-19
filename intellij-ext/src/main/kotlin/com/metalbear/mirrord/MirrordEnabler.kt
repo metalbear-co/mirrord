@@ -15,6 +15,8 @@ import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationAction
 import com.intellij.openapi.extensions.PluginId
 import java.net.URL
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 
 @Suppress("DialogTitleCapitalization")
@@ -35,6 +37,8 @@ class MirrordEnabler : ToggleAction() {
         fun notifier(message: String, type: NotificationType): Notification {
             return notificationManager.createNotification("mirrord", message, type)
         }
+
+        private const val LAST_CHECK_KEY = "lastCheck"
     }
     override fun isSelected(e: AnActionEvent): Boolean {
         return MirrordListener.enabled
@@ -62,6 +66,15 @@ class MirrordEnabler : ToggleAction() {
         }
 
     private fun checkVersion(project: Project) {
+        val pc = PropertiesComponent.getInstance() // Don't pass project, to get ide-wide persistence.
+        val lastCheckEpoch = pc.getLong(LAST_CHECK_KEY, 0)
+        val nowUTC = LocalDateTime.now(ZoneOffset.UTC)
+        val lastCheckUTCDateTime = LocalDateTime.ofEpochSecond(lastCheckEpoch, 0, ZoneOffset.UTC)
+        if (lastCheckUTCDateTime.isAfter(nowUTC.minusHours(3))) {
+            return // Already checked in the last 3 hours. Don't check again yet.
+        }
+        val nowEpoch = nowUTC.toEpochSecond(ZoneOffset.UTC)
+        pc.setValue(LAST_CHECK_KEY, nowEpoch.toString())
         val remoteVersion = Version.valueOf(URL(versionCheckEndpoint).readText())
         val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
