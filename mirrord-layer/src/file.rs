@@ -21,7 +21,7 @@ use mirrord_protocol::{
     CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
     OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
     ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse,
+    WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
 };
 use regex::RegexSet;
 use tracing::{debug, error, warn};
@@ -56,6 +56,8 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/usr/.*",
         r"^/dev/.*",
         r"^/opt/.*",
+        // support for nixOS.
+        r"^/nix/.*",
         r"^/home/iojs/.*",
         r"^/home/runner/.*",
         // dotnet: `/tmp/clr-debug-pipe-1`
@@ -147,6 +149,7 @@ pub struct FileHandler {
     read_limited_queue: ResponseDeque<ReadFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
+    write_limited_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
 }
@@ -229,6 +232,23 @@ impl FileHandler {
                 debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
                 pop_send(&mut self.access_queue, access)
             }
+            WriteLimited(write) => {
+                let _ = write
+                    .as_ref()
+                    .inspect(|success| {
+                        debug!("DaemonMessage::WriteLimitedFileResponse {:#?}", success)
+                    })
+                    .inspect_err(|fail| {
+                        error!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
+                    });
+
+                pop_send(&mut self.write_limited_queue, write).inspect_err(|fail| {
+                    error!(
+                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
+                        fail,
+                    )
+                })
+            }
         }
     }
 
@@ -253,6 +273,7 @@ impl FileHandler {
             ReadLimited(read) => self.handle_hook_read_limited(read, codec).await,
             Seek(seek) => self.handle_hook_seek(seek, codec).await,
             Write(write) => self.handle_hook_write(write, codec).await,
+            WriteLimited(write) => self.handle_hook_write_limited(write, codec).await,
             Close(close) => self.handle_hook_close(close, codec).await,
             Access(access) => self.handle_hook_access(access, codec).await,
         }
@@ -431,7 +452,7 @@ impl FileHandler {
 
     async fn handle_hook_write(
         &mut self,
-        write: Write,
+        write: Write<WriteFileResponse>,
         codec: &mut actix_codec::Framed<
             impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
             ClientCodec,
@@ -441,6 +462,7 @@ impl FileHandler {
             remote_fd: fd,
             write_bytes,
             file_channel_tx,
+            ..
         } = write;
         debug!(
             "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
@@ -453,6 +475,34 @@ impl FileHandler {
         let write_file_request = WriteFileRequest { fd, write_bytes };
 
         let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
+        codec.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, codec))]
+    async fn handle_hook_write_limited(
+        &mut self,
+        write: Write<WriteFileResponse>,
+        codec: &mut actix_codec::Framed<
+            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+            ClientCodec,
+        >,
+    ) -> Result<()> {
+        let Write {
+            remote_fd,
+            start_from,
+            write_bytes,
+            file_channel_tx,
+        } = write;
+
+        self.write_limited_queue.push_back(file_channel_tx);
+
+        let write_file_request = WriteLimitedFileRequest {
+            remote_fd,
+            start_from,
+            write_bytes,
+        };
+
+        let request = ClientMessage::FileRequest(FileRequest::WriteLimited(write_file_request));
         codec.send(request).await.map_err(From::from)
     }
 
@@ -537,20 +587,13 @@ pub struct Seek {
     pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
 }
 
-pub struct Write {
+#[derive(Debug)]
+pub struct Write<T> {
     pub(crate) remote_fd: usize,
     pub(crate) write_bytes: Vec<u8>,
-    pub(crate) file_channel_tx: ResponseChannel<WriteFileResponse>,
-}
-
-impl fmt::Debug for Write {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Write")
-            .field("fd", &self.remote_fd)
-            .field("write_bytes (length)", &self.write_bytes.len())
-            .field("file_channel_tx", &self.file_channel_tx)
-            .finish()
-    }
+    // Only used for `pwrite`.
+    pub(crate) start_from: u64,
+    pub(crate) file_channel_tx: ResponseChannel<T>,
 }
 
 #[derive(Debug)]
@@ -573,8 +616,9 @@ pub enum HookMessageFile {
     Read(Read<ReadFileResponse>),
     ReadLine(Read<ReadFileResponse>),
     ReadLimited(Read<ReadFileResponse>),
+    Write(Write<WriteFileResponse>),
+    WriteLimited(Write<WriteFileResponse>),
     Seek(Seek),
-    Write(Write),
     Close(Close),
     Access(Access),
 }

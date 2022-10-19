@@ -14,9 +14,20 @@ class MirrordDialogBuilder {
     private val dialogHeading: String = "mirrord"
     private val podLabel: JLabel = JLabel("Select pod to impersonate")
     private val namespaceLabel: JLabel = JLabel("Select Namespace to use")
-    private val optionLabel: JLabel = JLabel("Options")
+    private val optionLabel: JLabel = JLabel("Toggle Options")
 
-    fun createMirrordKubeDialog(pods: JBList<String>, fileOpsCheckbox: JCheckBox, remoteDnsCheckbox: JCheckBox, ephemeralCheckbox: JCheckBox, agentRustLog: JTextField, rustLog: JTextField): JPanel {
+    fun createMirrordKubeDialog(
+        pods: JBList<String>,
+        fileOps: JCheckBox,
+        remoteDns: JCheckBox,
+        outgoingTraffic: JCheckBox,
+        trafficStealing: JCheckBox,
+        ephemeralCheckbox: JCheckBox,
+        agentRustLog: JTextField,
+        rustLog: JTextField,
+        excludeEnv: JTextField,
+        includeEnv: JTextField
+    ): JPanel {
         val dialogPanel = JPanel(BorderLayout())
         podLabel.border = EmptyBorder(5, 40, 5, 5)
 
@@ -26,15 +37,19 @@ class MirrordDialogBuilder {
 
         dialogPanel.add(podPanel, BorderLayout.WEST)
 
-        dialogPanel.add(JSeparator(JSeparator.VERTICAL),
-                BorderLayout.CENTER)
+        dialogPanel.add(
+            JSeparator(JSeparator.VERTICAL),
+            BorderLayout.CENTER
+        )
 
-        val optionsPanel = JPanel(GridLayout(6, 1, 10, 2))
+        val optionsPanel = JPanel(GridLayout(10, 1, 10, 2))
         optionLabel.border = EmptyBorder(5, 110, 5, 20)
 
         optionsPanel.add(optionLabel)
-        optionsPanel.add(fileOpsCheckbox)
-        optionsPanel.add(remoteDnsCheckbox)
+        optionsPanel.add(fileOps)
+        optionsPanel.add(remoteDns)
+        optionsPanel.add(outgoingTraffic)
+        optionsPanel.add(trafficStealing)
         optionsPanel.add(ephemeralCheckbox)
 
         val agentLogPanel = JPanel(GridBagLayout())
@@ -51,8 +66,20 @@ class MirrordDialogBuilder {
 
         rustLogPanel.border = EmptyBorder(10, 10, 10, 10)
 
+        val excludeEnvPanel = JPanel(GridLayout())
+        excludeEnvPanel.add(JLabel("Exclude env vars: "))
+        excludeEnv.size = Dimension(3, 3)
+        excludeEnvPanel.add(excludeEnv)
+
+        val includeEnvPanel = JPanel(GridLayout())
+        includeEnvPanel.add(JLabel("Include env vars: "))
+        excludeEnv.size = Dimension(3, 3)
+        includeEnvPanel.add(includeEnv)
+
         optionsPanel.add(agentLogPanel)
         optionsPanel.add(rustLogPanel)
+        optionsPanel.add(excludeEnvPanel)
+        optionsPanel.add(includeEnvPanel)
 
         dialogPanel.add(optionsPanel, BorderLayout.EAST)
 

@@ -29,7 +29,7 @@ use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
 };
-use mirrord_macro::hook_guard_fn;
+use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
@@ -88,12 +88,41 @@ pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
+/// Check if we're running in NixOS or Devbox
+/// if so, add `sh` to the skip list because of https://github.com/metalbear-co/mirrord/issues/531
+fn nix_devbox_patch(config: &mut LayerConfig) {
+    let mut current_skip = config
+        .skip_processes
+        .clone()
+        .map(VecOrSingle::to_vec)
+        .unwrap_or_default();
+
+    if is_nix_or_devbox() && !current_skip.contains(&"sh".to_string()) {
+        current_skip.push("sh".into());
+        std::env::set_var("MIRRORD_SKIP_PROCESSES", current_skip.join(";"));
+        config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
+    }
+}
+
+/// Check if NixOS or Devbox by discrimnating env vars.
+fn is_nix_or_devbox() -> bool {
+    if let Ok(res) = std::env::var("IN_NIX_SHELL") && res.as_str() == "1" {
+        true
+    }
+    else if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
+        true
+    } else {
+        false
+    }
+}
+
 #[ctor]
 fn before_init() {
     if !cfg!(test) {
         if let Ok(Ok(true)) = std::env::var(MIRRORD_SKIP_LOAD).map(|value| value.parse::<bool>()) {
             return;
         }
+
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
 
@@ -105,7 +134,8 @@ fn before_init() {
             .generate_config();
 
         match config {
-            Ok(config) => {
+            Ok(mut config) => {
+                nix_devbox_patch(&mut config);
                 let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
                 if should_load(given_process, skip_processes) {
@@ -384,7 +414,7 @@ async fn thread_loop(
         }
     }
 
-    graceful_exit!();
+    graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
 #[tracing::instrument(level = "trace", skip(connection, receiver))]
@@ -433,6 +463,12 @@ async fn start_layer_thread(
                     std::env::set_var(&key, &value);
                     debug_assert_eq!(std::env::var(key), Ok(value));
                 }
+
+                if let Some(overrides) = &config.feature.env.overrides {
+                    for (key, value) in overrides {
+                        std::env::set_var(key, value);
+                    }
+                }
             } else {
                 graceful_exit!("unexpected response - expected env vars response {msg:?}");
             }
@@ -462,6 +498,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe {
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(
+            &mut interceptor,
+            "close$NOCANCEL",
+            close_nocancel_detour,
+            FnClose_nocancel,
+            FN_CLOSE_NOCANCEL
+        );
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -511,12 +554,17 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     }
 }
 
+// no need to guard because we call another detour which will do the guard for us.
+#[hook_fn]
+pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+    close_detour(fd)
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::pod_api::*;
 
     #[rstest]
     #[case("test", Some(vec!["foo".to_string()]))]
@@ -537,30 +585,5 @@ mod tests {
         #[case] skip_processes: Option<Vec<String>>,
     ) {
         assert!(!should_load(given_process, skip_processes));
-    }
-
-    #[rstest]
-    #[case("pod/foobaz", Target::Pod(PodData {pod_name: "foobaz".to_string(), container_name: None}))]
-    #[case("deployment/foobaz", Target::Deployment(DeploymentData {deployment: "foobaz".to_string()}))]
-    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentData {deployment: "nginx-deployment".to_string()}))]
-    #[case("pod/foo/container/baz", Target::Pod(PodData { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
-    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
-        let target = target.parse::<Target>().unwrap();
-        assert_eq!(target, expected)
-    }
-
-    #[rstest]
-    #[should_panic(expected = "InvalidTarget")]
-    #[case::panic("deployment/foobaz/blah")]
-    #[should_panic(expected = "InvalidTarget")]
-    #[case::panic("pod/foo/baz")]
-    fn test_target_parse_fails(#[case] target: &str) {
-        let target = target.parse::<pod_api::Target>().unwrap();
-        assert_eq!(
-            target,
-            Target::Deployment(DeploymentData {
-                deployment: "foobaz".to_string()
-            })
-        )
     }
 }
