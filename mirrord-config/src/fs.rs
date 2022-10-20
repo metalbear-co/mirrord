@@ -1,109 +1,55 @@
 use serde::Deserialize;
 
+pub use self::{filter::*, mode::*};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
+    config::{ConfigError, MirrordConfig},
     util::MirrordToggleableConfig,
 };
+
+pub mod filter;
+pub mod mode;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
-pub enum FsConfig {
-    Disabled,
-    Read,
-    Write,
+pub enum FsFileConfig {
+    Simple(FsModeConfig),
+    Advanced(FsConfig),
 }
 
-impl FsConfig {
-    pub fn is_read(&self) -> bool {
-        self == &FsConfig::Read
-    }
-
-    pub fn is_write(&self) -> bool {
-        self == &FsConfig::Write
-    }
-}
-
-impl Default for FsConfig {
+impl Default for FsFileConfig {
     fn default() -> Self {
-        FsConfig::Read
+        FsFileConfig::Simple(FsModeConfig::Read)
     }
 }
 
-impl FsConfig {
-    fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
-        match (fs, ro_fs) {
-            (Some(false), Some(true)) | (None, Some(true)) => Some(FsConfig::Read),
-            (Some(true), _) => Some(FsConfig::Write),
-            (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
-                Some(FsConfig::Disabled)
-            }
-            (None, None) => None,
-        }
-    }
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct FsConfig {
+    pub mode: FsModeConfig,
+    pub filter: FileFilterConfig,
 }
 
-impl MirrordConfig for FsConfig {
+impl MirrordConfig for FsFileConfig {
     type Generated = FsConfig;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let config = match self {
+            FsFileConfig::Simple(mode) => FsConfig {
+                mode,
+                filter: Default::default(),
+            },
+            FsFileConfig::Advanced(fs_config) => fs_config,
+        };
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        Ok(config)
     }
 }
 
-impl MirrordToggleableConfig for FsConfig {
+impl MirrordToggleableConfig for FsFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let mode = FsModeConfig::disabled_config()?;
+        let filter = FileFilterConfig::disabled_config()?;
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsConfig::Disabled))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-    use crate::{
-        config::MirrordConfig,
-        util::{testing::with_env_vars, ToggleableConfig},
-    };
-
-    #[rstest]
-    #[case(None, None, FsConfig::Read)]
-    #[case(Some("true"), None, FsConfig::Write)]
-    #[case(Some("true"), Some("true"), FsConfig::Write)]
-    #[case(Some("false"), Some("true"), FsConfig::Read)]
-    fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let fs = FsConfig::default().generate_config().unwrap();
-
-                assert_eq!(fs, expect);
-            },
-        );
-    }
-
-    #[rstest]
-    #[case(None, None, FsConfig::Disabled)]
-    #[case(Some("true"), None, FsConfig::Write)]
-    #[case(Some("true"), Some("true"), FsConfig::Write)]
-    #[case(Some("false"), Some("true"), FsConfig::Read)]
-    fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let fs = ToggleableConfig::<FsConfig>::Enabled(false)
-                    .generate_config()
-                    .unwrap();
-
-                assert_eq!(fs, expect);
-            },
-        );
+        Ok(FsConfig { mode, filter })
     }
 }

@@ -5,7 +5,7 @@ pub mod agent;
 pub mod config;
 pub mod env;
 pub mod feature;
-pub mod file;
+pub mod filter;
 pub mod fs;
 pub mod incoming;
 pub mod network;
@@ -90,7 +90,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        fs::FsConfig, incoming::IncomingConfig, network::NetworkFileConfig,
+        fs::FsModeConfig, incoming::IncomingConfig, network::NetworkFileConfig,
         outgoing::OutgoingFileConfig, util::ToggleableConfig,
     };
 
@@ -260,8 +260,8 @@ mod tests {
             },
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),
-                fs: ToggleableConfig::Config(FsConfig::Write),
-                file_select: ToggleableConfig::Enabled(true),
+                fs: ToggleableConfig::Config(FsFileConfig::Simple(FsModeConfig::Write)),
+                file_filter: ToggleableConfig::Enabled(true),
                 network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),

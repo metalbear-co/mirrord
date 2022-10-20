@@ -207,7 +207,8 @@ fn init(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.file_select.clone()));
+
+    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.file_select.clone()));
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
