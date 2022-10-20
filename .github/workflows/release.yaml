@@ -172,7 +172,7 @@ jobs:
           cd vscode-ext 
           npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-linux-x64 --target linux-x64
-          vsce publish ${{ steps.version.outputs.version }} --pre-release --target linux-x64
+          vsce publish ${{ steps.version.outputs.version }} --target linux-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: rm vscode-ext/libmirrord_layer.so
@@ -182,14 +182,14 @@ jobs:
           cd vscode-ext
           npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
-          vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-x64
+          vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - run: |
           cd vscode-ext
           npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
-          vsce publish ${{ steps.version.outputs.version }} --pre-release --target darwin-arm64
+          vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
       - uses: actions/upload-artifact@v3
