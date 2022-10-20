@@ -7,8 +7,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.3
+
+### Changed
+- release: VS Code extension release as stable and not pre-release.
+
+### Fixed
+- Dev container failing to execute `apt-get install -y clang`
+
+## 3.1.2
+
 ### Changed
 - Update some texts in documentation, READMEs, and extension package descriptions
+- IntelliJ version check on enabling instead of on project start. Don't check again after less than 3 minutes.
+
 ## 3.1.1
 
 ### Fixed
