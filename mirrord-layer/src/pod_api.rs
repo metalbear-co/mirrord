@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{collections::HashSet, str::FromStr};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
@@ -242,13 +242,7 @@ impl KubernetesAPI {
             }
         }
 
-        wait_for_agent_startup(
-            pod_api,
-            runtime_data.pod_name.clone(),
-            mirrord_agent_name,
-            self.config.agent.communication_timeout,
-        )
-        .await?;
+        wait_for_agent_startup(pod_api, runtime_data.pod_name.clone(), mirrord_agent_name).await?;
 
         container_progress.done_with("container is ready");
 
@@ -388,13 +382,7 @@ impl KubernetesAPI {
             .and_then(|pod| pod.metadata.name.clone())
             .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
 
-        wait_for_agent_startup(
-            pod_api,
-            pod_name.clone(),
-            "mirrord-agent".to_string(),
-            self.config.agent.communication_timeout,
-        )
-        .await?;
+        wait_for_agent_startup(pod_api, pod_name.clone(), "mirrord-agent".to_string()).await?;
 
         pod_progress.done_with("pod is ready");
 
@@ -467,34 +455,26 @@ async fn wait_for_agent_startup(
     pod_api: Api<Pod>,
     pod_name: String,
     container_name: String,
-    communication_timeout: Option<u16>,
 ) -> Result<()> {
-    let logs_wait = tokio::spawn(async move {
-        let mut logs = pod_api
-            .log_stream(
-                &pod_name,
-                &LogParams {
-                    follow: true,
-                    container: Some(container_name),
-                    ..LogParams::default()
-                },
-            )
-            .await?;
+    let mut logs = pod_api
+        .log_stream(
+            &pod_name,
+            &LogParams {
+                follow: true,
+                container: Some(container_name),
+                ..LogParams::default()
+            },
+        )
+        .await?;
 
-        while let Some(line) = logs.try_next().await? {
-            let line = String::from_utf8_lossy(&line);
-            if line.contains("agent ready") {
-                break;
-            }
+    while let Some(line) = logs.try_next().await? {
+        let line = String::from_utf8_lossy(&line);
+        if line.contains("agent ready") {
+            break;
         }
-
-        Ok(())
-    });
-
-    tokio::select! {
-        log_wait = logs_wait => log_wait?,
-        _ = tokio::time::sleep(Duration::from_secs(communication_timeout.unwrap_or(30) as u64)) => Err(LayerError::AgentReadyTimeout),
     }
+
+    Ok(())
 }
 
 pub(crate) struct RuntimeData {
