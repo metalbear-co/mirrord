@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+- Dev container failing to execute `apt-get install -y clang`
+
 ## 3.1.2
 
 ### Changed
