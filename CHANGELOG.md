@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.1.3
+
+### Changed
+- release: VS Code extension release as stable and not pre-release.
+
 ### Fixed
 - Dev container failing to execute `apt-get install -y clang`
 
