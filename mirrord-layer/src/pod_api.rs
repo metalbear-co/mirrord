@@ -242,7 +242,7 @@ impl KubernetesAPI {
             }
         }
 
-        wait_for_agent_startup(pod_api, runtime_data.pod_name.clone(), mirrord_agent_name).await?;
+        wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
 
         container_progress.done_with("container is ready");
 
@@ -382,7 +382,7 @@ impl KubernetesAPI {
             .and_then(|pod| pod.metadata.name.clone())
             .ok_or(LayerError::JobPodNotFound(mirrord_agent_job_name))?;
 
-        wait_for_agent_startup(pod_api, pod_name.clone(), "mirrord-agent".to_string()).await?;
+        wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
 
         pod_progress.done_with("pod is ready");
 
@@ -452,13 +452,13 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
 }
 
 async fn wait_for_agent_startup(
-    pod_api: Api<Pod>,
-    pod_name: String,
+    pod_api: &Api<Pod>,
+    pod_name: &str,
     container_name: String,
 ) -> Result<()> {
     let mut logs = pod_api
         .log_stream(
-            &pod_name,
+            pod_name,
             &LogParams {
                 follow: true,
                 container: Some(container_name),
@@ -473,7 +473,6 @@ async fn wait_for_agent_startup(
             break;
         }
     }
-
     Ok(())
 }
 
