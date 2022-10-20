@@ -115,7 +115,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                     k8s_api.create_agent(agent_port),
                 )
                 .await
-                .unwrap_or_else(|_| Err(LayerError::AgentReadyTimeout))
+                .unwrap_or(Err(LayerError::AgentReadyTimeout))
                 .unwrap_or_else(|err| handle_error(err));
 
                 // Set env var for children to re-use.
