@@ -10,6 +10,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
 
+## 3.1.3
+
+### Changed
+- release: VS Code extension release as stable and not pre-release.
+
 ### Fixed
 - Dev container failing to execute `apt-get install -y clang`
 
