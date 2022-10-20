@@ -32,7 +32,7 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
 
 * Click "Enable mirrord" on the status bar
 * Start debugging your project
-* Choose pod to mirror traffic from
+* Choose pod to impersonate
 * The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
