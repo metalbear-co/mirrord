@@ -10,6 +10,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Extended support for both `-s` and `-x` wildcard matching, now supports `PREFIX_*`, `*_SUFFIX`, ect.
 
+### Fixed
+- Don't ignore passed `--pod-namespace` argument, closes
+  [[#605](https://github.com/metalbear-co/mirrord/issues/605)]
+
 ## 3.1.3
 
 ### Changed
