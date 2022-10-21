@@ -16,6 +16,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Don't ignore passed `--pod-namespace` argument, closes
   [[#605](https://github.com/metalbear-co/mirrord/issues/605)]
+- Issues with IntelliJ extension when debugging Kotlin applications
 
 ### Deprecated
 - `--impersonated-container-name` and `MIRRORD_IMPERSONATED_CONTAINER_NAME` are
