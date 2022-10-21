@@ -25,15 +25,14 @@ impl EnvFilter {
         };
 
         let exclude = {
-            let patterns = [
-                "PATH",
-                "HOME",
-                "HOMEPATH",
-                "CLASSPATH",
-                "JAVA_EXE",
-                "JAVA_HOME",
+            let mut exclude = vec![
+                WildMatch::new("PATH"),
+                WildMatch::new("HOME"),
+                WildMatch::new("HOMEPATH"),
+                WildMatch::new("CLASSPATH"),
+                WildMatch::new("JAVA_EXE"),
+                WildMatch::new("JAVA_HOME"),
             ];
-            let mut exclude = patterns.iter().map(WildMatch::new).collect();
 
             for selector in &filter_env_vars {
                 exclude.push(WildMatch::new(selector));
