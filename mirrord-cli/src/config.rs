@@ -36,6 +36,7 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub target_namespace: Option<String>,
 
+    // START | To be removed after deprecated functionality is removed
     /// Target name to mirror.
     /// WARNING: [DEPRECATED] Consider using `--target` instead.
     #[clap(short, long, group = "pod", value_parser)]
@@ -52,6 +53,12 @@ pub(super) struct ExecArgs {
     )]
     pub pod_namespace: Option<String>,
 
+    /// Select container name to impersonate. Default is first container.
+    /// WARNING: [DEPRECATED] Consider using `--target` instead.
+    #[clap(long, requires = "pod", conflicts_with = "target", value_parser)]
+    pub impersonated_container_name: Option<String>,
+
+    // END
     /// Namespace to place agent in.
     #[clap(short = 'a', long, value_parser)]
     pub agent_namespace: Option<String>,
@@ -95,10 +102,6 @@ pub(super) struct ExecArgs {
     /// Agent TTL
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
-
-    /// Select container name to impersonate. Default is first container.
-    #[clap(long, requires = "pod", conflicts_with = "target", value_parser)]
-    pub impersonated_container_name: Option<String>,
 
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]

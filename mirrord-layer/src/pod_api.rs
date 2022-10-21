@@ -701,8 +701,7 @@ impl FromStr for Target {
             }
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {:?} is neither a pod or a deployment.",
-                target
+                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}",
             ))),
         }
     }
