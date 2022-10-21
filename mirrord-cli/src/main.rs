@@ -142,17 +142,25 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
     }
 
+    // START | To be removed after deprecated functionality is removed
     if let Some(pod) = &args.pod_name {
-        println!("[WARNING]: DEPRECATED - `--pod-name` is deprecated, consider using `--target instead.\nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
+        println!("[WARNING]: DEPRECATED - `--pod-name` is deprecated, consider using `--target` instead.\nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
         std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAME", pod);
     }
 
+    if let Some(pod_namespace) = &args.pod_namespace {
+        println!("[WARNING]: DEPRECATED - `--pod-namespace` is deprecated, consider using `--target-namespace` instead.\nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
+        std::env::set_var("MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE", pod_namespace);
+    }
+
     if let Some(impersonated_container_name) = &args.impersonated_container_name {
+        println!("[WARNING]: DEPRECATED - `--impersonated-container-name` is deprecated, consider using `--target` instead.\nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
         std::env::set_var(
             "MIRRORD_IMPERSONATED_CONTAINER_NAME",
             impersonated_container_name,
         );
     }
+    // END
 
     if let Some(skip_processes) = &args.skip_processes {
         std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());

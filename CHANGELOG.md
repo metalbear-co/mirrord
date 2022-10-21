@@ -11,6 +11,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Extended support for both `-s` and `-x` wildcard matching, now supports `PREFIX_*`, `*_SUFFIX`, ect.
 - Add to env default ignore `JAVA_HOME`,`HOMEPATH`,`CLASSPATH`,`JAVA_EXE` as it's usually runtime that you don't want from remote. Possibly fixes issue discussed on Discord (used complained that they had to use absolute path and not relative).
 - Add `jvm.cfg` to default bypass for files.
+- Clarify wrong target error message.
+
+### Fixed
+- Don't ignore passed `--pod-namespace` argument, closes
+  [[#605](https://github.com/metalbear-co/mirrord/issues/605)]
+
+### Deprecated
+- `--impersonated-container-name` and `MIRRORD_IMPERSONATED_CONTAINER_NAME` are
+  deprecated in favor of `--target` or `MIRRORD_IMPERSONATED_TARGET`
+- `--pod-namespace` and `MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE` are deprecated in
+  favor of `--target-namespace` and `MIRRORD_TARGET_NAMESPACE`
 
 ## 3.1.3
 
