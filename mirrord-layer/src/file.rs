@@ -48,7 +48,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r".*\.js",
         r".*\.pth",
         r".*\.plist",
-        r".*(^|\/)jvm\.cfg", // jvm.cfg or ANYTHING/jvm.cfg
+        r".*(^|\/)jvm\.cfg$", // jvm.cfg or ANYTHING/jvm.cfg
         r".*venv\.cfg",
         r"^/proc/.*",
         r"^/sys/.*",
