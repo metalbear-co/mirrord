@@ -98,8 +98,8 @@ class MirrordListener : ExecutionListener {
 
                     // SUCCESS: set the respective environment variables
                     if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
-                        mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = pods.selectedValue as String
-                        mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE"] = choseNamespace as String
+                        mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue as String}"
+                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = choseNamespace as String
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
                         mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = trafficStealing.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
