@@ -48,7 +48,7 @@ impl MirrordConfig for FsFileConfig {
 impl MirrordToggleableConfig for FsFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
-        let filter = FileFilterConfig::disabled_config()?;
+        let filter = FileFilterUserConfig::disabled_config()?;
 
         Ok(FsConfig { mode, filter })
     }
