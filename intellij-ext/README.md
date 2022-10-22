@@ -1,13 +1,13 @@
 # mirrord
 
 <!-- Plugin description -->
-mirrord works by letting you select a pod to mirror traffic from. It launches a privileged pod on the same node which enters the namespace of the selected pod and captures traffic from it.
+mirrord lets developers run local processes in the context of their cloud environment. It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually going through the hassle of deploying it there, and without disrupting the environment by deploying untested code. It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it (here)[https://mirrord.dev/docs/overview/introduction/].
 ### How To Use
 
 * Click "Enable/Disable mirrord" toggle button on the run tool window.
 * Start debugging your project
-* Choose pod to mirror traffic from, select and configure mirrord options.
-* The debugged process will start with mirrord, and receive traffic.
+* Choose pod to impersonate
+* The debugged process will be plugged into the selected pod by mirrord
  
 <!-- Plugin description end -->
 

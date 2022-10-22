@@ -2,6 +2,7 @@ package com.metalbear.mirrord
 
 import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.GridBagLayout
@@ -33,7 +34,8 @@ class MirrordDialogBuilder {
 
         val podPanel = JPanel(GridLayout(2, 1, 10, 5))
         podPanel.add(podLabel, BorderLayout.NORTH)
-        podPanel.add(pods)
+        val scrollablePane = JBScrollPane(pods)
+        podPanel.add(scrollablePane)
 
         dialogPanel.add(podPanel, BorderLayout.WEST)
 
@@ -43,7 +45,7 @@ class MirrordDialogBuilder {
         )
 
         val optionsPanel = JPanel(GridLayout(10, 1, 10, 2))
-        optionLabel.border = EmptyBorder(5, 110, 5, 20)
+        optionLabel.border = EmptyBorder(5, 110, 5, 80)
 
         optionsPanel.add(optionLabel)
         optionsPanel.add(fileOps)
@@ -90,7 +92,8 @@ class MirrordDialogBuilder {
         val dialogPanel = JPanel(BorderLayout())
         namespaceLabel.border = EmptyBorder(5, 20, 5, 20)
         dialogPanel.add(namespaceLabel, BorderLayout.NORTH)
-        dialogPanel.add(namespaces, BorderLayout.SOUTH)
+        val scrollablePane = JBScrollPane(namespaces)
+        dialogPanel.add(scrollablePane, BorderLayout.SOUTH)
         return dialogPanel
     }
 
