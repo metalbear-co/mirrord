@@ -10,13 +10,25 @@
 
 </div>
 
-[![Discord](https://img.shields.io/discord/933706914808889356)](https://discord.gg/J5YSrStDKD)
+[![Discord](https://img.shields.io/discord/933706914808889356?color=5865F2&label=Discord&logo=discord&logoColor=white)](https://discord.gg/J5YSrStDKD)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
 [![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
 
 mirrord lets developers run local processes in the context of their cloud environment. It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually going through the hassle of deploying it there, and without disrupting the environment by deploying untested code. It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
 
+# Contents
+
+- [Getting Started](#getting-started)
+- [How It Works](#how-it-works)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [Development](#development)
+- [Help & Community](#help-and-community)
+- [Code of Conduct](#code-of-conduct)
+- [License](#license)
+
+---
 ## Getting Started
 - [VS Code Extension](#vs-code-extension)
 - [IntelliJ Plugin](#intellij-plugin)
@@ -82,6 +94,9 @@ When you select a pod to impersonate, mirrord launches a privileged pod on the s
   <img src="./images/how_it_works.svg" alt="How It Works"/>
 </p>
 
+## FAQ
+Our FAQ is available [here](https://mirrord.dev/docs/overview/faq/). If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions) or on [Discord](https://discord.gg/J5YSrStDKD).
+
 ## Contributing
 Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
 If you wish to work an issue, please comment so you can be assigned.
@@ -91,7 +106,7 @@ If you wish to work an issue, please comment so you can be assigned.
 Read our development guide [here](https://mirrord.dev/docs/developer/testing/).
 
 
-## Help & Community 🎉✉️
+## Help and Community
 
 Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun.
 
