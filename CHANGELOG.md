@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - Don't ignore passed `--pod-namespace` argument, closes
   [[#605](https://github.com/metalbear-co/mirrord/issues/605)]
+- Replace deprecated environment variables in IntelliJ plugin
 
 ### Deprecated
 - `--impersonated-container-name` and `MIRRORD_IMPERSONATED_CONTAINER_NAME` are
