@@ -70,6 +70,7 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r".*/package.json",
+        r"^/tmp/mirrord/.*",
         &current_dir.to_string_lossy(),
         &current_binary.to_string_lossy(),
     ])

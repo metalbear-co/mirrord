@@ -49,6 +49,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{error, info, trace};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{common::HookMessage, file::FileHandler};
@@ -83,6 +84,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+pub(crate) static mut TRACING_GUARD: Vec<WorkerGuard> = Vec::new();
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
@@ -179,15 +181,18 @@ fn deprecation_check(config: &LayerConfig) {
 // END
 
 fn init(config: LayerConfig) {
-    let mut guards = Vec::new();
-
     let file_log = if config.feature.error_reporting {
-        let log_file_name = format!(
-            "{}-mirrord-layer.log",
+        let run_id = std::env::var("MIRRORD_RUN_ID").unwrap_or_else(|_| {
             Alphanumeric
                 .sample_string(&mut rand::thread_rng(), 10)
                 .to_lowercase()
-        );
+        });
+
+        println!("MIRRORD_RUN_ID = {}", run_id);
+
+        std::env::set_var("MIRRORD_RUN_ID", run_id.clone());
+
+        let log_file_name = format!("{}-mirrord-layer.log", run_id);
 
         let file_appender = tracing_appender::rolling::never("/tmp/mirrord", &log_file_name);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -196,7 +201,9 @@ fn init(config: LayerConfig) {
             .set(PathBuf::from("/tmp/mirrord").join(log_file_name))
             .expect("Setting LOG_FILE_PATH singleton");
 
-        guards.push(guard);
+        unsafe {
+            TRACING_GUARD.push(guard);
+        }
 
         Some(
             tracing_subscriber::fmt::layer()
@@ -217,8 +224,8 @@ fn init(config: LayerConfig) {
                 .with_span_events(FmtSpan::ACTIVE)
                 .compact(),
         )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(file_log)
+        .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     info!("Initializing mirrord-layer!");
@@ -451,12 +458,27 @@ async fn thread_loop(
         }
     }
 
-    if let Some(log_file) = LOG_FILE_PATH.get() {
-        if let Ok(logs) = fs::read(log_file) {
-            let binary_type = std::env::args().join(" ");
-            let os_version = format!("{}", os_info::get());
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
-            println!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}&logs={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version), urlencoding::encode_binary(&logs));
+    if let Some(log_file) = LOG_FILE_PATH.get() {
+        let binary_type = std::env::args().join(" ");
+        let os_version = format!("{}", os_info::get());
+        let base_url = format!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version));
+
+        if let Ok(logs) = fs::read(log_file) {
+            let encoded_logs = urlencoding::encode_binary(&logs);
+
+            if encoded_logs.len() > 4000 {
+                println!(
+                    "{}&logs={}",
+                    base_url,
+                    &encoded_logs[(encoded_logs.len() - 4000)..]
+                );
+            } else {
+                println!("{}&logs={}", base_url, encoded_logs);
+            }
+        } else {
+            println!("{}", base_url);
         }
     }
 
