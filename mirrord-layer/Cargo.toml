@@ -48,6 +48,9 @@ socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
+urlencoding = "2"
+itertools = "0.10"
+os_info = "3"
 
 
 [dev-dependencies]

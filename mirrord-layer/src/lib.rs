@@ -14,6 +14,7 @@
 extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
+    fs,
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -25,6 +26,7 @@ use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
@@ -35,6 +37,7 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
+use rand::distributions::{Alphanumeric, DistString};
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -85,6 +88,8 @@ pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
+
+pub(crate) static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
@@ -176,21 +181,36 @@ fn deprecation_check(config: &LayerConfig) {
 fn init(config: LayerConfig) {
     let mut guards = Vec::new();
 
-    let file_log = {
-        let file_appender = tracing_appender::rolling::never("/tmp/mirrord", "mirrord-layer.log");
+    let file_log = if config.feature.error_reporting {
+        let log_file_name = format!(
+            "{}-mirrord-layer.log",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+
+        let file_appender = tracing_appender::rolling::never("/tmp/mirrord", &log_file_name);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        LOG_FILE_PATH
+            .set(PathBuf::from("/tmp/mirrord").join(log_file_name))
+            .expect("Setting LOG_FILE_PATH singleton");
 
         guards.push(guard);
 
-        tracing_subscriber::fmt::layer()
-            .with_thread_ids(true)
-            .with_span_events(FmtSpan::ACTIVE)
-            .json()
-            .with_writer(non_blocking)
+        Some(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::ACTIVE)
+                .with_ansi(false)
+                .compact()
+                .with_writer(non_blocking),
+        )
+    } else {
+        None
     };
 
     tracing_subscriber::registry()
-        .with(file_log)
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
@@ -198,6 +218,7 @@ fn init(config: LayerConfig) {
                 .compact(),
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(file_log)
         .init();
 
     info!("Initializing mirrord-layer!");
@@ -373,9 +394,9 @@ async fn thread_loop(
         impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
         ClientCodec,
     >,
-    steal: bool,
+    config: LayerConfig,
 ) {
-    let mut layer = Layer::new(codec, steal);
+    let mut layer = Layer::new(codec, config.feature.network.incoming.is_steal());
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -430,6 +451,15 @@ async fn thread_loop(
         }
     }
 
+    if let Some(log_file) = LOG_FILE_PATH.get() {
+        if let Ok(logs) = fs::read(log_file) {
+            let binary_type = std::env::args().join(" ");
+            let os_version = format!("{}", os_info::get());
+
+            println!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}&logs={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version), urlencoding::encode_binary(&logs));
+        }
+    }
+
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
@@ -444,8 +474,18 @@ async fn start_layer_thread(
     let mut codec = actix_codec::Framed::new(connection, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
-        config.feature.env.exclude.map(|exclude| exclude.join(";")),
-        config.feature.env.include.map(|include| include.join(";")),
+        config
+            .feature
+            .env
+            .exclude
+            .clone()
+            .map(|exclude| exclude.join(";")),
+        config
+            .feature
+            .env
+            .include
+            .clone()
+            .map(|include| include.join(";")),
     ) {
         (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
@@ -499,11 +539,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(
-        receiver,
-        codec,
-        config.feature.network.incoming.is_steal(),
-    ));
+    let _ = tokio::spawn(thread_loop(receiver, codec, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.

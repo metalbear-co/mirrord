@@ -1731,6 +1731,7 @@ dependencies = [
  "errno",
  "frida-gum",
  "futures",
+ "itertools",
  "k8s-openapi",
  "kube",
  "libc",
@@ -1739,6 +1740,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "nix 0.24.2",
+ "os_info",
  "rand 0.8.5",
  "regex",
  "rstest",
@@ -1755,6 +1757,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "trust-dns-resolver",
+ "urlencoding",
 ]
 
 [[package]]
@@ -2149,6 +2152,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "os_info"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4750134fb6a5d49afc80777394ad5d95b04bc12068c6abb92fae8f43817270f"
+dependencies = [
+ "log",
+ "serde",
+ "winapi",
 ]
 
 [[package]]
@@ -3791,6 +3805,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8db7427f936968176eaa7cdf81b7f98b980b18495ec28f1b5791ac3bfe3eea9"
 
 [[package]]
 name = "utf-8"
