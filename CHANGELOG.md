@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add to env default ignore `JAVA_HOME`,`HOMEPATH`,`CLASSPATH`,`JAVA_EXE` as it's usually runtime that you don't want from remote. Possibly fixes issue discussed on Discord (used complained that they had to use absolute path and not relative).
 - Add `jvm.cfg` to default bypass for files.
 - Clarify wrong target error message.
+- mirrord-layer: Improve error message in `connection::handle_error`.
 
 ### Fixed
 - Don't ignore passed `--pod-namespace` argument, closes
