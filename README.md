@@ -24,7 +24,7 @@ mirrord lets developers run local processes in the context of their cloud enviro
 - [FAQ](#faq)
 - [Contributing](#contributing)
 - [Development](#development)
-- [Help & Community](#help--community)
+- [Help & Community](#help-and-community)
 - [Code of Conduct](#code-of-conduct)
 - [License](#license)
 
@@ -95,7 +95,7 @@ When you select a pod to impersonate, mirrord launches a privileged pod on the s
 </p>
 
 ## FAQ
-Our FAQ is available [here](https://mirrord.dev/docs/overview/faq/). If you have a question that's not on there, feel free to ask in our Discussions or on  
+Our FAQ is available [here](https://mirrord.dev/docs/overview/faq/). If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions) or on [Discord](https://discord.gg/J5YSrStDKD).
 
 ## Contributing
 Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
@@ -106,7 +106,7 @@ If you wish to work an issue, please comment so you can be assigned.
 Read our development guide [here](https://mirrord.dev/docs/developer/testing/).
 
 
-## Help & Community 🎉✉️
+## Help and Community
 
 Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun.
 
