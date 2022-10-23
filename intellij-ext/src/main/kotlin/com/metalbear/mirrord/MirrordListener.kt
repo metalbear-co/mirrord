@@ -29,12 +29,14 @@ class MirrordListener : ExecutionListener {
 
     companion object {
         var enabled: Boolean = false
+        var id: String = ""
         var envSet: Boolean = false
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
 
     override fun processStartScheduled(executorId: String, env: ExecutionEnvironment) {
-        if (enabled) {
+        if (enabled && id.isEmpty()) {
+            id = executorId // id is set here to make sure we don't spawn the dialog twice
             ApplicationManager.getApplication().invokeLater {
                 val customDialogBuilder = MirrordDialogBuilder()
                 val kubeDataProvider = KubeDataProvider()
@@ -51,6 +53,7 @@ class MirrordListener : ExecutionListener {
                 }
                 val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
                 val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+                dialogBuilder.resizable(false)
 
                 // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
                 if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
@@ -95,6 +98,7 @@ class MirrordListener : ExecutionListener {
                         includeEnv,
                     )
                     val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+                    dialogBuilder.resizable(false)
 
                     // SUCCESS: set the respective environment variables
                     if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
@@ -130,7 +134,8 @@ class MirrordListener : ExecutionListener {
         // NOTE: If the option was enabled, and we actually set the env, i.e. cancel was not clicked on the dialog,
         // we clear up the Environment, because we don't want mirrord to run again if the user hits debug again
         // with mirrord toggled off.
-        if (enabled and envSet) {
+        if (enabled && envSet && executorId == id) {
+            id = ""
             if (env.runProfile::class.simpleName == "GoApplicationConfiguration") {
                 GoRunConfig.clearGoEnv()
                 return super.processTerminating(executorId, env, handler)
