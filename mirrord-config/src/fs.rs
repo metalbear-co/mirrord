@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 pub use self::{advanced::*, mode::*};
 use crate::{
-    config::{ConfigError, MirrordConfig},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
     util::MirrordToggleableConfig,
 };
 
@@ -51,11 +51,13 @@ impl MirrordConfig for FsUserConfig {
 impl MirrordToggleableConfig for FsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
+        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
+        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
 
         Ok(FsConfig {
             mode,
-            include: todo!(),
-            exclude: todo!(),
+            include,
+            exclude,
         })
     }
 }
