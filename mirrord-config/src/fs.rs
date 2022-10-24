@@ -1,12 +1,12 @@
 use serde::Deserialize;
 
-pub use self::{filter::*, mode::*};
+pub use self::{advanced::*, mode::*};
 use crate::{
     config::{ConfigError, MirrordConfig},
     util::MirrordToggleableConfig,
 };
 
-pub mod filter;
+pub mod advanced;
 pub mod mode;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -14,19 +14,13 @@ pub mod mode;
 #[serde(rename_all = "lowercase")]
 pub enum FsUserConfig {
     Simple(FsModeConfig),
-    Advanced(FsConfig),
+    Advanced(AdvancedFsUserConfig),
 }
 
 impl Default for FsUserConfig {
     fn default() -> Self {
         FsUserConfig::Simple(FsModeConfig::Read)
     }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct FsConfig {
-    pub mode: FsModeConfig,
-    pub filter: FileFilterConfig,
 }
 
 impl MirrordConfig for FsUserConfig {
@@ -36,9 +30,18 @@ impl MirrordConfig for FsUserConfig {
         let config = match self {
             FsUserConfig::Simple(mode) => FsConfig {
                 mode,
-                filter: Default::default(),
+                include: Default::default(),
+                exclude: Default::default(),
             },
-            FsUserConfig::Advanced(fs_config) => fs_config,
+            FsUserConfig::Advanced(AdvancedFsUserConfig {
+                mode,
+                include,
+                exclude,
+            }) => FsConfig {
+                mode,
+                include,
+                exclude,
+            },
         };
 
         Ok(config)
@@ -48,8 +51,21 @@ impl MirrordConfig for FsUserConfig {
 impl MirrordToggleableConfig for FsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
-        let filter = FileFilterUserConfig::disabled_config()?;
 
-        Ok(FsConfig { mode, filter })
+        Ok(FsConfig {
+            mode,
+            include: todo!(),
+            exclude: todo!(),
+        })
+    }
+}
+
+impl FsConfig {
+    pub fn is_read(&self) -> bool {
+        self.mode.is_read()
+    }
+
+    pub fn is_write(&self) -> bool {
+        self.mode.is_write()
     }
 }

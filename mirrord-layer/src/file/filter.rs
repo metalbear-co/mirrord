@@ -4,7 +4,10 @@ use std::{
 };
 
 use fancy_regex::Regex;
-use mirrord_config::{filter::FileFilterConfig, util::VecOrSingle};
+use mirrord_config::{
+    fs::{AdvancedFsUserConfig, FsConfig, FsUserConfig},
+    util::VecOrSingle,
+};
 use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
@@ -82,8 +85,11 @@ impl FileFilter {
     ///   anything passed as exclude);
     /// - `FileFilter::Exclude` also appends the `DEFAULT_EXCLUDE_LIST` to the user supplied regex;
     #[tracing::instrument(level = "debug")]
-    pub(crate) fn new(user_config: FileFilterConfig) -> Self {
-        let FileFilterConfig { include, exclude } = user_config;
+    pub(crate) fn new(fs_config: FsConfig) -> Self {
+        let FsConfig {
+            include, exclude, ..
+        } = fs_config;
+
         let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
         let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
 
@@ -149,7 +155,10 @@ impl Default for FileFilter {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::{filter::FileFilterConfig, util::VecOrSingle};
+    use mirrord_config::{
+        fs::{AdvancedFsUserConfig, FsConfig, FsModeConfig, FsUserConfig},
+        util::VecOrSingle,
+    };
 
     use super::FileFilter;
     use crate::detour::{Bypass, Detour};
@@ -174,12 +183,12 @@ mod tests {
             "/folder/second.a".to_string(),
         ]));
 
-        let user_config = FileFilterConfig {
+        let fs_config = FsConfig {
             include,
-            exclude: None,
+            ..Default::default()
         };
 
-        let file_filter = FileFilter::new(user_config);
+        let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
             .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
@@ -203,12 +212,12 @@ mod tests {
             "/folder/second.a".to_string(),
         ]));
 
-        let user_config = FileFilterConfig {
-            include: None,
+        let fs_config = FsConfig {
             exclude,
+            ..Default::default()
         };
 
-        let file_filter = FileFilter::new(user_config);
+        let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
             .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
@@ -227,17 +236,20 @@ mod tests {
 
     #[test]
     fn test_include_overrides_exclude() {
-        let include_exclude = Some(VecOrSingle::Multiple(vec![
+        let include = Some(VecOrSingle::Multiple(vec![
             "/folder/first.a".to_string(),
             "/folder/second.a".to_string(),
         ]));
 
-        let user_config = FileFilterConfig {
-            include: include_exclude.clone(),
-            exclude: include_exclude.clone(),
+        let exclude = include.clone();
+
+        let fs_config = FsConfig {
+            include,
+            exclude,
+            ..Default::default()
         };
 
-        let file_filter = FileFilter::new(user_config);
+        let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
             .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
@@ -258,12 +270,12 @@ mod tests {
     fn test_regex_include_only_filter() {
         let include = Some(VecOrSingle::Multiple(vec![r"/folder/.*\.a".to_string()]));
 
-        let user_config = FileFilterConfig {
+        let fs_config = FsConfig {
             include,
-            exclude: None,
+            ..Default::default()
         };
 
-        let file_filter = FileFilter::new(user_config);
+        let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
             .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
@@ -280,12 +292,12 @@ mod tests {
     fn test_regex_exclude_only_filter() {
         let exclude = Some(VecOrSingle::Multiple(vec![r"/folder/.*\.a".to_string()]));
 
-        let user_config = FileFilterConfig {
-            include: None,
+        let fs_config = FsConfig {
             exclude,
+            ..Default::default()
         };
 
-        let file_filter = FileFilter::new(user_config);
+        let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
             .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
