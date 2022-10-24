@@ -7,17 +7,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.2.0
+
 ### Changed
 - Extended support for both `-s` and `-x` wildcard matching, now supports `PREFIX_*`, `*_SUFFIX`, ect.
 - Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
 - Add to env default ignore `JAVA_HOME`,`HOMEPATH`,`CLASSPATH`,`JAVA_EXE` as it's usually runtime that you don't want from remote. Possibly fixes issue discussed on Discord (used complained that they had to use absolute path and not relative).
 - Add `jvm.cfg` to default bypass for files.
 - Clarify wrong target error message.
+- mirrord-layer: Improve error message in `connection::handle_error`.
 
 ### Fixed
 - Don't ignore passed `--pod-namespace` argument, closes
   [[#605](https://github.com/metalbear-co/mirrord/issues/605)]
+- Replace deprecated environment variables in IntelliJ plugin
 - Issues with IntelliJ extension when debugging Kotlin applications
+- Scrollable list for pods and namespaces for IntelliJ extension, closes [[#610](https://github.com/metalbear-co/mirrord/issues/610)]
 
 ### Deprecated
 - `--impersonated-container-name` and `MIRRORD_IMPERSONATED_CONTAINER_NAME` are

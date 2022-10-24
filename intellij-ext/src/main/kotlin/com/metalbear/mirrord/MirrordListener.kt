@@ -36,7 +36,7 @@ class MirrordListener : ExecutionListener {
 
     override fun processStartScheduled(executorId: String, env: ExecutionEnvironment) {
         if (enabled && id.isEmpty()) {
-            id = executorId
+            id = executorId // id is set here to make sure we don't spawn the dialog twice
             ApplicationManager.getApplication().invokeLater {
                 val customDialogBuilder = MirrordDialogBuilder()
                 val kubeDataProvider = KubeDataProvider()
@@ -53,6 +53,7 @@ class MirrordListener : ExecutionListener {
                 }
                 val panel = customDialogBuilder.createMirrordNamespaceDialog(namespaces)
                 val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+                dialogBuilder.resizable(false)
 
                 // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
                 if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
@@ -97,11 +98,12 @@ class MirrordListener : ExecutionListener {
                         includeEnv,
                     )
                     val dialogBuilder = customDialogBuilder.getDialogBuilder(panel)
+                    dialogBuilder.resizable(false)
 
                     // SUCCESS: set the respective environment variables
                     if (dialogBuilder.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
-                        mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAME"] = pods.selectedValue as String
-                        mirrordEnv["MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE"] = choseNamespace as String
+                        mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue as String}"
+                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = choseNamespace as String
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
                         mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = trafficStealing.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
