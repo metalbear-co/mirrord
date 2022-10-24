@@ -61,5 +61,3 @@ impl MirrordToggleableConfig for FsUserConfig {
         })
     }
 }
-
-
