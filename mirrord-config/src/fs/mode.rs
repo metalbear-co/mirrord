@@ -5,11 +5,12 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, Copy)]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
     Disabled,
+    #[default]
     Read,
     Write,
 }
@@ -21,12 +22,6 @@ impl FsModeConfig {
 
     pub fn is_write(self) -> bool {
         self == FsModeConfig::Write
-    }
-}
-
-impl Default for FsModeConfig {
-    fn default() -> Self {
-        FsModeConfig::Read
     }
 }
 

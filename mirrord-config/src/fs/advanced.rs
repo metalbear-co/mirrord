@@ -51,4 +51,26 @@ impl FsConfig {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+
+    #[rstest]
+    fn default() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            ..Default::default()
+        };
+
+        with_env_vars(
+            vec![("MIRRORD_FILE_OPS", None), ("MIRRORD_FILE_RO_OPS", None)],
+            || {
+                let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
+    }
+}
