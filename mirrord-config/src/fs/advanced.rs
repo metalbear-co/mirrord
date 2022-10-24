@@ -19,10 +19,10 @@ pub struct AdvancedFsUserConfig {
     #[config(nested)]
     pub mode: FsModeConfig,
 
-    #[config(env = "MIRRORD_FILE_PATH_INCLUDE")]
+    #[config(env = "MIRRORD_FILE_FILTER_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
-    #[config(env = "MIRRORD_FILE_PATH_EXCLUDE")]
+    #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 }
 
