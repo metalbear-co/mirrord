@@ -12,14 +12,14 @@ pub mod mode;
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
-pub enum FsFileConfig {
+pub enum FsUserConfig {
     Simple(FsModeConfig),
     Advanced(FsConfig),
 }
 
-impl Default for FsFileConfig {
+impl Default for FsUserConfig {
     fn default() -> Self {
-        FsFileConfig::Simple(FsModeConfig::Read)
+        FsUserConfig::Simple(FsModeConfig::Read)
     }
 }
 
@@ -29,23 +29,23 @@ pub struct FsConfig {
     pub filter: FileFilterConfig,
 }
 
-impl MirrordConfig for FsFileConfig {
+impl MirrordConfig for FsUserConfig {
     type Generated = FsConfig;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
         let config = match self {
-            FsFileConfig::Simple(mode) => FsConfig {
+            FsUserConfig::Simple(mode) => FsConfig {
                 mode,
                 filter: Default::default(),
             },
-            FsFileConfig::Advanced(fs_config) => fs_config,
+            FsUserConfig::Advanced(fs_config) => fs_config,
         };
 
         Ok(config)
     }
 }
 
-impl MirrordToggleableConfig for FsFileConfig {
+impl MirrordToggleableConfig for FsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
         let filter = FileFilterUserConfig::disabled_config()?;

@@ -23,6 +23,11 @@ pub struct FileFilterUserConfig {
     pub exclude: Option<VecOrSingle<String>>,
 }
 
+pub struct FileFilterConfig {
+    pub include: Option<VecOrSingle<String>>,
+    pub exclude: Option<VecOrSingle<String>>,
+}
+
 impl Default for FileFilterConfig {
     fn default() -> Self {
         Self {
