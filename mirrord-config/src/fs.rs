@@ -11,7 +11,7 @@ pub mod mode;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
+#[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
     Simple(FsModeConfig),
     Advanced(AdvancedFsUserConfig),
@@ -62,12 +62,4 @@ impl MirrordToggleableConfig for FsUserConfig {
     }
 }
 
-impl FsConfig {
-    pub fn is_read(&self) -> bool {
-        self.mode.is_read()
-    }
 
-    pub fn is_write(&self) -> bool {
-        self.mode.is_write()
-    }
-}

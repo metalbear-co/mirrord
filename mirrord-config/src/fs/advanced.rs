@@ -40,5 +40,15 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
     }
 }
 
+impl FsConfig {
+    pub fn is_read(&self) -> bool {
+        self.mode.is_read()
+    }
+
+    pub fn is_write(&self) -> bool {
+        self.mode.is_write()
+    }
+}
+
 #[cfg(test)]
 mod tests {}
