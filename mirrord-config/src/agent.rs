@@ -28,6 +28,9 @@ pub struct AgentFileConfig {
 
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
+
+    #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
+    pub startup_timeout: Option<u64>,
 }
 
 #[cfg(test)]

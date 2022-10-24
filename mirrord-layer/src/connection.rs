@@ -111,7 +111,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
                 let pod_agent_name = tokio::time::timeout(
-                    Duration::from_secs(config.agent.communication_timeout.unwrap_or(30) as u64),
+                    Duration::from_secs(config.agent.startup_timeout),
                     k8s_api.create_agent(agent_port),
                 )
                 .await
