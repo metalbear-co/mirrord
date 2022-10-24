@@ -153,6 +153,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container ID not found in response from kube API")]
     ContainerIdNotFound,
+
+    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
+    AgentReadyTimeout,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
