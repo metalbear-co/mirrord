@@ -18,13 +18,13 @@ edition.workspace = true
 [dependencies]
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
 mirrord-progress = { path = "../progress" }
+mirrord-sip = { path = "../sip" }
 
 clap.workspace = true
 tracing.workspace = true
 rand.workspace = true
 tracing-subscriber.workspace = true
 regex = "1.6.0"
-which = "4.3.0"
 exec = "0.3"
 anyhow.workspace = true
 reqwest.workspace = true

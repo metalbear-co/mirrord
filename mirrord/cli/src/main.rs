@@ -11,12 +11,12 @@ use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_progress::TaskProgress;
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
-#[cfg(target_os = "macos")]
-use {regex::RegexSet, which::which};
 
 mod config;
 
@@ -98,33 +98,6 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn sip_check(binary_path: &str) -> Result<()> {
-    let sip_set = RegexSet::new([
-        r"/System/.*",
-        r"/bin/.*",
-        r"/sbin/.*",
-        r"/usr/.*",
-        r"/var/.*",
-        r"/Applications/.*",
-    ])?;
-    let complete_path = which(binary_path)?;
-
-    let sliced_path = complete_path.to_str().ok_or_else(|| {
-        anyhow!(
-            "Failed to convert path to a string slice: {}",
-            binary_path.to_string()
-        )
-    })?;
-
-    if sip_set.is_match(sliced_path) {
-        println!("[WARNING]: Provided binary: {:?} is located in a SIP directory. mirrord might fail to load into it.
-        >> for more info visit https://support.apple.com/en-us/HT204899", binary_path);
-    }
-
-    Ok(())
-}
-
 fn exec(args: &ExecArgs) -> Result<()> {
     if !args.no_telemetry {
         prompt_outdated_version();
@@ -135,7 +108,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     );
 
     #[cfg(target_os = "macos")]
-    sip_check(&args.binary)?;
+    sip_patch(&mut args.binary)?;
 
     if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
@@ -270,7 +243,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.commands {
-        Commands::Exec(args) => exec(&args)?,
+        Commands::Exec(mut args) => exec(&mut args)?,
         Commands::Extract { path } => {
             extract_library(Some(path))?;
         } // Commands::Login(args) => login(args)?,
