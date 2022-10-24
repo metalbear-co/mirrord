@@ -7,7 +7,6 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    env,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
@@ -23,7 +22,6 @@ use mirrord_protocol::{
     ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
 };
-use regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -31,52 +29,9 @@ use crate::{
     error::{LayerError, Result},
 };
 
+pub(crate) mod filter;
 pub(crate) mod hooks;
 pub(crate) mod ops;
-
-/// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
-    // To handle the problem of injecting `open` and friends into project runners (like in a call to
-    // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
-    let current_dir = env::current_dir().unwrap();
-    let current_binary = env::current_exe().unwrap();
-    let set = RegexSet::new([
-        r".*\.so",
-        r".*\.d",
-        r".*\.pyc",
-        r".*\.py",
-        r".*\.js",
-        r".*\.pth",
-        r".*\.plist",
-        r".*(^|/)jvm\.cfg$", // jvm.cfg or ANYTHING/jvm.cfg
-        r".*venv\.cfg",
-        r"^/proc/.*",
-        r"^/sys/.*",
-        r"^/lib/.*",
-        r"^/etc/.*",
-        r"^/usr/.*",
-        r"^/dev/.*",
-        r"^/opt/.*",
-        // support for nixOS.
-        r"^/nix/.*",
-        r"^/home/iojs/.*",
-        r"^/home/runner/.*",
-        // dotnet: `/tmp/clr-debug-pipe-1`
-        r"^.*clr-.*-pipe-.*",
-        // dotnet: `/home/{username}/{project}.pdb`
-        r".*\.pdb",
-        // dotnet: `/home/{username}/{project}.dll`
-        r".*\.dll",
-        // TODO: `node` searches for this file in multiple directories, bypassing some of our
-        // ignore regexes, maybe other "project runners" will do the same.
-        r".*/package.json",
-        &current_dir.to_string_lossy(),
-        &current_binary.to_string_lossy(),
-    ])
-    .unwrap();
-
-    set
-});
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
