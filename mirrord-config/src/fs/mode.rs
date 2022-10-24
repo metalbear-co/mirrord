@@ -5,7 +5,7 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, Copy)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
@@ -15,12 +15,12 @@ pub enum FsModeConfig {
 }
 
 impl FsModeConfig {
-    pub fn is_read(&self) -> bool {
-        self == &FsModeConfig::Read
+    pub fn is_read(self) -> bool {
+        self == FsModeConfig::Read
     }
 
-    pub fn is_write(&self) -> bool {
-        self == &FsModeConfig::Write
+    pub fn is_write(self) -> bool {
+        self == FsModeConfig::Write
     }
 }
 

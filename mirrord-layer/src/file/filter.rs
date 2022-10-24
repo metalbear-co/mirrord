@@ -4,10 +4,7 @@ use std::{
 };
 
 use fancy_regex::Regex;
-use mirrord_config::{
-    fs::{AdvancedFsUserConfig, FsConfig, FsUserConfig},
-    util::VecOrSingle,
-};
+use mirrord_config::{fs::FsConfig, util::VecOrSingle};
 use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
@@ -155,10 +152,7 @@ impl Default for FileFilter {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::{
-        fs::{AdvancedFsUserConfig, FsConfig, FsModeConfig, FsUserConfig},
-        util::VecOrSingle,
-    };
+    use mirrord_config::{fs::FsConfig, util::VecOrSingle};
 
     use super::FileFilter;
     use crate::detour::{Bypass, Detour};
