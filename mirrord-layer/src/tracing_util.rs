@@ -45,11 +45,13 @@ pub fn file_tracing_writer() -> NonBlocking {
 
 pub fn print_support_message() {
     if let Some(log_file) = LOG_FILE_PATH.get() {
-        print_github_link(log_file);
+        let issue_link = create_github_link(log_file);
+
+        println!("mirrord encountered an error, please create an issue over at github, It would be much appreciated: {}", issue_link);
     }
 }
 
-fn print_github_link<P: AsRef<Path>>(log_file: P) {
+fn create_github_link<P: AsRef<Path>>(log_file: P) -> String {
     let binary_type = std::env::args().join(" ");
     let os_version = format!("{}", os_info::get());
     let base_url = format!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version));
@@ -58,15 +60,15 @@ fn print_github_link<P: AsRef<Path>>(log_file: P) {
         let encoded_logs = urlencoding::encode_binary(&logs);
 
         if encoded_logs.len() > 6000 {
-            println!(
+            format!(
                 "{}&logs={}",
                 base_url,
                 &encoded_logs[(encoded_logs.len() - 6000)..]
-            );
+            )
         } else {
-            println!("{}&logs={}", base_url, encoded_logs);
+            format!("{}&logs={}", base_url, encoded_logs)
         }
     } else {
-        println!("{}", base_url);
+        format!("{}", base_url)
     }
 }
