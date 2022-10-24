@@ -2,7 +2,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
+use std::{cell::RefCell, io::Write, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use tracing::warn;
 
@@ -208,5 +208,41 @@ impl<T> OptionExt for Option<T> {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct GuardedWrite<W: Write + Sized>(W);
+
+impl<W> GuardedWrite<W>
+where
+    W: Write + Sized,
+{
+    pub fn new(writer: W) -> Self {
+        GuardedWrite(writer)
+    }
+}
+
+impl<W> Write for GuardedWrite<W>
+where
+    W: Write + Sized,
+{
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        let guard = DetourGuard::new();
+
+        let res = self.0.write(buf);
+
+        drop(guard);
+
+        res
+    }
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        let guard = DetourGuard::new();
+
+        let res = self.0.flush();
+
+        drop(guard);
+
+        res
     }
 }

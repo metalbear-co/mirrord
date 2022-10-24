@@ -15,6 +15,7 @@ extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
     fs,
+    fs::OpenOptions,
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -52,7 +53,7 @@ use tracing::{error, info, trace};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, file::FileHandler};
+use crate::{common::HookMessage, detour::GuardedWrite, file::FileHandler};
 
 mod common;
 mod connection;
@@ -84,7 +85,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
-pub(crate) static mut TRACING_GUARD: Vec<WorkerGuard> = Vec::new();
+pub(crate) static mut TRACING_GUARD: Option<WorkerGuard> = None;
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
@@ -194,25 +195,30 @@ fn init(config: LayerConfig) {
 
         let log_file_name = format!("{}-mirrord-layer.log", run_id);
 
-        let file_appender = tracing_appender::rolling::never("/tmp/mirrord", &log_file_name);
+        let log_path =
+            LOG_FILE_PATH.get_or_init(|| PathBuf::from("/tmp/mirrord").join(log_file_name));
+
+        let file_appender = GuardedWrite::new(
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(log_path)
+                .unwrap(),
+        );
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        LOG_FILE_PATH
-            .set(PathBuf::from("/tmp/mirrord").join(log_file_name))
-            .expect("Setting LOG_FILE_PATH singleton");
-
         unsafe {
-            TRACING_GUARD.push(guard);
+            TRACING_GUARD = Some(guard);
         }
 
-        Some(
-            tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE)
-                .with_ansi(false)
-                .compact()
-                .with_writer(non_blocking),
-        )
+        let layer = tracing_subscriber::fmt::layer()
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            .json()
+            .with_writer(non_blocking);
+
+        Some(layer)
     } else {
         None
     };
@@ -458,9 +464,11 @@ async fn thread_loop(
         }
     }
 
-    tokio::time::sleep(Duration::from_secs(10)).await;
-
     if let Some(log_file) = LOG_FILE_PATH.get() {
+        unsafe {
+            TRACING_GUARD = None;
+        }
+
         let binary_type = std::env::args().join(" ");
         let os_version = format!("{}", os_info::get());
         let base_url = format!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version));
@@ -468,11 +476,11 @@ async fn thread_loop(
         if let Ok(logs) = fs::read(log_file) {
             let encoded_logs = urlencoding::encode_binary(&logs);
 
-            if encoded_logs.len() > 4000 {
+            if encoded_logs.len() > 6000 {
                 println!(
                     "{}&logs={}",
                     base_url,
-                    &encoded_logs[(encoded_logs.len() - 4000)..]
+                    &encoded_logs[(encoded_logs.len() - 6000)..]
                 );
             } else {
                 println!("{}&logs={}", base_url, encoded_logs);
