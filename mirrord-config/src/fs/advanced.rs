@@ -58,14 +58,42 @@ mod tests {
     use crate::{config::MirrordConfig, util::testing::with_env_vars};
 
     #[rstest]
-    fn default() {
+    fn test_advanced_fs_config_default() {
         let expect = FsConfig {
             mode: FsModeConfig::Read,
             ..Default::default()
         };
 
         with_env_vars(
-            vec![("MIRRORD_FILE_OPS", None), ("MIRRORD_FILE_RO_OPS", None)],
+            vec![
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_RO_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", None),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
+            ],
+            || {
+                let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
+    }
+
+    #[rstest]
+    fn test_advanced_fs_config_file_filter_include() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            include: Some(VecOrSingle::Single(".*".to_string())),
+            ..Default::default()
+        };
+
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_RO_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", Some(".*")),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
+            ],
             || {
                 let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
 
