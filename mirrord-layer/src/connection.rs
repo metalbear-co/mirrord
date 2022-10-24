@@ -71,6 +71,26 @@ where
     }
 }
 
+const FAILED_TO_CREATE_AGENT: &str = r#"
+mirrord-layer failed while trying to establish connection with the agent pod!
+
+- Suggestions:
+
+>> Check that the agent pod was created with `$ kubectl get pods`, it should look something like
+   "mirrord-agent-qjys2dg9xk-rgnhr        1/1     Running   0              7s".
+
+>> Check that you're using the correct kubernetes credentials (and configuration).
+
+>> Check your kubernetes context match where the agent should be spawned.
+
+- If you're still stuck and everything looks fine:
+
+>> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
+
+>> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
+
+"#;
+
 fn handle_error(err: LayerError) -> ! {
     match err {
         LayerError::KubeError(kube::Error::HyperError(err)) => {
@@ -81,7 +101,7 @@ fn handle_error(err: LayerError) -> ! {
                 None => panic!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("failed to create agent in k8s: {}", err),
+        _ => panic!("{FAILED_TO_CREATE_AGENT}\nwith error {err:#?}"),
     }
 }
 
