@@ -185,6 +185,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if let Some(agent_ttl) = &args.agent_ttl {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
+    if let Some(agent_statup_timeout) = &args.agent_statup_timeout {
+        std::env::set_var(
+            "MIRRORD_AGENT_STARTUP_TIMEOUT",
+            agent_statup_timeout.to_string(),
+        );
+    }
 
     if args.enable_rw_fs && args.no_fs {
         warn!("fs was both enabled and disabled - disabling will take precedence.");
