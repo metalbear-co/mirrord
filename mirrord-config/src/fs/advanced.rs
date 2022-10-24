@@ -91,11 +91,16 @@ mod tests {
             vec![
                 ("MIRRORD_FILE_OPS", None),
                 ("MIRRORD_FILE_RO_OPS", None),
-                ("MIRRORD_FILE_FILTER_INCLUDE", Some(".*")),
+                ("MIRRORD_FILE_FILTER_INCLUDE", None),
                 ("MIRRORD_FILE_FILTER_EXCLUDE", None),
             ],
             || {
-                let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+                let fs_config = AdvancedFsUserConfig {
+                    include: Some(VecOrSingle::Single(".*".to_string())),
+                    ..Default::default()
+                }
+                .generate_config()
+                .unwrap();
 
                 assert_eq!(fs_config, expect);
             },
