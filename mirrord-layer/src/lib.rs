@@ -14,8 +14,6 @@
 extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
-    fs,
-    fs::OpenOptions,
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -27,7 +25,6 @@ use error::{LayerError, Result};
 use file::OPEN_FILES;
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
-use itertools::Itertools;
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
@@ -38,7 +35,6 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
-use rand::distributions::{Alphanumeric, DistString};
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -50,10 +46,9 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::{error, info, trace};
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, detour::GuardedWrite, file::FileHandler};
+use crate::{common::HookMessage, file::FileHandler};
 
 mod common;
 mod connection;
@@ -68,6 +63,7 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
+mod tracing_util;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -85,14 +81,11 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
-pub(crate) static mut TRACING_GUARD: Option<WorkerGuard> = None;
 
 pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
-
-pub(crate) static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
 
@@ -183,42 +176,13 @@ fn deprecation_check(config: &LayerConfig) {
 
 fn init(config: LayerConfig) {
     let file_log = if config.feature.error_reporting {
-        let run_id = std::env::var("MIRRORD_RUN_ID").unwrap_or_else(|_| {
-            Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
-                .to_lowercase()
-        });
-
-        println!("MIRRORD_RUN_ID = {}", run_id);
-
-        std::env::set_var("MIRRORD_RUN_ID", run_id.clone());
-
-        let log_file_name = format!("{}-mirrord-layer.log", run_id);
-
-        let log_path =
-            LOG_FILE_PATH.get_or_init(|| PathBuf::from("/tmp/mirrord").join(log_file_name));
-
-        let file_appender = GuardedWrite::new(
-            OpenOptions::new()
-                .write(true)
-                .create(true)
-                .append(true)
-                .open(log_path)
-                .unwrap(),
-        );
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-        unsafe {
-            TRACING_GUARD = Some(guard);
-        }
-
-        let layer = tracing_subscriber::fmt::layer()
-            .with_thread_ids(true)
-            .with_span_events(FmtSpan::ACTIVE)
-            .json()
-            .with_writer(non_blocking);
-
-        Some(layer)
+        Some(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::ACTIVE)
+                .json()
+                .with_writer(tracing_util::file_tracing_writer()),
+        )
     } else {
         None
     };
@@ -464,32 +428,7 @@ async fn thread_loop(
         }
     }
 
-    if let Some(log_file) = LOG_FILE_PATH.get() {
-        unsafe {
-            TRACING_GUARD = None;
-        }
-
-        let binary_type = std::env::args().join(" ");
-        let os_version = format!("{}", os_info::get());
-        let base_url = format!("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml&binary_type={}&os_version={}", urlencoding::encode(&binary_type), urlencoding::encode(&os_version));
-
-        if let Ok(logs) = fs::read(log_file) {
-            let encoded_logs = urlencoding::encode_binary(&logs);
-
-            if encoded_logs.len() > 6000 {
-                println!(
-                    "{}&logs={}",
-                    base_url,
-                    &encoded_logs[(encoded_logs.len() - 6000)..]
-                );
-            } else {
-                println!("{}&logs={}", base_url, encoded_logs);
-            }
-        } else {
-            println!("{}", base_url);
-        }
-    }
-
+    tracing_util::print_support_message();
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
