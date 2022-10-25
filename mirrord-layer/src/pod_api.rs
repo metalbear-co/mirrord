@@ -265,7 +265,7 @@ impl KubernetesAPI {
             "--container-id".to_string(),
             runtime_data.container_id,
             "--container-runtime".to_string(),
-            runtime_data.container_runtime,
+            runtime_data.container_runtime.to_string(),
             "-l".to_string(),
             connection_port.to_string(),
         ];
@@ -307,7 +307,7 @@ impl KubernetesAPI {
                             {
                                 "name": "sockpath",
                                 "hostPath": {
-                                    "path": runtime_data.socket_path
+                                    "path": runtime_data.container_runtime.mount_path()
                                 }
                             }
                         ],
@@ -321,7 +321,7 @@ impl KubernetesAPI {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": runtime_data.socket_path,
+                                        "mountPath": runtime_data.container_runtime.mount_path(),
                                         "name": "sockpath"
                                     }
                                 ],
@@ -476,13 +476,33 @@ async fn wait_for_agent_startup(
     Ok(())
 }
 
+pub(crate) enum ContainerRuntime {
+    Docker,
+    Containerd,
+}
+
+impl ContainerRuntime {
+    pub(crate) fn to_string(&self) -> String {
+        match self {
+            ContainerRuntime::Docker => "docker".to_string(),
+            ContainerRuntime::Containerd => "containerd".to_string(),
+        }
+    }
+
+    pub(crate) fn mount_path(&self) -> String {
+        match self {
+            ContainerRuntime::Docker => "/var/run/docker.sock".to_string(),
+            ContainerRuntime::Containerd => "/run/".to_string(),
+        }
+    }
+}
+
 pub(crate) struct RuntimeData {
     pod_name: String,
     node_name: String,
     container_id: String,
-    container_runtime: String,
+    container_runtime: ContainerRuntime,
     container_name: String,
-    socket_path: String,
 }
 
 impl RuntimeData {
@@ -524,9 +544,9 @@ impl RuntimeData {
 
         let mut split = container_id_full.split("://");
 
-        let (container_runtime, socket_path) = match split.next() {
-            Some("docker") => Ok(("docker", "/var/run/docker.sock")),
-            Some("containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
+        let container_runtime = match split.next() {
+            Some("docker") => Ok(ContainerRuntime::Docker),
+            Some("containerd") => Ok(ContainerRuntime::Containerd),
             _ => Err(LayerError::ContainerRuntimeParseError(
                 container_id_full.to_string(),
             )),
@@ -537,16 +557,12 @@ impl RuntimeData {
             .ok_or_else(|| LayerError::ContainerRuntimeParseError(container_id_full.to_string()))?
             .to_owned();
 
-        let container_runtime = container_runtime.to_string();
-        let socket_path = socket_path.to_string();
-
         Ok(RuntimeData {
             pod_name,
             node_name,
             container_id,
             container_runtime,
             container_name,
-            socket_path,
         })
     }
 }

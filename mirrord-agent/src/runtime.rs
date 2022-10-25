@@ -17,6 +17,8 @@ use tracing::debug;
 use crate::error::AgentError;
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
+const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
+
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
 pub async fn get_container_pid(
@@ -49,7 +51,9 @@ async fn get_docker_container_pid(container_id: String) -> Result<u64, AgentErro
 }
 
 async fn get_containerd_container_pid(container_id: String) -> Result<u64, AgentError> {
-    let channel = connect(CONTAINERD_SOCK_PATH).await?;
+    let channel = connect(CONTAINERD_SOCK_PATH)
+        .await
+        .or_else(|| connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await)?;
     let mut client = TasksClient::new(channel);
     let request = GetRequest {
         container_id,
