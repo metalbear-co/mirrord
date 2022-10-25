@@ -51,9 +51,10 @@ async fn get_docker_container_pid(container_id: String) -> Result<u64, AgentErro
 }
 
 async fn get_containerd_container_pid(container_id: String) -> Result<u64, AgentError> {
-    let channel = connect(CONTAINERD_SOCK_PATH)
-        .await
-        .or_else(|| connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await)?;
+    let channel = match connect(CONTAINERD_SOCK_PATH).await {
+        Ok(channel) => channel,
+        Err(_) => connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await?,
+    };
     let mut client = TasksClient::new(channel);
     let request = GetRequest {
         container_id,
