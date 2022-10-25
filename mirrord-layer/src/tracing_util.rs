@@ -6,9 +6,12 @@ use std::{
 
 use itertools::Itertools;
 use rand::distributions::{Alphanumeric, DistString};
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_appender::{
+    non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard},
+    WorkerOptions,
+};
 
-use crate::detour::GuardedWrite;
+use crate::detour::{detour_bypass_off, detour_bypass_on};
 
 pub(crate) static TRACING_GUARDS: RwLock<Vec<WorkerGuard>> = RwLock::new(vec![]);
 pub(crate) static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -28,15 +31,20 @@ pub fn file_tracing_writer() -> NonBlocking {
 
     let log_path = LOG_FILE_PATH.get_or_init(|| PathBuf::from("/tmp/mirrord").join(log_file_name));
 
-    let file_appender = GuardedWrite::new(
-        fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .unwrap(),
-    );
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let file_appender = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .unwrap();
+
+    let (non_blocking, guard) = NonBlockingBuilder::default()
+        .worker_options(
+            WorkerOptions::default()
+                .on_thread_start(detour_bypass_on)
+                .on_thread_stop(detour_bypass_off),
+        )
+        .finish(file_appender);
 
     let _ = TRACING_GUARDS.write().map(|mut guards| guards.push(guard));
 

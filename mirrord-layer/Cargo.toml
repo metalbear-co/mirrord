@@ -25,7 +25,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tracing-appender = "0.2"
+tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 frida-gum = { version = "0.8", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
