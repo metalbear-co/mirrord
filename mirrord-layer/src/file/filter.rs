@@ -40,6 +40,8 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
         r"(?<pdb_files>^.*\.pdb$)|",
         // dotnet: `/home/{username}/{project}.dll`
         r"(?<dll_files>^.*\.dll$)|",
+        // jvm.cfg or ANYTHING/jvm.cfg
+        r"(?<jvm_files>.*(^|/)jvm\.cfg$)|",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r"(?<package_json>^.*/package.json$)|",
