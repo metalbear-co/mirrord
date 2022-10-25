@@ -303,8 +303,9 @@ fn prompt_outdated_version() {
         if let Ok(client) = reqwest::blocking::Client::builder().build() {
             if let Ok(result) = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}",
-                    CURRENT_VERSION
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
+                    CURRENT_VERSION,
+                    std::env::consts::OS
                 ))
                 .timeout(Duration::from_secs(1))
                 .send()
