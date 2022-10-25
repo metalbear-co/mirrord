@@ -405,7 +405,7 @@ jobs:
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
-          args: "CHANGELOG.md"
+          args: "./CHANGELOG.md"
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
