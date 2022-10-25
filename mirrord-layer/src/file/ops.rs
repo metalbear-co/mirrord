@@ -57,9 +57,9 @@ unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: usize
     }
 }
 
+/// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
 #[tracing::instrument(level = "error")]
 fn close_remote_file_on_failure(fd: usize) -> Result<CloseFileResponse> {
-    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
@@ -76,6 +76,7 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
 }
 
+/// Converts a [`CStr`] path into a [`PathBuf`], or bypasses when this fails.
 fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
     let path = rawish_path
         .map(CStr::to_str)
@@ -102,8 +103,9 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 /// When called for a valid file, it blocks and sends an open file request to be handled by
 /// `mirrord-agent`, and waits until it receives an open file response.
 ///
-/// `open` is also used by other _open-ish_ functions, and it takes care of **creating** the _local_
-/// and _remote_ file association, plus **inserting** it into the storage for `OPEN_FILES`.
+/// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
+/// _local_ and _remote_ file association, plus **inserting** it into the storage for
+/// [`OPEN_FILES`].
 #[tracing::instrument(level = "debug")]
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
@@ -149,7 +151,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     Detour::Success(local_file_fd)
 }
 
-/// Calls `open` and returns a `FILE` pointer based on the **local** `fd`.
+/// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
 #[tracing::instrument(level = "debug")]
 pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let open_options: OpenOptionsInternal = rawish_mode
@@ -247,7 +249,7 @@ pub(crate) fn openat(
     }
 }
 
-/// Blocking wrapper around `libc::read` call.
+/// Blocking wrapper around [`libc::read`] call.
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.

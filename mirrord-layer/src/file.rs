@@ -49,6 +49,8 @@ struct RemoteFile {
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
+/// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
+/// Rust's [`std::fs::OpenOptions`]
 pub(crate) trait OpenOptionsInternalExt {
     fn from_flags(flags: c_int) -> Self;
     fn from_mode(mode: String) -> Self;
