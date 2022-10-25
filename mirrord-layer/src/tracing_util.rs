@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{OnceLock, RwLock},
+    sync::{Mutex, OnceLock},
 };
 
 use itertools::Itertools;
@@ -13,7 +13,7 @@ use tracing_appender::{
 
 use crate::detour::{detour_bypass_off, detour_bypass_on};
 
-pub(crate) static TRACING_GUARDS: RwLock<Vec<WorkerGuard>> = RwLock::new(vec![]);
+pub(crate) static TRACING_GUARDS: Mutex<Vec<WorkerGuard>> = Mutex::new(vec![]);
 pub(crate) static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn file_tracing_writer() -> NonBlocking {
@@ -46,7 +46,7 @@ pub fn file_tracing_writer() -> NonBlocking {
         )
         .finish(file_appender);
 
-    let _ = TRACING_GUARDS.write().map(|mut guards| guards.push(guard));
+    let _ = TRACING_GUARDS.lock().map(|mut guards| guards.push(guard));
 
     non_blocking
 }
