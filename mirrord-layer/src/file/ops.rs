@@ -30,9 +30,10 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<usize> {
     )
 }
 
-/// The pair `shm_open`, `shm_unlink` are used to create a temporary file (in `/dev/shm/`), and then
-/// remove it, as we only care about the `fd`. This is done to preserve `open_flags`, as
-/// `memfd_create` will always return a `File` with read and write permissions.
+/// The pair [`libc::shm_open`], [`libc::shm_unlink`] are used to create a temporary file (in
+/// `/dev/shm/`), and then remove it, as we only care about the `fd`. This is done to preserve
+/// `open_flags`, as [`libc::memfd_create`] will always return a `File` with read and write
+/// permissions (which is undesirable).
 #[tracing::instrument(level = "trace")]
 unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: usize) -> Detour<RawFd> {
     let local_file_fd = unsafe {
