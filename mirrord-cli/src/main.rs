@@ -126,6 +126,9 @@ fn sip_check(binary_path: &str) -> Result<()> {
 }
 
 fn exec(args: &ExecArgs) -> Result<()> {
+    if !args.no_telemetry {
+        prompt_outdated_version();
+    }
     info!(
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
@@ -280,7 +283,6 @@ fn main() -> Result<()> {
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
-    prompt_outdated_version();
 
     let cli = Cli::parse();
     match cli.commands {
