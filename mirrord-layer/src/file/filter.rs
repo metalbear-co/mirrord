@@ -1,3 +1,15 @@
+/// Controls which files are ignored (open local) by mirrord file operations.
+///
+/// There are 3 ways of setting this up:
+///
+/// 1. no configuration (default): will bypass file operations for file paths and types that
+/// match [`DEFAULT_EXCLUDE_LIST`];
+///
+/// 2. `MIRRORD_FILE_FILTER_INCLUDE`: includes only the files specified by the user (input)
+/// regex;
+///
+/// 3. `MIRRORD_FILE_FILTER_EXCLUDE`: similar to the default, it includes everything that is
+/// not filtered by the user (input) regex, and [`DEFAULT_EXCLUDE_LIST`];
 use std::{
     env,
     sync::{LazyLock, OnceLock},
@@ -9,6 +21,11 @@ use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
 
+/// List of files that mirrord should ignore, as they probably exist only in the local user machine,
+/// or are system configuration files (that could break the process if we used the remote version).
+///
+/// You most likely do **NOT** want to include any of these, but if have a reason to do so, then
+/// setting `MIRRORD_FILE_FILTER_INCLUDE` allows you to override this list.
 static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
@@ -52,26 +69,26 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
     .collect()
 });
 
-/// Regex that ignores system files + files in the current working directory.
+/// Global filter used by file operations to bypass (use local) or continue (use remote).
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
 /// Holds the `Regex` that is used to either continue or bypass file path operations (such as
-/// `file::ops::open`), according to what the user specified.
+/// [`file::ops::open`]), according to what the user specified.
 ///
-/// The `FileFilter::Include` variant takes precedence and erases whatever the user supplied as
+/// The [`FileFilter::Include`] variant takes precedence and erases whatever the user supplied as
 /// exclude, this means that if the user specifies both, `FileFilter::Exclude` is never constructed.
 ///
-/// Warning: Use `FileFilter::new` (or equivalent) when initializing this, otherwise the above
+/// Warning: Use [`FileFilter::new`] (or equivalent) when initializing this, otherwise the above
 /// constraint might not be held.
 #[derive(Debug, Clone)]
 pub(crate) enum FileFilter {
     /// User specified `Regex` containing the file paths that the user wants to include for file
     /// operations.
     ///
-    /// Overrides `FileFilter::Exclude`.
+    /// Overrides [`FileFilter::Exclude`].
     Include(Regex),
 
-    /// Combination of `DEFAULT_EXCLUDE_LIST` and the user's specified `Regex`.
+    /// Combination of [`DEFAULT_EXCLUDE_LIST`] and the user's specified `Regex`.
     ///
     /// Anything not matched by this `Regex` is considered as included.
     Exclude(Regex),
@@ -80,10 +97,11 @@ pub(crate) enum FileFilter {
 impl FileFilter {
     /// Initializes a `FileFilter` based on the user configuration.
     ///
-    /// - `FileFilter::Include` is returned if the user specified any include path (thus erasing
+    /// - [`FileFilter::Include`] is returned if the user specified any include path (thus erasing
     ///   anything passed as exclude);
-    /// - `FileFilter::Exclude` also appends the `DEFAULT_EXCLUDE_LIST` to the user supplied regex;
-    #[tracing::instrument(level = "debug")]
+    /// - [`FileFilter::Exclude`] also appends the [`DEFAULT_EXCLUDE_LIST`] to the user supplied
+    ///   regex;
+    #[tracing::instrument(level = "trace")]
     pub(crate) fn new(fs_config: FsConfig) -> Self {
         let FsConfig {
             include, exclude, ..
@@ -115,14 +133,17 @@ impl FileFilter {
             .map(Regex::new)
             .transpose()
             .expect("Failed parsing exclude file regex!")
+            // `exclude` always exists, either as user input, or as our default exclude list.
             .unwrap_or(default_exclude_regex);
 
+        // Try to generate the final `Regex` based on `include`.
         reduce_to_string(include)
             .as_deref()
             .map(Regex::new)
             .transpose()
             .expect("Failed parsing include file regex!")
             .map(Self::Include)
+            // `include` was empty, so we fallback to `exclude`.
             .unwrap_or(Self::Exclude(exclude))
     }
 

@@ -4,6 +4,11 @@
 /// `MIRRORD_FILE_RO_OPS` to `false`.
 ///
 /// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
+///
+/// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
+/// open locally), these are controlled by configuring the [`filter::FileFilter`] with either
+/// `MIRRORD_FILE_FILTER_INCLUDE` or `MIRRORD_FILE_FILTER_EXCLUDE` (the later adds aditional
+/// exclusions to the default).
 use core::fmt;
 use std::{
     collections::HashMap,
