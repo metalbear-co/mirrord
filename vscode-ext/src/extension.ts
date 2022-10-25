@@ -183,7 +183,6 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			});
 		}
 
-		globalContext.globalState.update('lastChecked', 0);
 		if (globalContext.workspaceState.get<boolean>('telemetry', true)) {
 			let lastChecked = globalContext.globalState.get('lastChecked', 0);
 			if (lastChecked < Date.now() - versionCheckInterval) {
