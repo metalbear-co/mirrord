@@ -29,19 +29,11 @@ impl MirrordConfig for FsUserConfig {
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
         let config = match self {
             FsUserConfig::Simple(mode) => FsConfig {
-                mode,
-                include: Default::default(),
-                exclude: Default::default(),
+                mode: mode.generate_config()?,
+                include: FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value(),
+                exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value(),
             },
-            FsUserConfig::Advanced(AdvancedFsUserConfig {
-                mode,
-                include,
-                exclude,
-            }) => FsConfig {
-                mode,
-                include,
-                exclude,
-            },
+            FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
         };
 
         Ok(config)
@@ -59,5 +51,35 @@ impl MirrordToggleableConfig for FsUserConfig {
             include,
             exclude,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+
+    #[rstest]
+    fn default() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            ..Default::default()
+        };
+
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", Some("true")),
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", None),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
+            ],
+            || {
+                let fs_config = FsUserConfig::default().generate_config().unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
     }
 }
