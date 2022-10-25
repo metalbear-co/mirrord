@@ -1,3 +1,11 @@
+/// mirrord file operations support 2 modes of configuration:
+///
+/// 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
+/// or disable file operations;
+///
+/// 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
+/// [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
+/// locally or remotely.
 use serde::Deserialize;
 
 pub use self::{advanced::*, mode::*};
@@ -9,11 +17,19 @@ use crate::{
 pub mod advanced;
 pub mod mode;
 
+/// Changes file operations behavior based on user configuration.
+///
+/// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
+    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and
+    /// `MIRRORD_FILE_RO_OPS` (default).
     Simple(FsModeConfig),
+
+    /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the
+    /// `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE` env vars.
     Advanced(AdvancedFsUserConfig),
 }
 
