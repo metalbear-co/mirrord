@@ -20,7 +20,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Lint Changelog and fix level of a "Changed" tag.
 
-
 ## 3.3.0
 
 ### Added
@@ -34,8 +33,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
-- Issue with [bottlerocket](https://github.com/bottlerocket-os/bottlerocket) where they use `/run/dockershim.sock` instead of the default containerd path. Add new path as fallback.
-
+- Issue with [bottlerocket](https://github.com/bottlerocket-os/bottlerocket) where they use `/run/dockershim.sock`
+  instead of the default containerd path. Add new path as fallback.
 
 ## 3.2.0
 
