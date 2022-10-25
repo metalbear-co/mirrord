@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, fmt::Display, str::FromStr};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
@@ -482,17 +482,19 @@ pub(crate) enum ContainerRuntime {
 }
 
 impl ContainerRuntime {
-    pub(crate) fn to_string(&self) -> String {
-        match self {
-            ContainerRuntime::Docker => "docker".to_string(),
-            ContainerRuntime::Containerd => "containerd".to_string(),
-        }
-    }
-
     pub(crate) fn mount_path(&self) -> String {
         match self {
             ContainerRuntime::Docker => "/var/run/docker.sock".to_string(),
             ContainerRuntime::Containerd => "/run/".to_string(),
+        }
+    }
+}
+
+impl Display for ContainerRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContainerRuntime::Docker => write!(f, "docker"),
+            ContainerRuntime::Containerd => write!(f, "containerd"),
         }
     }
 }
