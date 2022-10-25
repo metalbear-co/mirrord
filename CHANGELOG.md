@@ -312,6 +312,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - mirrord-layer: Remove `tracing::instrument` from `go_env::goenvs_unix_detour`.
+- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
 
 ### Added
 
@@ -321,10 +322,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   , [[#308](https://github.com/metalbear-co/mirrord/issues/308)]
 - release CI: add arm64e to the universal dylib
 - intellij-ext: Add support for Goland
-
-### Changed
-
-- mirrord-layer: Log to info instead of error when failing to write to local tunneled streams.
 
 ## 3.0.5-alpha
 
