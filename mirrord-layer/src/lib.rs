@@ -178,16 +178,17 @@ fn init(config: LayerConfig) {
     let file_log = if config.feature.error_reporting {
         Some(
             tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE)
+                .with_writer(tracing_util::file_tracing_writer())
                 .with_ansi(false)
-                .with_writer(tracing_util::file_tracing_writer()),
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::ACTIVE),
         )
     } else {
         None
     };
 
     tracing_subscriber::registry()
+        .with(file_log)
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
@@ -195,7 +196,6 @@ fn init(config: LayerConfig) {
                 .compact(),
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
-        .with(file_log)
         .init();
 
     info!("Initializing mirrord-layer!");
