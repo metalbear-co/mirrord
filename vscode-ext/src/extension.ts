@@ -1,4 +1,5 @@
 import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
+import { settings } from 'cluster';
 import * as vscode from 'vscode';
 
 const semver = require('semver');
@@ -33,6 +34,7 @@ async function changeSettings() {
 	let outgoingTraffic = globalContext.workspaceState.get<boolean>('outgoingTraffic', true);
 	let includeEnvironmentVariables = globalContext.workspaceState.get<string>('includeEnvironmentVariables', '*');
 	let excludeEnvironmentVariables = globalContext.workspaceState.get<string>('excludeEnvironmentVariables', '');
+	let telemetry = globalContext.workspaceState.get<boolean>('telemetry', true);
 
 	const options = ['Change namespace for mirrord agent (current: ' + agentNamespace + ')',
 	'Change namespace for impersonated pod (current: ' + impersonatedPodNamespace + ')',
@@ -42,17 +44,21 @@ async function changeSettings() {
 	'Toggle remote DNS (current: ' + (remoteDNS ? 'enabled' : 'disabled') + ')',
 	'Toggle outgoing traffic (current: ' + (outgoingTraffic ? 'enabled' : 'disabled') + ')',
 	'Include environment variables (current: ' + includeEnvironmentVariables + ')',
-	'Exclude environment variables (current: ' + excludeEnvironmentVariables + ')'];
+	'Exclude environment variables (current: ' + excludeEnvironmentVariables + ')',
+	'Toggle telemetry (current: ' + telemetry + ')'];
 	vscode.window.showQuickPick(options).then(async setting => {
 		if (setting === undefined) {
 			return;
+		}
+		else if (setting.startsWith('Toggle telemetry')) {
+			globalContext.workspaceState.update('telemetry', !telemetry);
 		}
 		else if (setting.startsWith('Toggle file')) {
 			globalContext.workspaceState.update('fileOps', !fileOps);
 		}
 		else if (setting.startsWith('Toggle invalid certificates')) {
 			globalContext.workspaceState.update('invalidCertificates', !invalidCertificates);
-		} 
+		}
 		else if (setting.startsWith('Toggle traffic stealing')) {
 			globalContext.workspaceState.update('trafficStealing', !trafficStealing);
 		}
@@ -105,18 +111,13 @@ async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBar
 		state.update('enabled', false);
 		button.text = 'Enable mirrord';
 	} else {
-		let lastChecked = state.get('lastChecked', 0);
-		if (lastChecked < Date.now() - versionCheckInterval) {
-			checkVersion(context.extension.packageJSON.version);
-			state.update('lastChecked', Date.now());
-		}
 		state.update('enabled', true);
 		button.text = 'Disable mirrord';
 	}
 }
 
 async function checkVersion(version: string) {
-	let versionUrl = versionCheckEndpoint + '?source=1&version=' + version;
+	let versionUrl = versionCheckEndpoint + '?source=1&version=' + version + '&platform=' + os.platform();
 	https.get(versionUrl, (res: any) => {
 		res.on('data', (d: any) => {
 			const config = vscode.workspace.getConfiguration();
@@ -175,10 +176,19 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			return new Promise(resolve => { resolve(config); });
 		}
 
+
 		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
 			return new Promise(resolve => {
 				return resolve(config);
 			});
+		}
+
+		if (globalContext.workspaceState.get<boolean>('telemetry', true)) {
+			let lastChecked = globalContext.globalState.get('lastChecked', 0);
+			if (lastChecked < Date.now() - versionCheckInterval) {
+				checkVersion(globalContext.extension.packageJSON.version);
+				globalContext.globalState.update('lastChecked', Date.now());
+			}
 		}
 
 		const podNamespace = globalContext.workspaceState.get<string>('impersonatedPodNamespace', 'default');
@@ -228,19 +238,19 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 				// mirrord doesn't support specifying both the include and exclude env vars (even if they're empty)
 				let include, exclude;
-				if (include = globalContext.workspaceState.get('includeEnvironmentVariables')){
+				if (include = globalContext.workspaceState.get('includeEnvironmentVariables')) {
 					config.env['MIRRORD_OVERRIDE_ENV_VARS_INCLUDE'] = include;
 				}
-				if (exclude = globalContext.workspaceState.get('excludeEnvironmentVariables')){
+				if (exclude = globalContext.workspaceState.get('excludeEnvironmentVariables')) {
 					config.env['MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE'] = exclude;
 				}
 
 				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 
-				if(config.type === "go"){
+				if (config.type === "go") {
 					config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
 				}
-				
+
 				return resolve(config);
 			});
 		});
