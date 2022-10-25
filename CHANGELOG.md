@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
+- IntelliJ Extension: Default log level to `ERROR` from `DEBUG`
 
 ## 3.2.0
 
