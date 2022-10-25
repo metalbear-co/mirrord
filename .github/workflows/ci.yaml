@@ -384,6 +384,7 @@ jobs:
         env:
           CI_BUILD_PLUGIN: true
         run: |
+          cp CHANGELOG.md intellij-ext/
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
