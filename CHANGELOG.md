@@ -6,6 +6,9 @@ Previous versions had CHANGELOG per component, we decided to combine all reposit
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 ## [Unreleased]
+
+## 3.3.0
+
 ### Added
 - Telemetries, see [TELEMETRY.md](./TELEMETRY.md) for more information.
 
