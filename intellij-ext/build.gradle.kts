@@ -64,6 +64,11 @@ tasks {
         gradleVersion = properties("gradleVersion")
     }
 
+    changelog {
+        version.set(properties("pluginVersion"))
+        groups.set(emptyList())
+    }
+
     patchPluginXml {
         version.set(properties("pluginVersion"))
         sinceBuild.set(properties("pluginSinceBuild"))
@@ -81,6 +86,12 @@ tasks {
                 subList(indexOf(start) + 1, indexOf(end))
             }.joinToString("\n").run { markdownToHTML(this) }
         )
+
+        changeNotes.set(provider {
+            changelog.run {
+                getOrNull(properties("pluginVersion")) ?: getLatest()
+            }.toHTML()
+        })
     }
 
     prepareSandbox {
@@ -91,11 +102,12 @@ tasks {
                 into(pluginName.get())
             }
             // NOTE: comment this line when developing locally without either of shared libs
-           if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
-               if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
-           }
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
+            }
         }
     }
+
     // Configure UI tests plugin
     // Read more: https://github.com/JetBrains/intellij-ui-test-robot
     runIdeForUiTests {
@@ -112,6 +124,7 @@ tasks {
     }
 
     publishPlugin {
+        dependsOn("patchChangelog")
         token.set(System.getenv("PUBLISH_TOKEN"))
         // pluginVersion is based on the SemVer (https://semver.org) and supports pre-release labels, like 2.1.7-alpha.3
         // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:

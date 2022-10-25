@@ -7,8 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- Changelog for intelliJ extension
+
 ### Changed
 - Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
+- Update intelliJ extension: lint & bump java version to 17
 
 ## 3.2.0
 
