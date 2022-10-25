@@ -139,6 +139,10 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
 
+    /// Disable telemetry - this also disables version check. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
+    #[clap(long, value_parser)]
+    pub no_telemetry: bool,
+
     /// Load config from config file
     #[clap(short = 'f', conflicts_with_all = &["target", "pod-name"], long, value_parser)]
     pub config_file: Option<PathBuf>,
