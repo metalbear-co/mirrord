@@ -8,24 +8,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Added
-- Telemetries, see [TELEMETRY.md](./TELEMETRY.md) for more information.
-
-### Added
 
 - Add changelog for intelliJ extension, closes [[#542](https://github.com/metalbear-co/mirrord/issues/542)]
-- Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
-- IntelliJ Extension: Default log level to `ERROR` from `DEBUG`
 - Add filter for changelog to ci.yml
 
 ### Changed
 
-- Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior.
-  See [#579](https://github.com/metalbear-co/mirrord/issues/579)
 - Update intelliJ extension: lint & bump java version to 17.
 
 ### Fixed
 
 - Lint Changelog and fix level of a "Changed" tag.
+
+
+## 3.3.0
+
+### Added
+
+- Telemetries, see [TELEMETRY.md](./TELEMETRY.md) for more information.
+
+### Changed
+
+- Added timeout for "waiting for pod to be ready..." in mirrord-layer to prevent unresponsive behavior. See [#579](https://github.com/metalbear-co/mirrord/issues/579)
+- IntelliJ Extension: Default log level to `ERROR` from `DEBUG`
+
+### Fixed
+
+- Issue with [bottlerocket](https://github.com/bottlerocket-os/bottlerocket) where they use `/run/dockershim.sock` instead of the default containerd path. Add new path as fallback.
+
 
 ## 3.2.0
 
