@@ -180,14 +180,14 @@ mod tests {
     use super::FileFilter;
     use crate::detour::{Bypass, Detour};
 
-    /// Implementation of helper methods for testing `Detour`.
+    /// Implementation of helper methods for testing [`Detour`].
     impl<S> Detour<S> {
-        /// Convenience function to convert `Detour::Success` to `bool`.
+        /// Convenience function to convert [`Detour::Success`] to `bool`.
         fn is_success(&self) -> bool {
             matches!(self, Detour::Success(_))
         }
 
-        /// Convenience function to convert `Detour::Bypass` to `bool`.
+        /// Convenience function to convert [`Detour::Bypass`] to `bool`.
         fn is_bypass(&self) -> bool {
             matches!(self, Detour::Bypass(_))
         }
