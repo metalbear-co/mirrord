@@ -61,6 +61,9 @@ static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
         r"^/nix/.*",
         r"^/home/iojs/.*",
         r"^/home/runner/.*",
+        // macOS
+        r"^/Users/.*",
+        r"^/Library/.*",
         // dotnet: `/tmp/clr-debug-pipe-1`
         r"^.*clr-.*-pipe-.*",
         // dotnet: `/home/{username}/{project}.pdb`
