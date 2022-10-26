@@ -11,100 +11,77 @@ import javax.swing.*
 import javax.swing.border.EmptyBorder
 
 
-class MirrordDialogBuilder {
-    private val dialogHeading: String = "mirrord"
-    private val podLabel: JLabel = JLabel("Select pod to impersonate")
-    private val namespaceLabel: JLabel = JLabel("Select Namespace to use")
-    private val optionLabel: JLabel = JLabel("Toggle Options")
+object MirrordDialogBuilder {
+    private const val dialogHeading: String = "mirrord"
+    private const val podLabel = "Select Pod"
+    private const val namespaceLabel = "Select Namespace"
 
-    fun createMirrordKubeDialog(
+    fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
+        setCenterPanel(dialogPanel)
+        resizable(false)
+        setTitle(dialogHeading)
+    }
+
+    fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel = JPanel(BorderLayout()).apply {
+        add(createSelectionDialog(namespaceLabel, namespaces), BorderLayout.CENTER)
+    }
+
+    fun createMirrordConfigDialog(
         pods: JBList<String>,
         fileOps: JCheckBox,
-        remoteDns: JCheckBox,
-        outgoingTraffic: JCheckBox,
+        stealTraffic: JCheckBox,
         telemetry: JCheckBox,
-        trafficStealing: JCheckBox,
-        ephemeralCheckbox: JCheckBox,
-        agentRustLog: JTextField,
-        rustLog: JTextField,
+        ephemeralContainer: JCheckBox,
+        remoteDns: JCheckBox,
+        tcpOutgoingTraffic: JCheckBox,
+        udpOutgoingTraffic: JCheckBox,
+        agentRustLog: JComboBox<LogLevel>,
+        rustLog: JComboBox<LogLevel>,
         excludeEnv: JTextField,
         includeEnv: JTextField
-    ): JPanel {
-        val dialogPanel = JPanel(BorderLayout())
-        podLabel.border = EmptyBorder(5, 40, 5, 5)
-
-        val podPanel = JPanel(GridLayout(2, 1, 10, 5))
-        podPanel.add(podLabel, BorderLayout.NORTH)
-        val scrollablePane = JBScrollPane(pods)
-        podPanel.add(scrollablePane)
-
-        dialogPanel.add(podPanel, BorderLayout.WEST)
-
-        dialogPanel.add(
-            JSeparator(JSeparator.VERTICAL),
-            BorderLayout.CENTER
-        )
-
-        val optionsPanel = JPanel(GridLayout(11, 1, 10, 2))
-        optionLabel.border = EmptyBorder(5, 110, 5, 80)
-
-        optionsPanel.add(optionLabel)
-        optionsPanel.add(fileOps)
-        optionsPanel.add(remoteDns)
-        optionsPanel.add(outgoingTraffic)
-        optionsPanel.add(telemetry)
-        optionsPanel.add(trafficStealing)
-        optionsPanel.add(ephemeralCheckbox)
-
-        val agentLogPanel = JPanel(GridBagLayout())
-        agentLogPanel.add(JLabel("Agent Log Level: "))
-        agentRustLog.size = Dimension(5, 5)
-        agentLogPanel.add(agentRustLog)
-
-        agentLogPanel.border = EmptyBorder(10, 10, 10, 10)
-
-        val rustLogPanel = JPanel(GridBagLayout())
-        rustLogPanel.add(JLabel("Layer Log Level: "))
-        rustLog.size = Dimension(5, 5)
-        rustLogPanel.add(rustLog)
-
-        rustLogPanel.border = EmptyBorder(10, 10, 10, 10)
-
-        val excludeEnvPanel = JPanel(GridLayout())
-        excludeEnvPanel.add(JLabel("Exclude env vars: "))
-        excludeEnv.size = Dimension(3, 3)
-        excludeEnvPanel.add(excludeEnv)
-
-        val includeEnvPanel = JPanel(GridLayout())
-        includeEnvPanel.add(JLabel("Include env vars: "))
-        excludeEnv.size = Dimension(3, 3)
-        includeEnvPanel.add(includeEnv)
-
-        optionsPanel.add(agentLogPanel)
-        optionsPanel.add(rustLogPanel)
-        optionsPanel.add(excludeEnvPanel)
-        optionsPanel.add(includeEnvPanel)
-
-        dialogPanel.add(optionsPanel, BorderLayout.EAST)
-
-        return dialogPanel
+    ): JPanel = JPanel(BorderLayout()).apply {
+        add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
+        add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
+        add(JPanel(GridLayout(6, 2, 15, 2)).apply {
+            add(fileOps)
+            add(stealTraffic)
+            add(telemetry)
+            add(ephemeralContainer)
+            add(remoteDns)
+            add(JLabel()) // empty label for filling up the row
+            add(tcpOutgoingTraffic)
+            add(udpOutgoingTraffic)
+            add(JPanel(GridBagLayout()).apply {
+                add(JLabel("Agent Log Level:"))
+                add(agentRustLog)
+            })
+            add(JPanel(GridBagLayout()).apply {
+                add(JLabel("Layer Log Level:"))
+                add(rustLog)
+            })
+            add(JPanel(GridLayout(2, 1)).apply {
+                add(JLabel("Exclude env vars:"))
+                add(excludeEnv)
+            })
+            add(JPanel(GridLayout(2, 1)).apply {
+                add(JLabel("Include env vars:"))
+                add(includeEnv)
+            })
+            border = EmptyBorder(0, 5, 5, 5)
+        }, BorderLayout.EAST)
     }
 
-    fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel {
-        val dialogPanel = JPanel(BorderLayout())
-        namespaceLabel.border = EmptyBorder(5, 20, 5, 20)
-        dialogPanel.add(namespaceLabel, BorderLayout.NORTH)
-        val scrollablePane = JBScrollPane(namespaces)
-        dialogPanel.add(scrollablePane, BorderLayout.SOUTH)
-        return dialogPanel
-    }
-
-    fun getDialogBuilder(dialogPanel: JPanel): DialogBuilder {
-        val dialogBuilder = DialogBuilder()
-
-        dialogBuilder.setCenterPanel(dialogPanel)
-        dialogBuilder.setTitle(dialogHeading)
-
-        return dialogBuilder
-    }
+    private fun createSelectionDialog(label: String, items: JBList<String>): JPanel =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(10, 5, 10, 5)
+            add(JLabel(label).apply {
+                alignmentX = JLabel.LEFT_ALIGNMENT
+            })
+            add(Box.createRigidArea(Dimension(0, 5)))
+            add(JBScrollPane(items).apply {
+                alignmentX = JBScrollPane.LEFT_ALIGNMENT
+                preferredSize = Dimension(250, 350)
+            })
+        }
 }
