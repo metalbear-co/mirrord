@@ -15,10 +15,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Update intelliJ extension: lint & bump java version to 17.
+- Use same default options as CLI in intelliJ extension. 
+- Improve UI layout of intelliJ extension.
+- Separate tcp and udp outgoing option in intelliJ extension.
 
 ### Fixed
 
 - Lint Changelog and fix level of a "Changed" tag.
+- Fix not reappearing window after pressing cancel-button in intelliJ extension.
 
 ## 3.3.0
 
