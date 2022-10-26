@@ -6,10 +6,13 @@ use std::{
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
-use k8s_openapi::api::{
-    apps::v1::Deployment,
-    batch::v1::Job,
-    core::v1::{ContainerStatus, EphemeralContainer, Pod},
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        batch::v1::Job,
+        core::v1::{ContainerStatus, EphemeralContainer, Pod},
+    },
+    NamespaceResourceScope,
 };
 use kube::{
     api::{Api, ListParams, LogParams, Portforwarder, PostParams},
@@ -33,8 +36,8 @@ const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
 #[derive(Debug)]
 struct EnvVarGuard {
     library: String,
-    original_args: HashMap<String, String>,
-    changed_args: HashMap<String, String>,
+    fork_args: HashMap<String, String>,
+    parent_args: HashMap<String, String>,
 }
 
 impl EnvVarGuard {
@@ -48,38 +51,40 @@ impl EnvVarGuard {
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
 
-        let original_args: HashMap<_, _> = std::env::vars()
+        let fork_args: HashMap<_, _> = std::env::vars()
             .filter(|(key, _)| key != MIRRORD_ORIG_ENVS)
             .collect();
 
-        let changed_args = std::env::var(MIRRORD_ORIG_ENVS)
+        let parent_args = std::env::var(MIRRORD_ORIG_ENVS)
             .ok()
             .and_then(|orig| serde_json::from_str(&orig).ok())
             .unwrap_or_else(|| {
-                if let Ok(ser_args) = serde_json::to_string(&original_args) {
+                if let Ok(ser_args) = serde_json::to_string(&fork_args) {
                     std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
                 }
 
-                original_args.clone()
+                fork_args.clone()
             });
-
-        EnvVarGuard::swap_args(&original_args, &changed_args);
 
         Self {
             library,
-            original_args,
-            changed_args,
+            fork_args,
+            parent_args,
         }
     }
 
-    fn swap_args(from_args: &HashMap<String, String>, to_args: &HashMap<String, String>) {
-        for (key, _) in from_args {
-            std::env::remove_var(key);
+    fn kube_env(&self) -> HashMap<String, String> {
+        let mut env_values = HashMap::new();
+
+        for (key, _) in &self.fork_args {
+            env_values.insert(key.clone(), "".to_owned());
         }
 
-        for (key, val) in to_args {
-            std::env::set_var(key, val.clone());
+        for (key, value) in &self.parent_args {
+            env_values.insert(key.clone(), value.clone());
         }
+
+        env_values
     }
 }
 
@@ -87,8 +92,6 @@ impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
         std::env::set_var(MIRRORD_SKIP_LOAD, "false");
-
-        EnvVarGuard::swap_args(&self.changed_args, &self.original_args);
     }
 }
 
@@ -152,14 +155,30 @@ pub(crate) struct KubernetesAPI {
 impl KubernetesAPI {
     pub async fn new(config: &LayerConfig) -> Result<Self> {
         let _guard = EnvVarGuard::new();
-        let client = if config.accept_invalid_certificates {
+        let mut kube_config = if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
             config.accept_invalid_certs = true;
             warn!("Accepting invalid certificates");
-            Client::try_from(config).map_err(LayerError::KubeError)?
+            config
         } else {
-            Client::try_default().await.map_err(LayerError::KubeError)?
+            Config::infer().await?
         };
+
+        if let Some(mut exec) = kube_config.auth_info.exec.as_mut() {
+            match &mut exec.env {
+                Some(envs) => {
+                    envs.push(_guard.kube_env());
+                }
+                None => {
+                    exec.env = Some(vec![_guard.kube_env()]);
+                }
+            }
+        }
+
+        println!("{:#?}", kube_config.auth_info);
+
+        let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
+
         Ok(Self {
             client,
             config: config.clone(),
@@ -170,7 +189,7 @@ impl KubernetesAPI {
     /// Create a Kubernetes API subject to the namespace of the agent
     fn get_agent_api<K>(&self) -> Api<K>
     where
-        K: kube::Resource,
+        K: kube::Resource<Scope = NamespaceResourceScope>,
         <K as kube::Resource>::DynamicType: Default,
     {
         if let Some(namespace) = &self.config.agent.namespace {
@@ -183,7 +202,7 @@ impl KubernetesAPI {
     /// Create a Kubernetes API subject to the namespace of the target pod.
     fn get_target_pod_api<K>(&self) -> Api<K>
     where
-        K: kube::Resource,
+        K: kube::Resource<Scope = NamespaceResourceScope>,
         <K as kube::Resource>::DynamicType: Default,
     {
         if let Some(namespace) = &self.config.target_namespace {
