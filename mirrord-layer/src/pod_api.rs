@@ -63,10 +63,22 @@ impl EnvVarGuard {
                 original_args.clone()
             });
 
+        EnvVarGuard::swap_args(&original_args, &changed_args);
+
         Self {
             library,
             original_args,
             changed_args,
+        }
+    }
+
+    fn swap_args(from_args: &HashMap<String, String>, to_args: &HashMap<String, String>) {
+        for (key, _) in from_args {
+            std::env::remove_var(key);
+        }
+
+        for (key, val) in to_args {
+            std::env::set_var(key, val.clone());
         }
     }
 }
@@ -76,13 +88,7 @@ impl Drop for EnvVarGuard {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
         std::env::set_var(MIRRORD_SKIP_LOAD, "false");
 
-        for (key, _) in &self.changed_args {
-            std::env::remove_var(key);
-        }
-
-        for (key, val) in &self.original_args {
-            std::env::set_var(key, val.clone());
-        }
+        EnvVarGuard::swap_args(&self.changed_args, &self.original_args);
     }
 }
 
