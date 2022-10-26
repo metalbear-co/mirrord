@@ -20,6 +20,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Use same default options as CLI in intelliJ extension. 
 - Improve UI layout of intelliJ extension.
 - Separate tcp and udp outgoing option in intelliJ extension.
+- Tighter control of witch environment variables would be passed to the KubeApi when fetching credentials via cli in kube-config. See [#637](https://github.com/metalbear-co/mirrord/issues/637)
 
 ### Fixed
 
