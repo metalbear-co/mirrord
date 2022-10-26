@@ -22,6 +22,7 @@ class MirrordDialogBuilder {
         fileOps: JCheckBox,
         remoteDns: JCheckBox,
         outgoingTraffic: JCheckBox,
+        telemetry: JCheckBox,
         trafficStealing: JCheckBox,
         ephemeralCheckbox: JCheckBox,
         agentRustLog: JTextField,
@@ -44,13 +45,14 @@ class MirrordDialogBuilder {
             BorderLayout.CENTER
         )
 
-        val optionsPanel = JPanel(GridLayout(10, 1, 10, 2))
+        val optionsPanel = JPanel(GridLayout(11, 1, 10, 2))
         optionLabel.border = EmptyBorder(5, 110, 5, 80)
 
         optionsPanel.add(optionLabel)
         optionsPanel.add(fileOps)
         optionsPanel.add(remoteDns)
         optionsPanel.add(outgoingTraffic)
+        optionsPanel.add(telemetry)
         optionsPanel.add(trafficStealing)
         optionsPanel.add(ephemeralCheckbox)
 

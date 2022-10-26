@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add changelog for intelliJ extension, closes [[#542](https://github.com/metalbear-co/mirrord/issues/542)]
 - Add filter for changelog to ci.yml
 - mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
+- Telemetry for intelliJ extension.
 
 ### Changed
 
