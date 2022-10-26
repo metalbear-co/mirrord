@@ -11,10 +11,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Add changelog for intelliJ extension, closes [[#542](https://github.com/metalbear-co/mirrord/issues/542)]
 - Add filter for changelog to ci.yml
+- Telemetry for intelliJ extension.
 
 ### Changed
 
 - Update intelliJ extension: lint & bump java version to 17.
+- Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS. 
 - Use same default options as CLI in intelliJ extension. 
 - Improve UI layout of intelliJ extension.
 - Separate tcp and udp outgoing option in intelliJ extension.
@@ -22,6 +24,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Lint Changelog and fix level of a "Changed" tag.
+- File operations - following symlinks now works as expected. Previously, absolute symlinks lead to use our own path instead of target path. For example, AWS/K8S uses `/var/run/..` for service account credentials. In many machines, `/var/run` is symlink to `/run` so we were using `/run/..` instead of `/proc/{target_pid}/root/run`.
 - Fix not reappearing window after pressing cancel-button in intelliJ extension.
 
 ## 3.3.0

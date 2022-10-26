@@ -34,6 +34,7 @@ object MirrordDialogBuilder {
         remoteDns: JCheckBox,
         tcpOutgoingTraffic: JCheckBox,
         udpOutgoingTraffic: JCheckBox,
+        telemetry: JCheckBox,
         agentRustLog: JComboBox<LogLevel>,
         rustLog: JComboBox<LogLevel>,
         excludeEnv: JTextField,
@@ -49,6 +50,7 @@ object MirrordDialogBuilder {
             add(remoteDns)
             add(tcpOutgoingTraffic)
             add(udpOutgoingTraffic)
+            add(telemetry)
             add(JPanel(GridBagLayout()).apply {
                 add(JLabel("Agent Log Level:"))
                 add(agentRustLog)
