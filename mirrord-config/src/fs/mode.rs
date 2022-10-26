@@ -5,6 +5,11 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
+/// Configuration for enabling read-only and read-write file operations.
+///
+/// Default option for general file configuration. Allows the user to specify:
+///
+/// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
 #[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
