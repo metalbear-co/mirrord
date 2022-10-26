@@ -154,7 +154,7 @@ impl FileFilter {
     /// converting the result a `Detour`.
     ///
     /// `op` is used to lazily initialize a `Bypass` case.
-    pub(crate) fn ok_or_else<F>(&self, text: &str, op: F) -> Detour<()>
+    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, op: F) -> Detour<()>
     where
         F: FnOnce() -> Bypass,
     {
@@ -211,17 +211,17 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
             .is_success());
 
         assert!(file_filter
-            .ok_or_else("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
 
         assert!(file_filter
-            .ok_or_else("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
             .is_bypass());
     }
 
@@ -240,17 +240,17 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
             .is_bypass());
 
         assert!(file_filter
-            .ok_or_else("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_bypass());
 
         assert!(file_filter
-            .ok_or_else("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
             .is_success());
     }
 
@@ -272,17 +272,17 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
             .is_success());
 
         assert!(file_filter
-            .ok_or_else("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
 
         assert!(file_filter
-            .ok_or_else("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
             .is_bypass());
     }
 
@@ -298,11 +298,11 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
             .is_success());
 
         assert!(file_filter
-            .ok_or_else("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
@@ -320,17 +320,17 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .ok_or_else("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
             .is_bypass());
 
         assert!(file_filter
-            .ok_or_else("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_bypass());
 
         assert!(file_filter
-            .ok_or_else("/dir/third.a", || Bypass::IgnoredFile("second.a".into()))
+            .continue_or_bypass_with("/dir/third.a", || Bypass::IgnoredFile("second.a".into()))
             .is_success());
     }
 }
