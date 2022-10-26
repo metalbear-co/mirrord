@@ -34,7 +34,7 @@ use crate::{
 const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
 
 #[derive(Debug)]
-struct EnvVarGuard {
+pub(crate) struct EnvVarGuard {
     library: String,
     fork_args: HashMap<String, String>,
     parent_args: HashMap<String, String>,
@@ -173,27 +173,37 @@ pub(crate) struct KubernetesAPI {
 }
 
 impl KubernetesAPI {
-    pub async fn new(config: &LayerConfig) -> Result<Self> {
-        let _guard = EnvVarGuard::new();
-        let mut kube_config = if config.accept_invalid_certificates {
+    pub(crate) async fn create_kube_config(config: &LayerConfig) -> Result<Config> {
+        if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
             config.accept_invalid_certs = true;
             warn!("Accepting invalid certificates");
-            config
+            Ok(config)
         } else {
-            Config::infer().await?
-        };
+            Config::infer().await.map_err(|err| err.into())
+        }
+    }
 
-        if let Some(mut exec) = kube_config.auth_info.exec.as_mut() {
+    pub(crate) fn create_kube_client(
+        mut config: Config,
+        env_guard: &EnvVarGuard,
+    ) -> Result<Client> {
+        if let Some(mut exec) = config.auth_info.exec.as_mut() {
             match &mut exec.env {
-                Some(envs) => _guard.extend_kube_env(envs),
-                None => exec.env = Some(_guard.kube_env()),
+                Some(envs) => env_guard.extend_kube_env(envs),
+                None => exec.env = Some(env_guard.kube_env()),
             }
 
-            exec.drop_env = Some(_guard.droped_env());
+            exec.drop_env = Some(env_guard.droped_env());
         }
 
-        let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
+        Client::try_from(config).map_err(LayerError::KubeError)
+    }
+
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
+        let _guard = EnvVarGuard::new();
+        let kube_config = Self::create_kube_config(config).await?;
+        let client = Self::create_kube_client(kube_config, &_guard)?;
 
         Ok(Self {
             client,
