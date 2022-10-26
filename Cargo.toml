@@ -59,6 +59,7 @@ streammap-ext = "0.1"
 # this should be changed once a newer version of rustls is ou
 [patch.crates-io]
 rustls = { git = "https://github.com/metalbear-co/rustls", branch = "feat-ip-address" }
+kube = { git = "https://github.com/metalbear-co/kube", ref = "ba2e348d88788e9b02c4645212a39d47a2aea771" }
 
 [patch."https://github.com/ctz/webpki"]
 webpki = { git = "https://github.com/metalbear-co/webpki", branch = "feat-ip-address" }

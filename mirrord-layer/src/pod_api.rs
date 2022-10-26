@@ -73,18 +73,38 @@ impl EnvVarGuard {
         }
     }
 
-    fn kube_env(&self) -> HashMap<String, String> {
-        let mut env_values = HashMap::new();
+    fn kube_env(&self) -> Vec<HashMap<String, String>> {
+        let mut envs = Vec::new();
+        self.extend_kube_env(&mut envs);
+        envs
+    }
 
-        for (key, _) in &self.fork_args {
-            env_values.insert(key.clone(), "".to_owned());
+    fn extend_kube_env(&self, envs: &mut Vec<HashMap<String, String>>) {
+        let filtered: HashSet<_> = envs
+            .iter()
+            .filter_map(|item| item.get("name"))
+            .cloned()
+            .collect();
+
+        for (key, value) in self
+            .parent_args
+            .iter()
+            .filter(|(key, _)| !filtered.contains(key.as_str()))
+        {
+            let mut env = HashMap::new();
+            env.insert("name".to_owned(), key.clone());
+            env.insert("value".to_owned(), value.clone());
+
+            envs.push(env);
         }
+    }
 
-        for (key, value) in &self.parent_args {
-            env_values.insert(key.clone(), value.clone());
-        }
-
-        env_values
+    fn droped_env(&self) -> Vec<String> {
+        self.fork_args
+            .keys()
+            .filter(|key| !self.parent_args.contains_key(key.as_str()))
+            .cloned()
+            .collect()
     }
 }
 
@@ -166,14 +186,14 @@ impl KubernetesAPI {
 
         if let Some(mut exec) = kube_config.auth_info.exec.as_mut() {
             match &mut exec.env {
-                Some(envs) => {
-                    envs.push(_guard.kube_env());
-                }
-                None => {
-                    exec.env = Some(vec![_guard.kube_env()]);
-                }
+                Some(envs) => _guard.extend_kube_env(envs),
+                None => exec.env = Some(_guard.kube_env()),
             }
+
+            exec.drop_env = Some(_guard.droped_env());
         }
+
+        println!("{:#?}", kube_config.auth_info);
 
         let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
 

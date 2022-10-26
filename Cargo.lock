@@ -1368,8 +1368,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.75.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb19108692aeafebb108fd0a1c381c06ac4c03859652599420975165e939b8a"
+source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -1381,8 +1380,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.75.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97e1a80ecd1b1438a2fc004549e155d47250b9e01fbfcf4cfbe9c8b56a085593"
+source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "base64",
  "bytes",
@@ -1419,8 +1417,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.75.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4d780f2bb048eeef64a4c6b2582d26a0fe19e30b4d3cc9e081616e1779c5d47"
+source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -1437,8 +1434,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.75.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98459d53b2841237392cd6959956185b2df15c19d32c3b275ed6ca7b7ee1adae"
+source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -1450,8 +1446,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.75.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7769af142ee2e46bfa44bd393cf7f40b9d8b80d2e11f6317399551ed17760beb"
+source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "ahash",
  "backoff",
