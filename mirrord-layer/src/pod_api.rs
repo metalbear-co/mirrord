@@ -34,7 +34,7 @@ const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
 struct EnvVarGuard {
     library: String,
     original_args: HashMap<String, String>,
-    changed_args: Option<HashMap<String, String>>,
+    changed_args: HashMap<String, String>,
 }
 
 impl EnvVarGuard {
@@ -48,17 +48,20 @@ impl EnvVarGuard {
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
 
-        let original_args = std::env::vars().collect();
+        let original_args: HashMap<_, _> = std::env::vars()
+            .filter(|(key, _)| key != MIRRORD_ORIG_ENVS)
+            .collect();
 
-        let changed_args = if let Ok(orig) = std::env::var(MIRRORD_ORIG_ENVS) {
-            serde_json::from_str(&orig).ok()
-        } else {
-            if let Ok(ser_args) = serde_json::to_string(&original_args) {
-                std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
-            }
+        let changed_args = std::env::var(MIRRORD_ORIG_ENVS)
+            .ok()
+            .and_then(|orig| serde_json::from_str(&orig).ok())
+            .unwrap_or_else(|| {
+                if let Ok(ser_args) = serde_json::to_string(&original_args) {
+                    std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
+                }
 
-            Some(original_args.clone())
-        };
+                original_args.clone()
+            });
 
         Self {
             library,
@@ -72,7 +75,14 @@ impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
         std::env::set_var(MIRRORD_SKIP_LOAD, "false");
-        std::env::remove_var(MIRRORD_ORIG_ENVS);
+
+        for (key, _) in &self.changed_args {
+            std::env::remove_var(key);
+        }
+
+        for (key, val) in &self.original_args {
+            std::env::set_var(key, val.clone());
+        }
     }
 }
 
