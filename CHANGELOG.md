@@ -18,11 +18,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Update intelliJ extension: lint & bump java version to 17.
 - mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
+- Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS. 
 
 ### Fixed
 
 - Lint Changelog and fix level of a "Changed" tag.
-
+- File operations - following symlinks now works as expected. Previously, absolute symlinks lead to use our own path instead of target path. For example, AWS/K8S uses `/var/run/..` for service account credentials. In many machines, `/var/run` is symlink to `/run` so we were using `/run/..` instead of `/proc/{target_pid}/root/run`.
+ 
 ## 3.3.0
 
 ### Added

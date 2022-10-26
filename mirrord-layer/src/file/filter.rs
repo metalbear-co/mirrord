@@ -62,6 +62,9 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r"(?<package_json>^.*/package.json$)|",
+        // macOS
+        r"(?<macos_users>^/Users/.*$)|",
+        r"(?<macos_library>^/Library/.*$)|",
         &format!("(^.*{}.*$)|", current_dir.to_string_lossy()),
         &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
     ]
