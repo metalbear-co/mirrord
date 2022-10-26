@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fmt::Display, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    str::FromStr,
+};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
@@ -24,8 +28,13 @@ use crate::{
     MIRRORD_SKIP_LOAD,
 };
 
+const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
+
+#[derive(Debug)]
 struct EnvVarGuard {
     library: String,
+    original_args: HashMap<String, String>,
+    changed_args: Option<HashMap<String, String>>,
 }
 
 impl EnvVarGuard {
@@ -33,11 +42,29 @@ impl EnvVarGuard {
     const ENV_VAR: &str = "LD_PRELOAD";
     #[cfg(target_os = "macos")]
     const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
     fn new() -> Self {
         std::env::set_var(MIRRORD_SKIP_LOAD, "true");
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
-        Self { library }
+
+        let original_args = std::env::vars().collect();
+
+        let changed_args = if let Ok(orig) = std::env::var(MIRRORD_ORIG_ENVS) {
+            serde_json::from_str(&orig).ok()
+        } else {
+            if let Ok(ser_args) = serde_json::to_string(&original_args) {
+                std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
+            }
+
+            Some(original_args.clone())
+        };
+
+        Self {
+            library,
+            original_args,
+            changed_args,
+        }
     }
 }
 
@@ -45,6 +72,7 @@ impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
         std::env::set_var(MIRRORD_SKIP_LOAD, "false");
+        std::env::remove_var(MIRRORD_ORIG_ENVS);
     }
 }
 
@@ -108,6 +136,7 @@ pub(crate) struct KubernetesAPI {
 impl KubernetesAPI {
     pub async fn new(config: &LayerConfig) -> Result<Self> {
         let _guard = EnvVarGuard::new();
+        println!("{:?}", _guard);
         let client = if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
             config.accept_invalid_certs = true;
