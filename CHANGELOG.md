@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Update intelliJ extension: lint & bump java version to 17.
 - Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS. 
+- Tighter control of witch environment variables would be passed to the KubeApi when fetching credentials via cli in kube-config. See [#637](https://github.com/metalbear-co/mirrord/issues/637)
 
 ### Fixed
 
