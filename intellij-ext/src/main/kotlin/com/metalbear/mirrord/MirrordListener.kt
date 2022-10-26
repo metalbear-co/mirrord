@@ -68,8 +68,8 @@ class MirrordListener : ExecutionListener {
 
                     val fileOps = JCheckBox("File Operations", defaults.fileOps)
                     val stealTraffic = JCheckBox("TCP Steal Traffic", defaults.stealTraffic)
-                    val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
                     val telemetry = JCheckBox("Telemetry", defaults.telemetry)
+                    val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
                     val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
                     val tcpOutgoingTraffic = JCheckBox("TCP Outgoing Traffic", defaults.tcpOutgoingTraffic)
                     val udpOutgoingTraffic = JCheckBox("UDP Outgoing Traffic", defaults.udpOutgoingTraffic)
@@ -88,8 +88,8 @@ class MirrordListener : ExecutionListener {
                             pods,
                             fileOps,
                             stealTraffic,
-                            ephemeralContainer,
                             telemetry,
+                            ephemeralContainer,
                             remoteDns,
                             tcpOutgoingTraffic,
                             udpOutgoingTraffic,

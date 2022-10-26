@@ -30,8 +30,8 @@ object MirrordDialogBuilder {
         pods: JBList<String>,
         fileOps: JCheckBox,
         stealTraffic: JCheckBox,
-        ephemeralContainer: JCheckBox,
         telemetry: JCheckBox,
+        ephemeralContainer: JCheckBox,
         remoteDns: JCheckBox,
         tcpOutgoingTraffic: JCheckBox,
         udpOutgoingTraffic: JCheckBox,
@@ -45,8 +45,8 @@ object MirrordDialogBuilder {
         add(JPanel(GridLayout(6, 2, 15, 2)).apply {
             add(fileOps)
             add(stealTraffic)
-            add(ephemeralContainer)
             add(telemetry)
+            add(ephemeralContainer)
             add(remoteDns)
             add(JLabel()) // empty label for filling up the row
             add(tcpOutgoingTraffic)
