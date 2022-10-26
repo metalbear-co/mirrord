@@ -86,7 +86,7 @@ impl EnvVarGuard {
         }
     }
 
-    fn droped_env(&self) -> Vec<String> {
+    fn dropped_env(&self) -> Vec<String> {
         std::env::vars()
             .map(|(key, _)| key)
             .filter(|key| !self.envs.contains_key(key.as_str()))
@@ -173,7 +173,7 @@ impl KubernetesAPI {
                 None => exec.env = Some(env_guard.kube_env()),
             }
 
-            exec.drop_env = Some(env_guard.droped_env());
+            exec.drop_env = Some(env_guard.dropped_env());
         }
 
         Client::try_from(config).map_err(LayerError::KubeError)
