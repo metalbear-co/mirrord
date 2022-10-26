@@ -146,7 +146,6 @@ pub(crate) struct KubernetesAPI {
 impl KubernetesAPI {
     pub async fn new(config: &LayerConfig) -> Result<Self> {
         let _guard = EnvVarGuard::new();
-        println!("{:?}", _guard);
         let client = if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
             config.accept_invalid_certs = true;
