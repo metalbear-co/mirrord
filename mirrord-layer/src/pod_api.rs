@@ -90,7 +90,6 @@ impl EnvVarGuard {
         std::env::vars()
             .map(|(key, _)| key)
             .filter(|key| !self.envs.contains_key(key.as_str()))
-            .chain(vec![EnvVarGuard::ENV_VAR.to_owned()].into_iter())
             .collect()
     }
 }
