@@ -36,8 +36,7 @@ const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
 #[derive(Debug)]
 pub(crate) struct EnvVarGuard {
     library: String,
-    fork_args: HashMap<String, String>,
-    parent_args: HashMap<String, String>,
+    parent_envs: HashMap<String, String>,
 }
 
 impl EnvVarGuard {
@@ -51,25 +50,24 @@ impl EnvVarGuard {
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
 
-        let fork_args: HashMap<_, _> = std::env::vars()
-            .filter(|(key, _)| key != MIRRORD_ORIG_ENVS)
-            .collect();
-
-        let parent_args = std::env::var(MIRRORD_ORIG_ENVS)
+        let parent_envs = std::env::var(MIRRORD_ORIG_ENVS)
             .ok()
             .and_then(|orig| serde_json::from_str(&orig).ok())
             .unwrap_or_else(|| {
+                let fork_args = std::env::vars()
+                    .filter(|(key, _)| key != MIRRORD_ORIG_ENVS)
+                    .collect();
+
                 if let Ok(ser_args) = serde_json::to_string(&fork_args) {
                     std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
                 }
 
-                fork_args.clone()
+                fork_args
             });
 
         Self {
             library,
-            fork_args,
-            parent_args,
+            parent_envs,
         }
     }
 
@@ -87,7 +85,7 @@ impl EnvVarGuard {
             .collect();
 
         for (key, value) in self
-            .parent_args
+            .parent_envs
             .iter()
             .filter(|(key, _)| !filtered.contains(key.as_str()))
         {
@@ -100,10 +98,9 @@ impl EnvVarGuard {
     }
 
     fn droped_env(&self) -> Vec<String> {
-        self.fork_args
-            .keys()
-            .filter(|key| !self.parent_args.contains_key(key.as_str()))
-            .cloned()
+        std::env::vars()
+            .map(|(key, _)| key)
+            .filter(|key| !self.parent_envs.contains_key(key.as_str()))
             .collect()
     }
 }
