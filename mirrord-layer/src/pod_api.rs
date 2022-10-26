@@ -26,7 +26,6 @@ use crate::{
 
 struct EnvVarGuard {
     library: String,
-    held_vars: Vec<(String, String)>,
 }
 
 impl EnvVarGuard {
@@ -38,14 +37,7 @@ impl EnvVarGuard {
         std::env::set_var(MIRRORD_SKIP_LOAD, "true");
         let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
         std::env::remove_var(EnvVarGuard::ENV_VAR);
-        let mut held_vars = Vec::new();
-        for (key, value) in std::env::vars() {
-            if key.starts_with("AWS_") {
-                std::env::remove_var(&key);
-                held_vars.push((key, value));
-            }
-        }
-        Self { library, held_vars }
+        Self { library }
     }
 }
 
@@ -53,9 +45,6 @@ impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
         std::env::set_var(MIRRORD_SKIP_LOAD, "false");
-        for (key, value) in self.held_vars.drain(..) {
-            std::env::set_var(&key, value);
-        }
     }
 }
 

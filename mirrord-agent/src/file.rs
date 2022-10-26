@@ -43,7 +43,6 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
 
     let mut temp_path = PathBuf::new();
     for component in path.as_ref().components() {
-        trace!("on component {:?}", &component);
         match component {
             RootDir => {}
             Prefix(prefix) => Err(std::io::Error::new(
@@ -52,7 +51,6 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
             ))?,
             CurDir => {}
             ParentDir => {
-                trace!("parent dir");
                 if !temp_path.pop() {
                     Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
@@ -62,11 +60,9 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
             }
             Normal(component) => {
                 let real_path = root_path.as_ref().join(&temp_path).join(&component);
-                trace!("calc path {:?}", real_path);
                 if real_path.is_symlink() {
                     trace!("{:?} is symlink", real_path);
                     let sym_dest = real_path.read_link()?;
-                    trace!("symlink dest {:?}", sym_dest);
                     temp_path = temp_path.join(sym_dest);
                 } else {
                     temp_path = temp_path.join(component);
@@ -87,7 +83,6 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
     }
     // full path, from host perspective
     let final_path = root_path.as_ref().join(temp_path);
-    trace!("final_path path {:?}", final_path);
     Ok(final_path)
 }
 
