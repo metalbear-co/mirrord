@@ -31,12 +31,11 @@ use crate::{
     MIRRORD_SKIP_LOAD,
 };
 
-const MIRRORD_ORIG_ENVS: &str = "MIRRORD_ORIG_ENVS";
+const MIRRORD_GUARDED_ENVS: &str = "MIRRORD_GUARDED_ENVS";
 
 #[derive(Debug)]
 pub(crate) struct EnvVarGuard {
-    library: String,
-    parent_envs: HashMap<String, String>,
+    envs: HashMap<String, String>,
 }
 
 impl EnvVarGuard {
@@ -46,29 +45,22 @@ impl EnvVarGuard {
     const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
     fn new() -> Self {
-        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
-        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
-        std::env::remove_var(EnvVarGuard::ENV_VAR);
-
-        let parent_envs = std::env::var(MIRRORD_ORIG_ENVS)
+        let envs = std::env::var(MIRRORD_GUARDED_ENVS)
             .ok()
             .and_then(|orig| serde_json::from_str(&orig).ok())
             .unwrap_or_else(|| {
                 let fork_args = std::env::vars()
-                    .filter(|(key, _)| key != MIRRORD_ORIG_ENVS)
+                    .filter(|(key, _)| key != MIRRORD_GUARDED_ENVS && key != EnvVarGuard::ENV_VAR)
                     .collect();
 
                 if let Ok(ser_args) = serde_json::to_string(&fork_args) {
-                    std::env::set_var(MIRRORD_ORIG_ENVS, ser_args);
+                    std::env::set_var(MIRRORD_GUARDED_ENVS, ser_args);
                 }
 
                 fork_args
             });
 
-        Self {
-            library,
-            parent_envs,
-        }
+        Self { envs }
     }
 
     fn kube_env(&self) -> Vec<HashMap<String, String>> {
@@ -84,8 +76,15 @@ impl EnvVarGuard {
             .cloned()
             .collect();
 
+        if !filtered.contains(MIRRORD_SKIP_LOAD) {
+            let mut env = HashMap::new();
+            env.insert("name".to_owned(), MIRRORD_SKIP_LOAD.to_owned());
+            env.insert("value".to_owned(), "true".to_owned());
+            envs.push(env);
+        }
+
         for (key, value) in self
-            .parent_envs
+            .envs
             .iter()
             .filter(|(key, _)| !filtered.contains(key.as_str()))
         {
@@ -100,15 +99,9 @@ impl EnvVarGuard {
     fn droped_env(&self) -> Vec<String> {
         std::env::vars()
             .map(|(key, _)| key)
-            .filter(|key| !self.parent_envs.contains_key(key.as_str()))
+            .filter(|key| !self.envs.contains_key(key.as_str()))
+            .chain(vec![EnvVarGuard::ENV_VAR.to_owned()].into_iter())
             .collect()
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
-        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
     }
 }
 
@@ -166,7 +159,6 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
-    _guard: EnvVarGuard,
 }
 
 impl KubernetesAPI {
@@ -198,14 +190,13 @@ impl KubernetesAPI {
     }
 
     pub async fn new(config: &LayerConfig) -> Result<Self> {
-        let _guard = EnvVarGuard::new();
+        let guard = EnvVarGuard::new();
         let kube_config = Self::create_kube_config(config).await?;
-        let client = Self::create_kube_client(kube_config, &_guard)?;
+        let client = Self::create_kube_client(kube_config, &guard)?;
 
         Ok(Self {
             client,
             config: config.clone(),
-            _guard,
         })
     }
 
