@@ -66,14 +66,14 @@ class MirrordListener : ExecutionListener {
                         return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
-                    val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
                     val fileOps = JCheckBox("File Operations", defaults.fileOps)
-                    val trafficStealing = JCheckBox("TCP Steal Traffic", defaults.trafficStealing)
+                    val stealTraffic = JCheckBox("TCP Steal Traffic", defaults.stealTraffic)
+                    val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
+                    val telemetry = JCheckBox("Telemetry", defaults.telemetry)
+                    val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
                     val tcpOutgoingTraffic = JCheckBox("TCP Outgoing Traffic", defaults.tcpOutgoingTraffic)
                     val udpOutgoingTraffic = JCheckBox("UDP Outgoing Traffic", defaults.udpOutgoingTraffic)
-                    val telemetry = JCheckBox("Telemetry")
 
-                    val ephemeralContainerCheckBox = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
 
                     val agentRustLog = JComboBox(LogLevel.values())
                     agentRustLog.selectedItem = defaults.agentRustLog
@@ -87,12 +87,12 @@ class MirrordListener : ExecutionListener {
                         MirrordDialogBuilder.createMirrordConfigDialog(
                             pods,
                             fileOps,
-                            trafficStealing,
-                            ephemeralContainerCheckBox,
+                            stealTraffic,
+                            ephemeralContainer,
+                            telemetry,
                             remoteDns,
                             tcpOutgoingTraffic,
                             udpOutgoingTraffic,
-                            telemetry,
                             agentRustLog,
                             rustLog,
                             excludeEnv,
@@ -105,8 +105,8 @@ class MirrordListener : ExecutionListener {
                         mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue}"
                         mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = namespaces.selectedValue
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
-                        mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = trafficStealing.isSelected.toString()
-                        mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainerCheckBox.isSelected.toString()
+                        mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
+                        mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
                         mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
                         mirrordEnv["MIRRORD_TCP_OUTGOING"] = tcpOutgoingTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()

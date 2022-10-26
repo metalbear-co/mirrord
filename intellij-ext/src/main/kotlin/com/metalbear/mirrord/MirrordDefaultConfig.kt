@@ -8,17 +8,19 @@ data class MirrordDefaultConfig(
     val dylibPath: String = getSharedLibPath("libmirrord_layer.dylib"),
     val acceptInvalidCertificates: Boolean = true,
     val skipProcesses: String = "",
-    val remoteDns: Boolean = false,
     val fileOps: Boolean = true,
-    val trafficStealing: Boolean = true,
+    val stealTraffic: Boolean = true,
+    val ephemeralContainers: Boolean = true,
+    val telemetry: Boolean = true,
+    val remoteDns: Boolean = false,
     val tcpOutgoingTraffic: Boolean = false,
     val udpOutgoingTraffic: Boolean = false,
-    val ephemeralContainers: Boolean = true,
     val agentRustLog: LogLevel = LogLevel.INFO,
     val rustLog: LogLevel = LogLevel.INFO,
     val overrideEnvVarsExclude: String = "",
     val overrideEnvVarsInclude: String = "*",
-)
+) {
+}
 
 private fun getSharedLibPath(libName: String): String {
     val path = Paths.get(PathManager.getPluginsPath(), "mirrord", libName).toString()

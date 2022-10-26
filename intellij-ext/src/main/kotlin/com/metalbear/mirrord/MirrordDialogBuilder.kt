@@ -29,12 +29,12 @@ object MirrordDialogBuilder {
     fun createMirrordConfigDialog(
         pods: JBList<String>,
         fileOps: JCheckBox,
-        trafficStealing: JCheckBox,
-        ephemeralCheckbox: JCheckBox,
+        stealTraffic: JCheckBox,
+        ephemeralContainer: JCheckBox,
+        telemetry: JCheckBox,
         remoteDns: JCheckBox,
         tcpOutgoingTraffic: JCheckBox,
         udpOutgoingTraffic: JCheckBox,
-        telemetry: JCheckBox,
         agentRustLog: JComboBox<LogLevel>,
         rustLog: JComboBox<LogLevel>,
         excludeEnv: JTextField,
@@ -42,15 +42,15 @@ object MirrordDialogBuilder {
     ): JPanel = JPanel(BorderLayout()).apply {
         add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
         add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
-        add(JPanel(GridLayout(5, 2, 15, 2)).apply {
-            border = EmptyBorder(0, 5, 5, 5)
+        add(JPanel(GridLayout(6, 2, 15, 2)).apply {
             add(fileOps)
-            add(trafficStealing)
-            add(ephemeralCheckbox)
+            add(stealTraffic)
+            add(ephemeralContainer)
+            add(telemetry)
             add(remoteDns)
+            add(JLabel()) // empty label for filling up the row
             add(tcpOutgoingTraffic)
             add(udpOutgoingTraffic)
-            add(telemetry)
             add(JPanel(GridBagLayout()).apply {
                 add(JLabel("Agent Log Level:"))
                 add(agentRustLog)
@@ -67,6 +67,7 @@ object MirrordDialogBuilder {
                 add(JLabel("Include env vars:"))
                 add(includeEnv)
             })
+            border = EmptyBorder(0, 5, 5, 5)
         }, BorderLayout.EAST)
     }
 
