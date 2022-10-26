@@ -4,7 +4,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{prelude::*, BufReader, SeekFrom},
     os::unix::prelude::FileExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
@@ -17,7 +17,7 @@ use mirrord_protocol::{
 };
 use tracing::{debug, error, trace};
 
-use crate::{error::AgentError, util::IndexAllocator};
+use crate::{error::Result, util::IndexAllocator};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -32,11 +32,69 @@ pub struct FileManager {
     index_allocator: IndexAllocator<usize>,
 }
 
+/// Resolve a path that might contain symlinks from a specific container to a path accessible from
+/// the root host
+#[tracing::instrument(level = "trace")]
+fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
+    path: P,
+    root_path: R,
+) -> std::io::Result<PathBuf> {
+    use std::path::Component::*;
+
+    let mut temp_path = PathBuf::new();
+    for component in path.as_ref().components() {
+        trace!("on component {:?}", &component);
+        match component {
+            RootDir => {}
+            Prefix(prefix) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Prefix not supported {prefix:?}"),
+            ))?,
+            CurDir => {}
+            ParentDir => {
+                trace!("parent dir");
+                if !temp_path.pop() {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "LFI attempt?",
+                    ))?
+                }
+            }
+            Normal(component) => {
+                let real_path = root_path.as_ref().join(&temp_path).join(&component);
+                trace!("calc path {:?}", real_path);
+                if real_path.is_symlink() {
+                    trace!("{:?} is symlink", real_path);
+                    let sym_dest = real_path.read_link()?;
+                    trace!("symlink dest {:?}", sym_dest);
+                    temp_path = temp_path.join(sym_dest);
+                } else {
+                    temp_path = temp_path.join(component);
+                }
+                if temp_path.has_root() {
+                    temp_path = temp_path
+                        .strip_prefix("/")
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "couldn't strip prefix",
+                            )
+                        })?
+                        .into();
+                }
+            }
+        }
+    }
+    // full path, from host perspective
+    let final_path = root_path.as_ref().join(temp_path);
+    trace!("final_path path {:?}", final_path);
+    Ok(final_path)
+}
+
 impl FileManager {
     /// Executes the request and returns the response.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse, AgentError> {
-        let root_path = &self.root_path;
+    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse> {
         match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -44,10 +102,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = self.open(full_path, open_options);
+                let open_result = self.open(path.into(), open_options);
                 Ok(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
@@ -106,10 +161,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(pathname);
-
-                let access_result = self.access(full_path, mode);
+                let access_result = self.access(pathname.into(), mode);
                 Ok(FileResponse::Access(access_result))
             }
         }
@@ -135,6 +187,7 @@ impl FileManager {
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
+        let path = resolve_path(path, &self.root_path)?;
         let file = OpenOptions::from(open_options).open(&path)?;
 
         let fd = self
@@ -392,6 +445,7 @@ impl FileManager {
         pathname: PathBuf,
         mode: u8,
     ) -> RemoteResult<AccessFileResponse> {
+        let pathname = resolve_path(pathname, &self.root_path)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
             pathname,
