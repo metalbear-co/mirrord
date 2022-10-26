@@ -35,6 +35,11 @@ class MirrordEnabler : ToggleAction() {
         }
 
         private const val LAST_CHECK_KEY = "lastCheck"
+        var versionCheckDisabled
+            get() = PropertiesComponent.getInstance().getBoolean("versionCheckDisabled", false)
+            set(value) {
+                PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
+            }
     }
 
     override fun isSelected(e: AnActionEvent): Boolean {
@@ -54,13 +59,9 @@ class MirrordEnabler : ToggleAction() {
 
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
+    private val os: String = System.getProperty("os.name").replace(" ", "%20")
     private val versionCheckEndpoint: String =
-        "https://version.mirrord.dev/get-latest-version?source=3&version=$version"
-    private var versionCheckDisabled
-        get() = PropertiesComponent.getInstance().getBoolean("versionCheckDisabled", false)
-        set(value) {
-            PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
-        }
+        "https://version.mirrord.dev/get-latest-version?source=3&version=$version&platform=$os"
 
     /**
      * Fetch the latest version number, compare to local version. If there is a later version available, notify.
