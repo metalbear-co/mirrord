@@ -19,8 +19,7 @@ data class MirrordDefaultConfig(
     val rustLog: LogLevel = LogLevel.INFO,
     val overrideEnvVarsExclude: String = "",
     val overrideEnvVarsInclude: String = "*",
-) {
-}
+)
 
 private fun getSharedLibPath(libName: String): String {
     val path = Paths.get(PathManager.getPluginsPath(), "mirrord", libName).toString()
