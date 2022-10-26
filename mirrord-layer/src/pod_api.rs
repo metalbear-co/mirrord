@@ -26,10 +26,7 @@ use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, warn};
 
-use crate::{
-    error::{LayerError, Result},
-    MIRRORD_SKIP_LOAD,
-};
+use crate::error::{LayerError, Result};
 
 const MIRRORD_GUARDED_ENVS: &str = "MIRRORD_GUARDED_ENVS";
 
@@ -75,13 +72,6 @@ impl EnvVarGuard {
             .filter_map(|item| item.get("name"))
             .cloned()
             .collect();
-
-        if !filtered.contains(MIRRORD_SKIP_LOAD) {
-            let mut env = HashMap::new();
-            env.insert("name".to_owned(), MIRRORD_SKIP_LOAD.to_owned());
-            env.insert("value".to_owned(), "true".to_owned());
-            envs.push(env);
-        }
 
         for (key, value) in self
             .envs
