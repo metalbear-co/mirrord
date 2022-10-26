@@ -7,7 +7,7 @@ use mirrord_protocol::{
     WriteFileResponse,
 };
 use tokio::sync::oneshot;
-use tracing::error;
+use tracing::{error, trace};
 
 use super::{filter::FILE_FILTER, *};
 use crate::{
@@ -108,7 +108,7 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
 
@@ -154,7 +154,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
 }
 
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -182,7 +182,7 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let _open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -199,7 +199,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
         .map(OpenOptionsInternalExt::from_mode)
         .unwrap_or_default();
 
-    debug!("fdopen -> open_options {_open_options:#?}");
+    trace!("fdopen -> open_options {_open_options:#?}");
 
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
@@ -207,13 +207,13 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
         .lock()?
         .get_key_value(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| debug!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
+        .inspect(|(local_fd, remote_fd)| trace!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
 
     Detour::Success(result)
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn openat(
     fd: RawFd,
     rawish_path: Option<&CStr>,
