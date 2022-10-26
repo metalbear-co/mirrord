@@ -175,8 +175,6 @@ impl KubernetesAPI {
             }
         }
 
-        println!("{:#?}", kube_config.auth_info);
-
         let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
 
         Ok(Self {
