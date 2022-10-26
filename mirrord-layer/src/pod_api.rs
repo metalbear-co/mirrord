@@ -793,6 +793,7 @@ impl FromStr for Target {
 
 #[cfg(test)]
 mod tests {
+    use kube::config::AuthInfo;
     use rstest::rstest;
 
     use super::*;
@@ -822,5 +823,20 @@ mod tests {
                 container_name: None
             })
         )
+    }
+
+    #[tokio::test]
+    async fn correct_envs_kubectl() {
+        let _guard = EnvVarGuard::new();
+        let config = Config {
+            auth_info: AuthInfo {
+                ..Default::default()
+            },
+            ..Config::new("http://localhost".parse().unwrap())
+        };
+
+        let result = KubernetesAPI::create_kube_client(config, &_guard);
+
+        assert!(result.is_ok())
     }
 }

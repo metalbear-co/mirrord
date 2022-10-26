@@ -1,7 +1,25 @@
 const express = require("express");
 const process = require("process");
+const { spawn } = require('node:child_process');
 const app = express();
 const PORT = 80;
+
+process.env.TEST = 'foobar';
+
+const python = spawn('python3', ['-u', './tests/python-e2e/app_flusk.py']);
+
+python.stdout.on('data', (data) => {
+  console.log(`stdout: ${data}`);
+});
+
+python.stderr.on('data', (data) => {
+  console.error(`stderr: ${data}`);
+});
+
+python.on('close', (code) => {
+  console.log(`child process exited with code ${code}`);
+});
+
 
 app.get("/", (req, res) => {
   console.log("GET: Request completed");
