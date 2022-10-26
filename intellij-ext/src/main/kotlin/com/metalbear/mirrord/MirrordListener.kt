@@ -76,6 +76,8 @@ class MirrordListener : ExecutionListener {
                     remoteDns.isSelected = true
                     val outgoingTraffic = JCheckBox("Outgoing Traffic")
                     outgoingTraffic.isSelected = true
+                    val telemetry = JCheckBox("Telemetry")
+                    telemetry.isSelected = true
                     val trafficStealing = JCheckBox("Traffic Stealing")
 
                     val ephemeralContainerCheckBox = JCheckBox("Enable Ephemeral Containers")
@@ -90,6 +92,7 @@ class MirrordListener : ExecutionListener {
                         fileOps,
                         remoteDns,
                         outgoingTraffic,
+                        telemetry,
                         trafficStealing,
                         ephemeralContainerCheckBox,
                         agentRustLog,
@@ -117,6 +120,9 @@ class MirrordListener : ExecutionListener {
                         }
                         if (includeEnv.text.toString().isNotEmpty()) {
                             mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
+                        }
+                        if (!telemetry.isSelected) {
+                            MirrordEnabler.versionCheckDisabled = true
                         }
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
