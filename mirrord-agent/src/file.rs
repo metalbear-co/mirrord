@@ -59,7 +59,7 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
                 }
             }
             Normal(component) => {
-                let real_path = root_path.as_ref().join(&temp_path).join(&component);
+                let real_path = root_path.as_ref().join(&temp_path).join(component);
                 if real_path.is_symlink() {
                     trace!("{:?} is symlink", real_path);
                     let sym_dest = real_path.read_link()?;
