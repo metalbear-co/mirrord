@@ -240,6 +240,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", config_file.clone());
     }
 
+    if args.capture_error_trace {
+        std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
+    }
+
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 

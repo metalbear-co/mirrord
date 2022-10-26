@@ -175,7 +175,7 @@ fn deprecation_check(config: &LayerConfig) {
 // END
 
 fn init(config: LayerConfig) {
-    let file_log = if config.feature.error_reporting {
+    let file_log = if config.feature.capture_error_trace {
         Some(
             tracing_subscriber::fmt::layer()
                 .with_writer(tracing_util::file_tracing_writer())

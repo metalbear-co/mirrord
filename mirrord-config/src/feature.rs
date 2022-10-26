@@ -24,6 +24,6 @@ pub struct FeatureFileConfig {
     pub network: ToggleableConfig<NetworkFileConfig>,
 
     #[serde(default)]
-    #[config(env = "MIRRORD_ERROR_REPORTING", default = "true")]
-    pub error_reporting: Option<bool>,
+    #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = "false")]
+    pub capture_error_trace: Option<bool>,
 }
