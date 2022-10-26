@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- Add changelog for intelliJ extension, closes [[#542](https://github.com/metalbear-co/mirrord/issues/542)]
+- Add changelog for intelliJ extension, closes [#542](https://github.com/metalbear-co/mirrord/issues/542)
 - Add filter for changelog to ci.yml
 - Telemetry for intelliJ extension.
 
