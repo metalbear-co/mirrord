@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- mirrord-layer: Improve error message when user tries to run a program with args without `--`.
+
 ## 3.4.0
 
 ### Added
