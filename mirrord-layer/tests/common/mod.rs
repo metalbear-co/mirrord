@@ -13,6 +13,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage,
 };
+use regex::{Regex, RegexBuilder};
 use rstest::fixture;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -24,6 +25,7 @@ pub struct TestProcess {
     pub child: Option<Child>,
     stderr: Arc<Mutex<String>>,
     stdout: Arc<Mutex<String>>,
+    error_capture: Regex,
 }
 
 impl TestProcess {
@@ -83,10 +85,18 @@ impl TestProcess {
                 }
             }
         });
+
+        let error_capture = RegexBuilder::new(r"^.*ERROR[^\w_-]")
+            .case_insensitive(true)
+            .multi_line(true)
+            .build()
+            .unwrap();
+
         TestProcess {
             child: Some(child),
             stderr: stderr_data,
             stdout: stdout_data,
+            error_capture,
         }
     }
 
@@ -111,11 +121,11 @@ impl TestProcess {
     }
 
     pub fn assert_no_error_in_stdout(&self) {
-        assert!(!self.stdout.lock().unwrap().to_lowercase().contains("error"));
+        assert!(!self.error_capture.is_match(&self.stdout.lock().unwrap()));
     }
 
     pub fn assert_no_error_in_stderr(&self) {
-        assert!(!self.stderr.lock().unwrap().to_lowercase().contains("error"));
+        assert!(!self.error_capture.is_match(&self.stderr.lock().unwrap()));
     }
 
     pub async fn wait_assert_success(&mut self) {
