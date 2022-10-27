@@ -637,7 +637,7 @@ fn post_go1_19(interceptor: &mut Interceptor, binary: &str) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-pub(crate) fn enable_socket_hooks(interceptor: &mut Interceptor, binary: &str) {
+pub(crate) fn enable_hooks(interceptor: &mut Interceptor, binary: &str) {
     if let Some(version_symbol) =
         frida_gum::Module::find_symbol_by_name(binary, "runtime.buildVersion.str")
     {
