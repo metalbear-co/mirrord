@@ -9,15 +9,25 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
+
+### Changed
+
+- Add tests for environment variables passed to KubeApi for authentication feature for cli credential fetch
+- Remove openssl/libssl dependency, cross compilation is easier now. (It wasn't needed/used)
+- mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
+
+## 3.4.0
+
+### Added
+
 - Add changelog for intelliJ extension, closes [#542](https://github.com/metalbear-co/mirrord/issues/542)
 - Add filter for changelog to ci.yml
-- mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
 - Telemetry for intelliJ extension.
 
 ### Changed
 
 - Update intelliJ extension: lint & bump java version to 17.
-- mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS. 
 - Use same default options as CLI in intelliJ extension. 
 - Improve UI layout of intelliJ extension.
