@@ -269,7 +269,7 @@ mod tests {
                         udp: Some(false),
                     }),
                 }),
-                capture_error_trace: Some(false),
+                capture_error_trace: None,
             },
             pod: PodFileConfig {
                 name: Some("test-service-abcdefg-abcd".to_owned()),
