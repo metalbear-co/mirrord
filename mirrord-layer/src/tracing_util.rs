@@ -46,7 +46,9 @@ pub fn file_tracing_writer() -> NonBlocking {
         )
         .finish(file_appender);
 
-    let _ = TRACING_GUARDS.lock().map(|mut guards| guards.push(guard));
+    if let Ok(mut guards) = TRACING_GUARDS.lock() {
+        guards.push(guard)
+    }
 
     non_blocking
 }
@@ -79,6 +81,6 @@ fn create_github_link<P: AsRef<Path>>(log_file: P) -> String {
             format!("{}&logs={}", base_url, encoded_logs)
         }
     } else {
-        format!("{}", base_url)
+        base_url
     }
 }
