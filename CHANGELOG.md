@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Add tests for environment variables passed to KubeApi for authentication feature for cli credential fetch
+
 ## 3.4.0
 
 ### Added
