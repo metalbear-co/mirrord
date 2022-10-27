@@ -22,36 +22,45 @@ use crate::{
     pod::PodFileConfig, util::VecOrSingle,
 };
 
+// TODO(alex) [mid] 2022-10-27: Add example usage of each field.
+
 /// This is the root struct for mirrord-layer's configuration
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {
+    /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
+    /// certificates).
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
     pub accept_invalid_certificates: Option<bool>,
 
+    /// Allows mirrord to skip unwanted processes.
+    ///
+    /// Useful when you have process A that spawns process B, and you want mirrord to operate only
+    /// on process B.
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
+    /// The pod (podname/deployment/container/containername) that will be impersonated by mirrord.
     #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
     pub target: Option<String>,
 
     #[config(env = "MIRRORD_TARGET_NAMESPACE")]
     pub target_namespace: Option<String>,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent name that already exists that we can connect to.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent listen port that already exists that we can connect to.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
