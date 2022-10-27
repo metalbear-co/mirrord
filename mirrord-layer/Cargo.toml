@@ -25,7 +25,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { version = "0.8", features = ["auto-download"] }
+frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear", version = "0.9", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
@@ -50,8 +50,12 @@ stacker = "0.1"
 
 
 [dev-dependencies]
+base64 = "0.13"
+http-body = "0.4"
+hyper = "0.14"
 rstest = "*"
 test-cdylib = "*"
+tower = "0.4"
 
 [lib]
 crate_type = ["cdylib"]

@@ -8,7 +8,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Changed
+
 - mirrord-layer: Improve error message when user tries to run a program with args without `--`.
+- Add tests for environment variables passed to KubeApi for authentication feature for cli credential fetch
+- Remove openssl/libssl dependency, cross compilation is easier now. (It wasn't needed/used)
 
 ## 3.4.0
 
