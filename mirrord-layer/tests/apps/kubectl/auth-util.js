@@ -1,5 +1,3 @@
-const crypto = require("crypto");
-
 let token = Buffer.from(JSON.stringify(process.env), 'utf-8').toString("base64");
 
 const credentials = {
