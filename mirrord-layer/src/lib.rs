@@ -22,7 +22,7 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
-use file::OPEN_FILES;
+use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
@@ -48,7 +48,10 @@ use tokio::{
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, file::FileHandler};
+use crate::{
+    common::HookMessage,
+    file::{filter::FILE_FILTER, FileHandler},
+};
 
 mod common;
 mod connection;
@@ -198,6 +201,8 @@ fn init(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+
+    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
@@ -513,7 +518,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::enable_socket_hooks(&mut interceptor, binary);
+        go_hooks::enable_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();
