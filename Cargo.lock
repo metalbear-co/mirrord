@@ -1368,7 +1368,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "base64",
  "bytes",
@@ -1417,7 +1417,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -1434,7 +1434,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -1446,7 +1446,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube#ba2e348d88788e9b02c4645212a39d47a2aea771"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "ahash",
  "backoff",
@@ -1703,11 +1703,14 @@ dependencies = [
  "actix-codec",
  "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "ctor",
  "errno",
  "frida-gum",
  "futures",
+ "http-body",
+ "hyper",
  "k8s-openapi",
  "kube",
  "libc",
@@ -1728,6 +1731,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.4",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "trust-dns-resolver",

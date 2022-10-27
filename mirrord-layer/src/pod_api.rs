@@ -92,6 +92,30 @@ impl EnvVarGuard {
             .filter(|key| !self.envs.contains_key(key.as_str()))
             .collect()
     }
+
+    #[cfg(test)]
+    fn is_correct_auth_env(&self, envs: &HashMap<String, String>) -> Result<(), std::io::Error> {
+        for (key, value) in envs {
+            let orig_val = self.envs.get(key).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Missing env value {}", key),
+                )
+            })?;
+
+            if value != orig_val {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Missmatch in values recived {} expected {}",
+                        value, orig_val
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Return the agent image to use
@@ -162,10 +186,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub(crate) fn create_kube_client(
-        mut config: Config,
-        env_guard: &EnvVarGuard,
-    ) -> Result<Client> {
+    pub(crate) fn prepare_config(config: &mut Config, env_guard: &EnvVarGuard) {
         if let Some(mut exec) = config.auth_info.exec.as_mut() {
             match &mut exec.env {
                 Some(envs) => env_guard.extend_kube_env(envs),
@@ -174,14 +195,14 @@ impl KubernetesAPI {
 
             exec.drop_env = Some(env_guard.dropped_env());
         }
-
-        Client::try_from(config).map_err(LayerError::KubeError)
     }
 
     pub async fn new(config: &LayerConfig) -> Result<Self> {
         let guard = EnvVarGuard::new();
-        let kube_config = Self::create_kube_config(config).await?;
-        let client = Self::create_kube_client(kube_config, &guard)?;
+        let mut kube_config = Self::create_kube_config(config).await?;
+        Self::prepare_config(&mut kube_config, &guard);
+
+        let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
 
         Ok(Self {
             client,
@@ -793,8 +814,17 @@ impl FromStr for Target {
 
 #[cfg(test)]
 mod tests {
-    use kube::config::AuthInfo;
+    use std::sync::Arc;
+
+    use http_body::Empty;
+    use hyper::body::Body;
+    use k8s_openapi::http::{header::AUTHORIZATION, Request, Response};
+    use kube::{
+        client::ConfigExt,
+        config::{AuthInfo, ExecConfig},
+    };
     use rstest::rstest;
+    use tower::{service_fn, ServiceBuilder};
 
     use super::*;
 
@@ -828,15 +858,52 @@ mod tests {
     #[tokio::test]
     async fn correct_envs_kubectl() {
         let _guard = EnvVarGuard::new();
-        let config = Config {
+        let mut config = Config {
+            accept_invalid_certs: true,
             auth_info: AuthInfo {
+                exec: Some(ExecConfig {
+                    api_version: Some("client.authentication.k8s.io/v1beta1".to_owned()),
+                    command: "node".to_owned(),
+                    args: Some(vec!["./tests/apps/kubectl/auth-util.js".to_owned()]),
+                    env: None,
+                    drop_env: None,
+                }),
                 ..Default::default()
             },
-            ..Config::new("http://localhost".parse().unwrap())
+            ..Config::new("https://kubernetes.docker.internal:6443".parse().unwrap())
         };
 
-        let result = KubernetesAPI::create_kube_client(config, &_guard);
+        KubernetesAPI::prepare_config(&mut config, &_guard);
 
-        assert!(result.is_ok())
+        let _guard = Arc::new(_guard);
+
+        let service = ServiceBuilder::new()
+            .layer(config.base_uri_layer())
+            .option_layer(config.auth_layer().unwrap())
+            .service(service_fn(move |req: Request<Body>| {
+                let _guard = _guard.clone();
+                async move {
+                    let auth_env_vars = req
+                        .headers()
+                        .get(AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|token| token.strip_prefix("Bearer "))
+                        .and_then(|token| base64::decode(token).ok())
+                        .and_then(|value| {
+                            serde_json::from_slice::<HashMap<String, String>>(&value).ok()
+                        })
+                        .ok_or_else(|| {
+                            std::io::Error::new(std::io::ErrorKind::Other, "No Auth Header Sent")
+                        })?;
+
+                    _guard
+                        .is_correct_auth_env(&auth_env_vars)
+                        .map(|_| Response::new(Empty::new()))
+                }
+            }));
+
+        let client = Client::new(service, config.default_namespace);
+
+        client.send(Request::new(Body::empty())).await.unwrap();
     }
 }
