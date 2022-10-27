@@ -21,10 +21,11 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
+checksum = "57e6e951cfbb2db8de1828d49073a113a29fd7117b1596caa781a258c7e38d72"
 dependencies = [
+ "cfg-if",
  "getrandom",
  "once_cell",
  "version_check",
@@ -761,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "libc",
 ]
@@ -1368,9 +1369,9 @@ dependencies = [
 
 [[package]]
 name = "k8s-openapi"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ae2c04fcee6b01b04e3aadd56bb418932c8e0a9d8a93f48bc68c6bdcdb559d"
+checksum = "6d9455388f4977de4d0934efa9f7d36296295537d774574113a20f6082de03da"
 dependencies = [
  "base64",
  "bytes",
@@ -1385,9 +1386,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "0.73.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f68b954ea9ad888de953fb1488bd8f377c4c78d82d4642efa5925189210b50b7"
+version = "0.75.0"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -1398,9 +1398,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.73.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9150dc7107d9acf4986088f284a0a6dddc5ae37ef1ffdf142f6811dc5998dd58"
+version = "0.75.0"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "base64",
  "bytes",
@@ -1436,9 +1435,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.73.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc8c429676abe6a73b374438d5ca02caaf9ae7a635441253c589b779fa5d0622"
+version = "0.75.0"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -1454,9 +1452,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "0.73.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb405f0d39181acbfdc7c79e3fc095330c9b6465ab50aeb662d762e53b662f1"
+version = "0.75.0"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -1467,9 +1464,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.73.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e9e9da456f0101b77f864a9da44866b9891ad4740db508b4b269343ebeb01d"
+version = "0.75.0"
+source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
 dependencies = [
  "ahash",
  "backoff",
@@ -1627,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "anyhow",
  "clap 3.2.22",
@@ -1646,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1682,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1695,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1711,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1721,16 +1717,19 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "actix-codec",
  "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "ctor",
  "errno",
  "frida-gum",
  "futures",
+ "http-body",
+ "hyper",
  "itertools",
  "k8s-openapi",
  "kube",
@@ -1753,6 +1752,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.4",
+ "tower",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macro"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1771,7 +1771,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "atty",
  "termspin",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "libc",
 ]
@@ -3323,13 +3323,31 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d634a985c4d4238ec39cacaed2e7ae552fbd3c476b552c1deac3021b7d7eaf0c"
+checksum = "0fab5c8b9980850e06d92ddbe3ab839c062c801f3927c0fb8abd6fc8e918fbca"
 dependencies = [
  "itoa",
  "libc",
  "num_threads",
+ "serde",
+ "time-core",
+ "time-macros",
+]
+
+[[package]]
+name = "time-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e153e1f1acaef8acc537e68b44906d2db6436e2b35ac2c6b42640fff91f00fd"
+
+[[package]]
+name = "time-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65bb801831d812c562ae7d2bfb531f26e66e4e1f6b17307ba4149c5064710e5b"
+dependencies = [
+ "time-core",
 ]
 
 [[package]]
@@ -3584,7 +3602,7 @@ source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_
 dependencies = [
  "crossbeam-channel",
  "thiserror",
- "time 0.3.15",
+ "time 0.3.16",
  "tracing-subscriber",
 ]
 

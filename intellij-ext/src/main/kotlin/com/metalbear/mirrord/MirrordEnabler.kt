@@ -1,19 +1,15 @@
 package com.metalbear.mirrord
 
-import com.intellij.notification.Notification
-import com.intellij.notification.NotificationGroup
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.ToggleAction
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.project.Project
 import com.github.zafarkhaja.semver.Version
 import com.intellij.ide.plugins.PluginManagerConfigurable
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.util.PropertiesComponent
-import com.intellij.notification.NotificationAction
+import com.intellij.notification.*
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.project.Project
 import java.net.URL
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -39,7 +35,13 @@ class MirrordEnabler : ToggleAction() {
         }
 
         private const val LAST_CHECK_KEY = "lastCheck"
+        var versionCheckDisabled
+            get() = PropertiesComponent.getInstance().getBoolean("versionCheckDisabled", false)
+            set(value) {
+                PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
+            }
     }
+
     override fun isSelected(e: AnActionEvent): Boolean {
         return MirrordListener.enabled
     }
@@ -57,13 +59,9 @@ class MirrordEnabler : ToggleAction() {
 
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
+    private val os: String = System.getProperty("os.name").replace(" ", "%20")
     private val versionCheckEndpoint: String =
-        "https://version.mirrord.dev/get-latest-version?source=3&version=$version"
-    private var versionCheckDisabled
-        get() = PropertiesComponent.getInstance().getBoolean("versionCheckDisabled", false)
-        set(value) {
-            PropertiesComponent.getInstance().setValue("versionCheckDisabled", value)
-        }
+        "https://version.mirrord.dev/get-latest-version?source=3&version=$version&platform=$os"
 
     /**
      * Fetch the latest version number, compare to local version. If there is a later version available, notify.

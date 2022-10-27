@@ -87,8 +87,6 @@ pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-pub(crate) const MIRRORD_SKIP_LOAD: &str = "MIRRORD_SKIP_LOAD";
-
 /// Check if we're running in NixOS or Devbox
 /// if so, add `sh` to the skip list because of https://github.com/metalbear-co/mirrord/issues/531
 fn nix_devbox_patch(config: &mut LayerConfig) {
@@ -120,10 +118,6 @@ fn is_nix_or_devbox() -> bool {
 #[ctor]
 fn before_init() {
     if !cfg!(test) {
-        if let Ok(Ok(true)) = std::env::var(MIRRORD_SKIP_LOAD).map(|value| value.parse::<bool>()) {
-            return;
-        }
-
         let args = std::env::args().collect::<Vec<_>>();
         let given_process = args.first().unwrap().split('/').last().unwrap();
 

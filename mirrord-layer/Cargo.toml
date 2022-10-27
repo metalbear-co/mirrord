@@ -54,8 +54,12 @@ os_info = "3"
 
 
 [dev-dependencies]
+base64 = "0.13"
+http-body = "0.4"
+hyper = "0.14"
 rstest = "*"
 test-cdylib = "*"
+tower = "0.4"
 
 [lib]
 crate_type = ["cdylib"]

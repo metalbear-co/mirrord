@@ -126,6 +126,9 @@ fn sip_check(binary_path: &str) -> Result<()> {
 }
 
 fn exec(args: &ExecArgs) -> Result<()> {
+    if !args.no_telemetry {
+        prompt_outdated_version();
+    }
     info!(
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
@@ -184,6 +187,12 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     if let Some(agent_ttl) = &args.agent_ttl {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
+    }
+    if let Some(agent_statup_timeout) = &args.agent_statup_timeout {
+        std::env::set_var(
+            "MIRRORD_AGENT_STARTUP_TIMEOUT",
+            agent_statup_timeout.to_string(),
+        );
     }
 
     if args.enable_rw_fs && args.no_fs {
@@ -278,7 +287,6 @@ fn main() -> Result<()> {
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
-    prompt_outdated_version();
 
     let cli = Cli::parse();
     match cli.commands {
@@ -299,8 +307,9 @@ fn prompt_outdated_version() {
         if let Ok(client) = reqwest::blocking::Client::builder().build() {
             if let Ok(result) = client
                 .get(format!(
-                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}",
-                    CURRENT_VERSION
+                    "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
+                    CURRENT_VERSION,
+                    std::env::consts::OS
                 ))
                 .timeout(Duration::from_secs(1))
                 .send()

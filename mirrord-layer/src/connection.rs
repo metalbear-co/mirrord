@@ -1,6 +1,7 @@
 use std::{
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, ReadBuf};
@@ -112,7 +113,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
         AgentConnection::TcpStream(stream)
     } else {
-        let k8s_api = KubernetesAPI::new(config).await.unwrap();
+        let k8s_api = KubernetesAPI::new(config)
+            .await
+            .unwrap_or_else(|err| handle_error(err));
+
         let (pod_agent_name, agent_port) = {
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
@@ -126,10 +130,13 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 info!("No existing agent, spawning new one.");
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
-                let pod_agent_name = match k8s_api.create_agent(agent_port).await {
-                    Ok(pod_name) => pod_name,
-                    Err(err) => handle_error(err),
-                };
+                let pod_agent_name = tokio::time::timeout(
+                    Duration::from_secs(config.agent.startup_timeout),
+                    k8s_api.create_agent(agent_port),
+                )
+                .await
+                .unwrap_or(Err(LayerError::AgentReadyTimeout))
+                .unwrap_or_else(|err| handle_error(err));
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);

@@ -103,6 +103,10 @@ pub(super) struct ExecArgs {
     #[clap(long, value_parser)]
     pub agent_ttl: Option<u16>,
 
+    /// Agent Startup Timeout seconds
+    #[clap(long, value_parser)]
+    pub agent_statup_timeout: Option<u16>,
+
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]
     pub accept_invalid_certificates: bool,
@@ -134,6 +138,10 @@ pub(super) struct ExecArgs {
     /// Disable udp outgoing feature.
     #[clap(long, value_parser)]
     pub no_udp_outgoing: bool,
+
+    /// Disable telemetry - this also disables version check. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
+    #[clap(long, value_parser)]
+    pub no_telemetry: bool,
 
     /// Load config from config file
     #[clap(short = 'f', conflicts_with_all = &["target", "pod-name"], long, value_parser)]
