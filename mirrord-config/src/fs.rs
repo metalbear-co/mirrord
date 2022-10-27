@@ -1,65 +1,72 @@
+/// mirrord file operations support 2 modes of configuration:
+///
+/// 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
+/// or disable file operations;
+///
+/// 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
+/// [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
+/// locally or remotely.
 use serde::Deserialize;
 
+pub use self::{advanced::*, mode::*};
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
     util::MirrordToggleableConfig,
 };
 
+pub mod advanced;
+pub mod mode;
+
+/// Changes file operations behavior based on user configuration.
+///
+/// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum FsConfig {
-    Disabled,
-    Read,
-    Write,
+#[serde(untagged, rename_all = "lowercase")]
+pub enum FsUserConfig {
+    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and
+    /// `MIRRORD_FILE_RO_OPS` (default).
+    Simple(FsModeConfig),
+
+    /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the
+    /// `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE` env vars.
+    Advanced(AdvancedFsUserConfig),
 }
 
-impl FsConfig {
-    pub fn is_read(&self) -> bool {
-        self == &FsConfig::Read
-    }
-
-    pub fn is_write(&self) -> bool {
-        self == &FsConfig::Write
-    }
-}
-
-impl Default for FsConfig {
+impl Default for FsUserConfig {
     fn default() -> Self {
-        FsConfig::Read
+        FsUserConfig::Simple(FsModeConfig::Read)
     }
 }
 
-impl FsConfig {
-    fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
-        match (fs, ro_fs) {
-            (Some(false), Some(true)) | (None, Some(true)) => Some(FsConfig::Read),
-            (Some(true), _) => Some(FsConfig::Write),
-            (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
-                Some(FsConfig::Disabled)
-            }
-            (None, None) => None,
-        }
-    }
-}
-
-impl MirrordConfig for FsConfig {
+impl MirrordConfig for FsUserConfig {
     type Generated = FsConfig;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let config = match self {
+            FsUserConfig::Simple(mode) => FsConfig {
+                mode: mode.generate_config()?,
+                include: FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value(),
+                exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value(),
+            },
+            FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
+        };
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        Ok(config)
     }
 }
 
-impl MirrordToggleableConfig for FsConfig {
+impl MirrordToggleableConfig for FsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let mode = FsModeConfig::disabled_config()?;
+        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
+        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsConfig::Disabled))
+        Ok(FsConfig {
+            mode,
+            include,
+            exclude,
+        })
     }
 }
 
@@ -70,39 +77,143 @@ mod tests {
     use super::*;
     use crate::{
         config::MirrordConfig,
-        util::{testing::with_env_vars, ToggleableConfig},
+        util::{testing::with_env_vars, VecOrSingle},
     };
 
     #[rstest]
-    #[case(None, None, FsConfig::Read)]
-    #[case(Some("true"), None, FsConfig::Write)]
-    #[case(Some("true"), Some("true"), FsConfig::Write)]
-    #[case(Some("false"), Some("true"), FsConfig::Read)]
-    fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let fs = FsConfig::default().generate_config().unwrap();
+    fn test_fs_config_default() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            ..Default::default()
+        };
 
-                assert_eq!(fs, expect);
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", Some("true")),
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", None),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
+            ],
+            || {
+                let fs_config = FsUserConfig::default().generate_config().unwrap();
+
+                assert_eq!(fs_config, expect);
             },
         );
     }
 
     #[rstest]
-    #[case(None, None, FsConfig::Disabled)]
-    #[case(Some("true"), None, FsConfig::Write)]
-    #[case(Some("true"), Some("true"), FsConfig::Write)]
-    #[case(Some("false"), Some("true"), FsConfig::Read)]
-    fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let fs = ToggleableConfig::<FsConfig>::Enabled(false)
-                    .generate_config()
-                    .unwrap();
+    fn test_fs_config_read_only_include() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            include: Some(VecOrSingle::Single(".*".to_string())),
+            exclude: None,
+        };
 
-                assert_eq!(fs, expect);
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", Some("true")),
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", Some(".*")),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
+            ],
+            || {
+                let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
+                    mode: FsModeConfig::Read,
+                    include: Some(VecOrSingle::Single(".*".to_string())),
+                    exclude: None,
+                })
+                .generate_config()
+                .unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
+    }
+
+    #[rstest]
+    fn test_fs_config_read_only_exclude() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            include: None,
+            exclude: Some(VecOrSingle::Single(".*".to_string())),
+        };
+
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", Some("true")),
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", None),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", Some(".*")),
+            ],
+            || {
+                let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
+                    mode: FsModeConfig::Read,
+                    include: None,
+                    exclude: Some(VecOrSingle::Single(".*".to_string())),
+                })
+                .generate_config()
+                .unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
+    }
+
+    #[rstest]
+    fn test_fs_config_read_only_include_exclude() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Read,
+            include: Some(VecOrSingle::Single(".*".to_string())),
+            exclude: Some(VecOrSingle::Single(".*".to_string())),
+        };
+
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", Some("true")),
+                ("MIRRORD_FILE_OPS", None),
+                ("MIRRORD_FILE_FILTER_INCLUDE", Some(".*")),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", Some(".*")),
+            ],
+            || {
+                let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
+                    mode: FsModeConfig::Read,
+                    include: Some(VecOrSingle::Single(".*".to_string())),
+                    exclude: Some(VecOrSingle::Single(".*".to_string())),
+                })
+                .generate_config()
+                .unwrap();
+
+                assert_eq!(fs_config, expect);
+            },
+        );
+    }
+
+    #[rstest]
+    fn test_fs_config_read_write_include_exclude() {
+        let expect = FsConfig {
+            mode: FsModeConfig::Write,
+            include: Some(VecOrSingle::Single(".*".to_string())),
+            exclude: Some(VecOrSingle::Single(".*".to_string())),
+        };
+
+        with_env_vars(
+            vec![
+                ("MIRRORD_FILE_RO_OPS", None),
+                ("MIRRORD_FILE_OPS", Some("true")),
+                ("MIRRORD_FILE_FILTER_INCLUDE", Some(".*")),
+                ("MIRRORD_FILE_FILTER_EXCLUDE", Some(".*")),
+            ],
+            || {
+                let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
+                    mode: FsModeConfig::Write,
+                    include: Some(VecOrSingle::Single(".*".to_string())),
+                    exclude: Some(VecOrSingle::Single(".*".to_string())),
+                })
+                .generate_config()
+                .unwrap();
+
+                assert_eq!(fs_config, expect);
             },
         );
     }

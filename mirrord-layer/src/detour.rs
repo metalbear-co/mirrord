@@ -79,6 +79,7 @@ pub(crate) enum Bypass {
     RelativePath(PathBuf),
     ReadOnly(PathBuf),
     EmptyBuffer,
+    EmptyOption,
 }
 
 /// `ControlFlow`-like enum to be used by hooks.
@@ -146,6 +147,15 @@ impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
         match residual {
             Ok(_) => unreachable!(),
             Err(e) => Detour::Bypass(e),
+        }
+    }
+}
+
+impl<S> FromResidual<Option<convert::Infallible>> for Detour<S> {
+    fn from_residual(residual: Option<convert::Infallible>) -> Self {
+        match residual {
+            Some(_) => unreachable!(),
+            None => Detour::Bypass(Bypass::EmptyOption),
         }
     }
 }
