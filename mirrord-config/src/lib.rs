@@ -77,6 +77,7 @@ pub struct LayerFileConfig {
     #[config(nested)]
     pub pod: PodFileConfig,
     // END
+    /// Controls mirrord features, see [`feature::FeatureFileConfig`].
     #[serde(default)]
     #[config(nested)]
     pub feature: FeatureFileConfig,
