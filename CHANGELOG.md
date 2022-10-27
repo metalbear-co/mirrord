@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- aarch64 release binaries (no go support yet, no IntelliJ also).
+
 ### Changed
 
 - Add tests for environment variables passed to KubeApi for authentication feature for cli credential fetch
