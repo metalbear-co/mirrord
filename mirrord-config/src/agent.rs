@@ -28,6 +28,9 @@ pub struct AgentFileConfig {
 
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
+
+    #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
+    pub startup_timeout: Option<u64>,
 }
 
 #[cfg(test)]
@@ -52,6 +55,7 @@ mod tests {
             Option<&str>,
             Option<u16>,
         ),
+        #[values((None, 60), (Some("30"), 30))] startup_timeout: (Option<&str>, u64),
     ) {
         with_env_vars(
             vec![
@@ -65,6 +69,7 @@ mod tests {
                     "MIRRORD_AGENT_COMMUNICATION_TIMEOUT",
                     communication_timeout.0,
                 ),
+                ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
             ],
             || {
                 let agent = AgentFileConfig::default().generate_config().unwrap();
@@ -76,6 +81,7 @@ mod tests {
                 assert_eq!(agent.ttl, ttl.1);
                 assert_eq!(agent.ephemeral, ephemeral.1);
                 assert_eq!(agent.communication_timeout, communication_timeout.1);
+                assert_eq!(agent.startup_timeout, startup_timeout.1);
             },
         );
     }

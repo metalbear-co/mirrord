@@ -262,6 +262,7 @@ mod tests {
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,
+                startup_timeout: None,
             },
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),

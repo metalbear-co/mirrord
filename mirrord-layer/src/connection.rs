@@ -1,6 +1,7 @@
 use std::{
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, ReadBuf};
@@ -71,6 +72,26 @@ where
     }
 }
 
+const FAILED_TO_CREATE_AGENT: &str = r#"
+mirrord-layer failed while trying to establish connection with the agent pod!
+
+- Suggestions:
+
+>> Check that the agent pod was created with `$ kubectl get pods`, it should look something like
+   "mirrord-agent-qjys2dg9xk-rgnhr        1/1     Running   0              7s".
+
+>> Check that you're using the correct kubernetes credentials (and configuration).
+
+>> Check your kubernetes context match where the agent should be spawned.
+
+- If you're still stuck and everything looks fine:
+
+>> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
+
+>> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
+
+"#;
+
 fn handle_error(err: LayerError) -> ! {
     match err {
         LayerError::KubeError(kube::Error::HyperError(err)) => {
@@ -81,7 +102,7 @@ fn handle_error(err: LayerError) -> ! {
                 None => panic!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("failed to create agent in k8s: {}", err),
+        _ => panic!("{FAILED_TO_CREATE_AGENT}\nwith error {err:#?}"),
     }
 }
 
@@ -92,7 +113,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
         AgentConnection::TcpStream(stream)
     } else {
-        let k8s_api = KubernetesAPI::new(config).await.unwrap();
+        let k8s_api = KubernetesAPI::new(config)
+            .await
+            .unwrap_or_else(|err| handle_error(err));
+
         let (pod_agent_name, agent_port) = {
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
@@ -106,10 +130,13 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 info!("No existing agent, spawning new one.");
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
-                let pod_agent_name = match k8s_api.create_agent(agent_port).await {
-                    Ok(pod_name) => pod_name,
-                    Err(err) => handle_error(err),
-                };
+                let pod_agent_name = tokio::time::timeout(
+                    Duration::from_secs(config.agent.startup_timeout),
+                    k8s_api.create_agent(agent_port),
+                )
+                .await
+                .unwrap_or(Err(LayerError::AgentReadyTimeout))
+                .unwrap_or_else(|err| handle_error(err));
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
