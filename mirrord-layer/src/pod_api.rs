@@ -857,6 +857,8 @@ mod tests {
 
     #[tokio::test]
     async fn correct_envs_kubectl() {
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "true");
+
         let _guard = EnvVarGuard::new();
         let mut config = Config {
             accept_invalid_certs: true,
@@ -903,6 +905,8 @@ mod tests {
             }));
 
         let client = Client::new(service, config.default_namespace);
+
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "false");
 
         client.send(Request::new(Body::empty())).await.unwrap();
     }
