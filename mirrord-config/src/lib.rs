@@ -42,10 +42,13 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// The pod (podname/deployment/container/containername) that will be impersonated by mirrord.
+    /// The target that will be impersonated by mirrord.
+    ///
+    /// Supports `pod`, `podname`, `deployment`, `container`, `containername`.
     #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
     pub target: Option<String>,
 
+    /// Namespace where the `target` lives.
     #[config(env = "MIRRORD_TARGET_NAMESPACE")]
     pub target_namespace: Option<String>,
 
@@ -64,6 +67,7 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
+    /// Agent configuration, see [`agent::AgentFileConfig`].
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,

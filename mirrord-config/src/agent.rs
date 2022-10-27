@@ -8,27 +8,45 @@ use crate::config::source::MirrordConfigSource;
 #[serde(deny_unknown_fields)]
 #[config(map_to = AgentConfig)]
 pub struct AgentFileConfig {
+    /// Log level for the agent.
+    ///
+    /// Supports anything that would work with `RUST_LOG`.
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: Option<String>,
 
+    /// Namespace where the agent shall live.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
+    /// Name of the agent's docker image.
+    ///
+    /// You probably don't need this, unless you want to use a custom mirrord-agent build.
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
+    /// Controls when a new agent image is downloaded.
+    ///
+    /// Supports any valid kubernetes [image pull
+    /// policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: Option<String>,
 
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
     pub ttl: Option<u16>,
 
+    /// Runs the agent as an [ephemeral
+    /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral: Option<bool>,
 
+    /// Controls how long should the agent await with no communication before timing out.
+    ///
+    /// mirrord has its own heartbeat mechanism, so even if your application has no messages, the
+    /// agent will stay alive until a heartbeat message times out with the value specified here.
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
+    /// How long to wait for the agent to finish initialization.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
     pub startup_timeout: Option<u64>,
 }
