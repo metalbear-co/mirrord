@@ -16,6 +16,7 @@ use trust_dns_resolver::config::Protocol;
 use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
+    intellij_debug_patch,
 };
 
 pub(super) mod hooks;
@@ -125,8 +126,8 @@ pub struct UserSocket {
 }
 
 #[inline]
-const fn is_ignored_port(port: Port) -> bool {
-    port == 0 || (port > 50000 && port < 60000)
+fn is_ignored_port(port: Port) -> bool {
+    port == 0 || (port > 50000 && port < 60000) || intellij_debug_patch(port)
 }
 
 /// Fill in the sockaddr structure for the given address.

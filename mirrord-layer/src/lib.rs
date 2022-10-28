@@ -32,7 +32,7 @@ use mirrord_config::{
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, Port,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
@@ -112,6 +112,23 @@ fn is_nix_or_devbox() -> bool {
     }
     else if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
         true
+    } else {
+        false
+    }
+}
+
+/// Prevent mirrord from connecting to ports used by the intelliJ debugger
+pub(crate) fn intellij_debug_patch(port: Port) -> bool {
+    if let Ok(ports) = std::env::var("INTELLIJ_DEBUG_PATCH") {
+        // port range can be specified as "1234-1236" or just "1234"
+        let ports: Vec<u16> = ports.split('-').map(|p| p.parse().unwrap()).collect();
+        if ports.len() == 2 {
+            port >= ports[0] && port <= ports[1]
+        } else if ports.len() == 1 {
+            port == ports[0]
+        } else {
+            panic!("INTELLIJ_DEBUG_PATCH: invalid port range");
+        }
     } else {
         false
     }
