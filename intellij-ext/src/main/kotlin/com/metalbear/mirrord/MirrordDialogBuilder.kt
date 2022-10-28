@@ -43,7 +43,7 @@ object MirrordDialogBuilder {
     ): JPanel = JPanel(BorderLayout()).apply {
         add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
         add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
-        add(JPanel(GridLayout(9, 2, 15, 2)).apply {
+        add(JPanel(GridLayout(7, 2, 15, 2)).apply {
             add(fileOps)
             add(stealTraffic)
             add(telemetry)
@@ -72,7 +72,6 @@ object MirrordDialogBuilder {
                 add(JLabel("Ignore Debugger Port:"))
                 add(ignorePorts)
             })
-            add(JLabel())
             border = EmptyBorder(0, 5, 5, 5)
         }, BorderLayout.EAST)
     }
