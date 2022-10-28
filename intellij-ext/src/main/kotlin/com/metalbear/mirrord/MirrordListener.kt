@@ -82,6 +82,7 @@ class MirrordListener : ExecutionListener {
 
                     val excludeEnv = JTextField(defaults.overrideEnvVarsExclude)
                     val includeEnv = JTextField(defaults.overrideEnvVarsInclude)
+                    val ignorePorts = JTextField(defaults.ignorePorts)
 
                     val mirrordConfigDialog = MirrordDialogBuilder.createDialogBuilder(
                         MirrordDialogBuilder.createMirrordConfigDialog(
@@ -95,6 +96,7 @@ class MirrordListener : ExecutionListener {
                             udpOutgoingTraffic,
                             agentRustLog,
                             rustLog,
+                            ignorePorts,
                             excludeEnv,
                             includeEnv,
                         )
@@ -112,6 +114,7 @@ class MirrordListener : ExecutionListener {
                         mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()
                         mirrordEnv["RUST_LOG"] = (rustLog.selectedItem as LogLevel).name
                         mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = (agentRustLog.selectedItem as LogLevel).name
+                        mirrordEnv["INTELLIJ_IGNORE_PORTS"] = ignorePorts.text.toString()
                         if (excludeEnv.text.isNotEmpty()) {
                             mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
                         }

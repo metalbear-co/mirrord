@@ -37,12 +37,13 @@ object MirrordDialogBuilder {
         udpOutgoingTraffic: JCheckBox,
         agentRustLog: JComboBox<LogLevel>,
         rustLog: JComboBox<LogLevel>,
+        ignorePorts: JTextField,
         excludeEnv: JTextField,
         includeEnv: JTextField
     ): JPanel = JPanel(BorderLayout()).apply {
         add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
         add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
-        add(JPanel(GridLayout(6, 2, 15, 2)).apply {
+        add(JPanel(GridLayout(9, 2, 15, 2)).apply {
             add(fileOps)
             add(stealTraffic)
             add(telemetry)
@@ -67,6 +68,11 @@ object MirrordDialogBuilder {
                 add(JLabel("Include env vars:"))
                 add(includeEnv)
             })
+            add(JPanel(GridLayout(2, 1)).apply {
+                add(JLabel("Ignore Debugger Port:"))
+                add(ignorePorts)
+            })
+            add(JLabel())
             border = EmptyBorder(0, 5, 5, 5)
         }, BorderLayout.EAST)
     }

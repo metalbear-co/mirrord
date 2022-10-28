@@ -19,6 +19,7 @@ data class MirrordDefaultConfig(
     val rustLog: LogLevel = LogLevel.INFO,
     val overrideEnvVarsExclude: String = "",
     val overrideEnvVarsInclude: String = "*",
+    val ignorePorts: String = "",
 )
 
 private fun getSharedLibPath(libName: String): String {

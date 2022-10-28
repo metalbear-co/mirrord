@@ -19,6 +19,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Lint `README` and update it for `--target` flag.
 
+### Fixed
+
+- Env var to ignore ports used by a debugger for intelliJ, refer [#644](https://github.com/metalbear-co/mirrord/issues/644)
+
 ## 3.4.0
 
 ### Added

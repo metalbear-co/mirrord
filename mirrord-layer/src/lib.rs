@@ -119,15 +119,19 @@ fn is_nix_or_devbox() -> bool {
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
 pub(crate) fn intellij_debug_patch(port: Port) -> bool {
-    if let Ok(ports) = std::env::var("INTELLIJ_DEBUG_PATCH") {
-        // port range can be specified as "1234-1236" or just "1234"
-        let ports: Vec<u16> = ports.split('-').map(|p| p.parse().unwrap()).collect();
-        if ports.len() == 2 {
-            port >= ports[0] && port <= ports[1]
-        } else if ports.len() == 1 {
-            port == ports[0]
-        } else {
-            panic!("INTELLIJ_DEBUG_PATCH: invalid port range");
+    if let Ok(ports) = std::env::var("INTELLIJ_IGNORE_PORTS") {
+        // port range can be specified as "45000-65000" or just "45893"
+        let ports: Vec<u16> = ports
+            .split('-')
+            .map(|p| {
+                p.parse()
+                    .expect("Failed to parse the given port - not a number!")
+            })
+            .collect();
+        match ports.len() {
+            2 => port >= ports[0] && port <= ports[1],
+            1 => port == ports[0],
+            _ => false,
         }
     } else {
         false
