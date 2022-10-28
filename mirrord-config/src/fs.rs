@@ -24,8 +24,8 @@ pub mod mode;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
-    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and
-    /// `MIRRORD_FILE_RO_OPS` (default).
+    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`
+    /// (default).
     Simple(FsModeConfig),
 
     /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the

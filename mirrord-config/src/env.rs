@@ -8,14 +8,22 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// Allows the user to set or override a local process' environment variables with the ones from a
+/// remote pod.
+///
+/// Which environment variables to load from the remote are controlled by setting either `include`
+/// or `exclude`.
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[config(map_to = EnvConfig)]
 pub struct EnvFileConfig {
+    /// Include only these remote environment variables in the local process.
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// Include the remote environment variables in the local process that are **NOT** specified by
+    /// this option.
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 

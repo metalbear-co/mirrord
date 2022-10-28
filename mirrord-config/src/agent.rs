@@ -3,6 +3,7 @@ use serde::Deserialize;
 
 use crate::config::source::MirrordConfigSource;
 
+/// Configuration for the agent pod that is spawned in the kubernetes context.
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -31,6 +32,7 @@ pub struct AgentFileConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: Option<String>,
 
+    /// Controls for how long should the agent pod persist (even after the local process finished).
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
     pub ttl: Option<u16>,
 

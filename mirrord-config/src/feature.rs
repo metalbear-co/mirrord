@@ -6,7 +6,7 @@ use crate::{
     network::NetworkFileConfig, util::ToggleableConfig,
 };
 
-// TODO(alex) [high] 2022-10-27: Expand these docs.
+/// Configuration for mirrord features.
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
