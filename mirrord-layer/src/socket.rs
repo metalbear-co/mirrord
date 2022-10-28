@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -16,7 +16,6 @@ use trust_dns_resolver::config::Protocol;
 use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
-    intellij_debug_patch,
 };
 
 pub(super) mod hooks;
@@ -126,8 +125,13 @@ pub struct UserSocket {
 }
 
 #[inline]
-fn is_ignored_port(port: Port) -> bool {
-    port == 0 || (port > 50000 && port < 60000) || intellij_debug_patch(port)
+const fn is_ignored_port(port: Port) -> bool {
+    port == 0 || (port > 50000 && port < 60000)
+}
+
+#[inline]
+fn is_ignored_ip(ip: IpAddr) -> bool {
+    ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
 }
 
 /// Fill in the sockaddr structure for the given address.
