@@ -22,7 +22,7 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
-use file::OPEN_FILES;
+use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
@@ -48,7 +48,10 @@ use tokio::{
 use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{common::HookMessage, file::FileHandler};
+use crate::{
+    common::HookMessage,
+    file::{filter::FILE_FILTER, FileHandler},
+};
 
 mod common;
 mod connection;
@@ -198,6 +201,8 @@ fn init(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+
+    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
@@ -464,7 +469,8 @@ async fn start_layer_thread(
                     }
                 }
             } else {
-                graceful_exit!("unexpected response - expected env vars response {msg:?}");
+                let raw_issue = format!("Expected env vars response, but got {msg:?}");
+                graceful_exit!("{}{FAIL_STILL_STUCK}{}", FAIL_UNEXPECTED_RESPONSE, raw_issue);
             }
           },
           _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
@@ -513,7 +519,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::enable_socket_hooks(&mut interceptor, binary);
+        go_hooks::enable_hooks(&mut interceptor, binary);
     }
 
     interceptor.end_transaction();
@@ -553,6 +559,24 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
+
+pub(crate) const FAIL_STILL_STUCK: &str = r#"
+- If you're still stuck and everything looks fine:
+
+>> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
+
+>> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
+
+"#;
+
+const FAIL_UNEXPECTED_RESPONSE: &str = r#"
+mirrord-layer received an unexpected response from the agent pod!
+
+- Suggestions:
+
+>> When trying to run a program with arguments in the form of `app -arg value`, run it as
+   `app -- -arg value` instead.
+"#;
 
 #[cfg(test)]
 mod tests {
