@@ -3,6 +3,8 @@ on:
   push:
     tags:
       - "*.*.*"
+  # Running from workflow dispatch (AKA manual) will not publish anything.
+  # This is intended for testing changes to this flow.
   workflow_dispatch:
 
 jobs:
@@ -27,6 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.target}}-${{matrix.os}}
+      # We use zigbuild for easy cross compilation (no need for target's gcc when compiling C dependencies)
       - name: setup zigbuild
         run: python3 -m pip install ziglang && cargo install cargo-zigbuild
       - name: build mirrord-layer and cli
