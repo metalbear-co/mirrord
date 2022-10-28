@@ -118,8 +118,8 @@ fn is_nix_or_devbox() -> bool {
 }
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
-pub(crate) fn intellij_debug_patch(port: Port) -> bool {
-    if let Ok(ports) = std::env::var("INTELLIJ_IGNORE_PORTS") {
+pub(crate) fn port_debug_patch(port: Port) -> bool {
+    if let Ok(ports) = std::env::var("DEBBUGER_IGNORE_PORTS_PATCH") {
         // port range can be specified as "45000-65000" or just "45893"
         let ports: Vec<u16> = ports
             .split('-')

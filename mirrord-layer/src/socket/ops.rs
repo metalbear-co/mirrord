@@ -19,8 +19,8 @@ use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     detour::{Detour, OptionExt},
     error::HookError,
-    intellij_debug_patch,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
+    port_debug_patch,
     tcp::{HookMessageTcp, Listen},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
@@ -262,7 +262,7 @@ pub(super) fn connect(
 ) -> Detour<i32> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
 
-    if (is_ignored_port(remote_address.port()) || intellij_debug_patch(remote_address.port()))
+    if (is_ignored_port(remote_address.port()) || port_debug_patch(remote_address.port()))
         && is_ignored_ip(remote_address.ip())
     {
         Err(Bypass::Port(remote_address.port()))?
