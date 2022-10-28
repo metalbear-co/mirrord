@@ -38,8 +38,8 @@ install() {
   if [[ "$OSTYPE" == "linux"* ]]; then
       ARCH=$(uname -m);
       OS="linux";
-      if [[ "$ARCH" != "x86_64" ]]; then
-          echo "mirrord is only available for linux x86_64 architecture"
+      if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" ]]; then
+          echo "mirrord is only available for linux x86_64/aarch64 architecture"
           file_issue_prompt
           exit 1
       fi
