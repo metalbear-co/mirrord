@@ -16,6 +16,17 @@ use crate::{
 ///
 /// ## Examples
 ///
+/// - Include every environment variable from the remote pod (default).:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// include = "*"
+/// ```
+///
+/// Some environment variables are excluded by default (`PATH` for example), including these
+/// requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].
+///
 /// - Include the remote pod's environment variables "project", "database":
 ///
 /// ```yaml

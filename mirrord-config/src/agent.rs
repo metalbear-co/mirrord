@@ -21,7 +21,7 @@ pub struct AgentFileConfig {
 
     /// Name of the agent's docker image.
     ///
-    /// You probably don't need this, unless you want to use a custom mirrord-agent build.
+    /// Useful when a custom build of mirrord-agent is required.
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
@@ -41,14 +41,14 @@ pub struct AgentFileConfig {
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral: Option<bool>,
 
-    /// Controls how long should the agent await with no communication before timing out.
+    /// Controls how long should the agent wait when there is no communication, before timing out.
     ///
     /// mirrord has its own heartbeat mechanism, so even if your application has no messages, the
     /// agent will stay alive until a heartbeat message times out with the value specified here.
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
-    /// How long to wait for the agent to finish initialization.
+    /// Controls how long to wait for the agent to finish initialization.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
     pub startup_timeout: Option<u64>,
 }
