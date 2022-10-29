@@ -37,8 +37,8 @@ pub struct LayerFileConfig {
 
     /// Allows mirrord to skip unwanted processes.
     ///
-    /// Useful when you have process A that spawns process B, and you want mirrord to operate only
-    /// on process B.
+    /// Useful when process A spawns process B, and the user wants mirrord to operate only on
+    /// process B.
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 

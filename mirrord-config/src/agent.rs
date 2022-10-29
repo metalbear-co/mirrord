@@ -43,8 +43,9 @@ pub struct AgentFileConfig {
 
     /// Controls how long should the agent wait when there is no communication, before timing out.
     ///
-    /// mirrord has its own heartbeat mechanism, so even if your application has no messages, the
-    /// agent will stay alive until a heartbeat message times out with the value specified here.
+    /// mirrord has its own heartbeat mechanism, so even if the local application has no messages,
+    /// the agent will stay alive until a heartbeat message times out with the value specified
+    /// here.
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
