@@ -20,6 +20,36 @@ pub mod mode;
 /// Changes file operations behavior based on user configuration.
 ///
 /// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
+///
+/// ## Examples
+///
+/// - Read-write file operations:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// fs = write
+/// ```
+///
+/// - Read-only excluding `.foo` files:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// [fs]
+/// mode = read
+/// exclude = "^.*\.foo$"
+/// ```
+///
+/// - Read-write including only `.baz` files:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// [fs]
+/// mode = write
+/// include = "^.*\.baz$"
+/// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged, rename_all = "lowercase")]

@@ -13,6 +13,25 @@ use crate::{
 ///
 /// Which environment variables to load from the remote are controlled by setting either `include`
 /// or `exclude`.
+///
+/// ## Examples
+///
+/// - Include the remote pod's environment variables "project", "database":
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// include = "project;database"
+/// ```
+///
+/// - Exclude the remote pod's environment variables "project", "database", and include everything
+///   else:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// exclude = "project;database"
+/// ```
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -27,6 +46,7 @@ pub struct EnvFileConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
+    // TODO(alex) [mid] 2022-10-29: Have no idea about this.
     /// Set or override environment variables.
     #[serde(rename = "override")]
     pub overrides: Option<HashMap<String, String>>,
