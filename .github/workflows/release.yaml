@@ -205,8 +205,8 @@ jobs:
     needs: [build_binaries, build_binaries_macos, release_docker_image]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2      
-        id: version      
+      - uses: actions/checkout@v2
+        id: version
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
@@ -289,3 +289,17 @@ jobs:
 
       - name: Update latest tag
         uses: EndBug/latest-tag@latest
+
+  bump_homebrew:
+    needs: release_gh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mislav/bump-homebrew-formula-action@v2
+        with:
+          formula-name: mirrord
+          formula-path: mirrord.rb
+          homebrew-tap: metalbear-co/homebrew-mirrord
+          download-url: https://github.com/metalbear-co/mirrord/releases/download/${{ github.ref_name }}/mirrord_mac_universal.zip
+          commit-message: Bump mirrord to {{version}}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
