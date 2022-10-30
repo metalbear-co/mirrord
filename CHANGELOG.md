@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - aarch64 release binaries (no go support yet, no IntelliJ also).
 - mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
+- mirrord-layer: Allow capturing tracing logs to file and print github issue creation link via MIRRORD_CAPTURE_ERROR_TRACE env variable
 
 ### Changed
 
