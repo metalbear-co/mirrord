@@ -427,7 +427,9 @@ async fn thread_loop(
         }
     }
 
-    tracing_util::print_support_message();
+    if config.feature.capture_error_trace {
+        tracing_util::print_support_message();
+    }
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
