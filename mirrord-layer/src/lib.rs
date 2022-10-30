@@ -120,7 +120,7 @@ fn is_nix_or_devbox() -> bool {
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
 pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
-    if let Ok(ports) = std::env::var("DEBBUGER_IGNORE_PORTS_PATCH") {
+    if let Ok(ports) = std::env::var("DEBUGGER_IGNORE_PORTS_PATCH") {
         let (ip, port) = (addr.ip(), addr.port());
         let ignored_ip =
             ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
@@ -133,7 +133,7 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
             })
             .collect();
         match ports.len() {
-            2 => ignored_ip && port >= ports[0] && port <= ports[1],
+            2 => ignored_ip && (port >= ports[0] && port <= ports[1]),
             1 => ignored_ip && port == ports[0],
             _ => false,
         }
