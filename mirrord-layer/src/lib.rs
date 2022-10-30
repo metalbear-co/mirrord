@@ -172,28 +172,28 @@ fn deprecation_check(config: &LayerConfig) {
 // END
 
 fn init(config: LayerConfig) {
-    let file_log = if config.feature.capture_error_trace {
-        Some(
-            tracing_subscriber::fmt::layer()
-                .with_writer(tracing_util::file_tracing_writer())
-                .with_ansi(false)
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE),
-        )
+    if config.feature.capture_error_trace {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(tracing_util::file_tracing_writer())
+                    .with_ansi(false)
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::ACTIVE),
+            )
+            .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
+            .init();
     } else {
-        None
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::ACTIVE)
+                    .compact(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
     };
-
-    tracing_subscriber::registry()
-        .with(file_log)
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE)
-                .compact(),
-        )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
 
     info!("Initializing mirrord-layer!");
 
