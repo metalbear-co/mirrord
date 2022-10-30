@@ -52,11 +52,24 @@ pub fn file_tracing_writer() -> NonBlocking {
 
 pub fn print_support_message() {
     if let Some(log_file) = LOG_FILE_PATH.get() {
-        println!("mirrord full log file at: {}", log_file.display());
+        println!(
+            r#"
+mirrord full log file at: {}"#,
+            log_file.display()
+        );
 
         let issue_link = create_github_link(log_file);
 
-        println!("mirrord encountered an error, please create an issue over at github, It would be much appreciated: {}", issue_link);
+        println!(
+            r#"
+mirrord encountered an error, please create an issue over at github, It would be much appreciated
+
+NOTE: Please check and reduct the logs in the issue for sensative information. (We do love hearing feedback on how can we reduce the amount of sensative information in the logs)
+
+{}
+            "#,
+            issue_link
+        );
     }
 }
 
