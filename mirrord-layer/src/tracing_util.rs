@@ -29,14 +29,11 @@ pub fn file_tracing_writer() -> NonBlocking {
 
     let log_file_name = format!("{}-mirrord-layer.log", run_id);
 
-    let log_path = LOG_FILE_PATH.get_or_init(|| PathBuf::from("/tmp/mirrord").join(log_file_name));
+    LOG_FILE_PATH
+        .set(PathBuf::from("/tmp/mirrord").join(&log_file_name))
+        .expect("Could not set LOG_FILE_PATH singleton");
 
-    let file_appender = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .unwrap();
+    let file_appender = tracing_appender::rolling::never("/tmp/mirrord", log_file_name);
 
     let (non_blocking, guard) = NonBlockingBuilder::default()
         .worker_options(
