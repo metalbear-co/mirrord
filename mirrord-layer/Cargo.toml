@@ -25,7 +25,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear", version = "0.9", features = ["auto-download"] }
+frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear2", version = "0.8", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true

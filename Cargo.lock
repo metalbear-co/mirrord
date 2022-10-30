@@ -301,9 +301,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.73"
+version = "1.0.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
+checksum = "581f5dba903aac52ea3feb5ec4810848460ee833876f1f9b0fdeab1f19091574"
 
 [[package]]
 name = "cesu8"
@@ -823,8 +823,8 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "frida-build"
-version = "0.2.1"
-source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear#65ca85847b5fc37758adf5fd1a758165d6f28eca"
+version = "0.2.0"
+source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear2#505b1ca1918077feb76f368d9cdef15d85bc3e06"
 dependencies = [
  "reqwest",
  "tar",
@@ -833,8 +833,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum"
-version = "0.9.0"
-source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear#65ca85847b5fc37758adf5fd1a758165d6f28eca"
+version = "0.8.1"
+source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear2#505b1ca1918077feb76f368d9cdef15d85bc3e06"
 dependencies = [
  "capstone",
  "capstone-sys",
@@ -848,8 +848,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum-sys"
-version = "0.5.0"
-source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear#65ca85847b5fc37758adf5fd1a758165d6f28eca"
+version = "0.4.1"
+source = "git+https://github.com/metalbear-co/frida-rust.git?branch=metalbear2#505b1ca1918077feb76f368d9cdef15d85bc3e06"
 dependencies = [
  "bindgen",
  "frida-build",
@@ -2040,9 +2040,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e82dad04139b71a90c080c8463fe0dc7902db5192d939bd0950f074d014339e1"
+checksum = "86f0b0d4bf799edbc74508c1e8bf170ff5f41238e5f8225603ca7caaae2b7860"
 
 [[package]]
 name = "openssl-probe"
