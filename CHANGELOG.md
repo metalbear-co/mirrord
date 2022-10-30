@@ -22,7 +22,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Env var to ignore ports used by a debugger for intelliJ/VSCode, refer [#644](https://github.com/metalbear-co/mirrord/issues/644)
-- Ignore debugger ports only when ip is localhost, fixed a bug which was reintroduced in refactors - [#370](https://github.com/metalbear-co/mirrord/pull/370)
 
 ## 3.4.0
 

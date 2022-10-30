@@ -14,6 +14,7 @@
 extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -32,7 +33,7 @@ use mirrord_config::{
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, Port,
+    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
@@ -118,8 +119,11 @@ fn is_nix_or_devbox() -> bool {
 }
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
-pub(crate) fn port_debug_patch(port: Port) -> bool {
+pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
     if let Ok(ports) = std::env::var("DEBBUGER_IGNORE_PORTS_PATCH") {
+        let (ip, port) = (addr.ip(), addr.port());
+        let ignored_ip =
+            ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
         // port range can be specified as "45000-65000" or just "45893"
         let ports: Vec<u16> = ports
             .split('-')
@@ -129,8 +133,8 @@ pub(crate) fn port_debug_patch(port: Port) -> bool {
             })
             .collect();
         match ports.len() {
-            2 => port >= ports[0] && port <= ports[1],
-            1 => port == ports[0],
+            2 => ignored_ip && port >= ports[0] && port <= ports[1],
+            1 => ignored_ip && port == ports[0],
             _ => false,
         }
     } else {

@@ -262,9 +262,7 @@ pub(super) fn connect(
 ) -> Detour<i32> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
 
-    if (is_ignored_port(remote_address.port()) || port_debug_patch(remote_address.port()))
-        && is_ignored_ip(remote_address.ip())
-    {
+    if is_ignored_port(remote_address.port()) || port_debug_patch(remote_address) {
         Err(Bypass::Port(remote_address.port()))?
     }
 

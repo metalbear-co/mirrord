@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashMap, VecDeque},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     os::unix::io::RawFd,
     sync::{Arc, LazyLock, Mutex},
 };
@@ -127,12 +127,6 @@ pub struct UserSocket {
 #[inline]
 const fn is_ignored_port(port: Port) -> bool {
     port == 0 || (port > 50000 && port < 60000)
-}
-
-/// Ignore localhost Ipv4 and Ipv6 addresses, used along with `is_ignored_port` for debuggers
-#[inline]
-fn is_ignored_ip(ip: IpAddr) -> bool {
-    ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
 }
 
 /// Fill in the sockaddr structure for the given address.
