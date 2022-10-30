@@ -92,4 +92,4 @@ pub enum AgentError {
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
-pub type Result<T> = std::result::Result<T, AgentError>;
+pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

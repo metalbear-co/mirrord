@@ -8,7 +8,7 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_macro::hook_guard_fn;
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse};
+use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
 use tracing::debug;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
@@ -238,6 +238,27 @@ pub(crate) unsafe extern "C" fn pread_detour(
     result
 }
 
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn pwrite_detour(
+    fd: RawFd,
+    in_buffer: *const c_void,
+    amount_to_write: size_t,
+    offset: off_t,
+) -> ssize_t {
+    // Convert the given buffer into a u8 slice, upto the amount to write.
+    let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
+
+    let (Ok(result) | Err(result)) = pwrite(fd, casted_in_buffer, offset as u64)
+        .map(|write_response| {
+            let WriteFileResponse { written_amount } = write_response;
+            written_amount as ssize_t
+        })
+        .bypass_with(|_| FN_PWRITE(fd, in_buffer, amount_to_write, offset))
+        .map_err(From::from);
+
+    result
+}
+
 /// Hook for `libc::lseek`.
 ///
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
@@ -377,6 +398,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
     let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
+    let _ = replace!(interceptor, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
     let _ = replace!(interceptor, "access", access_detour, FnAccess, FN_ACCESS);
     let _ = replace!(
         interceptor,

@@ -1,14 +1,21 @@
-use std::{collections::HashSet, str::FromStr, sync::OnceLock};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    str::FromStr,
+};
 
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
-use k8s_openapi::api::{
-    apps::v1::Deployment,
-    batch::v1::Job,
-    core::v1::{ContainerStatus, EphemeralContainer, Pod},
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        batch::v1::Job,
+        core::v1::{ContainerStatus, EphemeralContainer, Pod},
+    },
+    NamespaceResourceScope,
 };
 use kube::{
-    api::{Api, ListParams, LogParams, Patch, PatchParams, Portforwarder, PostParams},
+    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
@@ -19,15 +26,13 @@ use serde_json::{json, to_vec};
 use tokio::pin;
 use tracing::{debug, warn};
 
-use crate::{
-    error::{LayerError, Result},
-    MIRRORD_SKIP_LOAD,
-};
+use crate::error::{LayerError, Result};
 
-pub(crate) static DEPLOYMENT_REPLICAS: OnceLock<i32> = OnceLock::new();
+const MIRRORD_GUARDED_ENVS: &str = "MIRRORD_GUARDED_ENVS";
 
-struct EnvVarGuard {
-    library: String,
+#[derive(Debug)]
+pub(crate) struct EnvVarGuard {
+    envs: HashMap<String, String>,
 }
 
 impl EnvVarGuard {
@@ -35,18 +40,81 @@ impl EnvVarGuard {
     const ENV_VAR: &str = "LD_PRELOAD";
     #[cfg(target_os = "macos")]
     const ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
-    fn new() -> Self {
-        std::env::set_var(MIRRORD_SKIP_LOAD, "true");
-        let library = std::env::var(EnvVarGuard::ENV_VAR).unwrap_or_default();
-        std::env::remove_var(EnvVarGuard::ENV_VAR);
-        Self { library }
-    }
-}
 
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        std::env::set_var(EnvVarGuard::ENV_VAR, &self.library);
-        std::env::set_var(MIRRORD_SKIP_LOAD, "false");
+    fn new() -> Self {
+        let envs = std::env::var(MIRRORD_GUARDED_ENVS)
+            .ok()
+            .and_then(|orig| serde_json::from_str(&orig).ok())
+            .unwrap_or_else(|| {
+                let fork_args = std::env::vars()
+                    .filter(|(key, _)| key != MIRRORD_GUARDED_ENVS && key != EnvVarGuard::ENV_VAR)
+                    .collect();
+
+                if let Ok(ser_args) = serde_json::to_string(&fork_args) {
+                    std::env::set_var(MIRRORD_GUARDED_ENVS, ser_args);
+                }
+
+                fork_args
+            });
+
+        Self { envs }
+    }
+
+    fn kube_env(&self) -> Vec<HashMap<String, String>> {
+        let mut envs = Vec::new();
+        self.extend_kube_env(&mut envs);
+        envs
+    }
+
+    fn extend_kube_env(&self, envs: &mut Vec<HashMap<String, String>>) {
+        let filtered: HashSet<_> = envs
+            .iter()
+            .filter_map(|item| item.get("name"))
+            .cloned()
+            .collect();
+
+        for (key, value) in self
+            .envs
+            .iter()
+            .filter(|(key, _)| !filtered.contains(key.as_str()))
+        {
+            let mut env = HashMap::new();
+            env.insert("name".to_owned(), key.clone());
+            env.insert("value".to_owned(), value.clone());
+
+            envs.push(env);
+        }
+    }
+
+    fn dropped_env(&self) -> Vec<String> {
+        std::env::vars()
+            .map(|(key, _)| key)
+            .filter(|key| !self.envs.contains_key(key.as_str()))
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn is_correct_auth_env(&self, envs: &HashMap<String, String>) -> Result<(), std::io::Error> {
+        for (key, value) in envs {
+            let orig_val = self.envs.get(key).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Missing env value {}", key),
+                )
+            })?;
+
+            if value != orig_val {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Missmatch in values recived {} expected {}",
+                        value, orig_val
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -104,33 +172,48 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
-    target: Target,
-    _guard: EnvVarGuard,
 }
 
 impl KubernetesAPI {
-    pub async fn new(config: &LayerConfig) -> Result<Self> {
-        let _guard = EnvVarGuard::new();
-        let client = if config.accept_invalid_certificates {
+    pub(crate) async fn create_kube_config(config: &LayerConfig) -> Result<Config> {
+        if config.accept_invalid_certificates {
             let mut config = Config::infer().await?;
             config.accept_invalid_certs = true;
             warn!("Accepting invalid certificates");
-            Client::try_from(config).map_err(LayerError::KubeError)?
+            Ok(config)
         } else {
-            Client::try_default().await.map_err(LayerError::KubeError)?
-        };
+            Config::infer().await.map_err(|err| err.into())
+        }
+    }
+
+    pub(crate) fn prepare_config(config: &mut Config, env_guard: &EnvVarGuard) {
+        if let Some(mut exec) = config.auth_info.exec.as_mut() {
+            match &mut exec.env {
+                Some(envs) => env_guard.extend_kube_env(envs),
+                None => exec.env = Some(env_guard.kube_env()),
+            }
+
+            exec.drop_env = Some(env_guard.dropped_env());
+        }
+    }
+
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
+        let guard = EnvVarGuard::new();
+        let mut kube_config = Self::create_kube_config(config).await?;
+        Self::prepare_config(&mut kube_config, &guard);
+
+        let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
+
         Ok(Self {
             client,
-            target: target(config)?,
             config: config.clone(),
-            _guard,
         })
     }
 
     /// Create a Kubernetes API subject to the namespace of the agent
     fn get_agent_api<K>(&self) -> Api<K>
     where
-        K: kube::Resource,
+        K: kube::Resource<Scope = NamespaceResourceScope>,
         <K as kube::Resource>::DynamicType: Default,
     {
         if let Some(namespace) = &self.config.agent.namespace {
@@ -143,7 +226,7 @@ impl KubernetesAPI {
     /// Create a Kubernetes API subject to the namespace of the target pod.
     fn get_target_pod_api<K>(&self) -> Api<K>
     where
-        K: kube::Resource,
+        K: kube::Resource<Scope = NamespaceResourceScope>,
         <K as kube::Resource>::DynamicType: Default,
     {
         if let Some(namespace) = &self.config.target_namespace {
@@ -269,7 +352,7 @@ impl KubernetesAPI {
             "--container-id".to_string(),
             runtime_data.container_id,
             "--container-runtime".to_string(),
-            runtime_data.container_runtime,
+            runtime_data.container_runtime.to_string(),
             "-l".to_string(),
             connection_port.to_string(),
         ];
@@ -311,7 +394,7 @@ impl KubernetesAPI {
                             {
                                 "name": "sockpath",
                                 "hostPath": {
-                                    "path": runtime_data.socket_path
+                                    "path": runtime_data.container_runtime.mount_path()
                                 }
                             }
                         ],
@@ -325,12 +408,20 @@ impl KubernetesAPI {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": runtime_data.socket_path,
+                                        "mountPath": runtime_data.container_runtime.mount_path(),
                                         "name": "sockpath"
                                     }
                                 ],
                                 "command": agent_command_line,
                                 "env": [{"name": "RUST_LOG", "value": self.config.agent.log_level}],
+                                "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
+                                {
+                                    "requests":
+                                    {
+                                        "cpu": "10m",
+                                        "memory": "50Mi"
+                                    }
+                                }
                             }
                         ]
                     }
@@ -414,28 +505,8 @@ impl KubernetesAPI {
             .map_err(LayerError::KubeError)
     }
     async fn get_runtime_data(&self) -> Result<RuntimeData> {
-        match &self.target {
-            Target::Deployment(deployment) => deployment.downsize(self).await?,
-            Target::Pod(_) => {}
-        }
-        self.target.runtime_data(self).await
-    }
-
-    pub(crate) async fn resize_deployment_replicas(&self) {
-        match &self.target {
-            Target::Deployment(deployment) => {
-                deployment.resize(self).await.unwrap();
-            }
-            Target::Pod(_) => {}
-        }
-    }
-}
-
-impl std::fmt::Debug for KubernetesAPI {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KubernetesAPI")
-            .field("config", &self.config)
-            .finish()
+        let target = target(&self.config)?;
+        target.runtime_data(self).await
     }
 }
 
@@ -492,13 +563,35 @@ async fn wait_for_agent_startup(
     Ok(())
 }
 
+pub(crate) enum ContainerRuntime {
+    Docker,
+    Containerd,
+}
+
+impl ContainerRuntime {
+    pub(crate) fn mount_path(&self) -> String {
+        match self {
+            ContainerRuntime::Docker => "/var/run/docker.sock".to_string(),
+            ContainerRuntime::Containerd => "/run/".to_string(),
+        }
+    }
+}
+
+impl Display for ContainerRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContainerRuntime::Docker => write!(f, "docker"),
+            ContainerRuntime::Containerd => write!(f, "containerd"),
+        }
+    }
+}
+
 pub(crate) struct RuntimeData {
     pod_name: String,
     node_name: String,
     container_id: String,
-    container_runtime: String,
+    container_runtime: ContainerRuntime,
     container_name: String,
-    socket_path: String,
 }
 
 impl RuntimeData {
@@ -540,9 +633,9 @@ impl RuntimeData {
 
         let mut split = container_id_full.split("://");
 
-        let (container_runtime, socket_path) = match split.next() {
-            Some("docker") => Ok(("docker", "/var/run/docker.sock")),
-            Some("containerd") => Ok(("containerd", "/run/containerd/containerd.sock")),
+        let container_runtime = match split.next() {
+            Some("docker") => Ok(ContainerRuntime::Docker),
+            Some("containerd") => Ok(ContainerRuntime::Containerd),
             _ => Err(LayerError::ContainerRuntimeParseError(
                 container_id_full.to_string(),
             )),
@@ -553,16 +646,12 @@ impl RuntimeData {
             .ok_or_else(|| LayerError::ContainerRuntimeParseError(container_id_full.to_string()))?
             .to_owned();
 
-        let container_runtime = container_runtime.to_string();
-        let socket_path = socket_path.to_string();
-
         Ok(RuntimeData {
             pod_name,
             node_name,
             container_id,
             container_runtime,
             container_name,
-            socket_path,
         })
     }
 }
@@ -621,62 +710,6 @@ impl RuntimeDataProvider for DeploymentTarget {
 pub(crate) enum Target {
     Deployment(DeploymentTarget),
     Pod(PodTarget),
-}
-
-impl DeploymentTarget {
-    async fn downsize(&self, client: &KubernetesAPI) -> Result<()> {
-        debug!("Downsizing target: {:?}", self);
-        let deployment_api: Api<Deployment> = client.get_target_pod_api();
-        let deployment = deployment_api
-            .get(&self.deployment_name)
-            .await
-            .map_err(LayerError::KubeError)?;
-
-        // create a global value for current replicas
-        let current_replicas = deployment
-            .spec
-            .as_ref()
-            .and_then(|spec| spec.replicas)
-            .ok_or_else(|| {
-                LayerError::DeploymentNotFound(format!(
-                    "Replicas for deployment: {:?}, not found!",
-                    deployment.clone()
-                ))
-            })?;
-
-        DEPLOYMENT_REPLICAS
-            .set(current_replicas)
-            .expect("Failed to set replicas");
-
-        let patch = Patch::Merge(serde_json::json!({
-            "spec": {
-                "replicas": 1
-            }
-        }));
-
-        let patch_params = PatchParams::default();
-        deployment_api
-            .patch(&deployment.metadata.name.unwrap(), &patch_params, &patch)
-            .await
-            .map_err(LayerError::KubeError)?;
-        Ok(())
-    }
-
-    async fn resize(&self, client: &KubernetesAPI) -> Result<()> {
-        let current_replicas = DEPLOYMENT_REPLICAS.get().unwrap();
-        let deployment_api: Api<Deployment> = client.get_target_pod_api();
-        let patch = Patch::Merge(serde_json::json!({
-            "spec": {
-                "replicas": current_replicas
-            }
-        }));
-        let patch_params = PatchParams::default();
-        deployment_api
-            .patch(&self.deployment_name, &patch_params, &patch)
-            .await
-            .map_err(LayerError::KubeError)?;
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -773,8 +806,7 @@ impl FromStr for Target {
             }
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {:?} is neither a pod or a deployment.",
-                target
+                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}",
             ))),
         }
     }
@@ -782,7 +814,17 @@ impl FromStr for Target {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use http_body::Empty;
+    use hyper::body::Body;
+    use k8s_openapi::http::{header::AUTHORIZATION, Request, Response};
+    use kube::{
+        client::ConfigExt,
+        config::{AuthInfo, ExecConfig},
+    };
     use rstest::rstest;
+    use tower::{service_fn, ServiceBuilder};
 
     use super::*;
 
@@ -811,5 +853,61 @@ mod tests {
                 container_name: None
             })
         )
+    }
+
+    #[tokio::test]
+    async fn correct_envs_kubectl() {
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "true");
+
+        let _guard = EnvVarGuard::new();
+        let mut config = Config {
+            accept_invalid_certs: true,
+            auth_info: AuthInfo {
+                exec: Some(ExecConfig {
+                    api_version: Some("client.authentication.k8s.io/v1beta1".to_owned()),
+                    command: "node".to_owned(),
+                    args: Some(vec!["./tests/apps/kubectl/auth-util.js".to_owned()]),
+                    env: None,
+                    drop_env: None,
+                }),
+                ..Default::default()
+            },
+            ..Config::new("https://kubernetes.docker.internal:6443".parse().unwrap())
+        };
+
+        KubernetesAPI::prepare_config(&mut config, &_guard);
+
+        let _guard = Arc::new(_guard);
+
+        let service = ServiceBuilder::new()
+            .layer(config.base_uri_layer())
+            .option_layer(config.auth_layer().unwrap())
+            .service(service_fn(move |req: Request<Body>| {
+                let _guard = _guard.clone();
+                async move {
+                    let auth_env_vars = req
+                        .headers()
+                        .get(AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|token| token.strip_prefix("Bearer "))
+                        .and_then(|token| base64::decode(token).ok())
+                        .and_then(|value| {
+                            serde_json::from_slice::<HashMap<String, String>>(&value).ok()
+                        })
+                        .ok_or_else(|| {
+                            std::io::Error::new(std::io::ErrorKind::Other, "No Auth Header Sent")
+                        })?;
+
+                    _guard
+                        .is_correct_auth_env(&auth_env_vars)
+                        .map(|_| Response::new(Empty::new()))
+                }
+            }));
+
+        let client = Client::new(service, config.default_namespace);
+
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "false");
+
+        client.send(Request::new(Body::empty())).await.unwrap();
     }
 }

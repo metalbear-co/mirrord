@@ -1,7 +1,7 @@
 use std::{
     pin::Pin,
-    sync::OnceLock,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use actix_codec::{AsyncRead, AsyncWrite, ReadBuf};
@@ -10,9 +10,7 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tracing::log::info;
 
-use crate::{error::LayerError, pod_api::KubernetesAPI};
-
-pub(crate) static K8S_API: OnceLock<KubernetesAPI> = OnceLock::new();
+use crate::{error::LayerError, pod_api::KubernetesAPI, FAIL_STILL_STUCK};
 
 pub(crate) enum AgentConnection<T>
 where
@@ -74,6 +72,15 @@ where
     }
 }
 
+const FAIL_CREATE_AGENT: &str = r#"
+mirrord-layer failed while trying to establish connection with the agent pod!
+- Suggestions:
+>> Check that the agent pod was created with `$ kubectl get pods`, it should look something like
+   "mirrord-agent-qjys2dg9xk-rgnhr        1/1     Running   0              7s".
+>> Check that you're using the correct kubernetes credentials (and configuration).
+>> Check your kubernetes context match where the agent should be spawned.
+"#;
+
 fn handle_error(err: LayerError) -> ! {
     match err {
         LayerError::KubeError(kube::Error::HyperError(err)) => {
@@ -84,7 +91,7 @@ fn handle_error(err: LayerError) -> ! {
                 None => panic!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("failed to create agent in k8s: {}", err),
+        _ => panic!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK}with error {err:#?}"),
     }
 }
 
@@ -95,10 +102,9 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
         AgentConnection::TcpStream(stream)
     } else {
-        let k8s_api = KubernetesAPI::new(config).await.unwrap();
-        K8S_API
-            .set(k8s_api)
-            .expect("Failed to set K8S_API global variable");
+        let k8s_api = KubernetesAPI::new(config)
+            .await
+            .unwrap_or_else(|err| handle_error(err));
 
         let (pod_agent_name, agent_port) = {
             if let (Some(pod_agent_name), Some(agent_port)) =
@@ -113,10 +119,13 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 info!("No existing agent, spawning new one.");
                 let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
                 info!("Using port `{agent_port:?}` for communication");
-                let pod_agent_name = match K8S_API.get().unwrap().create_agent(agent_port).await {
-                    Ok(pod_name) => pod_name,
-                    Err(err) => handle_error(err),
-                };
+                let pod_agent_name = tokio::time::timeout(
+                    Duration::from_secs(config.agent.startup_timeout),
+                    k8s_api.create_agent(agent_port),
+                )
+                .await
+                .unwrap_or(Err(LayerError::AgentReadyTimeout))
+                .unwrap_or_else(|err| handle_error(err));
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
@@ -127,27 +136,11 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             }
         };
 
-        let mut port_forwarder = match K8S_API
-            .get()
-            .unwrap()
-            .port_forward(&pod_agent_name, agent_port)
-            .await
-        {
+        let mut port_forwarder = match k8s_api.port_forward(&pod_agent_name, agent_port).await {
             Ok(port_forwarder) => port_forwarder,
             Err(err) => handle_error(err),
         };
 
         AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
-    }
-}
-
-impl<T> Drop for AgentConnection<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn drop(&mut self) {
-        tokio::spawn(async {
-            K8S_API.get().unwrap().resize_deployment_replicas().await;
-        });
     }
 }

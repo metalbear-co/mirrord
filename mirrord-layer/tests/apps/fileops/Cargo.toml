@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-auth"
+name = "fileops"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -15,15 +15,5 @@ edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-default = []
-webbrowser = ["dep:rand", "dep:reqwest", "dep:webbrowser"]
-
 [dependencies]
-lazy_static = "1"
-rand = { version = "0.8", optional = true }
-reqwest = { workspace = true, features=["json", "rustls-tls"], default-features = false, optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_json.workspace = true
-thiserror.workspace = true
-webbrowser = { version = "0.7", optional = true }
+libc = "0.2"

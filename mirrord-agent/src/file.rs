@@ -3,7 +3,8 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{prelude::*, BufReader, SeekFrom},
-    path::PathBuf,
+    os::unix::prelude::FileExt,
+    path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
@@ -12,10 +13,11 @@ use mirrord_protocol::{
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    WriteLimitedFileRequest,
 };
 use tracing::{debug, error, trace};
 
-use crate::{error::AgentError, util::IndexAllocator};
+use crate::{error::Result, util::IndexAllocator};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -30,11 +32,64 @@ pub struct FileManager {
     index_allocator: IndexAllocator<usize>,
 }
 
+/// Resolve a path that might contain symlinks from a specific container to a path accessible from
+/// the root host
+#[tracing::instrument(level = "trace")]
+fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
+    path: P,
+    root_path: R,
+) -> std::io::Result<PathBuf> {
+    use std::path::Component::*;
+
+    let mut temp_path = PathBuf::new();
+    for component in path.as_ref().components() {
+        match component {
+            RootDir => {}
+            Prefix(prefix) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Prefix not supported {prefix:?}"),
+            ))?,
+            CurDir => {}
+            ParentDir => {
+                if !temp_path.pop() {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "LFI attempt?",
+                    ))?
+                }
+            }
+            Normal(component) => {
+                let real_path = root_path.as_ref().join(&temp_path).join(component);
+                if real_path.is_symlink() {
+                    trace!("{:?} is symlink", real_path);
+                    let sym_dest = real_path.read_link()?;
+                    temp_path = temp_path.join(sym_dest);
+                } else {
+                    temp_path = temp_path.join(component);
+                }
+                if temp_path.has_root() {
+                    temp_path = temp_path
+                        .strip_prefix("/")
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "couldn't strip prefix",
+                            )
+                        })?
+                        .into();
+                }
+            }
+        }
+    }
+    // full path, from host perspective
+    let final_path = root_path.as_ref().join(temp_path);
+    Ok(final_path)
+}
+
 impl FileManager {
     /// Executes the request and returns the response.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse, AgentError> {
-        let root_path = &self.root_path;
+    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse> {
         match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -42,10 +97,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(path);
-
-                let open_result = self.open(full_path, open_options);
+                let open_result = self.open(path.into(), open_options);
                 Ok(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
@@ -87,6 +139,14 @@ impl FileManager {
                 let write_result = self.write(fd, write_bytes);
                 Ok(FileResponse::Write(write_result))
             }
+            FileRequest::WriteLimited(WriteLimitedFileRequest {
+                remote_fd,
+                start_from,
+                write_bytes,
+            }) => {
+                let write_result = self.write_limited(remote_fd, start_from, write_bytes);
+                Ok(FileResponse::WriteLimited(write_result))
+            }
             FileRequest::Close(CloseFileRequest { fd }) => {
                 let close_result = self.close(fd);
                 Ok(FileResponse::Close(close_result))
@@ -96,10 +156,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                // Should be something like `/proc/{pid}/root/{path}`
-                let full_path = root_path.as_path().join(pathname);
-
-                let access_result = self.access(full_path, mode);
+                let access_result = self.access(pathname.into(), mode);
                 Ok(FileResponse::Access(access_result))
             }
         }
@@ -125,6 +182,7 @@ impl FileManager {
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
+        let path = resolve_path(path, &self.root_path)?;
         let file = OpenOptions::from(open_options).open(&path)?;
 
         let fd = self
@@ -267,12 +325,9 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
-                    let _ = reader.seek(SeekFrom::Start(start_from))?;
-
                     let mut buffer = vec![0; buffer_size];
 
-                    let read_result = reader.read(&mut buffer).map(|read_amount| {
+                    let read_result = file.read_at(&mut buffer, start_from).map(|read_amount| {
                         // We handle the extra bytes in the `pread` hook, so here we can just
                         // return the full buffer.
                         ReadFileResponse {
@@ -282,6 +337,29 @@ impl FileManager {
                     })?;
 
                     Ok(read_result)
+                } else {
+                    Err(ResponseError::NotFile(fd))
+                }
+            })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn write_limited(
+        &mut self,
+        fd: usize,
+        start_from: u64,
+        buffer: Vec<u8>,
+    ) -> RemoteResult<WriteFileResponse> {
+        self.open_files
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))
+            .and_then(|remote_file| {
+                if let RemoteFile::File(file) = remote_file {
+                    let written_amount = file
+                        .write_at(&buffer, start_from)
+                        .map(|written_amount| WriteFileResponse { written_amount })?;
+
+                    Ok(written_amount)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
@@ -362,6 +440,7 @@ impl FileManager {
         pathname: PathBuf,
         mode: u8,
     ) -> RemoteResult<AccessFileResponse> {
+        let pathname = resolve_path(pathname, &self.root_path)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
             pathname,

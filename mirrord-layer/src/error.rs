@@ -153,6 +153,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Container ID not found in response from kube API")]
     ContainerIdNotFound,
+
+    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
+    AgentReadyTimeout,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -162,8 +165,8 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookE
     }
 }
 
-pub(crate) type Result<T> = std::result::Result<T, LayerError>;
-pub(crate) type HookResult<T> = std::result::Result<T, HookError>;
+pub(crate) type Result<T, E = LayerError> = std::result::Result<T, E>;
+pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 
 /// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
 impl From<HookError> for i64 {

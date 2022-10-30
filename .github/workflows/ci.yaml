@@ -13,6 +13,7 @@ jobs:
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
       intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
+      markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -44,13 +45,21 @@ jobs:
         with:
           files: |
             intellij-ext/**
+      - name: get markdown changes
+        id: changed-markdown
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            CHANGELOG.md
+            README.md
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
           echo ${{ steps.changed-intellij.outputs.any_changed }};
           echo ${{ steps.changed-intellij.outputs.all_changed_files }};
-
+          echo ${{ steps.changed-markdown.outputs.any_changed }};
+          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -107,6 +116,26 @@ jobs:
           key: ${{matrix.os}}
       - run: |
           cargo test -p mirrord-config
+
+  test_mirrord_layer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
 
   test_agent:
     runs-on: ubuntu-latest
@@ -230,6 +259,9 @@ jobs:
       - run: |
           cd mirrord-layer/tests/apps/self_open
           go build -o 19
+      - run: |
+          cd mirrord-layer/tests/apps/fileops
+          cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -256,11 +288,14 @@ jobs:
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19.0"
-      - run: |                                # Build Go app to test http mirroring with.
+      - run: | # Build Go app to test http mirroring with.
           cd mirrord-layer/tests/apps/self_open
           go build -o 19
           cd ../app_go
           go build -o 19
+      - run: |
+          cd mirrord-layer/tests/apps/fileops
+          cargo build
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -271,7 +306,6 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - run: cargo +nightly test -p mirrord-layer
-
 
   e2e:
     runs-on: ubuntu-latest
@@ -379,9 +413,20 @@ jobs:
         env:
           CI_BUILD_PLUGIN: true
         run: |
+          cp CHANGELOG.md intellij-ext/
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
+
+  lint_markdown:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
+    steps:
+      - uses: avto-dev/markdown-lint@v1
+        with:
+          config: "markdownlint-config.json"
+          args: "README.md CHANGELOG.md"
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
@@ -400,6 +445,7 @@ jobs:
         test_mirrord_config,
         test_mirrord_protocol,
         build_intellij_plugin,
+        lint_markdown,
       ]
     runs-on: ubuntu-latest
     if: |
@@ -414,7 +460,8 @@ jobs:
       (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
       (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
       (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
-      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped')
+      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
+      (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped')
     steps:
       - name: CI succeeded
         run: exit 0
