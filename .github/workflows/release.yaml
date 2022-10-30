@@ -33,7 +33,7 @@ jobs:
       - name: setup zigbuild
         run: python3 -m pip install ziglang && cargo install cargo-zigbuild
       - name: build mirrord-layer and cli
-        run: cargo zigbuild +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cargo +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
