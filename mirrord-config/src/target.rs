@@ -13,7 +13,7 @@ pub enum TargetFileConfig {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TargetConfig {
     pub path: Option<String>,
     pub namespace: Option<String>,
