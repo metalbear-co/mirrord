@@ -78,10 +78,11 @@ async fn test_mirroring_with_http(
         layer_connection
             .codec
             .send(mirrord_protocol::DaemonMessage::UdpOutgoing(
-                mirrord_protocol::outgoing::udp::DaemonUdpOutgoing::Connect(Err(
-                    ResponseError::Remote(mirrord_protocol::RemoteError::ConnectTimedOut(
-                        std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
-                    )),
+                mirrord_protocol::outgoing::udp::DaemonUdpOutgoing::Connect(Ok(
+                    mirrord_protocol::outgoing::DaemonConnect {
+                        connection_id: 0,
+                        remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
+                    },
                 )),
             ))
             .await
