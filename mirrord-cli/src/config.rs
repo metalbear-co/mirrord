@@ -23,6 +23,7 @@ pub(super) enum Commands {
 #[clap(group(
     ArgGroup::new("exec")
         .required(true)
+        .multiple(true)
         .args(&["target", "config-file"]),
 ))]
 pub(super) struct ExecArgs {
@@ -33,7 +34,7 @@ pub(super) struct ExecArgs {
     pub target: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
-    #[clap(long, value_parser)]
+    #[clap(short = 'n', long, value_parser)]
     pub target_namespace: Option<String>,
 
     /// Namespace to place agent in.
@@ -121,7 +122,7 @@ pub(super) struct ExecArgs {
     pub no_telemetry: bool,
 
     /// Load config from config file
-    #[clap(short = 'f', conflicts_with_all = &["target"], long, value_parser)]
+    #[clap(short = 'f', long, value_parser)]
     pub config_file: Option<PathBuf>,
 }
 
