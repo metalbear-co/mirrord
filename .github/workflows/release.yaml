@@ -29,12 +29,10 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.target}}-${{matrix.os}}
-      # We use zigbuild for easy cross compilation (no need for target's gcc when compiling C dependencies)
-      - name: setup zigbuild
-        run: python3 -m pip install ziglang && cargo install cargo-zigbuild
-      - run: sudo apt update && sudo apt install gcc-multilib
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
       - name: build mirrord-layer and cli
-        run: cargo +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cross +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
