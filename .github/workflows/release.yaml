@@ -32,7 +32,7 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: build mirrord-layer and cli
-        run: cross +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cross +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
