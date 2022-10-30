@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Remove openssl/libssl dependency, cross compilation is easier now. (It wasn't needed/used)
 - mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Lint `README` and update it for `--target` flag.
+- Update target file config to have `namespace` nested inside of `target` and not a seperate `target_namespace`
 
 ## 3.4.0
 
