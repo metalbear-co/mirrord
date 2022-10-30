@@ -4,10 +4,14 @@
 /// `MIRRORD_FILE_RO_OPS` to `false`.
 ///
 /// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
+///
+/// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
+/// open locally), these are controlled by configuring the [`filter::FileFilter`] with either
+/// `MIRRORD_FILE_FILTER_INCLUDE` or `MIRRORD_FILE_FILTER_EXCLUDE` (the later adds aditional
+/// exclusions to the default).
 use core::fmt;
 use std::{
     collections::HashMap,
-    env,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
@@ -23,7 +27,6 @@ use mirrord_protocol::{
     ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
     WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
 };
-use regex::RegexSet;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -31,56 +34,9 @@ use crate::{
     error::{LayerError, Result},
 };
 
+pub(crate) mod filter;
 pub(crate) mod hooks;
 pub(crate) mod ops;
-
-/// Regex that ignores system files + files in the current working directory.
-static IGNORE_FILES: LazyLock<RegexSet> = LazyLock::new(|| {
-    // To handle the problem of injecting `open` and friends into project runners (like in a call to
-    // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
-    let current_dir = env::current_dir().unwrap();
-    let current_binary = env::current_exe().unwrap();
-    let set = RegexSet::new([
-        r".*\.so",
-        r".*\.d",
-        r".*\.pyc",
-        r".*\.py",
-        r".*\.js",
-        r".*\.pth",
-        r".*\.plist",
-        r".*(^|/)jvm\.cfg$", // jvm.cfg or ANYTHING/jvm.cfg
-        r".*venv\.cfg",
-        r"^/proc/.*",
-        r"^/sys/.*",
-        r"^/lib/.*",
-        r"^/etc/.*",
-        r"^/usr/.*",
-        r"^/dev/.*",
-        r"^/opt/.*",
-        // support for nixOS.
-        r"^/nix/.*",
-        r"^/home/iojs/.*",
-        r"^/home/runner/.*",
-        // macOS
-        r"^/Users/.*",
-        r"^/Library/.*",
-        // dotnet: `/tmp/clr-debug-pipe-1`
-        r"^.*clr-.*-pipe-.*",
-        // dotnet: `/home/{username}/{project}.pdb`
-        r".*\.pdb",
-        // dotnet: `/home/{username}/{project}.dll`
-        r".*\.dll",
-        // TODO: `node` searches for this file in multiple directories, bypassing some of our
-        // ignore regexes, maybe other "project runners" will do the same.
-        r".*/package.json",
-        r"^/tmp/mirrord/.*",
-        &current_dir.to_string_lossy(),
-        &current_binary.to_string_lossy(),
-    ])
-    .unwrap();
-
-    set
-});
 
 type LocalFd = RawFd;
 type RemoteFd = usize;
@@ -93,6 +49,8 @@ struct RemoteFile {
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
+/// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
+/// Rust's [`std::fs::OpenOptions`]
 pub(crate) trait OpenOptionsInternalExt {
     fn from_flags(flags: c_int) -> Self;
     fn from_mode(mode: String) -> Self;

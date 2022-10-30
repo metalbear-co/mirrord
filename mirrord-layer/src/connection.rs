@@ -10,7 +10,7 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tracing::log::info;
 
-use crate::{error::LayerError, pod_api::KubernetesAPI};
+use crate::{error::LayerError, pod_api::KubernetesAPI, FAIL_STILL_STUCK};
 
 pub(crate) enum AgentConnection<T>
 where
@@ -72,7 +72,7 @@ where
     }
 }
 
-const FAILED_TO_CREATE_AGENT: &str = r#"
+const FAIL_CREATE_AGENT: &str = r#"
 mirrord-layer failed while trying to establish connection with the agent pod!
 
 - Suggestions:
@@ -83,13 +83,6 @@ mirrord-layer failed while trying to establish connection with the agent pod!
 >> Check that you're using the correct kubernetes credentials (and configuration).
 
 >> Check your kubernetes context match where the agent should be spawned.
-
-- If you're still stuck and everything looks fine:
-
->> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
-
->> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
-
 "#;
 
 fn handle_error(err: LayerError) -> ! {
@@ -102,7 +95,7 @@ fn handle_error(err: LayerError) -> ! {
                 None => panic!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("{FAILED_TO_CREATE_AGENT}\nwith error {err:#?}"),
+        _ => panic!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK}with error {err:#?}"),
     }
 }
 

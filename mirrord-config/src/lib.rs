@@ -89,8 +89,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        fs::FsConfig, incoming::IncomingConfig, network::NetworkFileConfig,
-        outgoing::OutgoingFileConfig, util::ToggleableConfig,
+        fs::{FsModeConfig, FsUserConfig},
+        incoming::IncomingConfig,
+        network::NetworkFileConfig,
+        outgoing::OutgoingFileConfig,
+        util::ToggleableConfig,
     };
 
     #[derive(Debug)]
@@ -260,7 +263,7 @@ mod tests {
             },
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),
-                fs: ToggleableConfig::Config(FsConfig::Write),
+                fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)),
                 network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
