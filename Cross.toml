@@ -1,0 +1,2 @@
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = ["TARGET_CC=aarch64-linux-gnu-gcc", "TARGET_AR=aarch64-linux-gnu-ar"]
