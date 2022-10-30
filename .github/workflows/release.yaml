@@ -32,7 +32,7 @@ jobs:
       # We use zigbuild for easy cross compilation (no need for target's gcc when compiling C dependencies)
       - name: setup zigbuild
         run: python3 -m pip install ziglang && cargo install cargo-zigbuild
-      - run: apt update && apt install gcc-multlib
+      - run: sudo apt update && sudo apt install gcc-multlib
       - name: build mirrord-layer and cli
         run: cargo +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
