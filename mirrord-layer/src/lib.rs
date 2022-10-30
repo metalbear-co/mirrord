@@ -26,9 +26,7 @@ use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
-use mirrord_config::{
-    config::MirrordConfig, pod::PodConfig, util::VecOrSingle, LayerConfig, LayerFileConfig,
-};
+use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
 use mirrord_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -136,7 +134,6 @@ fn before_init() {
                 let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
                 if should_load(given_process, skip_processes) {
-                    deprecation_check(&config);
                     init(config);
                 }
             }
@@ -146,29 +143,6 @@ fn before_init() {
         }
     }
 }
-
-// START | To be removed after deprecated functionality is removed
-fn deprecation_check(config: &LayerConfig) {
-    let LayerConfig {
-        target,
-        pod: PodConfig {
-            name, container, ..
-        },
-        ..
-    } = config;
-
-    match (target, name, container) {
-        (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
-            panic!("Conflicting EnvVars: Either of [MIRRORD_IMPERSONATED_TARGET], [MIRRORD_AGENT_IMPERSONATED_POD_NAME, MIRRORD_IMPERSONATED_CONTAINER_NAME] can't be set together
-            >> EnvVars: {:?}, {:?}, {:?}", target, name, container);
-        }
-        (None, None, _) => {
-            panic!("Missing EnvVar: either of [MIRRORD_IMPERSONATED_TARGET, MIRRORD_AGENT_IMPERSONATED_POD_NAME] must be set");
-        }
-        _ => {}
-    }
-}
-// END
 
 fn init(config: LayerConfig) {
     tracing_subscriber::registry()

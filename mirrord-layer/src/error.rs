@@ -136,7 +136,7 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Deployment: `{0} not found!`")]
     DeploymentNotFound(String),
 
-    #[error("mirrord-layer: Invalid target proivded `{0:#?}`!")]
+    #[error("mirrord-layer: Invalid target proivded `{0}`!")]
     InvalidTarget(String),
 
     #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
