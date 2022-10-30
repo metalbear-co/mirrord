@@ -749,7 +749,7 @@ mirrord-layer failed to parse the provided target!
     >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
     >> specifying the pod name is optional, defaults to the first pod in case the target is a deployment.
 
-- Suggestons:
+- Suggestions:
     >> check for typos in the provided target.
     >> check if the provided target exists in the cluster using `kubectl get/describe` commands.
     >> check if the provided target is in the correct namespace.
