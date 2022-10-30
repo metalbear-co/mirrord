@@ -7,13 +7,13 @@ use std::{
 };
 
 use actix_codec::Framed;
+use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage,
 };
-use regex::{Regex, RegexBuilder};
 use rstest::fixture;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -86,11 +86,7 @@ impl TestProcess {
             }
         });
 
-        let error_capture = RegexBuilder::new(r"^.*ERROR[^\w_-]")
-            .case_insensitive(true)
-            .multi_line(true)
-            .build()
-            .unwrap();
+        let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
 
         TestProcess {
             child: Some(child),
