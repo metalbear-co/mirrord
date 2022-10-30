@@ -117,11 +117,17 @@ impl TestProcess {
     }
 
     pub fn assert_no_error_in_stdout(&self) {
-        assert!(!self.error_capture.is_match(&self.stdout.lock().unwrap()));
+        assert!(!self
+            .error_capture
+            .is_match(&self.stdout.lock().unwrap())
+            .unwrap());
     }
 
     pub fn assert_no_error_in_stderr(&self) {
-        assert!(!self.error_capture.is_match(&self.stderr.lock().unwrap()));
+        assert!(!self
+            .error_capture
+            .is_match(&self.stderr.lock().unwrap())
+            .unwrap());
     }
 
     pub async fn wait_assert_success(&mut self) {
