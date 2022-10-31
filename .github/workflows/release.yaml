@@ -3,6 +3,9 @@ on:
   push:
     tags:
       - "*.*.*"
+  # Running from workflow dispatch (AKA manual) will not publish anything.
+  # This is intended for testing changes to this flow.
+  workflow_dispatch:
 
 jobs:
   build_binaries:
@@ -12,6 +15,9 @@ jobs:
           - os: ubuntu-latest
             extension: so
             target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            extension: so
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{matrix.os}}
     steps:
       - uses: actions/checkout@v2
@@ -23,8 +29,11 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.target}}-${{matrix.os}}
+      # We use zigbuild for easy cross compilation (no need for target's gcc when compiling C dependencies)
+      - name: setup zigbuild
+        run: python3 -m pip install ziglang && cargo install cargo-zigbuild
       - name: build mirrord-layer and cli
-        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cargo +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
       - uses: actions/upload-artifact@v3
         with:
           name: ${{matrix.target}}
@@ -111,6 +120,7 @@ jobs:
           if-no-files-found: error
 
   release_docker_image:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -172,9 +182,21 @@ jobs:
           cd vscode-ext 
           npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-linux-x64 --target linux-x64
-          vsce publish ${{ steps.version.outputs.version }} --target linux-x64
+      - name: Publish linux-x64
+        if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish ${{ steps.version.outputs.version }} --target linux-x64
+      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
+      - run: |
+          cd vscode-ext 
+          npm install          
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-linux-aarch64 --target linux-arm64
+      - name: Publish linux-xarm64
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish ${{ steps.version.outputs.version }} --target linux-arm64
       - run: rm vscode-ext/libmirrord_layer.so
       - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
       # Same binary for darwin
@@ -182,16 +204,21 @@ jobs:
           cd vscode-ext
           npm install          
           tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
-          vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
+      - name: Publish darwin-x64
+        if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
       - run: |
           cd vscode-ext
           npm install          
-          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
-          vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-darwin-x64 --target darwin-x64
+      - name: Publish darwin-arm64
+        if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
+
       - uses: actions/upload-artifact@v3
         with:
           name: vscode-ext
@@ -218,7 +245,13 @@ jobs:
       - run: cp LICENSE CHANGELOG.md intellij-ext/
       - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so intellij-ext/
       - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib intellij-ext/
+      - name: Build Plugin
+        run: |
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew buildPlugin
       - name: Publish Plugin
+        if: github.event_name != 'workflow_dispatch'
         env:
           PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
           CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
@@ -244,6 +277,7 @@ jobs:
         release_intellij_plugin,
       ]
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     permissions:
       packages: write
       contents: write
@@ -255,11 +289,16 @@ jobs:
         with:
           path: /tmp/artifacts
       - uses: montudor/action-zip@v1
-      - name: Create mirrord linux zip file
+      - name: Create mirrord linux-x64 zip file
         run: |
           zip mirrord_linux_x86_64.zip mirrord
           shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
         working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
+      - name: Create mirrord linux-aarch64 zip file
+        run: |
+          zip mirrord_linux_aarch64.zip mirrord
+          shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
+        working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
       - name: Create mirrord macos zip file
         run: |
           zip mirrord_mac_universal.zip mirrord
@@ -272,6 +311,12 @@ jobs:
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
+
+          mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
+          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
+          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
+          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
+
 
           mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
@@ -293,6 +338,7 @@ jobs:
   bump_homebrew:
     needs: release_gh
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: mislav/bump-homebrew-formula-action@v2
         with:
