@@ -234,7 +234,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
+        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
 
       - uses: actions/upload-artifact@v3
         with:
