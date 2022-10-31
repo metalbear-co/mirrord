@@ -137,6 +137,11 @@ impl LayerFileConfig {
 #[cfg(test)]
 mod tests {
 
+    use std::{
+        fs::{DirBuilder, File},
+        io::Write,
+    };
+
     use rstest::*;
 
     use super::*;
@@ -341,5 +346,24 @@ mod tests {
     fn print_schema() {
         let schema = schemars::schema_for!(LayerFileConfig);
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    #[ignore]
+    fn write_schema_to_file() {
+        let schema = schemars::schema_for!(LayerFileConfig);
+        let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
+
+        DirBuilder::new()
+            .recursive(true)
+            .create("./schema")
+            .expect("Failed creating schema directory!");
+
+        let mut file = File::create("./schema/mirrord-config-schema.json")
+            .expect("Failed to create schema file!");
+
+        file.write(content.as_bytes())
+            .expect("Failed writing schema to file!");
     }
 }

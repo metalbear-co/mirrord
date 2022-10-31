@@ -116,6 +116,9 @@ jobs:
           key: ${{matrix.os}}
       - run: |
           cargo test -p mirrord-config
+      # generate the schema file to be uploaded to the schema store
+      - run: |
+          cargo test -p mirrord-config write_schema_to_file --features schema -- --ignored
 
   test_mirrord_layer:
     strategy:
