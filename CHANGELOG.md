@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Update target file config to have `namespace` nested inside of `target` and not a separate `target_namespace`. See [#587](https://github.com/metalbear-co/mirrord/issues/587) and [#667](https://github.com/metalbear-co/mirrord/issues/667)
+
 ## 3.5.0
 
 ### Added
