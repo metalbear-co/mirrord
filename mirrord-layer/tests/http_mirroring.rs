@@ -1,11 +1,16 @@
 use std::{path::PathBuf, time::Duration};
 
+use mirrord_protocol::{
+    outgoing::{udp::LayerUdpOutgoing::Connect, LayerConnect},
+    ClientMessage::UdpOutgoing,
+};
 use rstest::rstest;
 use tokio::net::TcpListener;
 
 mod common;
 
 pub use common::*;
+use futures::{SinkExt, StreamExt};
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
@@ -66,6 +71,28 @@ async fn test_mirroring_with_http(
     layer_connection
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
+    if matches!(application, Application::PythonFlaskHTTP) {
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            UdpOutgoing(Connect(LayerConnect {
+                remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162))
+            }))
+        );
+        // Refer: https://github.com/pallets/werkzeug/blob/main/src/werkzeug/serving.py#L640
+        // We send a dummy response to connect so that werkzeug proceeds
+        layer_connection
+            .codec
+            .send(mirrord_protocol::DaemonMessage::UdpOutgoing(
+                mirrord_protocol::outgoing::udp::DaemonUdpOutgoing::Connect(Ok(
+                    mirrord_protocol::outgoing::DaemonConnect {
+                        connection_id: 0,
+                        remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
+                    },
+                )),
+            ))
+            .await
+            .unwrap();
+    }
     test_process.wait().await;
     test_process.assert_stdout_contains("GET: Request completed");
     test_process.assert_stdout_contains("POST: Request completed");

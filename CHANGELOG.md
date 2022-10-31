@@ -24,6 +24,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - `--pod-name`, `--pod-namespace`, `--impersonated_container_name` have been removed in favor of `--target`, `--target-namespace`
 
+### Fixed
+
+- Env var to ignore ports used by a debugger for intelliJ/VSCode, refer [#644](https://github.com/metalbear-co/mirrord/issues/644)
+
 ## 3.4.0
 
 ### Added
