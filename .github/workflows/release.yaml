@@ -166,7 +166,13 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    needs:
+      [
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
+        build_binaries_macos,
+        release_docker_image,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -240,7 +246,13 @@ jobs:
           if-no-files-found: error
 
   release_intellij_plugin:
-    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    needs:
+      [
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
+        build_binaries_macos,
+        release_docker_image,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -281,7 +293,8 @@ jobs:
   release_gh:
     needs:
       [
-        build_binaries,
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_macos,
         release_docker_image,
         release_vscode_ext,
