@@ -1,2 +1,5 @@
-[target.aarch64-unknown-linux-gnu.env]
-passthrough = ["TARGET_CC=aarch64-linux-gnu-gcc", "TARGET_AR=aarch64-linux-gnu-ar"]
+[package.metadata.cross.target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get install --assume-yes libssl-dev gcc-multilib g++-multilib libssl-dev:$CROSS_DEB_ARCH",
+]
