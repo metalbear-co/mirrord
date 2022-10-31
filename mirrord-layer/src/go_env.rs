@@ -45,7 +45,7 @@ unsafe extern "C" fn goenvs_unix_detour() {
         if let Some(argv) = frida_gum::Module::find_symbol_by_name(binary, "runtime.argv") {
             let mut new_argv = ManuallyDrop::new(make_argv());
             let argv_ptr: *mut *mut *mut i8 = argv.0.cast();
-            std::ptr::replace(argv_ptr, new_argv.as_mut_ptr());
+            std::ptr::replace(argv_ptr, new_argv.as_mut_ptr() as _);
         }
     });
     FN_GOENVS_UNIX();
