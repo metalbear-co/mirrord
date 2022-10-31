@@ -22,9 +22,50 @@ use crate::{
     target::TargetFileConfig, util::VecOrSingle,
 };
 
-// TODO(alex) [mid] 2022-10-27: Add example usage of each field.
-
-/// This is the root struct for mirrord-layer's configuration
+/// Main struct for mirrord-layer's configuration
+///
+/// ## Examples
+///
+/// - Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// target = "pod/sample-pod-1234"
+/// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
+///
+/// [agent]
+/// log_level = "debug"
+/// ttl = 1024 # seconds
+///
+/// [fs]
+/// mode = "read"
+///
+/// [network]
+/// incoming = "mirror"
+/// ```
+///
+/// - Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates,
+///   use a custom mirrord-agent image:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// target = "pod/sample-pod-1234"
+/// accept_invalid_certificates = true
+///
+/// [agent]
+/// log_level = "debug"
+/// ttl = 1024 # seconds
+/// image = "registry/mirrord-agent-custom:latest"
+/// image_pull_policy = "Always"
+///
+/// [fs]
+/// mode = "write"
+///
+/// [network]
+/// incoming = "steal"
+/// ```
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]

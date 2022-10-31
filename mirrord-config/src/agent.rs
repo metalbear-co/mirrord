@@ -37,7 +37,8 @@ pub struct AgentFileConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: Option<String>,
 
-    /// Controls how long the agent pod persists for, after the local process terminated.
+    /// Controls how long the agent pod persists for, after the local process terminated (in
+    /// seconds).
     ///
     /// Can be useful for collecting logs.
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]

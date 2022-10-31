@@ -25,16 +25,16 @@ pub mod mode;
 ///
 /// - Read-write file operations:
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
 /// fs = write
 /// ```
 ///
 /// - Read-only excluding `.foo` files:
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
 /// [fs]
 /// mode = read
@@ -43,8 +43,8 @@ pub mod mode;
 ///
 /// - Read-write including only `.baz` files:
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
 /// [fs]
 /// mode = write
