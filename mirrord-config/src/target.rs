@@ -77,6 +77,7 @@ mirrord-layer failed to parse the provided target!
 
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
 #[serde(untagged)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Target {
     Deployment(DeploymentTarget),
     Pod(PodTarget),
@@ -100,6 +101,7 @@ impl FromStr for Target {
 }
 
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PodTarget {
     pub pod: String,
     pub container: Option<String>,
@@ -127,6 +129,7 @@ impl FromSplit for PodTarget {
 }
 
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeploymentTarget {
     pub deployment: String,
     pub container: Option<String>,
