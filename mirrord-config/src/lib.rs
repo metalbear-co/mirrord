@@ -9,7 +9,6 @@ pub mod fs;
 pub mod incoming;
 pub mod network;
 pub mod outgoing;
-pub mod pod;
 pub mod target;
 pub mod util;
 
@@ -20,7 +19,7 @@ use serde::Deserialize;
 
 use crate::{
     agent::AgentFileConfig, config::source::MirrordConfigSource, feature::FeatureFileConfig,
-    pod::PodFileConfig, target::TargetFileConfig, util::VecOrSingle,
+    target::TargetFileConfig, util::VecOrSingle
 };
 
 /// This is the root struct for mirrord-layer's configuration
@@ -58,11 +57,6 @@ pub struct LayerFileConfig {
     #[config(nested)]
     pub agent: AgentFileConfig,
 
-    // START | To be removed after deprecated functionality is removed
-    #[serde(default)]
-    #[config(nested)]
-    pub pod: PodFileConfig,
-    // END
     #[serde(default)]
     #[config(nested)]
     pub feature: FeatureFileConfig,
@@ -141,11 +135,6 @@ mod tests {
                                     "udp": false
                                 }
                             }
-                        },
-                        "pod": {
-                            "name": "test-service-abcdefg-abcd",
-                            "namespace": "default",
-                            "container": "test"
                         }
                     }
                     "#
@@ -177,11 +166,6 @@ mod tests {
                     [feature.network.outgoing]
                     tcp = true
                     udp = false
-
-                    [pod]
-                    name = "test-service-abcdefg-abcd"
-                    namespace = "default"
-                    container = "test"
                     "#
                 }
                 ConfigType::Yaml => {
@@ -207,11 +191,7 @@ mod tests {
                             incoming: "mirror"
                             outgoing:
                                 tcp: true
-                                udp: false
-                    pod:
-                        name: "test-service-abcdefg-abcd"
-                        namespace: "default"
-                        container: "test"
+                                udp: false                    
                     "#
                 }
             }
@@ -279,11 +259,6 @@ mod tests {
                         udp: Some(false),
                     }),
                 }),
-            },
-            pod: PodFileConfig {
-                name: Some("test-service-abcdefg-abcd".to_owned()),
-                namespace: Some("default".to_owned()),
-                container: Some("test".to_owned()),
             },
             connect_tcp: None,
         };
