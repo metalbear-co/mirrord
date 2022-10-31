@@ -1,6 +1,9 @@
 use std::{path::PathBuf, time::Duration};
 
-use mirrord_protocol::ResponseError;
+use mirrord_protocol::{
+    outgoing::{udp::LayerUdpOutgoing::Connect, LayerConnect},
+    ClientMessage::UdpOutgoing,
+};
 use rstest::rstest;
 use tokio::net::TcpListener;
 
@@ -69,9 +72,11 @@ async fn test_mirroring_with_http(
         .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
         .await;
     if matches!(application, Application::PythonFlaskHTTP) {
-        println!(
-            "Connect codec = {:?}",
-            layer_connection.codec.next().await.unwrap().unwrap()
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            UdpOutgoing(Connect(LayerConnect {
+                remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162))
+            }))
         );
         // Refer: https://github.com/pallets/werkzeug/blob/main/src/werkzeug/serving.py#L640
         // We send a dummy response to connect so that werkzeug proceeds
