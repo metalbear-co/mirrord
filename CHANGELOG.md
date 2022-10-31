@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.5.0
+
 ### Added
 - aarch64 release binaries (no go support yet, no IntelliJ also).
 - mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
@@ -24,6 +26,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Removed
 
 - `--pod-name`, `--pod-namespace`, `--impersonated_container_name` have been removed in favor of `--target`, `--target-namespace`
+
+### Fixed
+
+- Env var to ignore ports used by a debugger for intelliJ/VSCode, refer [#644](https://github.com/metalbear-co/mirrord/issues/644)
 
 ## 3.4.0
 
