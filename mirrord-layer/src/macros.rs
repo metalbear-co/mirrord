@@ -104,5 +104,5 @@ macro_rules! graceful_exit {
     };
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
 pub(crate) use hook_symbol;
