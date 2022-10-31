@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.5.0
+
 ### Added
 - aarch64 release binaries (no go support yet, no IntelliJ also).
 - mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
@@ -18,6 +20,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Remove openssl/libssl dependency, cross compilation is easier now. (It wasn't needed/used)
 - mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Lint `README` and update it for `--target` flag.
+- mirrord-layer: improve error message for invalid targets.
+
+### Removed
+
+- `--pod-name`, `--pod-namespace`, `--impersonated_container_name` have been removed in favor of `--target`, `--target-namespace`
+
+### Fixed
+
+- Env var to ignore ports used by a debugger for intelliJ/VSCode, refer [#644](https://github.com/metalbear-co/mirrord/issues/644)
 
 ## 3.4.0
 
