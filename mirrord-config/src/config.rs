@@ -6,7 +6,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("invalid target proivded `{0}`!")]
+    #[error("invalid target provided `{0}`!")]
     InvalidTarget(String),
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),

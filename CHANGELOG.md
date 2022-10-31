@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Update target file config to have `namespace` nested inside of `target` and not a separate `target_namespace`. See [#587](https://github.com/metalbear-co/mirrord/issues/587) and [#667](https://github.com/metalbear-co/mirrord/issues/667)
+
 ## 3.5.0
 
 ### Added
@@ -21,7 +25,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Lint `README` and update it for `--target` flag.
 - mirrord-layer: improve error message for invalid targets.
-- Update target file config to have `namespace` nested inside of `target` and not a seperate `target_namespace`
 
 ### Removed
 
