@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
-    str::FromStr,
 };
 
 use async_trait::async_trait;
@@ -19,7 +18,10 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    target::{DeploymentTarget, PodTarget, Target},
+    LayerConfig,
+};
 use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
@@ -129,8 +131,8 @@ fn agent_image(config: &LayerConfig) -> String {
 
 /// Return target based on layer config.
 fn target(config: &LayerConfig) -> Result<Target> {
-    if let Some(target) = &config.target {
-        target.parse()
+    if let Some(target) = &config.target.path {
+        Ok(target.clone())
     } else {
         Err(LayerError::InvalidTarget(
             "No target specified. Please set the `MIRRORD_IMPERSONATED_TARGET` environment variable.".to_string(),
@@ -221,7 +223,7 @@ impl KubernetesAPI {
         K: kube::Resource<Scope = NamespaceResourceScope>,
         <K as kube::Resource>::DynamicType: Default,
     {
-        if let Some(namespace) = &self.config.target_namespace {
+        if let Some(namespace) = &self.config.target.namespace {
             Api::namespaced(self.client.clone(), namespace)
         } else {
             Api::default_namespaced(self.client.clone())
@@ -645,10 +647,19 @@ impl RuntimeData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DeploymentTarget {
-    pub deployment_name: String,
-    pub container_name: Option<String>,
+#[async_trait]
+trait RuntimeDataProvider {
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData>;
+}
+
+#[async_trait]
+impl RuntimeDataProvider for Target {
+    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
+        match self {
+            Target::Deployment(deployment) => deployment.runtime_data(client).await,
+            Target::Pod(pod) => pod.runtime_data(client).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -656,7 +667,7 @@ impl RuntimeDataProvider for DeploymentTarget {
     async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
         let deployment_api: Api<Deployment> = client.get_target_pod_api();
         let deployment = deployment_api
-            .get(&self.deployment_name)
+            .get(&self.deployment)
             .await
             .map_err(LayerError::KubeError)?;
 
@@ -666,7 +677,7 @@ impl RuntimeDataProvider for DeploymentTarget {
             .ok_or_else(|| {
                 LayerError::DeploymentNotFound(format!(
                     "Label for deployment: {}, not found!",
-                    self.deployment_name.clone()
+                    self.deployment.clone()
                 ))
             })?;
 
@@ -686,131 +697,21 @@ impl RuntimeDataProvider for DeploymentTarget {
         let first_pod = deployment_pods.items.first().ok_or_else(|| {
             LayerError::DeploymentNotFound(format!(
                 "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
-                self.deployment_name.clone()
+                self.deployment.clone()
             ))
         })?;
 
-        RuntimeData::from_pod(first_pod, &self.container_name)
+        RuntimeData::from_pod(first_pod, &self.container)
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Target {
-    Deployment(DeploymentTarget),
-    Pod(PodTarget),
-}
-
-#[async_trait]
-trait RuntimeDataProvider {
-    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData>;
-}
-
-#[async_trait]
-impl RuntimeDataProvider for Target {
-    async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
-        match self {
-            Target::Deployment(deployment) => deployment.runtime_data(client).await,
-            Target::Pod(pod) => pod.runtime_data(client).await,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PodTarget {
-    pub pod_name: String,
-    pub container_name: Option<String>,
 }
 
 #[async_trait]
 impl RuntimeDataProvider for PodTarget {
     async fn runtime_data(&self, client: &KubernetesAPI) -> Result<RuntimeData> {
         let pod_api: Api<Pod> = client.get_target_pod_api();
-        let pod = pod_api.get(&self.pod_name).await?;
+        let pod = pod_api.get(&self.pod).await?;
 
-        RuntimeData::from_pod(&pod, &self.container_name)
-    }
-}
-
-trait FromSplit {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self>
-    where
-        Self: Sized;
-}
-
-const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
-mirrord-layer failed to parse the provided target!
-
-- Valid format:
-    >> deployment/<deployment-name>[/container/container-name]
-    >> deploy/<deployment-name>[/container/container-name]
-    >> pod/<pod-name>[/container/container-name]
-
-- Note:
-    >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
-    >> specifying the pod name is optional, defaults to the first pod in case the target is a deployment.
-
-- Suggestions:
-    >> check for typos in the provided target.
-    >> check if the provided target exists in the cluster using `kubectl get/describe` commands.
-    >> check if the provided target is in the correct namespace.
-"#;
-
-impl FromSplit for DeploymentTarget {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let deployment_name = split
-            .next()
-            .ok_or_else(|| LayerError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
-        match (split.next(), split.next()) {
-            (Some("container"), Some(container_name)) => Ok(Self {
-                deployment_name: deployment_name.to_string(),
-                container_name: Some(container_name.to_string()),
-            }),
-            (None, None) => Ok(Self {
-                deployment_name: deployment_name.to_string(),
-                container_name: None,
-            }),
-            _ => Err(LayerError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
-            )),
-        }
-    }
-}
-
-impl FromSplit for PodTarget {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let pod_name = split
-            .next()
-            .ok_or_else(|| LayerError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
-        match (split.next(), split.next()) {
-            (Some("container"), Some(container_name)) => Ok(Self {
-                pod_name: pod_name.to_string(),
-                container_name: Some(container_name.to_string()),
-            }),
-            (None, None) => Ok(Self {
-                pod_name: pod_name.to_string(),
-                container_name: None,
-            }),
-            _ => Err(LayerError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
-            )),
-        }
-    }
-}
-
-impl FromStr for Target {
-    type Err = LayerError;
-
-    fn from_str(target: &str) -> Result<Target> {
-        let mut split = target.split('/');
-        match split.next() {
-            Some("deployment") | Some("deploy") => {
-                DeploymentTarget::from_split(&mut split).map(Target::Deployment)
-            }
-            Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
-            _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
-            ))),
-        }
+        RuntimeData::from_pod(&pod, &self.container)
     }
 }
 
@@ -831,11 +732,11 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("pod/foobaz", Target::Pod(PodTarget {pod_name: "foobaz".to_string(), container_name: None}))]
-    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment_name: "foobaz".to_string(), container_name: None}))]
-    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment_name: "nginx-deployment".to_string(), container_name: None}))]
-    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod_name: "foo".to_string(), container_name: Some("baz".to_string()) }))]
-    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment_name: "nginx-deployment".to_string(), container_name: Some("container-name".to_string())}))]
+    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_string(), container: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_string(), container: None}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
+    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
     fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();
         assert_eq!(target, expected)
@@ -851,8 +752,8 @@ mod tests {
         assert_eq!(
             target,
             Target::Deployment(DeploymentTarget {
-                deployment_name: "foobaz".to_string(),
-                container_name: None
+                deployment: "foobaz".to_string(),
+                container: None
             })
         )
     }

@@ -9,6 +9,7 @@ pub mod fs;
 pub mod incoming;
 pub mod network;
 pub mod outgoing;
+pub mod target;
 pub mod util;
 
 use std::path::Path;
@@ -18,7 +19,7 @@ use serde::Deserialize;
 
 use crate::{
     agent::AgentFileConfig, config::source::MirrordConfigSource, feature::FeatureFileConfig,
-    util::VecOrSingle,
+    target::TargetFileConfig, util::VecOrSingle,
 };
 
 // TODO(alex) [mid] 2022-10-27: Add example usage of each field.
@@ -49,14 +50,9 @@ pub struct LayerFileConfig {
     /// - `deployment/{sample-deployment}`;
     /// - `container/{sample-container}`;
     /// - `containername/{sample-container}`.
-    #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
-    pub target: Option<String>,
-
-    /// Namespace where the `target` lives.
-    ///
-    /// Defaults to the current kubernetes config namespace.
-    #[config(env = "MIRRORD_TARGET_NAMESPACE")]
-    pub target_namespace: Option<String>,
+    #[serde(default)]
+    #[config(nested)]
+    pub target: TargetFileConfig,
 
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -108,6 +104,7 @@ mod tests {
         incoming::IncomingConfig,
         network::NetworkFileConfig,
         outgoing::OutgoingFileConfig,
+        target::{PodTarget, Target, TargetFileConfig},
         util::ToggleableConfig,
     };
 
@@ -133,8 +130,10 @@ mod tests {
                     r#"
                     {
                         "accept_invalid_certificates": false,
-                        "target": "pod/test-service-abcdefg-abcd",
-                        "target_namespace": "default",
+                        "target": {
+                            "path": "pod/test-service-abcdefg-abcd",
+                            "namespace": "default"
+                        },
                         "agent": {
                             "log_level": "info",
                             "namespace": "default",
@@ -161,8 +160,10 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
-                    target = "pod/test-service-abcdefg-abcd"
-                    target_namespace = "default"
+
+                    [target]
+                    path = "pod/test-service-abcdefg-abcd"
+                    namespace = "default"
 
                     [agent]
                     log_level = "info"
@@ -188,8 +189,9 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
-                    target: "pod/test-service-abcdefg-abcd"
-                    target_namespace: "default"
+                    target:
+                        path: "pod/test-service-abcdefg-abcd"
+                        namespace: "default"
 
                     agent:
                         log_level: "info"
@@ -249,8 +251,13 @@ mod tests {
             accept_invalid_certificates: Some(false),
             connect_agent_name: None,
             connect_agent_port: None,
-            target: Some("pod/test-service-abcdefg-abcd".to_owned()),
-            target_namespace: Some("default".to_owned()),
+            target: TargetFileConfig::Advanced {
+                path: Some(Target::Pod(PodTarget {
+                    pod: "test-service-abcdefg-abcd".to_owned(),
+                    container: None,
+                })),
+                namespace: Some("default".to_owned()),
+            },
             skip_processes: None,
             agent: AgentFileConfig {
                 log_level: Some("info".to_owned()),
