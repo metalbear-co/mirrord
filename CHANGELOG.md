@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.5.2
+
+### Fixed
+- Fixed breaking vscode release step
+
 ## 3.5.1
 
 ### Fixed
