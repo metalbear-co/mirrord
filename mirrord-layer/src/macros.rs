@@ -69,7 +69,7 @@ macro_rules! replace_symbol {
     }};
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
 macro_rules! hook_symbol {
     ($interceptor:expr, $func:expr, $detour_name:expr, $binary:expr) => {
         if let Some(symbol) = frida_gum::Module::find_symbol_by_name($binary, $func) {
