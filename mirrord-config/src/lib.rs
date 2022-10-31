@@ -41,9 +41,14 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// The target that will be impersonated by mirrord.
+    /// Specifies the running pod to mirror.
     ///
-    /// Supports `pod`, `podname`, `deployment`, `container`, `containername`.
+    /// Supports:
+    /// - `pod/{sample-pod}`;
+    /// - `podname/{sample-pod}`;
+    /// - `deployment/{sample-deployment}`;
+    /// - `container/{sample-container}`;
+    /// - `containername/{sample-container}`.
     #[config(env = "MIRRORD_IMPERSONATED_TARGET")]
     pub target: Option<String>,
 
