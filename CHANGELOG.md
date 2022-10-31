@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.5.0
+
 ### Added
 - aarch64 release binaries (no go support yet, no IntelliJ also).
 - mirrord-layer: Add [`FileFilter`](mirrord-layer/src/file/filter.rs) that allows the user to include or exclude file paths (with regex support) for file operations.
