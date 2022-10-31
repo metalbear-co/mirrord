@@ -111,7 +111,7 @@ where
         type Value = Option<T>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("string or map")
+            formatter.write_str("string or map or none")
         }
 
         fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -138,7 +138,7 @@ where
             // into a `Deserializer`, allowing it to be used as the input to T's
             // `Deserialize` implementation. T then deserializes itself using
             // the entries from the map visitor.
-            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map)).map(T::into)
         }
     }
 

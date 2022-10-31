@@ -76,7 +76,7 @@ mirrord-layer failed to parse the provided target!
 "#;
 
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
-#[serde(untagged, rename_all = "lowercase")]
+#[serde(untagged)]
 pub enum Target {
     Deployment(DeploymentTarget),
     Pod(PodTarget),
