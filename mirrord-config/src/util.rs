@@ -125,7 +125,9 @@ where
         where
             E: de::Error,
         {
-            Ok(Some(FromStr::from_str(value).unwrap()))
+            FromStr::from_str(value)
+                .map(T::into)
+                .map_err(|err| de::Error::custom(err))
         }
 
         fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
