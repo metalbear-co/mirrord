@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use crate::{
     agent::AgentFileConfig, config::source::MirrordConfigSource, feature::FeatureFileConfig,
-    target::TargetFileConfig, util::VecOrSingle
+    target::TargetFileConfig, util::VecOrSingle,
 };
 
 /// This is the root struct for mirrord-layer's configuration
@@ -86,7 +86,7 @@ mod tests {
         incoming::IncomingConfig,
         network::NetworkFileConfig,
         outgoing::OutgoingFileConfig,
-        target::TargetFileConfig,
+        target::{PodTarget, Target, TargetFileConfig},
         util::ToggleableConfig,
     };
 
@@ -234,7 +234,10 @@ mod tests {
             connect_agent_name: None,
             connect_agent_port: None,
             target: TargetFileConfig::Advanced {
-                path: Some("pod/test-service-abcdefg-abcd".to_owned()),
+                path: Some(Target::Pod(PodTarget {
+                    pod: "test-service-abcdefg-abcd".to_owned(),
+                    container: None,
+                })),
                 namespace: Some("default".to_owned()),
             },
             skip_processes: None,
