@@ -22,6 +22,7 @@ class MirrordListener : ExecutionListener {
         mirrordEnv["LD_PRELOAD"] = defaults.ldPreloadPath
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = defaults.acceptInvalidCertificates.toString()
         mirrordEnv["MIRRORD_SKIP_PROCESSES"] = defaults.skipProcesses
+        mirrordEnv["DEBUGGER_IGNORE_PORTS_PATCH"] = defaults.ignorePorts
     }
 
     companion object {

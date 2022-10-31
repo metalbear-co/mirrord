@@ -142,7 +142,7 @@ impl TestProcess {
 }
 
 pub struct LayerConnection {
-    codec: Framed<TcpStream, DaemonCodec>,
+    pub codec: Framed<TcpStream, DaemonCodec>,
     num_connections: u64,
 }
 
