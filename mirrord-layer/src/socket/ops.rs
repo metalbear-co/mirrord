@@ -20,6 +20,7 @@ use crate::{
     detour::{Detour, OptionExt},
     error::HookError,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
+    port_debug_patch,
     tcp::{HookMessageTcp, Listen},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
@@ -68,7 +69,7 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
 
-    if is_ignored_port(requested_port) {
+    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
         Err(Bypass::Port(requested_address.port()))?;
     }
 
@@ -261,7 +262,7 @@ pub(super) fn connect(
 ) -> Detour<i32> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
 
-    if is_ignored_port(remote_address.port()) {
+    if is_ignored_port(remote_address) || port_debug_patch(remote_address) {
         Err(Bypass::Port(remote_address.port()))?
     }
 

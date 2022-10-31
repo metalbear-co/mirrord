@@ -131,14 +131,6 @@ fn agent_image(config: &LayerConfig) -> String {
 fn target(config: &LayerConfig) -> Result<Target> {
     if let Some(target) = &config.target {
         target.parse()
-    } else if let Some(pod_name) = &config.pod.name {
-        warn!("[WARNING]: DEPRECATED - `MIRRORD_AGENT_IMPERSONATED_POD_NAME` is deprecated, consider using `MIRRORD_IMPERSONATED_TARGET` instead.
-        \nDeprecated since: [28/09/2022] | Scheduled removal: [28/10/2022]");
-        // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
-        Ok(Target::Pod(PodTarget {
-            pod_name: pod_name.clone(),
-            container_name: config.pod.container.clone(),
-        }))
     } else {
         Err(LayerError::InvalidTarget(
             "No target specified. Please set the `MIRRORD_IMPERSONATED_TARGET` environment variable.".to_string(),
@@ -230,9 +222,6 @@ impl KubernetesAPI {
         <K as kube::Resource>::DynamicType: Default,
     {
         if let Some(namespace) = &self.config.target_namespace {
-            Api::namespaced(self.client.clone(), namespace)
-        } else if let Some(namespace) = &self.config.pod.namespace {
-            // START | DEPRECATED: - Scheduled for removal on [28/10/2022]
             Api::namespaced(self.client.clone(), namespace)
         } else {
             Api::default_namespaced(self.client.clone())
@@ -655,7 +644,6 @@ impl RuntimeData {
         })
     }
 }
-// END
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DeploymentTarget {
@@ -749,25 +737,40 @@ trait FromSplit {
         Self: Sized;
 }
 
+const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
+mirrord-layer failed to parse the provided target!
+
+- Valid format:
+    >> deployment/<deployment-name>[/container/container-name]
+    >> deploy/<deployment-name>[/container/container-name]
+    >> pod/<pod-name>[/container/container-name]
+
+- Note:
+    >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
+    >> specifying the pod name is optional, defaults to the first pod in case the target is a deployment.
+
+- Suggestions:
+    >> check for typos in the provided target.
+    >> check if the provided target exists in the cluster using `kubectl get/describe` commands.
+    >> check if the provided target is in the correct namespace.
+"#;
+
 impl FromSplit for DeploymentTarget {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let deployment_name = split.next().ok_or_else(|| {
-            LayerError::InvalidTarget("Deployment target must have a deployment name".to_string())
-        })?;
+        let deployment_name = split
+            .next()
+            .ok_or_else(|| LayerError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
         match (split.next(), split.next()) {
-            (Some("container"), Some(container_name)) => {
-                Ok(Self {
-                    deployment_name: deployment_name.to_string(),
-                    container_name: Some(container_name.to_string()),
-                })
-            },
+            (Some("container"), Some(container_name)) => Ok(Self {
+                deployment_name: deployment_name.to_string(),
+                container_name: Some(container_name.to_string()),
+            }),
             (None, None) => Ok(Self {
                 deployment_name: deployment_name.to_string(),
                 container_name: None,
             }),
             _ => Err(LayerError::InvalidTarget(
-                "Deployment target must be in the format deployment/<deployment_name>[/container/<container_name>]"
-                    .to_string(),
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
             )),
         }
     }
@@ -775,9 +778,9 @@ impl FromSplit for DeploymentTarget {
 
 impl FromSplit for PodTarget {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let pod_name = split.next().ok_or_else(|| {
-            LayerError::InvalidTarget("Deployment target must have a deployment name".to_string())
-        })?;
+        let pod_name = split
+            .next()
+            .ok_or_else(|| LayerError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container_name)) => Ok(Self {
                 pod_name: pod_name.to_string(),
@@ -788,8 +791,7 @@ impl FromSplit for PodTarget {
                 container_name: None,
             }),
             _ => Err(LayerError::InvalidTarget(
-                "Pod target must be in the format pod/<pod_name>[/container/<container_name>]"
-                    .to_string(),
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
             )),
         }
     }
@@ -806,7 +808,7 @@ impl FromStr for Target {
             }
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(LayerError::InvalidTarget(format!(
-                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}",
+                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
         }
     }
