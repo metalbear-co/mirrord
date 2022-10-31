@@ -23,42 +23,20 @@ pub(super) enum Commands {
 #[clap(group(
     ArgGroup::new("exec")
         .required(true)
-        .args(&["target", "pod-name", "config-file"]),
+        .multiple(true)
+        .args(&["target", "config-file"]),
 ))]
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
     /// Valid formats: deployment/name, pod/name, pod/name/container/name
-    #[clap(short, long, value_parser)]
+    #[clap(short = 't', long, value_parser)]
     pub target: Option<String>,
 
     /// Namespace of the pod to mirror. Defaults to "default".
-    #[clap(long, value_parser)]
+    #[clap(short = 'n', long, value_parser)]
     pub target_namespace: Option<String>,
 
-    // START | To be removed after deprecated functionality is removed
-    /// Target name to mirror.
-    /// WARNING: [DEPRECATED] Consider using `--target` instead.
-    #[clap(short, long, group = "pod", value_parser)]
-    pub pod_name: Option<String>,
-
-    /// Namespace of the pod to mirror. Defaults to "default".
-    /// WARNING: [DEPRECATED] Consider using `--target-namespace` instead.
-    #[clap(
-        short = 'n',
-        requires = "pod",
-        conflicts_with = "target",
-        long,
-        value_parser
-    )]
-    pub pod_namespace: Option<String>,
-
-    /// Select container name to impersonate. Default is first container.
-    /// WARNING: [DEPRECATED] Consider using `--target` instead.
-    #[clap(long, requires = "pod", conflicts_with = "target", value_parser)]
-    pub impersonated_container_name: Option<String>,
-
-    // END
     /// Namespace to place agent in.
     #[clap(short = 'a', long, value_parser)]
     pub agent_namespace: Option<String>,
@@ -144,7 +122,7 @@ pub(super) struct ExecArgs {
     pub no_telemetry: bool,
 
     /// Load config from config file
-    #[clap(short = 'f', conflicts_with_all = &["target", "pod-name"], long, value_parser)]
+    #[clap(short = 'f', long, value_parser)]
     pub config_file: Option<PathBuf>,
 }
 

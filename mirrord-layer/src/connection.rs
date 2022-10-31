@@ -91,7 +91,7 @@ fn handle_error(err: LayerError) -> ! {
                 None => panic!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK}with error {err:#?}"),
+        _ => panic!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK} with error {err}"),
     }
 }
 
