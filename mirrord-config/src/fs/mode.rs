@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -28,8 +29,7 @@ use crate::{
 ///
 /// fs = write
 /// ```
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
     Disabled,

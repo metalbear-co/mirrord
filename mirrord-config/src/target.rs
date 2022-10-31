@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -7,8 +8,7 @@ use crate::{
     util::string_or_struct_option,
 };
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
     Simple(#[serde(deserialize_with = "string_or_struct_option")] Option<Target>),
@@ -75,9 +75,8 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
-#[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 #[serde(untagged)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Target {
     Deployment(DeploymentTarget),
     Pod(PodTarget),
@@ -100,8 +99,7 @@ impl FromStr for Target {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 pub struct PodTarget {
     pub pod: String,
     pub container: Option<String>,
@@ -128,8 +126,7 @@ impl FromSplit for PodTarget {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 pub struct DeploymentTarget {
     pub deployment: String,
     pub container: Option<String>,

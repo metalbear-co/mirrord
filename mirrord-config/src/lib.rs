@@ -15,6 +15,7 @@ pub mod util;
 use std::path::Path;
 
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -66,8 +67,7 @@ use crate::{
 /// [network]
 /// incoming = "steal"
 /// ```
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {
@@ -338,9 +338,8 @@ mod tests {
     /// Run it with:
     ///
     /// ```sh
-    /// cargo test -p mirrord-config print_schema --features schema -- --ignored --nocapture
+    /// cargo test -p mirrord-config print_schema -- --ignored --nocapture
     /// ```
-    #[cfg(feature = "schema")]
     #[test]
     #[ignore]
     fn print_schema() {
@@ -348,7 +347,6 @@ mod tests {
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
     }
 
-    #[cfg(feature = "schema")]
     #[test]
     #[ignore]
     fn write_schema_to_file() {

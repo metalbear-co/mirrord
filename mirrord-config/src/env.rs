@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -43,8 +44,7 @@ use crate::{
 ///
 /// exclude = "PROJECT;DATABASE"
 /// ```
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = EnvConfig)]
 pub struct EnvFileConfig {

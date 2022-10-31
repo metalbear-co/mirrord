@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 /// mirrord file operations support 2 modes of configuration:
 ///
 /// 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
@@ -50,8 +51,7 @@ pub mod mode;
 /// mode = write
 /// include = "^.*\.baz$"
 /// ```
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
     /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`

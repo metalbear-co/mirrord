@@ -23,10 +23,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 serde_yaml = "0.9"
 toml = "0.5"
-schemars = { version = "0.8.11", optional = true }
+schemars = { version = "0.8.11" }
 
 [dev-dependencies]
 rstest = "0.15"
-
-[features]
-schema = ["dep:schemars"]
