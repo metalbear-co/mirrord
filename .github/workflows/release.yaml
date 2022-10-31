@@ -8,38 +8,49 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_binaries:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            extension: so
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
-            extension: so
-            target: aarch64-unknown-linux-gnu
-    runs-on: ${{matrix.os}}
+  build_binaries_aarch64-unknown-linux-gnu:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
-          target: ${{matrix.target}}
+          target: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v1
         with:
-          key: ${{matrix.target}}-${{matrix.os}}
-      # We use zigbuild for easy cross compilation (no need for target's gcc when compiling C dependencies)
-      - name: setup zigbuild
-        run: python3 -m pip install ziglang && cargo install cargo-zigbuild
+          key: aarch64-unknown-linux-gnu-ubuntu-latest
+      - name: setup cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
       - name: build mirrord-layer and cli
-        run: cargo +nightly zigbuild --release -p mirrord -p mirrord-layer --target=${{matrix.target}}
+        run: cross +nightly build --release -p mirrord -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{matrix.target}}
+          name: aarch64-unknown-linux-gnu
           path: |
-            target/${{matrix.target}}/release/mirrord
-            target/${{matrix.target}}/release/libmirrord_layer.${{matrix.extension}}
+            target/aarch64-unknown-linux-gnu/release/mirrord
+            target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
+          if-no-files-found: error
+  build_binaries_x86_64-unknown-linux-gnu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: x86_64-unknown-linux-gnu-ubuntu-latest
+      - name: build mirrord-layer and cli
+        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
+      - uses: actions/upload-artifact@v3
+        with:
+          name: x86_64-unknown-linux-gnu
+          path: |
+            target/x86_64-unknown-linux-gnu/release/mirrord
+            target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_macos:
     runs-on: macos-12
@@ -155,7 +166,13 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_vscode_ext:
-    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    needs:
+      [
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
+        build_binaries_macos,
+        release_docker_image,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -229,7 +246,13 @@ jobs:
           if-no-files-found: error
 
   release_intellij_plugin:
-    needs: [build_binaries, build_binaries_macos, release_docker_image]
+    needs:
+      [
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
+        build_binaries_macos,
+        release_docker_image,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -270,7 +293,8 @@ jobs:
   release_gh:
     needs:
       [
-        build_binaries,
+        build_binaries_aarch64-unknown-linux-gnu,
+        build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_macos,
         release_docker_image,
         release_vscode_ext,
