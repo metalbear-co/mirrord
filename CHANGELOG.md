@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.5.3
+
+### Fixed
+- Fixed broken release step for VS Code Darwin arm64 version
+
 ## 3.5.2
 
 ### Fixed
