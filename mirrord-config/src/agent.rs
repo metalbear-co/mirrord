@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::config::source::MirrordConfigSource;
 
-/// Configuration for the agent pod that is spawned in the kubernetes context.
+/// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -16,12 +16,17 @@ pub struct AgentFileConfig {
     pub log_level: Option<String>,
 
     /// Namespace where the agent shall live.
+    ///
+    /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
     /// Name of the agent's docker image.
     ///
-    /// Useful when a custom build of mirrord-agent is required.
+    /// Useful when a custom build of mirrord-agent is required, or when using an internal
+    /// registry.
+    ///
+    /// Defaults to the latest stable image.
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
@@ -32,7 +37,9 @@ pub struct AgentFileConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: Option<String>,
 
-    /// Controls for how long should the agent pod persist (even after the local process finished).
+    /// Controls how long the agent pod persists for, after the local process terminated.
+    ///
+    /// Can be useful for collecting logs.
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
     pub ttl: Option<u16>,
 
@@ -41,15 +48,16 @@ pub struct AgentFileConfig {
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral: Option<bool>,
 
-    /// Controls how long should the agent wait when there is no communication, before timing out.
+    /// Controls how long the agent lives when there are no connections.
     ///
-    /// mirrord has its own heartbeat mechanism, so even if the local application has no messages,
-    /// the agent will stay alive until a heartbeat message times out with the value specified
-    /// here.
+    /// Each connection has its own heartbeat mechanism, so even if the local application has no
+    /// messages, the agent stays alive until there are no more heartbeat messages.
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
     /// Controls how long to wait for the agent to finish initialization.
+    ///
+    /// If initialization takes longer than this value, mirrord exits.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
     pub startup_timeout: Option<u64>,
 }

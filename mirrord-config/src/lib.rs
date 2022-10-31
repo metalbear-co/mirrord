@@ -49,6 +49,8 @@ pub struct LayerFileConfig {
     pub target: Option<String>,
 
     /// Namespace where the `target` lives.
+    ///
+    /// Defaults to the current kubernetes config namespace.
     #[config(env = "MIRRORD_TARGET_NAMESPACE")]
     pub target_namespace: Option<String>,
 

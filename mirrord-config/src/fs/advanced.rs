@@ -52,7 +52,7 @@ pub struct AdvancedFsUserConfig {
     /// operations are enabled.
     ///
     /// The regexes specified here will make mirrord operate only on files that match it, otherwise
-    /// the file will be operated locally (bypassing mirrord).
+    /// the file will be accessed locally (bypassing mirrord).
     #[config(env = "MIRRORD_FILE_FILTER_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
@@ -60,7 +60,7 @@ pub struct AdvancedFsUserConfig {
     /// operations are enabled.
     ///
     /// The opposite of `include`, files that match the regexes specified here will bypass mirrord
-    /// and are operated locally.
+    /// and are accessed locally.
     #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 }

@@ -11,12 +11,12 @@ use crate::{
 /// Allows the user to set or override a local process' environment variables with the ones from a
 /// remote pod.
 ///
-/// Which environment variables to load from the remote are controlled by setting either `include`
-/// or `exclude`.
+/// Which environment variables to load from the remote pod are controlled by setting either
+/// `include` or `exclude`.
 ///
 /// ## Examples
 ///
-/// - Include every environment variable from the remote pod (default).:
+/// - Include every environment variable from the remote pod (default):
 ///
 /// ```yaml
 /// # mirrord-config.yaml
@@ -27,21 +27,21 @@ use crate::{
 /// Some environment variables are excluded by default (`PATH` for example), including these
 /// requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].
 ///
-/// - Include the remote pod's environment variables "project", "database":
+/// - Include the remote pod's environment variables "PROJECT", "DATABASE":
 ///
 /// ```yaml
 /// # mirrord-config.yaml
 ///
-/// include = "project;database"
+/// include = "PROJECT;DATABASE"
 /// ```
 ///
-/// - Exclude the remote pod's environment variables "project", "database", and include everything
+/// - Exclude the remote pod's environment variables "PROJECT", "DATABASE", and include everything
 ///   else:
 ///
 /// ```yaml
 /// # mirrord-config.yaml
 ///
-/// exclude = "project;database"
+/// exclude = "PROJECT;DATABASE"
 /// ```
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -49,16 +49,22 @@ use crate::{
 #[config(map_to = EnvConfig)]
 pub struct EnvFileConfig {
     /// Include only these remote environment variables in the local process.
+    ///
+    /// Value is a list separated by ";".
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
+    ///
+    /// Value is a list separated by ";".
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
-    // TODO(alex) [mid] 2022-10-29: Have no idea about this.
-    /// Set or override environment variables.
+    /// Allows setting or overriding environment variables (locally) with a custom value.
+    ///
+    /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
+    /// undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.
     #[serde(rename = "override")]
     pub overrides: Option<HashMap<String, String>>,
 }

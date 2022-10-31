@@ -18,17 +18,17 @@ use crate::{
 pub struct NetworkFileConfig {
     /// Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:
     ///
-    /// - `mirror`: mirror requests from a Kubernetes container to the local process;
-    /// ` `steal`: redirects requests from the local process;
+    /// - `mirror`: mirror incoming requests to the remote pod to the local process;
+    /// ` `steal`: redirect incoming requests to the remote pod to the local process
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
     pub incoming: Option<IncomingConfig>,
 
-    /// Enables mirrord to take control of outgoing network operations.
+    /// Tunnel outgoing network operations through mirrord.
     #[serde(default)]
     #[config(nested)]
     pub outgoing: ToggleableConfig<OutgoingFileConfig>,
 
-    /// Enables mirrord to resolve DNS via the remote pod.
+    /// Resolve DNS via the remote pod.
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,
 }
