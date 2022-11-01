@@ -372,8 +372,14 @@ mod tests {
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
+    ///
+    /// Use this function to generate a mirrord config schema file.
+    ///
+    /// ```sh
+    /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --nocapture
+    /// ```
     #[test]
-    fn check_schema_file_exists_and_is_valid_or_creates_it() {
+    fn check_schema_file_exists_and_is_valid_or_create_it() {
         let compare_schema = schemars::schema_for!(LayerFileConfig);
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
