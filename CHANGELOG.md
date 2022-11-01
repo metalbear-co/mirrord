@@ -11,8 +11,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - mirrord-layer: Allow capturing tracing logs to file and print github issue creation link via MIRRORD_CAPTURE_ERROR_TRACE env variable
 
-### Changed
+## 3.5.3
 
+### Fixed
+- Fixed broken release step for VS Code Darwin arm64 version
+
+## 3.5.2
+
+### Fixed
+- Fixed breaking vscode release step
+
+## 3.5.1
+
+### Fixed
+- Fixed an issue with the release CI
+
+### Changed
 - Update target file config to have `namespace` nested inside of `target` and not a separate `target_namespace`. See [#587](https://github.com/metalbear-co/mirrord/issues/587) and [#667](https://github.com/metalbear-co/mirrord/issues/667)
 
 ## 3.5.0
