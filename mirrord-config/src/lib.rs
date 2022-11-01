@@ -369,6 +369,8 @@ mod tests {
         file
     }
 
+    // TODO(alex) [high] 2022-11-01: Run this as part of `build.rs`, can just call a command to run
+    // this test there, also check for file changes for this project, ezpz.
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
