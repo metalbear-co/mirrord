@@ -15,7 +15,7 @@ use k8s_openapi::{
     NamespaceResourceScope,
 };
 use kube::{
-    api::{Api, ListParams, LogParams, Portforwarder, PostParams},
+    api::{Api, ListParams, LogParams, Patch, PatchParams, Portforwarder, PostParams},
     runtime::{watcher, WatchStreamExt},
     Client, Config,
 };
@@ -164,6 +164,7 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
+    replicas: Option<u32>,
 }
 
 impl KubernetesAPI {
@@ -199,6 +200,7 @@ impl KubernetesAPI {
         Ok(Self {
             client,
             config: config.clone(),
+            replicas: None,
         })
     }
 
@@ -465,7 +467,7 @@ impl KubernetesAPI {
         Ok(pod_name)
     }
 
-    pub(crate) async fn create_agent(&self, connection_port: u16) -> Result<String> {
+    pub(crate) async fn create_agent(&mut self, connection_port: u16) -> Result<String> {
         let progress = TaskProgress::new("agent initializing...");
         let agent_image = agent_image(&self.config);
         let runtime_data = self.get_runtime_data().await?;
@@ -493,9 +495,18 @@ impl KubernetesAPI {
             .await
             .map_err(LayerError::KubeError)
     }
-    async fn get_runtime_data(&self) -> Result<RuntimeData> {
+    async fn get_runtime_data(&mut self) -> Result<RuntimeData> {
         let target = target(&self.config)?;
-        target.runtime_data(self).await
+        let data = target.runtime_data(self).await;
+        match target {
+            Target::Deployment(deployment) => deployment.downsize(self).await?,
+            Target::Pod(_) => {}
+        }
+        data
+    }
+
+    async fn resize_deployment_target_pods(&mut self) -> Result<()> {
+        todo!()
     }
 }
 
@@ -649,6 +660,60 @@ impl RuntimeData {
 pub(crate) struct DeploymentTarget {
     pub deployment_name: String,
     pub container_name: Option<String>,
+}
+
+impl DeploymentTarget {
+    async fn downsize(&self, client: &mut KubernetesAPI) -> Result<()> {
+        debug!("Downsizing target: {:?}", self);
+        let deployment_api: Api<Deployment> = client.get_target_pod_api();
+        let deployment = deployment_api
+            .get(&self.deployment_name)
+            .await
+            .map_err(LayerError::KubeError)?;
+
+        let current_replicas = deployment
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .ok_or_else(|| {
+                LayerError::DeploymentNotFound(format!(
+                    "Replicas for deployment: {:?}, not found!",
+                    deployment.clone()
+                ))
+            })?;
+
+        client.replicas = Some(current_replicas as u32);
+        let patch = Patch::Merge(serde_json::json!({
+            "spec": {
+                "replicas": 1
+            }
+        }));
+
+        let patch_params = PatchParams::default();
+        deployment_api
+            .patch(&self.deployment_name, &patch_params, &patch)
+            .await
+            .map_err(LayerError::KubeError)?;
+        Ok(())
+    }
+
+    async fn resize(&self, client: &mut KubernetesAPI) -> Result<()> {
+        debug!("Resizing target: {:?}", self);
+        let deployment_api: Api<Deployment> = client.get_target_pod_api();
+        let replicas = client.replicas.ok_or(LayerError::ReplicasNotFound)?;
+        let patch = Patch::Merge(serde_json::json!({
+            "spec": {
+                "replicas": client.replicas
+            }
+        }));
+
+        let patch_params = PatchParams::default();
+        deployment_api
+            .patch(&self.deployment_name, &patch_params, &patch)
+            .await
+            .map_err(LayerError::KubeError)?;
+        Ok(())
+    }
 }
 
 #[async_trait]

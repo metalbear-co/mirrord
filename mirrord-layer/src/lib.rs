@@ -19,7 +19,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{GetAddrInfoHook, ResponseChannel};
+use common::{ExitHook, GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -276,6 +276,9 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
+            HookMessage::Exit(message) => {
+                self.exit_handler(message).await;
+            }
         }
     }
 
@@ -321,6 +324,10 @@ where
             DaemonMessage::Close => todo!(),
             DaemonMessage::LogMessage(_) => todo!(),
         }
+    }
+
+    async fn exit_handler(&mut self, message: ExitHook) -> Result<()> {
+        todo!()
     }
 }
 

@@ -102,7 +102,7 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
         AgentConnection::TcpStream(stream)
     } else {
-        let k8s_api = KubernetesAPI::new(config)
+        let mut k8s_api = KubernetesAPI::new(config)
             .await
             .unwrap_or_else(|err| handle_error(err));
 

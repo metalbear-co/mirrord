@@ -9,6 +9,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
+use crate::pod_api::DeploymentTarget;
 
 const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
@@ -156,6 +157,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
+
+    #[error("mirrord-layer: Current state of replicas for the provided deployment not found!")]
+    ReplicasNotFound,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
