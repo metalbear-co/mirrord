@@ -8,6 +8,19 @@ use crate::{
     util::string_or_struct_option,
 };
 
+/// Specifies the target to mirror. See [`Target`].
+///
+/// ## Examples
+///
+/// - Mirror pod `hello-world-abcd-1234` in the `hello` namespace:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [target]
+/// path = "pod/hello-world-abcd-1234"
+/// namespace = "hello"
+/// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
@@ -75,10 +88,30 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
+/// Specifies the running pod (or deployment) to mirror.
+///
+/// Supports:
+/// - `pod/{sample-pod}`;
+/// - `podname/{sample-pod}`;
+/// - `deployment/{sample-deployment}`;
+/// - `container/{sample-container}`;
+/// - `containername/{sample-container}`.
+///
+/// ## Examples
+///
+/// - Mirror pod `hello-world-abcd-1234`:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// target = "pod/hello-world-abcd-1234"
+/// ```
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
+    /// Mirror a deployment.
     Deployment(DeploymentTarget),
+    /// Mirror a pod.
     Pod(PodTarget),
 }
 
@@ -99,8 +132,10 @@ impl FromStr for Target {
     }
 }
 
+/// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 pub struct PodTarget {
+    /// Pod to mirror.
     pub pod: String,
     pub container: Option<String>,
 }
@@ -126,8 +161,10 @@ impl FromSplit for PodTarget {
     }
 }
 
+/// Mirror the deployment specified by [`PodTarget::deployment`].
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 pub struct DeploymentTarget {
+    /// Deployment to mirror.
     pub deployment: String,
     pub container: Option<String>,
 }
