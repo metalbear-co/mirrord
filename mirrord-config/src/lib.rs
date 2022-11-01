@@ -380,6 +380,8 @@ mod tests {
     /// ```
     #[test]
     fn check_schema_file_exists_and_is_valid_or_create_it() {
+        println!("Checking for an existing schema file!");
+
         let compare_schema = schemars::schema_for!(LayerFileConfig);
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
