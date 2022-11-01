@@ -140,8 +140,8 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
-        fs::{DirBuilder, File},
-        io::{self, Read, Write},
+        fs::{File, OpenOptions},
+        io::{Read, Write},
     };
 
     use rstest::*;
@@ -350,18 +350,20 @@ mod tests {
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
     }
 
-    const SCHEMA_FILE_PATH: &str = "./schema/mirrord-config-schema.json";
+    const SCHEMA_FILE_PATH: &str = "./../mirrord-schema.json";
 
     /// Writes the config schema to a file (uploaded to the schema store).
     fn write_schema_to_file(schema: &RootSchema) -> File {
+        println!("Writing schema to file.");
+
         let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
-
-        DirBuilder::new()
-            .recursive(true)
-            .create("./schema")
-            .expect("Failed creating schema directory!");
-
-        let mut file = File::create(SCHEMA_FILE_PATH).expect("Failed to create schema file!");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .read(true)
+            .open(SCHEMA_FILE_PATH)
+            .expect("Failed to create schema file!");
 
         file.write(content.as_bytes())
             .expect("Failed writing schema to file!");
@@ -369,8 +371,6 @@ mod tests {
         file
     }
 
-    // TODO(alex) [high] 2022-11-01: Run this as part of `build.rs`, can just call a command to run
-    // this test there, also check for file changes for this project, ezpz.
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
@@ -378,31 +378,45 @@ mod tests {
     /// Use this function to generate a mirrord config schema file.
     ///
     /// ```sh
-    /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --nocapture
+    /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
     /// ```
     #[test]
+    #[ignore]
     fn check_schema_file_exists_and_is_valid_or_create_it() {
-        println!("Checking for an existing schema file!");
+        let fresh_schema = schemars::schema_for!(LayerFileConfig);
+        let fresh_content =
+            serde_json::to_string_pretty(&fresh_schema).expect("Failed generating schema!");
 
+        println!("Checking for an existing schema file!");
+        let mut existing_content = String::with_capacity(fresh_content.len());
+        if let Ok(_) = File::open(SCHEMA_FILE_PATH)
+            .and_then(|mut file| file.read_to_string(&mut existing_content))
+        {
+            if existing_content != fresh_content {
+                println!("Schema is outdated, preparing updated version!");
+                write_schema_to_file(&fresh_schema);
+            }
+        } else {
+            write_schema_to_file(&fresh_schema);
+        }
+    }
+
+    #[test]
+    fn test_schema_file_exists() {
+        let _ = File::open(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
+    }
+
+    #[test]
+    fn test_schema_file_is_up_to_date() {
         let compare_schema = schemars::schema_for!(LayerFileConfig);
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
 
         let mut existing_content = String::with_capacity(compare_content.len());
         let _ = File::open(SCHEMA_FILE_PATH)
-            .or_else(|_| {
-                println!("Schema file doesn't exist, generating it.");
-
-                Ok::<File, io::Error>(write_schema_to_file(&compare_schema))
-            })
             .unwrap()
             .read_to_string(&mut existing_content);
 
-        if existing_content != compare_content {
-            println!("Schema is outdated, preparing updated version!");
-            write_schema_to_file(&compare_schema);
-
-            assert_eq!(existing_content, compare_content);
-        }
+        assert_eq!(existing_content, compare_content);
     }
 }
