@@ -235,6 +235,10 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
+      - run: |
+          cd vscode-ext
+          npm install          
+          tsc && vsce package -o  /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
 
       - uses: actions/upload-artifact@v3
         with:
