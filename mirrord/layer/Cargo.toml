@@ -15,10 +15,10 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-config = { path = "../mirrord-config"}
-mirrord-protocol = { path = "../mirrord-protocol"}
-mirrord-macro = { path = "../mirrord-macro"}
-mirrord-progress = { path = "../mirrord-progress" }
+mirrord-config = { path = "../config"}
+mirrord-protocol = { path = "../protocol"}
+mirrord-macro = { path = "../macro"}
+mirrord-progress = { path = "../progress" }
 
 ctor = "0.1"
 libc = "0.2"

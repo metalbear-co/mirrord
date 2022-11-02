@@ -22,7 +22,7 @@ serde_json.workspace = true
 pnet = "0.31"
 nix.workspace = true
 clap.workspace = true
-mirrord-protocol = { path = "../mirrord-protocol"}
+mirrord-protocol = { path = "../protocol"}
 actix-codec.workspace = true
 futures.workspace = true
 tracing.workspace = true
