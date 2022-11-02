@@ -11,6 +11,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Fix vscode artifacts where arm64 package was not released.
 
+### Changed
+- Add `/home` to default file exclude list.
+- Changed log level of `Bypassing operation...` from warning to trace.
+
+
 ## 3.5.3
 
 ### Fixed
