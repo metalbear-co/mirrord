@@ -25,6 +25,7 @@ libc = "0.2"
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear2", version = "0.8", features = ["auto-download"] }
 futures.workspace = true
 k8s-openapi.workspace = true
@@ -47,6 +48,9 @@ socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
 stacker = "0.1"
+urlencoding = "2"
+itertools = "0.10"
+os_info = "3"
 
 
 [dev-dependencies]

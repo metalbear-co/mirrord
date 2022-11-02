@@ -262,6 +262,7 @@ mod tests {
                         udp: Some(false),
                     }),
                 }),
+                capture_error_trace: None,
             },
             connect_tcp: None,
         };
