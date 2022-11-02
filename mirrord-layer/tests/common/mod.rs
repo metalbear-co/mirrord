@@ -7,6 +7,7 @@ use std::{
 };
 
 use actix_codec::Framed;
+use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
@@ -24,6 +25,7 @@ pub struct TestProcess {
     pub child: Option<Child>,
     stderr: Arc<Mutex<String>>,
     stdout: Arc<Mutex<String>>,
+    error_capture: Regex,
 }
 
 impl TestProcess {
@@ -83,10 +85,14 @@ impl TestProcess {
                 }
             }
         });
+
+        let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
+
         TestProcess {
             child: Some(child),
             stderr: stderr_data,
             stdout: stdout_data,
+            error_capture,
         }
     }
 
@@ -111,11 +117,17 @@ impl TestProcess {
     }
 
     pub fn assert_no_error_in_stdout(&self) {
-        assert!(!self.stdout.lock().unwrap().to_lowercase().contains("error"));
+        assert!(!self
+            .error_capture
+            .is_match(&self.stdout.lock().unwrap())
+            .unwrap());
     }
 
     pub fn assert_no_error_in_stderr(&self) {
-        assert!(!self.stderr.lock().unwrap().to_lowercase().contains("error"));
+        assert!(!self
+            .error_capture
+            .is_match(&self.stderr.lock().unwrap())
+            .unwrap());
     }
 
     pub async fn wait_assert_success(&mut self) {

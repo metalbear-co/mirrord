@@ -65,6 +65,7 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
+mod tracing_util;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -170,15 +171,28 @@ fn before_init() {
 }
 
 fn init(config: LayerConfig) {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::ACTIVE)
-                .compact(),
-        )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    if config.feature.capture_error_trace {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(tracing_util::file_tracing_writer())
+                    .with_ansi(false)
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::ACTIVE),
+            )
+            .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::ACTIVE)
+                    .compact(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    };
 
     info!("Initializing mirrord-layer!");
 
@@ -355,9 +369,9 @@ async fn thread_loop(
         impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
         ClientCodec,
     >,
-    steal: bool,
+    config: LayerConfig,
 ) {
-    let mut layer = Layer::new(codec, steal);
+    let mut layer = Layer::new(codec, config.feature.network.incoming.is_steal());
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -412,6 +426,9 @@ async fn thread_loop(
         }
     }
 
+    if config.feature.capture_error_trace {
+        tracing_util::print_support_message();
+    }
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
@@ -426,8 +443,18 @@ async fn start_layer_thread(
     let mut codec = actix_codec::Framed::new(connection, ClientCodec::new());
 
     let (env_vars_filter, env_vars_select) = match (
-        config.feature.env.exclude.map(|exclude| exclude.join(";")),
-        config.feature.env.include.map(|include| include.join(";")),
+        config
+            .feature
+            .env
+            .exclude
+            .clone()
+            .map(|exclude| exclude.join(";")),
+        config
+            .feature
+            .env
+            .include
+            .clone()
+            .map(|include| include.join(";")),
     ) {
         (Some(_), Some(_)) => panic!(
             r#"mirrord-layer encountered an issue:
@@ -482,11 +509,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(
-        receiver,
-        codec,
-        config.feature.network.incoming.is_steal(),
-    ));
+    let _ = tokio::spawn(thread_loop(receiver, codec, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
