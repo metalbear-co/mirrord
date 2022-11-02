@@ -29,7 +29,7 @@ pub mod mode;
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// fs = write
+/// fs = "write"
 /// ```
 ///
 /// - Read-only excluding `.foo` files:
@@ -38,7 +38,7 @@ pub mod mode;
 /// # mirrord-config.toml
 ///
 /// [fs]
-/// mode = read
+/// mode = "read"
 /// exclude = "^.*\.foo$"
 /// ```
 ///
@@ -48,7 +48,7 @@ pub mod mode;
 /// # mirrord-config.toml
 ///
 /// [fs]
-/// mode = write
+/// mode = "write"
 /// include = "^.*\.baz$"
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
