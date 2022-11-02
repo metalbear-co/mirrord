@@ -62,9 +62,9 @@ mirrord full log file at: {}"#,
 
         println!(
             r#"
-mirrord encountered an error, please create an issue over at github, It would be much appreciated
+mirrord encountered an error. We'd appreciate it if you could create an issue on our GitHub repository so we could address it as soon as possible.```
 
-NOTE: Please check and reduct the logs in the issue for sensative information. (We do love hearing feedback on how can we reduce the amount of sensative information in the logs)
+NOTE: Please redact sensitive information from the logs.
 
 {}
             "#,
