@@ -1,6 +1,7 @@
 pub mod default_value;
 pub mod from_env;
 pub mod source;
+pub mod unstable;
 
 use thiserror::Error;
 

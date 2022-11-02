@@ -12,6 +12,7 @@ enum FieldAttr {
     Nested,
     Env(Lit),
     Default(Lit),
+    Unstable,
 }
 
 /// Parse and create Ident from map_to attribute
@@ -44,6 +45,7 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
     match meta {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unstable") => Ok(FieldAttr::Unstable),
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
             Ok(FieldAttr::Env(meta.lit))
         }
