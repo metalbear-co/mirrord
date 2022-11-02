@@ -14,7 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - Add `/home` to default file exclude list.
 - Changed log level of `Bypassing operation...` from warning to trace.
-
+- IntelliJ settings default to match CLI/VSCode.
 
 ## 3.5.3
 
