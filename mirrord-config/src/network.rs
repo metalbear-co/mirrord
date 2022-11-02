@@ -19,7 +19,7 @@ pub struct NetworkFileConfig {
     /// Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:
     ///
     /// - `mirror`: mirror incoming requests to the remote pod to the local process;
-    /// ` `steal`: redirect incoming requests to the remote pod to the local process
+    /// - `steal`: redirect incoming requests to the remote pod to the local process
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
     pub incoming: Option<IncomingConfig>,
 
