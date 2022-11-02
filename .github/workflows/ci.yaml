@@ -267,7 +267,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
-      MIRRORD_TEST_USE_EXISTING_LIB: ../target/debug/libmirrord_layer.dylib
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v2 # Checkout the mirrord repo.
       - uses: actions-rs/toolchain@v1 # Install Rust.
