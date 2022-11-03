@@ -42,28 +42,38 @@ class MirrordListener : ExecutionListener {
                     kubeDataProvider.getNamespaces().asJBList()
                 } catch (e: Exception) {
                     MirrordEnabler.notify(
-                        "Error occurred while fetching namespaces from Kubernetes context",
+                        "Error occurred while fetching namespaces from Kubernetes context.\n " +
+                                "mirrord will use the default namespace from kube configuration.\n `${e.message}`",
                         NotificationType.ERROR,
                         env.project
                     )
-                    // FAILURE: Just call the parent implementation
-                    return@invokeLater super.processStartScheduled(executorId, env)
+                    null
                 }
-                val namespaceDialog = MirrordDialogBuilder.createDialogBuilder(
-                    MirrordDialogBuilder.createMirrordNamespaceDialog(namespaces)
-                )
 
-                // SUCCESS: Ask the user for the impersonated pod in the chosen namespace
-                if (namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
+                // we need the following check to make sure in case the dialog is spawned, we get an
+                // OK exit code and a non-empty selection from the user
+                val showNamespaceDialog = if (namespaces != null) {
+                    val namespaceDialog = namespaces.let { MirrordDialogBuilder.createMirrordNamespaceDialog(it) }.let {
+                        MirrordDialogBuilder.createDialogBuilder(
+                            it
+                        )
+                    }
+                    namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty
+                } else {
+                    true
+                }
+
+                val podNamespace = namespaces?.selectedValue ?: kubeDataProvider.getPodNamespace()
+
+                if (showNamespaceDialog) {
                     val pods = try {
-                        kubeDataProvider.getNameSpacedPods(namespaces.selectedValue).asJBList()
+                        kubeDataProvider.getNameSpacedPods(podNamespace).asJBList()
                     } catch (e: Exception) {
                         MirrordEnabler.notify(
-                            "Error occurred while fetching pods from Kubernetes context",
+                            "Error occurred while fetching pods from Kubernetes context: `${e.message}`",
                             NotificationType.ERROR,
                             env.project
                         )
-                        // FAILURE: Just call the parent implementation
                         return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
@@ -100,11 +110,9 @@ class MirrordListener : ExecutionListener {
                             includeEnv,
                         )
                     )
-
-                    // SUCCESS: set the respective environment variables
                     if (mirrordConfigDialog.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
                         mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue}"
-                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = namespaces.selectedValue
+                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = podNamespace
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
                         mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
