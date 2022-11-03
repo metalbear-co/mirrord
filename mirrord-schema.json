@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayerFileConfig",
-  "description": "Main struct for mirrord-layer's configuration\n\n## Examples\n\n- Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" skip_processes = [\"ide-debugger\", \"ide-service\"] # we don't want mirrord to hook into these\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds\n\n[fs] mode = \"read\"\n\n[network] incoming = \"mirror\" ```\n\n- Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates, use a custom mirrord-agent image:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" accept_invalid_certificates = true\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds image = \"registry/mirrord-agent-custom:latest\" image_pull_policy = \"Always\"\n\n[fs] mode = \"write\"\n\n[network] incoming = \"steal\" ```",
+  "description": "Main struct for mirrord-layer's configuration\n\n## Examples\n\n- Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" skip_processes = [\"ide-debugger\", \"ide-service\"] # we don't want mirrord to hook into these\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds\n\n[feature] fs = \"read\" # default\n\n[feature.network] incoming = \"mirror\" # default ```\n\n- Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates, use a custom mirrord-agent image:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" accept_invalid_certificates = true\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds image = \"registry/mirrord-agent-custom:latest\" image_pull_policy = \"Always\"\n\n[feature] fs = \"write\"\n\n[feature.network] incoming = \"steal\" ```",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
@@ -179,6 +179,7 @@
       "additionalProperties": false
     },
     "DeploymentTarget": {
+      "description": "Mirror the deployment specified by [`PodTarget::deployment`].",
       "type": "object",
       "required": [
         "deployment"
@@ -191,12 +192,13 @@
           ]
         },
         "deployment": {
+          "description": "Deployment to mirror.",
           "type": "string"
         }
       }
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```yaml # mirrord-config.yaml\n\ninclude = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```yaml # mirrord-config.yaml\n\ninclude = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"PROJECT\", \"DATABASE\", and include everything else:\n\n```yaml # mirrord-config.yaml\n\nexclude = \"PROJECT;DATABASE\" ```",
+      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] exclude = \"USER;SECRET\" ```",
       "type": "object",
       "properties": {
         "exclude": {
@@ -235,11 +237,11 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Configuration for mirrord features.",
+      "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations and mirror network traffic (default option):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\"\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
       "type": "object",
       "properties": {
         "env": {
-          "description": "Controls the environment variables feature, see [`EnvFileConfig`].",
+          "description": "Controls the environment variables feature, see [`EnvFileConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
           "allOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
@@ -247,7 +249,7 @@
           ]
         },
         "fs": {
-          "description": "Controls the file operations feature, see [`FsUserConfig`].",
+          "description": "Controls the file operations feature, see [`FsUserConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
           "allOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
@@ -255,7 +257,7 @@
           ]
         },
         "network": {
-          "description": "Controls the network feature, see [`NetworkFileConfig`].",
+          "description": "Controls the network feature, see [`NetworkFileConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
           "allOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
@@ -275,7 +277,7 @@
       ]
     },
     "FsUserConfig": {
-      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\nfs = write ```\n\n- Read-only excluding `.foo` files:\n\n```toml # mirrord-config.toml\n\n[fs] mode = read exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```toml # mirrord-config.toml\n\n[fs] mode = write include = \"^.*\\.baz$\" ```",
+      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details.\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" ```\n\n- Read-only excluding `.foo` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"read\" exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"write\" include = \"^.*\\.baz$\" ```",
       "anyOf": [
         {
           "description": "Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
@@ -303,7 +305,7 @@
       ]
     },
     "NetworkFileConfig": {
-      "description": "Controls mirrord network operations.",
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n## Examples\n\n- Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"steal\" dns = true # not needed, as this is the default\n\n[feature.network.outgoing] tcp = true ```",
       "type": "object",
       "properties": {
         "dns": {
@@ -314,7 +316,7 @@
           ]
         },
         "incoming": {
-          "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; ` `steal`: redirect incoming requests to the remote pod to the local process",
+          "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; - `steal`: redirect incoming requests to the remote pod to the local process",
           "anyOf": [
             {
               "$ref": "#/definitions/IncomingConfig"
@@ -354,6 +356,7 @@
       "additionalProperties": false
     },
     "PodTarget": {
+      "description": "Mirror the pod specified by [`PodTarget::pod`].",
       "type": "object",
       "required": [
         "pod"
@@ -366,21 +369,34 @@
           ]
         },
         "pod": {
+          "description": "Pod to mirror.",
           "type": "string"
         }
       }
     },
     "Target": {
+      "description": "Specifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234`:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/hello-world-abcd-1234\" ```",
       "anyOf": [
         {
-          "$ref": "#/definitions/DeploymentTarget"
+          "description": "Mirror a deployment.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeploymentTarget"
+            }
+          ]
         },
         {
-          "$ref": "#/definitions/PodTarget"
+          "description": "Mirror a pod.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PodTarget"
+            }
+          ]
         }
       ]
     },
     "TargetFileConfig": {
+      "description": "Specifies the target to mirror. See [`Target`].\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234` in the `hello` namespace:\n\n```toml # mirrord-config.toml\n\n[target] path = \"pod/hello-world-abcd-1234\" namespace = \"hello\" ```",
       "anyOf": [
         {
           "anyOf": [
