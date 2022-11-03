@@ -25,6 +25,7 @@ use crate::{
 /// ```yaml
 /// # mirrord-config.yaml
 ///
+/// [env]
 /// include = "*"
 /// ```
 ///
@@ -36,6 +37,7 @@ use crate::{
 /// ```yaml
 /// # mirrord-config.yaml
 ///
+/// [env]
 /// include = "PROJECT;DATABASE"
 /// ```
 ///
@@ -44,6 +46,7 @@ use crate::{
 /// ```yaml
 /// # mirrord-config.yaml
 ///
+/// [env]
 /// exclude = "USER;SECRET"
 /// ```
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
