@@ -17,7 +17,7 @@ edition.workspace = true
 [dependencies]
 mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
-mirrord-macro = { path = "../macro"}
+mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
 
 ctor = "0.1"

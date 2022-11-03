@@ -1651,7 +1651,6 @@ version = "3.5.3"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
- "mirrord-macro",
  "rstest",
  "schemars",
  "serde",
@@ -1692,7 +1691,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
- "mirrord-macro",
+ "mirrord-layer-macro",
  "mirrord-progress",
  "mirrord-protocol",
  "nix 0.24.2",
@@ -1717,7 +1716,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord-macro"
+name = "mirrord-layer-macro"
 version = "3.5.3"
 dependencies = [
  "proc-macro2",

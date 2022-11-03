@@ -14,7 +14,6 @@ publish.workspace = true
 edition.workspace = true
 
 [dependencies]
-mirrord-macro = { path = "../macro"}
 mirrord-config-derive = { path = "./derive"}
 
 anyhow.workspace = true
