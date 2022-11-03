@@ -32,6 +32,7 @@ pub mod mode;
 /// ```toml
 /// # mirrord-config.toml
 ///
+/// [feature]
 /// fs = "write"
 /// ```
 ///
@@ -40,7 +41,7 @@ pub mod mode;
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [fs]
+/// [feature.fs]
 /// mode = "read"
 /// exclude = "^.*\.foo$"
 /// ```
@@ -50,7 +51,7 @@ pub mod mode;
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [fs]
+/// [feature.fs]
 /// mode = "write"
 /// include = "^.*\.baz$"
 /// ```

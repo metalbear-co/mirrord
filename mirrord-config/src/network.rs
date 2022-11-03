@@ -23,10 +23,12 @@ use crate::{
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [network]
+/// [feature.network]
 /// incoming = "steal"
-/// outgoing = "tcp"
-/// dns = "true" # not needed, as this is the default
+/// dns = true # not needed, as this is the default
+///
+/// [feature.network.outgoing]
+/// tcp = true
 /// ```
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]

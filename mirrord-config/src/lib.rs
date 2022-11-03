@@ -41,11 +41,11 @@ use crate::{
 /// log_level = "debug"
 /// ttl = 1024 # seconds
 ///
-/// [fs]
-/// mode = "read"
+/// [feature]
+/// fs = "read" # default
 ///
-/// [network]
-/// incoming = "mirror"
+/// [feature.network]
+/// incoming = "mirror" # default
 /// ```
 ///
 /// - Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates,
@@ -63,10 +63,10 @@ use crate::{
 /// image = "registry/mirrord-agent-custom:latest"
 /// image_pull_policy = "Always"
 ///
-/// [fs]
-/// mode = "write"
+/// [feature]
+/// fs = "write"
 ///
-/// [network]
+/// [feature.network]
 /// incoming = "steal"
 /// ```
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]

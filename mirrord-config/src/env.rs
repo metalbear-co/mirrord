@@ -22,10 +22,13 @@ use crate::{
 ///
 /// - Include every environment variable from the remote pod (default):
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
-/// [env]
+/// [feature]
+/// env = true
+///
+/// [feature.env]
 /// include = "*"
 /// ```
 ///
@@ -34,19 +37,25 @@ use crate::{
 ///
 /// - Include the remote pod's environment variables "PROJECT", "DATABASE":
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
-/// [env]
+/// [feature]
+/// env = true
+///
+/// [feature.env]
 /// include = "PROJECT;DATABASE"
 /// ```
 ///
 /// - Exclude the remote pod's environment variables "USER", "SECRET", and include everything else:
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ```toml
+/// # mirrord-config.toml
 ///
-/// [env]
+/// [feature]
+/// env = true
+///
+/// [feature.env]
 /// exclude = "USER;SECRET"
 /// ```
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]

@@ -20,11 +20,11 @@ use crate::{
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [env]
-/// exclude = "SECRET"
+/// [feature]
+/// fs = "write"
 ///
-/// [fs]
-/// mode = "write"
+/// [feature.env]
+/// exclude = "SECRET"
 /// ```
 ///
 /// - Include only "DATABASE_URL", and "PORT" environment variables, enable read-write file
@@ -34,16 +34,19 @@ use crate::{
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [env]
+/// [feature.env]
 /// include = "DATABASE_URL;PORT"
 ///
-/// [fs]
+/// [feature.fs]
 /// mode = "write"
 /// include = "^.*\.txt$"
 ///
-/// [network]
+/// [feature.network]
 /// incoming = "mirror" # default, included here for effect
-/// outgoing = "true"
+///
+/// [feature.network.outgoing]
+/// tcp = true
+/// udp = true
 /// ```
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
