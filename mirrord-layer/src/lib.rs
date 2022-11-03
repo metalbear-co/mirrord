@@ -19,7 +19,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{ExitHook, GetAddrInfoHook, ResponseChannel};
+use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -33,6 +33,7 @@ use mirrord_protocol::{
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
+use pod_api::ResizeGuard;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -157,7 +158,7 @@ fn init(config: LayerConfig) {
 
     info!("Initializing mirrord-layer!");
 
-    let connection = RUNTIME.block_on(connection::connect(&config));
+    let (connection, token) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -180,7 +181,7 @@ fn init(config: LayerConfig) {
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
-    RUNTIME.block_on(start_layer_thread(connection, receiver, config));
+    RUNTIME.block_on(start_layer_thread(connection, token, receiver, config));
 }
 
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
@@ -215,6 +216,7 @@ where
     pub tcp_steal_handler: TcpStealHandler,
 
     steal: bool,
+    running: bool,
 }
 
 impl<T> Layer<T>
@@ -225,6 +227,7 @@ where
         Self {
             codec,
             ping: false,
+            running: true,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -276,8 +279,8 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
-            HookMessage::Exit(message) => {
-                self.exit_handler(message).await;
+            HookMessage::Exit => {
+                self.running = false;
             }
         }
     }
@@ -325,10 +328,6 @@ where
             DaemonMessage::LogMessage(_) => todo!(),
         }
     }
-
-    async fn exit_handler(&mut self, message: ExitHook) -> Result<()> {
-        todo!()
-    }
 }
 
 async fn thread_loop(
@@ -338,9 +337,10 @@ async fn thread_loop(
         ClientCodec,
     >,
     steal: bool,
+    token: Option<ResizeGuard>,
 ) {
     let mut layer = Layer::new(codec, steal);
-    loop {
+    while layer.running {
         select! {
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
@@ -393,13 +393,16 @@ async fn thread_loop(
             }
         }
     }
-
+    drop(token);
+    // tokio::abort
+    // std::process::exit(code);
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
 #[tracing::instrument(level = "trace", skip(connection, receiver))]
 async fn start_layer_thread(
     connection: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    token: Option<ResizeGuard>,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
@@ -468,6 +471,7 @@ async fn start_layer_thread(
         receiver,
         codec,
         config.feature.network.incoming.is_steal(),
+        token,
     ));
 }
 
@@ -486,6 +490,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
         );
+        let _ = replace!(&mut interceptor, "exit", exit_detour, FnExit, FN_EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -539,6 +544,23 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
+}
+
+// // no need to guard because we call another detour which will do the guard for us.
+// #[hook_fn]
+// pub(crate) unsafe extern "C" fn exit_detour(fd: c_int) -> c_int {
+//     send_message();
+//     // this happens
+//     // it sends to message to main loop
+//     // it sees if main loop is already dead or received message and acked it
+//     // exit(original_code)
+//     block_on_ack();
+//     exit();
+// }
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn exit_detour() {
+    FN_EXIT();
 }
 
 pub(crate) const FAIL_STILL_STUCK: &str = r#"

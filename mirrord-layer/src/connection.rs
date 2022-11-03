@@ -10,7 +10,11 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tracing::log::info;
 
-use crate::{error::LayerError, pod_api::KubernetesAPI, FAIL_STILL_STUCK};
+use crate::{
+    error::LayerError,
+    pod_api::{KubernetesAPI, ResizeGuard},
+    FAIL_STILL_STUCK,
+};
 
 pub(crate) enum AgentConnection<T>
 where
@@ -95,14 +99,16 @@ fn handle_error(err: LayerError) -> ! {
     }
 }
 
-pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead + Unpin {
+pub(crate) async fn connect(
+    config: &LayerConfig,
+) -> (impl AsyncWrite + AsyncRead + Unpin, Option<ResizeGuard>) {
     if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
-        AgentConnection::TcpStream(stream)
+        (AgentConnection::TcpStream(stream), None)
     } else {
-        let mut k8s_api = KubernetesAPI::new(config)
+        let k8s_api = KubernetesAPI::new(config)
             .await
             .unwrap_or_else(|err| handle_error(err));
 
@@ -140,7 +146,10 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
             Ok(port_forwarder) => port_forwarder,
             Err(err) => handle_error(err),
         };
-
-        AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
+        let token = k8s_api.resize_deployment_replicas().await;
+        (
+            AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap()),
+            token,
+        )
     }
 }

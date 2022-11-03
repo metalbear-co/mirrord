@@ -54,6 +54,9 @@ pub struct LayerFileConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
+    #[config(env = "MIRRORD_DOWNSIZE_REPLICAS", default = "false")]
+    pub downsize_replicas: Option<bool>,
+
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,
@@ -112,6 +115,7 @@ mod tests {
                     r#"
                     {
                         "accept_invalid_certificates": false,
+                        "downsize_replicas": false,
                         "target": "pod/test-service-abcdefg-abcd",
                         "target_namespace": "default",
                         "agent": {
@@ -140,6 +144,7 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
+                    downsize_replicas = false
                     target = "pod/test-service-abcdefg-abcd"
                     target_namespace = "default"
 
@@ -167,6 +172,7 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
+                    downsize_replicas: false
                     target: "pod/test-service-abcdefg-abcd"
                     target_namespace: "default"
 
@@ -228,6 +234,7 @@ mod tests {
             accept_invalid_certificates: Some(false),
             connect_agent_name: None,
             connect_agent_port: None,
+            downsize_replicas: Some(false),
             target: Some("pod/test-service-abcdefg-abcd".to_owned()),
             target_namespace: Some("default".to_owned()),
             skip_processes: None,

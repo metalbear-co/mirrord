@@ -24,7 +24,8 @@ use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::{json, to_vec};
 use tokio::pin;
-use tracing::{debug, warn};
+use tokio_util::sync::{CancellationToken, DropGuard};
+use tracing::{debug, error, warn};
 
 use crate::error::{LayerError, Result};
 
@@ -164,7 +165,43 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
-    replicas: Option<u32>,
+    replicas: Option<u32>, // ignore this field for now
+    target: Target,
+}
+
+async fn set_replicas(api: &Api<Deployment>, name: &str, replicas: u32) -> Result<()> {
+    let patch = Patch::Merge(serde_json::json!({
+        "spec": {
+            "replicas": replicas
+        }
+    }));
+
+    let patch_params = PatchParams::default();
+    api.patch(name, &patch_params, &patch)
+        .await
+        .map_err(LayerError::KubeError)?;
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) struct ResizeGuard {
+    token: DropGuard,
+}
+
+impl ResizeGuard {
+    async fn new(deployment: DeploymentTarget, api: Api<Deployment>, replicas: u32) -> ResizeGuard {
+        let token = CancellationToken::new();
+        let cloned_token = token.clone();
+        tokio::spawn(async move {
+            cloned_token.cancelled().await;
+            if let Err(err) = set_replicas(&api, &deployment.deployment_name, replicas).await {
+                error!("restoring replicas on shutdown failed");
+            }
+        });
+        ResizeGuard {
+            token: token.drop_guard(),
+        }
+    }
 }
 
 impl KubernetesAPI {
@@ -197,10 +234,13 @@ impl KubernetesAPI {
 
         let client = Client::try_from(kube_config).map_err(LayerError::KubeError)?;
 
+        let target = target(config)?;
+
         Ok(Self {
             client,
             config: config.clone(),
             replicas: None,
+            target: target,
         })
     }
 
@@ -467,7 +507,7 @@ impl KubernetesAPI {
         Ok(pod_name)
     }
 
-    pub(crate) async fn create_agent(&mut self, connection_port: u16) -> Result<String> {
+    pub(crate) async fn create_agent(&self, connection_port: u16) -> Result<String> {
         let progress = TaskProgress::new("agent initializing...");
         let agent_image = agent_image(&self.config);
         let runtime_data = self.get_runtime_data().await?;
@@ -495,18 +535,22 @@ impl KubernetesAPI {
             .await
             .map_err(LayerError::KubeError)
     }
-    async fn get_runtime_data(&mut self) -> Result<RuntimeData> {
-        let target = target(&self.config)?;
-        let data = target.runtime_data(self).await;
-        match target {
-            Target::Deployment(deployment) => deployment.downsize(self).await?,
-            Target::Pod(_) => {}
-        }
-        data
+    async fn get_runtime_data(&self) -> Result<RuntimeData> {
+        self.target.runtime_data(self).await
     }
 
-    async fn resize_deployment_target_pods(&mut self) -> Result<()> {
-        todo!()
+    pub(crate) async fn resize_deployment_replicas(&self) -> Option<ResizeGuard> {
+        if let Target::Deployment(deployment) = &self.target {
+            deployment
+                .resize(&self)
+                .await
+                .map_err(|err| {
+                    error!("Failed to resize deployment: {}", err);
+                })
+                .ok()
+        } else {
+            None
+        }
     }
 }
 
@@ -663,15 +707,14 @@ pub(crate) struct DeploymentTarget {
 }
 
 impl DeploymentTarget {
-    async fn downsize(&self, client: &mut KubernetesAPI) -> Result<()> {
-        debug!("Downsizing target: {:?}", self);
+    async fn resize(&self, client: &KubernetesAPI) -> Result<ResizeGuard> {
         let deployment_api: Api<Deployment> = client.get_target_pod_api();
         let deployment = deployment_api
             .get(&self.deployment_name)
             .await
             .map_err(LayerError::KubeError)?;
 
-        let current_replicas = deployment
+        let original_replicas = deployment
             .spec
             .as_ref()
             .and_then(|spec| spec.replicas)
@@ -682,37 +725,9 @@ impl DeploymentTarget {
                 ))
             })?;
 
-        client.replicas = Some(current_replicas as u32);
-        let patch = Patch::Merge(serde_json::json!({
-            "spec": {
-                "replicas": 1
-            }
-        }));
-
-        let patch_params = PatchParams::default();
-        deployment_api
-            .patch(&self.deployment_name, &patch_params, &patch)
-            .await
-            .map_err(LayerError::KubeError)?;
-        Ok(())
-    }
-
-    async fn resize(&self, client: &mut KubernetesAPI) -> Result<()> {
-        debug!("Resizing target: {:?}", self);
-        let deployment_api: Api<Deployment> = client.get_target_pod_api();
-        let replicas = client.replicas.ok_or(LayerError::ReplicasNotFound)?;
-        let patch = Patch::Merge(serde_json::json!({
-            "spec": {
-                "replicas": client.replicas
-            }
-        }));
-
-        let patch_params = PatchParams::default();
-        deployment_api
-            .patch(&self.deployment_name, &patch_params, &patch)
-            .await
-            .map_err(LayerError::KubeError)?;
-        Ok(())
+        let downsize_replicas: u32 = 1;
+        set_replicas(&deployment_api, &self.deployment_name, downsize_replicas);
+        Ok(ResizeGuard::new(self.clone(), deployment_api, original_replicas as u32).await)
     }
 }
 
