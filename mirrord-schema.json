@@ -240,6 +240,13 @@
       "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations and mirror network traffic (default option):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\"\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
       "type": "object",
       "properties": {
+        "capture_error_trace": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "env": {
           "description": "Controls the environment variables feature, see [`EnvFileConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
           "allOf": [
