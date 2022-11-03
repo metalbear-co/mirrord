@@ -1,3 +1,3 @@
-# mirrord-auth
+# mirrord-config
 
-Authentication parts for cli
+Crate that handles the configuration part of mirrord.
