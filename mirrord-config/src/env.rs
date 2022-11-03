@@ -39,13 +39,12 @@ use crate::{
 /// include = "PROJECT;DATABASE"
 /// ```
 ///
-/// - Exclude the remote pod's environment variables "PROJECT", "DATABASE", and include everything
-///   else:
+/// - Exclude the remote pod's environment variables "USER", "SECRET", and include everything else:
 ///
 /// ```yaml
 /// # mirrord-config.yaml
 ///
-/// exclude = "PROJECT;DATABASE"
+/// exclude = "USER;SECRET"
 /// ```
 #[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
