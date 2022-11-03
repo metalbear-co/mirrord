@@ -237,10 +237,11 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations and mirror network traffic (default option):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\"\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
+      "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations, mirror network traffic (default option), and generate a crash report (if there is any crash):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" capture_error_trace = true\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
       "type": "object",
       "properties": {
         "capture_error_trace": {
+          "description": "Controls the crash reporting feature.\n\nWith this feature enabled, mirrord generates a nice crash report log.",
           "default": null,
           "type": [
             "boolean",

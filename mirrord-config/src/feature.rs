@@ -14,14 +14,15 @@ use crate::{
 ///
 /// ## Examples
 ///
-/// - Exclude "SECRET" environment variable, enable read-write file operations and mirror network
-///   traffic (default option):
+/// - Exclude "SECRET" environment variable, enable read-write file operations, mirror network
+///   traffic (default option), and generate a crash report (if there is any crash):
 ///
 /// ```toml
 /// # mirrord-config.toml
 ///
 /// [feature]
 /// fs = "write"
+/// capture_error_trace = true
 ///
 /// [feature.env]
 /// exclude = "SECRET"
@@ -76,6 +77,9 @@ pub struct FeatureFileConfig {
     #[config(nested)]
     pub network: ToggleableConfig<NetworkFileConfig>,
 
+    /// Controls the crash reporting feature.
+    ///
+    /// With this feature enabled, mirrord generates a nice crash report log.
     #[serde(default)]
     #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = "false")]
     pub capture_error_trace: Option<bool>,
