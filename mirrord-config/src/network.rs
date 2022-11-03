@@ -12,6 +12,22 @@ use crate::{
 };
 
 /// Controls mirrord network operations.
+///
+/// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
+/// for more details.
+///
+/// ## Examples
+///
+/// - Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [network]
+/// incoming = "steal"
+/// outgoing = "tcp"
+/// dns = "true" # not needed, as this is the default
+/// ```
 #[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = NetworkConfig)]

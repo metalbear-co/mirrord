@@ -15,6 +15,9 @@ use crate::{
 /// Which environment variables to load from the remote pod are controlled by setting either
 /// `include` or `exclude`.
 ///
+/// See the environment variables [reference](https://mirrord.dev/docs/reference/env/)
+/// for more details.
+///
 /// ## Examples
 ///
 /// - Include every environment variable from the remote pod (default):

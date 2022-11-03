@@ -22,6 +22,9 @@ pub mod mode;
 ///
 /// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
 ///
+/// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
+/// for more details.
+///
 /// ## Examples
 ///
 /// - Read-write file operations:
