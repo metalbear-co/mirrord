@@ -124,6 +124,9 @@ pub(super) struct ExecArgs {
     /// Load config from config file
     #[clap(short = 'f', long, value_parser)]
     pub config_file: Option<PathBuf>,
+
+    #[clap(long, value_parser)]
+    pub capture_error_trace: bool,
 }
 
 #[derive(Args, Debug)]
