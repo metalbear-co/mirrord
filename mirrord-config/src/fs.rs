@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 /// mirrord file operations support 2 modes of configuration:
 ///
 /// 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
@@ -20,12 +21,45 @@ pub mod mode;
 /// Changes file operations behavior based on user configuration.
 ///
 /// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+///
+/// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
+/// for more details.
+///
+/// ## Examples
+///
+/// - Read-write file operations:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature]
+/// fs = "write"
+/// ```
+///
+/// - Read-only excluding `.foo` files:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature.fs]
+/// mode = "read"
+/// exclude = "^.*\.foo$"
+/// ```
+///
+/// - Read-write including only `.baz` files:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature.fs]
+/// mode = "write"
+/// include = "^.*\.baz$"
+/// ```
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
-    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and
-    /// `MIRRORD_FILE_RO_OPS` (default).
+    /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`
+    /// (default).
     Simple(FsModeConfig),
 
     /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the

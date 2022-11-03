@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -10,8 +11,25 @@ use crate::{
 /// Default option for general file configuration. Allows the user to specify:
 ///
 /// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+///
+/// ## Examples
+///
+/// - Disable mirrord file operations:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// fs = disabled
+/// ```
+///
+/// - Enable mirrord read-write file operations:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// fs = write
+/// ```
+#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
     Disabled,

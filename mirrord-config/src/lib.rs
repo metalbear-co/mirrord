@@ -12,9 +12,15 @@ pub mod outgoing;
 pub mod target;
 pub mod util;
 
+/// To generate the `mirrord-schema.json` file see
+/// [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+///
+/// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
+/// including if you only made documentation changes.
 use std::path::Path;
 
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -22,41 +28,97 @@ use crate::{
     target::TargetFileConfig, util::VecOrSingle,
 };
 
-/// This is the root struct for mirrord-layer's configuration
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+/// Main struct for mirrord-layer's configuration
+///
+/// ## Examples
+///
+/// - Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// target = "pod/sample-pod-1234"
+/// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
+///
+/// [agent]
+/// log_level = "debug"
+/// ttl = 1024 # seconds
+///
+/// [feature]
+/// fs = "read" # default
+///
+/// [feature.network]
+/// incoming = "mirror" # default
+/// ```
+///
+/// - Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates,
+///   use a custom mirrord-agent image:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// target = "pod/sample-pod-1234"
+/// accept_invalid_certificates = true
+///
+/// [agent]
+/// log_level = "debug"
+/// ttl = 1024 # seconds
+/// image = "registry/mirrord-agent-custom:latest"
+/// image_pull_policy = "Always"
+///
+/// [feature]
+/// fs = "write"
+///
+/// [feature.network]
+/// incoming = "steal"
+/// ```
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {
+    /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
+    /// certificates).
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
     pub accept_invalid_certificates: Option<bool>,
 
+    /// Allows mirrord to skip unwanted processes.
+    ///
+    /// Useful when process A spawns process B, and the user wants mirrord to operate only on
+    /// process B.
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
+    /// Specifies the running pod to mirror.
+    ///
+    /// Supports:
+    /// - `pod/{sample-pod}/[container]/{sample-container}`;
+    /// - `podname/{sample-pod}/[container]/{sample-container}`;
+    /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
     #[serde(default)]
     #[config(nested)]
     pub target: TargetFileConfig,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent name that already exists that we can connect to.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    #[cfg_attr(feature = "schema", schemars(skip))]
     /// Agent listen port that already exists that we can connect to.
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
+    /// Agent configuration, see [`agent::AgentFileConfig`].
     #[serde(default)]
     #[config(nested)]
     pub agent: AgentFileConfig,
 
+    /// Controls mirrord features, see [`feature::FeatureFileConfig`].
     #[serde(default)]
     #[config(nested)]
     pub feature: FeatureFileConfig,
@@ -78,7 +140,13 @@ impl LayerFileConfig {
 #[cfg(test)]
 mod tests {
 
+    use std::{
+        fs::{File, OpenOptions},
+        io::{Read, Write},
+    };
+
     use rstest::*;
+    use schemars::schema::RootSchema;
 
     use super::*;
     use crate::{
@@ -171,7 +239,7 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
-                    target: 
+                    target:
                         path: "pod/test-service-abcdefg-abcd"
                         namespace: "default"
 
@@ -191,7 +259,7 @@ mod tests {
                             incoming: "mirror"
                             outgoing:
                                 tcp: true
-                                udp: false                    
+                                udp: false
                     "#
                 }
             }
@@ -275,13 +343,82 @@ mod tests {
     /// Run it with:
     ///
     /// ```sh
-    /// cargo test -p mirrord-config print_schema --features schema -- --ignored --nocapture
+    /// cargo test -p mirrord-config print_schema -- --ignored --nocapture
     /// ```
-    #[cfg(feature = "schema")]
     #[test]
     #[ignore]
     fn print_schema() {
         let schema = schemars::schema_for!(LayerFileConfig);
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+    }
+
+    const SCHEMA_FILE_PATH: &str = "./../mirrord-schema.json";
+
+    /// Writes the config schema to a file (uploaded to the schema store).
+    fn write_schema_to_file(schema: &RootSchema) -> File {
+        println!("Writing schema to file.");
+
+        let content = serde_json::to_string_pretty(&schema).expect("Failed generating schema!");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .read(true)
+            .open(SCHEMA_FILE_PATH)
+            .expect("Failed to create schema file!");
+
+        file.write(content.as_bytes())
+            .expect("Failed writing schema to file!");
+
+        file
+    }
+
+    /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
+    ///
+    /// It also checks and updates when the schema file is outdated.
+    ///
+    /// Use this function to generate a mirrord config schema file.
+    ///
+    /// ```sh
+    /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore]
+    fn check_schema_file_exists_and_is_valid_or_create_it() {
+        let fresh_schema = schemars::schema_for!(LayerFileConfig);
+        let fresh_content =
+            serde_json::to_string_pretty(&fresh_schema).expect("Failed generating schema!");
+
+        println!("Checking for an existing schema file!");
+        let mut existing_content = String::with_capacity(fresh_content.len());
+        if let Ok(_) = File::open(SCHEMA_FILE_PATH)
+            .and_then(|mut file| file.read_to_string(&mut existing_content))
+        {
+            if existing_content != fresh_content {
+                println!("Schema is outdated, preparing updated version!");
+                write_schema_to_file(&fresh_schema);
+            }
+        } else {
+            write_schema_to_file(&fresh_schema);
+        }
+    }
+
+    #[test]
+    fn test_schema_file_exists() {
+        let _ = File::open(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
+    }
+
+    #[test]
+    fn test_schema_file_is_up_to_date() {
+        let compare_schema = schemars::schema_for!(LayerFileConfig);
+        let compare_content =
+            serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
+
+        let mut existing_content = String::with_capacity(compare_content.len());
+        let _ = File::open(SCHEMA_FILE_PATH)
+            .unwrap()
+            .read_to_string(&mut existing_content);
+
+        assert_eq!(existing_content, compare_content);
     }
 }

@@ -7,6 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+- mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
+
+### Changed
+- mirrord-config: Take `schema` feature out of feature flag (now it's always on).
+- mirrord-config: Add docs for the user config types.
+
 ## 3.6.0
 
 ### Added
@@ -80,8 +87,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Update intelliJ extension: lint & bump java version to 17.
-- Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS. 
-- Use same default options as CLI in intelliJ extension. 
+- Added `/Users` and `/Library` to path to ignore for file operations to improve UX on macOS.
+- Use same default options as CLI in intelliJ extension.
 - Improve UI layout of intelliJ extension.
 - Separate tcp and udp outgoing option in intelliJ extension.
 - Tighter control of witch environment variables would be passed to the KubeApi when fetching credentials via cli in kube-config. See [#637](https://github.com/metalbear-co/mirrord/issues/637)

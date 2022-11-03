@@ -1,4 +1,5 @@
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -10,18 +11,42 @@ use crate::{
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
 
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+/// Controls mirrord network operations.
+///
+/// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
+/// for more details.
+///
+/// ## Examples
+///
+/// - Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature.network]
+/// incoming = "steal"
+/// dns = true # not needed, as this is the default
+///
+/// [feature.network.outgoing]
+/// tcp = true
+/// ```
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = NetworkConfig)]
 pub struct NetworkFileConfig {
+    /// Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:
+    ///
+    /// - `mirror`: mirror incoming requests to the remote pod to the local process;
+    /// - `steal`: redirect incoming requests to the remote pod to the local process
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = "mirror")]
     pub incoming: Option<IncomingConfig>,
 
+    /// Tunnel outgoing network operations through mirrord.
     #[serde(default)]
     #[config(nested)]
     pub outgoing: ToggleableConfig<OutgoingFileConfig>,
 
+    /// Resolve DNS via the remote pod.
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: Option<bool>,
 }

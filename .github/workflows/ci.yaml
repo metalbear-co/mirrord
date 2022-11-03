@@ -114,6 +114,7 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: ${{matrix.os}}
+      # Has the side-effect of generating (or updating) the config schema file.
       - run: |
           cargo test -p mirrord-config
 

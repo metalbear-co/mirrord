@@ -1,4 +1,5 @@
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::FsModeConfig;
@@ -16,18 +17,50 @@ use crate::{
 ///
 /// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
 /// - `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE`;
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+///
+/// ## Examples
+///
+/// - Read-only excluding `.foo` files:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// [fs]
+/// mode = read
+/// exclude = "^.*\.foo$"
+/// ```
+///
+/// - Read-write including only `.baz` files:
+///
+/// ```yaml
+/// # mirrord-config.yaml
+///
+/// [fs]
+/// mode = write
+/// include = "^.*\.baz$"
+/// ```
+#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = FsConfig)]
 pub struct AdvancedFsUserConfig {
+    /// File operations mode, defaults to read-only, see [`FsModeConfig`].
     #[serde(default)]
     #[config(nested)]
     pub mode: FsModeConfig,
 
+    /// Allows the user to specify regexes that are used to match against files when mirrord file
+    /// operations are enabled.
+    ///
+    /// The regexes specified here will make mirrord operate only on files that match it, otherwise
+    /// the file will be accessed locally (bypassing mirrord).
     #[config(env = "MIRRORD_FILE_FILTER_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// Allows the user to specify regexes that are used to match against files when mirrord file
+    /// operations are enabled.
+    ///
+    /// The opposite of `include`, files that match the regexes specified here will bypass mirrord
+    /// and are accessed locally.
     #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 }
