@@ -165,7 +165,6 @@ fn choose_container<'a>(
 pub(crate) struct KubernetesAPI {
     client: Client,
     config: LayerConfig,
-    replicas: Option<u32>, // ignore this field for now
     target: Target,
 }
 
@@ -239,7 +238,6 @@ impl KubernetesAPI {
         Ok(Self {
             client,
             config: config.clone(),
-            replicas: None,
             target: target,
         })
     }

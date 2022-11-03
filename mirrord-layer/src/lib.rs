@@ -19,7 +19,7 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{GetAddrInfoHook, ResponseChannel};
+use common::{ExitFunction, GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -217,6 +217,7 @@ where
 
     steal: bool,
     running: bool,
+    exit_function: ExitFunction,
 }
 
 impl<T> Layer<T>
@@ -228,6 +229,7 @@ where
             codec,
             ping: false,
             running: true,
+            exit_function: ExitFunction::None,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -279,8 +281,9 @@ where
                 .handle_hook_message(message, &mut self.codec)
                 .await
                 .unwrap(),
-            HookMessage::Exit => {
+            HookMessage::Exit(message) => {
                 self.running = false;
+                self.exit_function = message.exit_function;
             }
         }
     }
@@ -394,9 +397,13 @@ async fn thread_loop(
         }
     }
     drop(token);
-    // tokio::abort
-    // std::process::exit(code);
-    graceful_exit!("mirrord has encountered an error and is now exiting.");
+    match layer.exit_function {
+        ExitFunction::Exit => std::process::exit(0),
+        ExitFunction::_Exit => unsafe { libc::_exit(0) },
+        ExitFunction::None => {
+            graceful_exit!("mirrord has encountered an error and is now exiting.")
+        }
+    }
 }
 
 #[tracing::instrument(level = "trace", skip(connection, receiver))]

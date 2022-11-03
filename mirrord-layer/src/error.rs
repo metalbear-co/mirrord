@@ -156,9 +156,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
-
-    #[error("mirrord-layer: Current state of replicas for the provided deployment not found!")]
-    DeploymentResizeError,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

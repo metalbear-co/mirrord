@@ -92,8 +92,7 @@ macro_rules! hook_symbol {
 #[macro_export]
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {
-        eprintln!($($arg)+);
-        graceful_exit!()
+        eprintln!($($arg)+)
     };
     () => {
         nix::sys::signal::kill(

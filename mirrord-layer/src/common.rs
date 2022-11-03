@@ -30,6 +30,18 @@ pub struct GetAddrInfoHook {
     pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
 }
 
+#[derive(Debug)]
+pub(crate) enum ExitFunction {
+    Exit,
+    _Exit,
+    None,
+}
+
+#[derive(Debug)]
+pub(crate) struct ExitHook {
+    pub(crate) exit_function: ExitFunction,
+}
+
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.
 #[derive(Debug)]
 pub(crate) enum HookMessage {
@@ -38,5 +50,5 @@ pub(crate) enum HookMessage {
     UdpOutgoing(UdpOutgoing),
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
-    Exit,
+    Exit(ExitHook),
 }
