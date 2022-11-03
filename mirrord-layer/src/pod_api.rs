@@ -194,7 +194,7 @@ impl ResizeGuard {
         tokio::spawn(async move {
             cloned_token.cancelled().await;
             if let Err(err) = set_replicas(&api, &deployment.deployment_name, replicas).await {
-                error!("restoring replicas on shutdown failed");
+                error!("restoring replicas on shutdown failed: {}", err);
             }
         });
         ResizeGuard {
@@ -238,7 +238,7 @@ impl KubernetesAPI {
         Ok(Self {
             client,
             config: config.clone(),
-            target: target,
+            target,
         })
     }
 
@@ -540,7 +540,7 @@ impl KubernetesAPI {
     pub(crate) async fn resize_deployment_replicas(&self) -> Option<ResizeGuard> {
         if let Target::Deployment(deployment) = &self.target {
             deployment
-                .resize(&self)
+                .resize(self)
                 .await
                 .map_err(|err| {
                     error!("Failed to resize deployment: {}", err);
@@ -724,7 +724,7 @@ impl DeploymentTarget {
             })?;
 
         let downsize_replicas: u32 = 1;
-        set_replicas(&deployment_api, &self.deployment_name, downsize_replicas);
+        set_replicas(&deployment_api, &self.deployment_name, downsize_replicas).await?;
         Ok(ResizeGuard::new(self.clone(), deployment_api, original_replicas as u32).await)
     }
 }
