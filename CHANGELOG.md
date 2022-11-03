@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.6.0
+
 ### Added
 
 - mirrord-layer: Allow capturing tracing logs to file and print github issue creation link via MIRRORD_CAPTURE_ERROR_TRACE env variable
