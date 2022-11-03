@@ -10,7 +10,7 @@ COPY mirrord /app/mirrord
 COPY tests /app/tests
 COPY .cargo /app/.cargo
 
-RUN /app/mirrord/agent/platform.sh
+RUN ./mirrord/agent/platform.sh
 RUN rustup component add --toolchain nightly rustfmt
 RUN rustup target add --toolchain nightly $(cat /.platform)
 RUN apt-get update && apt-get install -y $(cat /.compiler)
