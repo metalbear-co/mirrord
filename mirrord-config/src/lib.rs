@@ -12,8 +12,11 @@ pub mod outgoing;
 pub mod target;
 pub mod util;
 
-/// To generate the schema file with the config and documentation, see
-/// [`tests::write_schema_to_file`].
+/// To generate the `mirrord-schema.json` file see
+/// [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+///
+/// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
+/// including if you only made documentation changes.
 use std::path::Path;
 
 use mirrord_config_derive::MirrordConfig;
