@@ -91,11 +91,9 @@ pub struct LayerFileConfig {
     /// Specifies the running pod to mirror.
     ///
     /// Supports:
-    /// - `pod/{sample-pod}`;
-    /// - `podname/{sample-pod}`;
-    /// - `deployment/{sample-deployment}`;
-    /// - `container/{sample-container}`;
-    /// - `containername/{sample-container}`.
+    /// - `pod/{sample-pod}/[container]/{sample-container}`;
+    /// - `podname/{sample-pod}/[container]/{sample-container}`;
+    /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
     #[serde(default)]
     #[config(nested)]
     pub target: TargetFileConfig,
