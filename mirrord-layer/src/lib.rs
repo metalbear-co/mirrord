@@ -19,7 +19,9 @@ use std::{
 };
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use common::{ExitFunction, GetAddrInfoHook, ResponseChannel};
+use common::{
+    blocking_send_hook_message, ExitFunction, ExitHook, GetAddrInfoHook, ResponseChannel,
+};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -498,6 +500,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
             FN_CLOSE_NOCANCEL
         );
         let _ = replace!(&mut interceptor, "exit", exit_detour, FnExit, FN_EXIT);
+        let _ = replace!(&mut interceptor, "_exit", _exit_detour, Fn_exit, FN__EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
@@ -553,21 +556,22 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
-// // no need to guard because we call another detour which will do the guard for us.
-// #[hook_fn]
-// pub(crate) unsafe extern "C" fn exit_detour(fd: c_int) -> c_int {
-//     send_message();
-//     // this happens
-//     // it sends to message to main loop
-//     // it sees if main loop is already dead or received message and acked it
-//     // exit(original_code)
-//     block_on_ack();
-//     exit();
-// }
-
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn exit_detour() {
-    FN_EXIT();
+    blocking_send_hook_message(HookMessage::Exit(ExitHook {
+        exit_function: ExitFunction::Exit,
+    }))
+    .expect("Failed to send HookMessage::Exit");
+    // TODO: is a wait for an ack really needed here?
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _exit_detour() {
+    blocking_send_hook_message(HookMessage::Exit(ExitHook {
+        exit_function: ExitFunction::_Exit,
+    }))
+    .expect("Failed to send HookMessage::Exit");
+    // TODO: is a wait for an ack really needed here?
 }
 
 pub(crate) const FAIL_STILL_STUCK: &str = r#"

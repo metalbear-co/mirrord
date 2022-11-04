@@ -184,7 +184,7 @@ async fn set_replicas(api: &Api<Deployment>, name: &str, replicas: u32) -> Resul
 
 #[derive(Debug)]
 pub(crate) struct ResizeGuard {
-    token: DropGuard,
+    _token: DropGuard,
 }
 
 impl ResizeGuard {
@@ -198,7 +198,7 @@ impl ResizeGuard {
             }
         });
         ResizeGuard {
-            token: token.drop_guard(),
+            _token: token.drop_guard(),
         }
     }
 }
