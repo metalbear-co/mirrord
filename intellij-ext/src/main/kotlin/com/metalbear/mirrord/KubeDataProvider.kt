@@ -2,7 +2,6 @@ package com.metalbear.mirrord
 
 import io.kubernetes.client.openapi.apis.CoreV1Api
 import io.kubernetes.client.util.Config
-import io.kubernetes.client.util.Namespaces
 
 class KubeDataProvider : CoreV1Api(Config.defaultClient()) {
     fun getNameSpacedPods(namespace: String): List<String> {
@@ -13,9 +12,5 @@ class KubeDataProvider : CoreV1Api(Config.defaultClient()) {
     fun getNamespaces(): List<String> {
         val namespaces = listNamespace(null, null, null, null, null, null, null, null, null, null)
         return namespaces.items.map { it.metadata!!.name!! }
-    }
-
-    fun getPodNamespace(): String {
-        return Namespaces.getPodNamespace()
     }
 }

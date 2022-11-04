@@ -67,7 +67,11 @@ class MirrordListener : ExecutionListener {
                     true
                 }
 
-                val podNamespace = namespaces?.selectedValue ?: kubeDataProvider.getPodNamespace()
+                val envMap = getRunConfigEnv(env)
+
+                val podNamespace = namespaces?.selectedValue ?: run {
+                    envMap?.get("DEFAULT_POD_NAMESPACE") ?: defaults.defaultPodNamespace
+                }
 
                 if (showNamespaceDialog) {
                     val pods = try {
@@ -134,7 +138,6 @@ class MirrordListener : ExecutionListener {
                         if (!telemetry.isSelected) {
                             MirrordEnabler.versionCheckDisabled = true
                         }
-                        val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
                         envSet = envMap != null
                     }
