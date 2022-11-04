@@ -29,6 +29,7 @@ object MirrordDialogBuilder {
         stealTraffic: JCheckBox,
         telemetry: JCheckBox,
         ephemeralContainer: JCheckBox,
+        remoteDns: JCheckBox,
         tcpOutgoingTraffic: JCheckBox,
         udpOutgoingTraffic: JCheckBox,
         agentRustLog: JComboBox<LogLevel>,
@@ -38,11 +39,13 @@ object MirrordDialogBuilder {
     ): JPanel = JPanel(BorderLayout()).apply {
         add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
         add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
-        add(JPanel(GridLayout(5, 2, 15, 2)).apply {
+        add(JPanel(GridLayout(6, 2, 15, 2)).apply {
             add(fileOps)
             add(stealTraffic)
             add(telemetry)
             add(ephemeralContainer)
+            add(remoteDns)
+            add(JLabel()) // empty label for filling up the row
             add(tcpOutgoingTraffic)
             add(udpOutgoingTraffic)
             add(JPanel(GridBagLayout()).apply {
