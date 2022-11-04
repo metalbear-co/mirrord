@@ -26,8 +26,12 @@ class MirrordListener : ExecutionListener {
     }
 
     companion object {
-        var enabled: Boolean = false
         var id: String = ""
+        var enabled: Boolean = false
+            set(value) {
+                id = ""
+                field = value
+            }
         var envSet: Boolean = false
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
@@ -81,7 +85,6 @@ class MirrordListener : ExecutionListener {
                     val stealTraffic = JCheckBox("TCP Steal Traffic", defaults.stealTraffic)
                     val telemetry = JCheckBox("Telemetry", defaults.telemetry)
                     val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
-                    val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
                     val tcpOutgoingTraffic = JCheckBox("TCP Outgoing Traffic", defaults.tcpOutgoingTraffic)
                     val udpOutgoingTraffic = JCheckBox("UDP Outgoing Traffic", defaults.udpOutgoingTraffic)
 
@@ -101,7 +104,6 @@ class MirrordListener : ExecutionListener {
                             stealTraffic,
                             telemetry,
                             ephemeralContainer,
-                            remoteDns,
                             tcpOutgoingTraffic,
                             udpOutgoingTraffic,
                             agentRustLog,
@@ -116,9 +118,11 @@ class MirrordListener : ExecutionListener {
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
                         mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
-                        mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
                         mirrordEnv["MIRRORD_TCP_OUTGOING"] = tcpOutgoingTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()
+                        if(tcpOutgoingTraffic.isSelected || udpOutgoingTraffic.isSelected) {
+                            mirrordEnv["MIRRORD_REMOTE_DNS"] = "true"
+                        }
                         mirrordEnv["RUST_LOG"] = (rustLog.selectedItem as LogLevel).name
                         mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = (agentRustLog.selectedItem as LogLevel).name
                         if (excludeEnv.text.isNotEmpty()) {
@@ -132,7 +136,6 @@ class MirrordListener : ExecutionListener {
                         }
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
-
                         envSet = envMap != null
                     }
                 } else {
@@ -146,6 +149,12 @@ class MirrordListener : ExecutionListener {
 
     private fun List<String>.asJBList() = JBList(this).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
+    }
+
+    override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
+        id = ""
+        envSet = false
+        super.processNotStarted(executorId, env)
     }
 
     @Suppress("UNCHECKED_CAST")
