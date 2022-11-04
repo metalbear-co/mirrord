@@ -10,6 +10,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
 
+### Fixed
+- IntelliJ: Fix occurring of small namespace selection window and make mirrord dialogs resizable
+- IntelliJ: Fix bug when pressing cancel in mirrord dialog and rerunning the application no mirrord window appears again
+
 ### Changed
 - mirrord-config: Take `schema` feature out of feature flag (now it's always on).
 - mirrord-config: Add docs for the user config types.

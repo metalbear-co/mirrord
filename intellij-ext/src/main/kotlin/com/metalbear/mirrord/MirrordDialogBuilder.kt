@@ -3,10 +3,7 @@ package com.metalbear.mirrord
 import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import java.awt.BorderLayout
-import java.awt.Dimension
-import java.awt.GridBagLayout
-import java.awt.GridLayout
+import java.awt.*
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 
@@ -18,11 +15,11 @@ object MirrordDialogBuilder {
 
     fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
         setCenterPanel(dialogPanel)
-        resizable(false)
         setTitle(dialogHeading)
     }
 
     fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel = JPanel(BorderLayout()).apply {
+        size = Dimension(260, 360)
         add(createSelectionDialog(namespaceLabel, namespaces), BorderLayout.CENTER)
     }
 

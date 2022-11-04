@@ -26,8 +26,12 @@ class MirrordListener : ExecutionListener {
     }
 
     companion object {
-        var enabled: Boolean = false
         var id: String = ""
+        var enabled: Boolean = false
+            set(value) {
+                id = ""
+                field = value
+            }
         var envSet: Boolean = false
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
@@ -132,7 +136,6 @@ class MirrordListener : ExecutionListener {
                         }
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
-
                         envSet = envMap != null
                     }
                 } else {
@@ -146,6 +149,12 @@ class MirrordListener : ExecutionListener {
 
     private fun List<String>.asJBList() = JBList(this).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
+    }
+
+    override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
+        id = ""
+        envSet = false
+        super.processNotStarted(executorId, env)
     }
 
     @Suppress("UNCHECKED_CAST")
