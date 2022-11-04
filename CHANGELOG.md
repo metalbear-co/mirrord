@@ -17,7 +17,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 - mirrord-config: Take `schema` feature out of feature flag (now it's always on).
 - mirrord-config: Add docs for the user config types.
-- IntelliJ: Enable "Remote DNS" option automatically when one of "TCP/UDP Outgoing Traffic" option is enabled
 
 ## 3.6.0
 
