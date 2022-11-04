@@ -539,13 +539,17 @@ impl KubernetesAPI {
 
     pub(crate) async fn resize_deployment_replicas(&self) -> Option<ResizeGuard> {
         if let Target::Deployment(deployment) = &self.target {
-            deployment
-                .resize(self)
-                .await
-                .map_err(|err| {
-                    error!("Failed to resize deployment: {}", err);
-                })
-                .ok()
+            if self.config.downsize_replicas {
+                deployment
+                    .resize(self)
+                    .await
+                    .map_err(|err| {
+                        error!("Failed to resize deployment: {}", err);
+                    })
+                    .ok()
+            } else {
+                None
+            }
         } else {
             None
         }
