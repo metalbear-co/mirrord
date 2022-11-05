@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57e6e951cfbb2db8de1828d49073a113a29fd7117b1596caa781a258c7e38d72"
+checksum = "464b3811b747f8f7ebc8849c9c728c39f6ac98a055edad93baf9eb330e3f8f9d"
 dependencies = [
  "cfg-if",
  "getrandom",
@@ -954,8 +954,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c05aeb6a22b8f62540c194aac980f2115af067bfe15a0734d7277a768d396b31"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1072,9 +1074,9 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
 name = "hyper"
-version = "0.14.20"
+version = "0.14.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02c929dc5c39e335a03c405292728118860721b10190d98c2a0f0efd5baafbac"
+checksum = "abfba89e19b959ca163c7752ba59d737c1ceea53a5d31a149c805446fc958064"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1336,8 +1338,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
+version = "0.76.0"
+source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#fde09fe177aebbe5628dd4199ea848ad4f5a0aba"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -1348,8 +1350,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
+version = "0.76.0"
+source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#fde09fe177aebbe5628dd4199ea848ad4f5a0aba"
 dependencies = [
  "base64",
  "bytes",
@@ -1385,8 +1387,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
+version = "0.76.0"
+source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#fde09fe177aebbe5628dd4199ea848ad4f5a0aba"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -1402,8 +1404,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
+version = "0.76.0"
+source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#fde09fe177aebbe5628dd4199ea848ad4f5a0aba"
 dependencies = [
  "darling 0.14.2",
  "proc-macro2",
@@ -1414,8 +1416,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.75.0"
-source = "git+https://github.com/metalbear-co/kube?rev=ba2e348d88788e9b02c4645212a39d47a2aea771#ba2e348d88788e9b02c4645212a39d47a2aea771"
+version = "0.76.0"
+source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#fde09fe177aebbe5628dd4199ea848ad4f5a0aba"
 dependencies = [
  "ahash",
  "backoff",
@@ -1508,9 +1510,9 @@ dependencies = [
 
 [[package]]
 name = "lzma-sys"
-version = "0.1.19"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e06754c4acf47d49c727d5665ca9fb828851cda315ed3bd51edd148ef78a8772"
+checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
 dependencies = [
  "cc",
  "libc",
@@ -1994,9 +1996,9 @@ dependencies = [
 
 [[package]]
 name = "num_cpus"
-version = "1.13.1"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e64526ebdee182341572e50e9ad03965aa510cd94427a4549448f285e957a1"
+checksum = "f6058e64324c71e02bc2b150e4f3bc8286db6c83092132ffa3f6b1eab0f9def5"
 dependencies = [
  "hermit-abi",
  "libc",
@@ -2265,15 +2267,15 @@ dependencies = [
 
 [[package]]
 name = "ppv-lite86"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
+checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 
 [[package]]
 name = "predicates"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5aab5be6e4732b473071984b3164dbbfb7a3674d30ea5ff44410b6bcd960c3c"
+checksum = "ab68289ded120dcbf9d571afcf70163233229052aec9b08ab09532f698d0e1e6"
 dependencies = [
  "difflib",
  "float-cmp",
@@ -2285,15 +2287,15 @@ dependencies = [
 
 [[package]]
 name = "predicates-core"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da1c2388b1513e1b605fcec39a95e0a9e8ef088f71443ef37099fa9ae6673fcb"
+checksum = "a6e7125585d872860e9955ca571650b27a4979c5823084168c5ed5bbfb016b56"
 
 [[package]]
 name = "predicates-tree"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d86de6de25020a36c6d3643a86d9a6a9f552107c0559c60ea03551b5e16c032"
+checksum = "ad3f7fa8d61e139cbc7c3edfebf3b6678883a53f5ffac65d1259329a93ee43a5"
 dependencies = [
  "predicates-core",
  "termtree",
@@ -3117,9 +3119,9 @@ dependencies = [
 
 [[package]]
 name = "termtree"
-version = "0.2.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "507e9898683b6c43a9aa55b64259b721b52ba226e0f3779137e50ad114a4c90b"
+checksum = "95059e91184749cb66be6dc994f67f182b6d897cb3df74a5bf66b5e709295fd8"
 
 [[package]]
 name = "test-cdylib"
