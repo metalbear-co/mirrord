@@ -193,7 +193,7 @@ impl KubernetesAPI {
             if auth_provider.config.contains_key("cmd-path") {
                 auth_provider.config.insert(
                     "cmd-drop-env".to_string(),
-                    env_guard.dropped_env().join(" ").into(),
+                    env_guard.dropped_env().join(" "),
                 );
             }
         }
