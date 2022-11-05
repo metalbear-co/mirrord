@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.7.0
+
 ### Added
 - mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
 
