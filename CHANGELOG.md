@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - IntelliJ: Fix occurring of small namespace selection window and make mirrord dialogs resizable
 - IntelliJ: Fix bug when pressing cancel in mirrord dialog and rerunning the application no mirrord window appears again
+- VS Code: Fix crash occurring because it used deprecated env vars.
 
 ### Changed
 - mirrord-config: Take `schema` feature out of feature flag (now it's always on).
