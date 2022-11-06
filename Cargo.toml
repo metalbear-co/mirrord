@@ -1,19 +1,11 @@
 [workspace]
 
 members = [
-    "mirrord-auth",
-    "mirrord-config",
-    "mirrord-config/derive",
-    "mirrord-protocol",
-    "mirrord-agent",
-    "mirrord-layer",
-    "mirrord-cli",
-    "mirrord-macro",
-    "mirrord-progress",
+    "mirrord/*",
+    "mirrord/layer/tests/apps/fileops",
     "sample/rust",
     "tests",
     "tests/rust-e2e-fileops",
-    "mirrord-layer/tests/apps/fileops",
 ]
 
 # latest commits on rustls suppress certificate verification

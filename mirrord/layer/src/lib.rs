@@ -28,7 +28,7 @@ use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
-use mirrord_macro::{hook_fn, hook_guard_fn};
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,

@@ -5,7 +5,7 @@
 			"type": "cargo",
 			"command": "build",
 			"options": {
-				"cwd": "mirrord-layer/"
+				"cwd": "mirrord/layer/"
 			},
 			"problemMatcher": [
 				"$rustc"

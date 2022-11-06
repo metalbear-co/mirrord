@@ -283,7 +283,7 @@ mod tests {
             .chain(process_cmd.into_iter())
             .collect();
         // used by the CI, to load the image locally:
-        // docker build -t test . -f mirrord-agent/Dockerfile
+        // docker build -t test . -f mirrord/agent/Dockerfile
         // minikube load image test:latest
         let mut env = HashMap::new();
         env.insert("MIRRORD_AGENT_IMAGE", "test");
