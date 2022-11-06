@@ -278,7 +278,7 @@ fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> 
         _ => return Err(ident.span().error("Enums and Unions are not supported")),
     };
 
-    let flags = flag::ConfigFlags::from(&attrs);
+    let flags = flag::ConfigFlags::new(&attrs, flag::ConfigFlagsType::Container);
 
     let output = file::FileStruct::new(vis, ident, fields, flags).into_token_stream();
 

@@ -1,7 +1,7 @@
 use quote::{quote, ToTokens};
 use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
-use crate::flag::{ConfigFlags, EnvFlag};
+use crate::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
 #[derive(Debug)]
 pub struct FileStructField {
@@ -78,7 +78,7 @@ impl FileStructField {
 
 impl From<Field> for FileStructField {
     fn from(field: Field) -> Self {
-        let flags = ConfigFlags::from(&field.attrs);
+        let flags = ConfigFlags::new(&field.attrs, ConfigFlagsType::Field);
         let option = Self::is_option(&field);
 
         let Field { ident, vis, ty, .. } = field;

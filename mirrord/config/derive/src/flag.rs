@@ -2,6 +2,12 @@ use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{Attribute, Ident, Lit, Meta, NestedMeta};
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum ConfigFlagsType {
+    Container,
+    Field,
+}
+
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
     pub map_to: Option<Ident>,
@@ -9,8 +15,8 @@ pub struct ConfigFlags {
     pub default: Option<DefaultFlag>,
 }
 
-impl From<&Vec<Attribute>> for ConfigFlags {
-    fn from(attrs: &Vec<Attribute>) -> Self {
+impl ConfigFlags {
+    pub fn new(attrs: &Vec<Attribute>, mode: ConfigFlagsType) -> Self {
         let mut flags = ConfigFlags::default();
 
         for meta in attrs
@@ -21,15 +27,20 @@ impl From<&Vec<Attribute>> for ConfigFlags {
             if let Meta::List(list) = meta {
                 for meta in list.nested {
                     match meta {
-                        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
+                        {
                             flags.env = Some(EnvFlag(meta.lit))
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
-                            if meta.path.is_ident("default") =>
+                            if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
                         {
                             flags.default = Some(DefaultFlag(meta.lit))
                         }
-                        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("map_to") => {
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Container
+                                && meta.path.is_ident("map_to") =>
+                        {
                             match meta.lit {
                                 Lit::Str(val) => {
                                     flags.map_to = Some(Ident::new(&val.value(), Span::call_site()))
