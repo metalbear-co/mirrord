@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 - using gcloud auth for kubernetes. (mistakenly loaded layer into it)
-
+- debugging Go on VSCode. We patch to use our own delivered delve.
 
 ## 3.7.0
 
