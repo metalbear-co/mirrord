@@ -1,0 +1,496 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LayerFileConfig",
+  "description": "Main struct for mirrord-layer's configuration\n\n## Examples\n\n- Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" skip_processes = [\"ide-debugger\", \"ide-service\"] # we don't want mirrord to hook into these\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds\n\n[feature] fs = \"read\" # default\n\n[feature.network] incoming = \"mirror\" # default ```\n\n- Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates, use a custom mirrord-agent image:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" accept_invalid_certificates = true\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds image = \"registry/mirrord-agent-custom:latest\" image_pull_policy = \"Always\"\n\n[feature] fs = \"write\"\n\n[feature.network] incoming = \"steal\" ```",
+  "type": "object",
+  "properties": {
+    "accept_invalid_certificates": {
+      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "agent": {
+      "description": "Agent configuration, see [`agent::AgentFileConfig`].",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AgentFileConfig"
+        }
+      ]
+    },
+    "connect_agent_name": {
+      "description": "Agent name that already exists that we can connect to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "connect_agent_port": {
+      "description": "Agent listen port that already exists that we can connect to.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "connect_tcp": {
+      "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "feature": {
+      "description": "Controls mirrord features, see [`feature::FeatureFileConfig`].",
+      "allOf": [
+        {
+          "$ref": "#/definitions/FeatureFileConfig"
+        }
+      ]
+    },
+    "skip_processes": {
+      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target": {
+      "description": "Specifies the running pod to mirror.\n\nSupports: - `pod/{sample-pod}/[container]/{sample-container}`; - `podname/{sample-pod}/[container]/{sample-container}`; - `deployment/{sample-deployment}/[container]/{sample-container}`;",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TargetFileConfig"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "AdvancedFsUserConfig": {
+      "description": "Advanced user configuration for file operations.\n\nAllows the user to specify:\n\n- `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`; - `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE`;\n\n## Examples\n\n- Read-only excluding `.foo` files:\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = write include = \"^.*\\.baz$\" ```",
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe opposite of `include`, files that match the regexes specified here will bypass mirrord and are accessed locally.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include": {
+          "description": "Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe regexes specified here will make mirrord operate only on files that match it, otherwise the file will be accessed locally (bypassing mirrord).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "description": "File operations mode, defaults to read-only, see [`FsModeConfig`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FsModeConfig"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentFileConfig": {
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
+      "type": "object",
+      "properties": {
+        "communication_timeout": {
+          "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "ephemeral": {
+          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "image": {
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_pull_policy": {
+          "description": "Controls when a new agent image is downloaded.\n\nSupports any valid kubernetes [image pull policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "description": "Log level for the agent.\n\nSupports anything that would work with `RUST_LOG`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "description": "Namespace where the agent shall live.\n\nDefaults to the current kubernetes namespace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startup_timeout": {
+          "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ttl": {
+          "description": "Controls how long the agent pod persists for, after the local process terminated (in seconds).\n\nCan be useful for collecting logs.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeploymentTarget": {
+      "description": "Mirror the deployment specified by [`PodTarget::deployment`].",
+      "type": "object",
+      "required": [
+        "deployment"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deployment": {
+          "description": "Deployment to mirror.",
+          "type": "string"
+        }
+      }
+    },
+    "EnvFileConfig": {
+      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] exclude = \"USER;SECRET\" ```",
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option.\n\nValue is a list separated by \";\".",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include": {
+          "description": "Include only these remote environment variables in the local process.\n\nValue is a list separated by \";\".",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "override": {
+          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FeatureFileConfig": {
+      "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations, mirror network traffic (default option), and generate a crash report (if there is any crash):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" capture_error_trace = true\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
+      "type": "object",
+      "properties": {
+        "capture_error_trace": {
+          "description": "Controls the crash reporting feature.\n\nWith this feature enabled, mirrord generates a nice crash report log.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "env": {
+          "description": "Controls the environment variables feature, see [`EnvFileConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
+            }
+          ]
+        },
+        "fs": {
+          "description": "Controls the file operations feature, see [`FsUserConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
+            }
+          ]
+        },
+        "network": {
+          "description": "Controls the network feature, see [`NetworkFileConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FsModeConfig": {
+      "description": "Configuration for enabling read-only and read-write file operations.\n\nDefault option for general file configuration. Allows the user to specify:\n\n- `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = disabled ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
+      "type": "string",
+      "enum": [
+        "disabled",
+        "read",
+        "write"
+      ]
+    },
+    "FsUserConfig": {
+      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details.\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" ```\n\n- Read-only excluding `.foo` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"read\" exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"write\" include = \"^.*\\.baz$\" ```",
+      "anyOf": [
+        {
+          "description": "Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FsModeConfig"
+            }
+          ]
+        },
+        {
+          "description": "Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE` env vars.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AdvancedFsUserConfig"
+            }
+          ]
+        }
+      ]
+    },
+    "IncomingConfig": {
+      "type": "string",
+      "enum": [
+        "mirror",
+        "steal"
+      ]
+    },
+    "NetworkFileConfig": {
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n## Examples\n\n- Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"steal\" dns = true # not needed, as this is the default\n\n[feature.network.outgoing] tcp = true ```",
+      "type": "object",
+      "properties": {
+        "dns": {
+          "description": "Resolve DNS via the remote pod.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "incoming": {
+          "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; - `steal`: redirect incoming requests to the remote pod to the local process",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outgoing": {
+          "description": "Tunnel outgoing network operations through mirrord.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_OutgoingFileConfig"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OutgoingFileConfig": {
+      "type": "object",
+      "properties": {
+        "tcp": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "udp": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PodTarget": {
+      "description": "Mirror the pod specified by [`PodTarget::pod`].",
+      "type": "object",
+      "required": [
+        "pod"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pod": {
+          "description": "Pod to mirror.",
+          "type": "string"
+        }
+      }
+    },
+    "Target": {
+      "description": "Specifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234`:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/hello-world-abcd-1234\" ```",
+      "anyOf": [
+        {
+          "description": "Mirror a deployment.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeploymentTarget"
+            }
+          ]
+        },
+        {
+          "description": "Mirror a pod.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PodTarget"
+            }
+          ]
+        }
+      ]
+    },
+    "TargetFileConfig": {
+      "description": "Specifies the target to mirror. See [`Target`].\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234` in the `hello` namespace:\n\n```toml # mirrord-config.toml\n\n[target] path = \"pod/hello-world-abcd-1234\" namespace = \"hello\" ```",
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Target"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Target"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ToggleableConfig_for_EnvFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/EnvFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_FsUserConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/FsUserConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_NetworkFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/NetworkFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_OutgoingFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/OutgoingFileConfig"
+        }
+      ]
+    },
+    "VecOrSingle_for_String": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    }
+  }
+}

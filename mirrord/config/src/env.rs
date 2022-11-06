@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -8,18 +9,76 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+/// Allows the user to set or override a local process' environment variables with the ones from a
+/// remote pod.
+///
+/// Which environment variables to load from the remote pod are controlled by setting either
+/// `include` or `exclude`.
+///
+/// See the environment variables [reference](https://mirrord.dev/docs/reference/env/)
+/// for more details.
+///
+/// ## Examples
+///
+/// - Include every environment variable from the remote pod (default):
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature]
+/// env = true
+///
+/// [feature.env]
+/// include = "*"
+/// ```
+///
+/// Some environment variables are excluded by default (`PATH` for example), including these
+/// requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].
+///
+/// - Include the remote pod's environment variables "PROJECT", "DATABASE":
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature]
+/// env = true
+///
+/// [feature.env]
+/// include = "PROJECT;DATABASE"
+/// ```
+///
+/// - Exclude the remote pod's environment variables "USER", "SECRET", and include everything else:
+///
+/// ```toml
+/// # mirrord-config.toml
+///
+/// [feature]
+/// env = true
+///
+/// [feature.env]
+/// exclude = "USER;SECRET"
+/// ```
+#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = EnvConfig)]
 pub struct EnvFileConfig {
+    /// Include only these remote environment variables in the local process.
+    ///
+    /// Value is a list separated by ";".
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// Include the remote environment variables in the local process that are **NOT** specified by
+    /// this option.
+    ///
+    /// Value is a list separated by ";".
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
-    /// Set or override environment variables.
+    /// Allows setting or overriding environment variables (locally) with a custom value.
+    ///
+    /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
+    /// undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.
     #[serde(rename = "override")]
     pub overrides: Option<HashMap<String, String>>,
 }

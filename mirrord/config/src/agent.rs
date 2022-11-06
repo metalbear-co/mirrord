@@ -1,34 +1,64 @@
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::config::source::MirrordConfigSource;
 
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+/// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
+#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = AgentConfig)]
 pub struct AgentFileConfig {
+    /// Log level for the agent.
+    ///
+    /// Supports anything that would work with `RUST_LOG`.
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: Option<String>,
 
+    /// Namespace where the agent shall live.
+    ///
+    /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
+    /// Name of the agent's docker image.
+    ///
+    /// Useful when a custom build of mirrord-agent is required, or when using an internal
+    /// registry.
+    ///
+    /// Defaults to the latest stable image.
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
+    /// Controls when a new agent image is downloaded.
+    ///
+    /// Supports any valid kubernetes [image pull
+    /// policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: Option<String>,
 
+    /// Controls how long the agent pod persists for, after the local process terminated (in
+    /// seconds).
+    ///
+    /// Can be useful for collecting logs.
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
     pub ttl: Option<u16>,
 
+    /// Runs the agent as an [ephemeral
+    /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
     pub ephemeral: Option<bool>,
 
+    /// Controls how long the agent lives when there are no connections.
+    ///
+    /// Each connection has its own heartbeat mechanism, so even if the local application has no
+    /// messages, the agent stays alive until there are no more heartbeat messages.
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
+    /// Controls how long to wait for the agent to finish initialization.
+    ///
+    /// If initialization takes longer than this value, mirrord exits.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
     pub startup_timeout: Option<u64>,
 }

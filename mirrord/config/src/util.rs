@@ -1,5 +1,6 @@
 use std::{fmt, marker::PhantomData, slice::Join, str::FromStr};
 
+use schemars::JsonSchema;
 use serde::{
     de::{self, MapAccess, Visitor},
     Deserialize, Deserializer,
@@ -15,8 +16,7 @@ pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn disabled_config() -> Result<Self::Generated, ConfigError>;
 }
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum ToggleableConfig<T> {
     Enabled(bool),
@@ -44,8 +44,7 @@ where
     }
 }
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum VecOrSingle<T> {
     Single(T),

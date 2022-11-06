@@ -1,4 +1,5 @@
 use mirrord_config_derive::MirrordConfig;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
@@ -8,8 +9,7 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = OutgoingConfig)]
 pub struct OutgoingFileConfig {
