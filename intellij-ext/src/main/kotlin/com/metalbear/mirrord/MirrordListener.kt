@@ -54,8 +54,7 @@ class MirrordListener : ExecutionListener {
                     null
                 }
 
-                // we need the following check to make sure in case the dialog is spawned, we get an
-                // OK exit code and a non-empty selection from the user
+                // in case listing namespace fails, we will use a textbox to get the namespace from the user
                 val podNamespace = if (namespaces != null) {
                     val namespaceDialog = namespaces.let { MirrordDialogBuilder.createMirrordNamespaceDialog(it) }.let {
                         MirrordDialogBuilder.createDialogBuilder(
