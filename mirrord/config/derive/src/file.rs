@@ -12,11 +12,11 @@ use crate::{
 
 #[derive(Debug)]
 pub struct FileStruct {
-    pub vis: Visibility,
-    pub ident: Ident,
-    pub fields: Vec<FileStructField>,
-    pub source: Ident,
-    pub derive: Vec<Ident>,
+    vis: Visibility,
+    ident: Ident,
+    fields: Vec<FileStructField>,
+    source: Ident,
+    flags: ConfigFlags,
 }
 
 impl FileStruct {
@@ -29,8 +29,7 @@ impl FileStruct {
             ..
         } = input;
 
-        let ConfigFlags { map_to, derive, .. } =
-            ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
+        let flags = ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
 
         let fields = match data {
             Data::Struct(DataStruct { fields, .. }) => match fields {
@@ -43,15 +42,17 @@ impl FileStruct {
             _ => return Err(source.span().error("Enums and Unions are not supported")),
         };
 
-        let ident =
-            map_to.unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
+        let ident = flags
+            .map_to
+            .clone()
+            .unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
 
         Ok(FileStruct {
             vis,
             source,
             ident,
             fields,
-            derive,
+            flags,
         })
     }
 }
@@ -63,7 +64,7 @@ impl ToTokens for FileStruct {
             vis,
             fields,
             source,
-            derive,
+            flags: ConfigFlags { doc, derive, .. },
         } = &self;
 
         let field_definitions = fields.iter().map(|field| field.definition());
@@ -72,6 +73,7 @@ impl ToTokens for FileStruct {
         tokens.extend(quote! {
             #[derive(Debug, Clone, serde::Deserialize, #(#derive),*)]
             #[serde(deny_unknown_fields)]
+            #(#doc)*
             #vis struct #ident { #(#field_definitions),* }
 
             impl crate::config::MirrordConfig for #ident {

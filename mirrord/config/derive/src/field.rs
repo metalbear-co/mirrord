@@ -6,11 +6,11 @@ use crate::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
 #[derive(Debug)]
 pub struct FileStructField {
-    pub ident: Option<Ident>,
-    pub option: Option<Type>,
-    pub ty: Type,
-    pub vis: Visibility,
-    pub flags: ConfigFlags,
+    ident: Option<Ident>,
+    option: Option<Type>,
+    ty: Type,
+    vis: Visibility,
+    flags: ConfigFlags,
 }
 
 impl FileStructField {
@@ -36,12 +36,18 @@ impl FileStructField {
             vis,
             ty,
             option,
+            flags,
             ..
         } = &self;
 
+        let docs = flags.doc.iter().map(ToTokens::to_token_stream);
+
         let ty = option.as_ref().unwrap_or(ty);
 
-        quote! { #vis #ident: Option<#ty> }
+        quote! {
+            #(#docs)*
+            #vis #ident: Option<#ty>
+        }
     }
 
     pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {

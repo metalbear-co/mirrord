@@ -15,11 +15,19 @@ pub struct ConfigFlags {
     pub map_to: Option<Ident>,
     pub env: Option<EnvFlag>,
     pub default: Option<DefaultFlag>,
+    pub doc: Vec<Attribute>,
 }
 
 impl ConfigFlags {
     pub fn new(attrs: &Vec<Attribute>, mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
-        let mut flags = ConfigFlags::default();
+        let mut flags = ConfigFlags {
+            doc: attrs
+                .iter()
+                .filter(|attr| attr.path.is_ident("doc"))
+                .cloned()
+                .collect(),
+            ..Default::default()
+        };
 
         for meta in attrs
             .iter()

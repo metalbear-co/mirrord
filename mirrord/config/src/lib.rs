@@ -414,11 +414,11 @@ mod tests {
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
 
-        let mut existing_content = String::with_capacity(compare_content.len());
+        let mut existing_content = String::new();
         let _ = File::open(SCHEMA_FILE_PATH)
             .unwrap()
             .read_to_string(&mut existing_content);
 
-        assert_eq!(existing_content, compare_content);
+        assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
     }
 }
