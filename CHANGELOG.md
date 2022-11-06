@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.7.2
+
+### Fixed
+- Release: fix broken docker build step caused by folder restructure
+
 ## 3.7.1
 
 ### Fixed
