@@ -2,7 +2,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{Ident, Visibility};
 
-use crate::field::FileStructField;
+use crate::{field::FileStructField, flag::ConfigFlags};
 
 #[derive(Debug)]
 pub struct FileStruct {
@@ -13,8 +13,15 @@ pub struct FileStruct {
 }
 
 impl FileStruct {
-    pub fn new(vis: Visibility, source: Ident, fields: Vec<FileStructField>) -> Self {
-        let ident = Ident::new(&format!("File{}", &source), Span::call_site());
+    pub fn new(
+        vis: Visibility,
+        source: Ident,
+        fields: Vec<FileStructField>,
+        flags: ConfigFlags,
+    ) -> Self {
+        let ident = flags
+            .map_to
+            .unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
 
         FileStruct {
             vis,

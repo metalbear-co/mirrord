@@ -8,6 +8,7 @@ use syn::{
 
 mod field;
 mod file;
+mod flag;
 
 #[derive(Eq, PartialEq, Debug)]
 enum FieldAttr {
@@ -260,7 +261,11 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 /// Macro Logic
 fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     let DeriveInput {
-        data, ident, vis, ..
+        attrs,
+        data,
+        ident,
+        vis,
+        ..
     } = input;
 
     let fields = match data {
@@ -273,7 +278,9 @@ fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> 
         _ => return Err(ident.span().error("Enums and Unions are not supported")),
     };
 
-    let output = file::FileStruct::new(vis, ident, fields).into_token_stream();
+    let flags = flag::ConfigFlags::from(&attrs);
+
+    let output = file::FileStruct::new(vis, ident, fields, flags).into_token_stream();
 
     Ok(output)
 }

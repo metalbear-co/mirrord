@@ -1,14 +1,15 @@
-use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{Field, GenericArgument, Ident, Lit, Meta, NestedMeta, PathArguments, Type, Visibility};
+use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
+
+use crate::flag::{ConfigFlags, EnvFlag};
 
 #[derive(Debug)]
 pub struct FileStructField {
-    pub flags: FileStructFieldFlags,
     pub ident: Option<Ident>,
     pub option: Option<Type>,
     pub ty: Type,
     pub vis: Visibility,
+    pub flags: ConfigFlags,
 }
 
 impl FileStructField {
@@ -77,7 +78,7 @@ impl FileStructField {
 
 impl From<Field> for FileStructField {
     fn from(field: Field) -> Self {
-        let flags = FileStructFieldFlags::from(&field);
+        let flags = ConfigFlags::from(&field.attrs);
         let option = Self::is_option(&field);
 
         let Field { ident, vis, ty, .. } = field;
@@ -89,64 +90,5 @@ impl From<Field> for FileStructField {
             ty,
             vis,
         }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct FileStructFieldFlags {
-    pub env: Option<EnvFlag>,
-    pub default: Option<DefaultFlag>,
-}
-
-impl From<&Field> for FileStructFieldFlags {
-    fn from(field: &Field) -> Self {
-        let mut flags = FileStructFieldFlags::default();
-
-        for meta in field
-            .attrs
-            .iter()
-            .filter(|attr| attr.path.is_ident("config"))
-            .filter_map(|attr| attr.parse_meta().ok())
-        {
-            if let Meta::List(list) = meta {
-                for meta in list.nested {
-                    match meta {
-                        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
-                            flags.env = Some(EnvFlag(meta.lit))
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if meta.path.is_ident("default") =>
-                        {
-                            flags.default = Some(DefaultFlag(meta.lit))
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        flags
-    }
-}
-
-#[derive(Debug)]
-pub struct EnvFlag(Lit);
-
-impl ToTokens for EnvFlag {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let env_name = &self.0;
-
-        tokens.extend(quote! { crate::config::from_env::FromEnv::new(#env_name) });
-    }
-}
-
-#[derive(Debug)]
-pub struct DefaultFlag(Lit);
-
-impl ToTokens for DefaultFlag {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let default_value = &self.0;
-
-        tokens.extend(quote! { crate::config::default_value::DefaultValue::new(#default_value) });
     }
 }
