@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.7.1
+
 ### Fixed
 
 - using gcloud auth for kubernetes. (mistakenly loaded layer into it)
