@@ -5,6 +5,6 @@ updates:
 
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: "cargo"
-    directory: "/mirrord-protocol"
+    directory: "/mirrord/protocol"
     schedule:
       interval: "daily"

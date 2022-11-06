@@ -16,8 +16,8 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-auth = { path="../mirrord-auth", features = ["webbrowser"] }
-mirrord-progress = { path = "../mirrord-progress" }
+mirrord-auth = { path="../auth", features = ["webbrowser"] }
+mirrord-progress = { path = "../progress" }
 
 clap.workspace = true
 tracing.workspace = true
@@ -32,4 +32,4 @@ semver = "1"
 
 
 [build-dependencies]
-mirrord-layer = { artifact = "cdylib", path="../mirrord-layer" }
+mirrord-layer = { artifact = "cdylib", path="../layer" }

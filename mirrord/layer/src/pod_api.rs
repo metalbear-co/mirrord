@@ -189,6 +189,14 @@ impl KubernetesAPI {
 
             exec.drop_env = Some(env_guard.dropped_env());
         }
+        if let Some(auth_provider) = config.auth_info.auth_provider.as_mut() {
+            if auth_provider.config.contains_key("cmd-path") {
+                auth_provider.config.insert(
+                    "cmd-drop-env".to_string(),
+                    env_guard.dropped_env().join(" "),
+                );
+            }
+        }
     }
 
     pub async fn new(config: &LayerConfig) -> Result<Self> {

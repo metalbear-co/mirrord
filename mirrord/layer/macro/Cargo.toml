@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-macro"
+name = "mirrord-layer-macro"
 version.workspace = true
 authors.workspace = true
 description.workspace = true

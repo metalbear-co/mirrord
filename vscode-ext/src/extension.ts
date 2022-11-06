@@ -216,9 +216,9 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				config.env = {
 					...config.env, ...{
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_AGENT_IMPERSONATED_POD_NAME': podName,
+						'MIRRORD_IMPERSONATED_TARGET': 'pod/' + podName,
 						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_AGENT_IMPERSONATED_POD_NAMESPACE': podNamespace,
+						'MIRRORD_TARGET_NAMESPACE': podNamespace,
 						// eslint-disable-next-line @typescript-eslint/naming-convention
 						'MIRRORD_AGENT_NAMESPACE': globalContext.workspaceState.get('agentNamespace', 'default'),
 						// eslint-disable-next-line @typescript-eslint/naming-convention
@@ -249,6 +249,10 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 				if (config.type === "go") {
 					config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+					// use our custom delve to fix being loaded into debugserver
+					if (os.platform() === "darwin") {
+						config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
+					}
 				}
 
 				return resolve(config);
