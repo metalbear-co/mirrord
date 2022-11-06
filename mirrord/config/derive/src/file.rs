@@ -10,6 +10,7 @@ pub struct FileStruct {
     pub ident: Ident,
     pub fields: Vec<FileStructField>,
     pub source: Ident,
+    pub derive: Vec<Ident>,
 }
 
 impl FileStruct {
@@ -19,15 +20,17 @@ impl FileStruct {
         fields: Vec<FileStructField>,
         flags: ConfigFlags,
     ) -> Self {
-        let ident = flags
-            .map_to
-            .unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
+        let ConfigFlags { map_to, derive, .. } = flags;
+
+        let ident =
+            map_to.unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
 
         FileStruct {
             vis,
             source,
             ident,
             fields,
+            derive,
         }
     }
 }
@@ -39,13 +42,15 @@ impl ToTokens for FileStruct {
             vis,
             fields,
             source,
+            derive,
         } = &self;
 
         let field_definitions = fields.iter().map(|field| field.definition());
         let field_impl = fields.iter().map(|field| field.implmentation(&source));
 
         tokens.extend(quote! {
-            #[derive(Debug, serde::Deserialize)]
+            #[derive(Debug, Clone, serde::Deserialize, #(#derive),*)]
+            #[serde(deny_unknown_fields)]
             #vis struct #ident { #(#field_definitions),* }
 
             impl crate::config::MirrordConfig for #ident {

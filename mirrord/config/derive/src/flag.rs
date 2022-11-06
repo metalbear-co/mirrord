@@ -10,6 +10,7 @@ pub enum ConfigFlagsType {
 
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
+    pub derive: Vec<Ident>,
     pub map_to: Option<Ident>,
     pub env: Option<EnvFlag>,
     pub default: Option<DefaultFlag>,
@@ -44,6 +45,21 @@ impl ConfigFlags {
                             match meta.lit {
                                 Lit::Str(val) => {
                                     flags.map_to = Some(Ident::new(&val.value(), Span::call_site()))
+                                }
+                                _ => {}
+                            }
+                        }
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Container
+                                && meta.path.is_ident("derive") =>
+                        {
+                            match meta.lit {
+                                Lit::Str(val) => {
+                                    flags.derive.extend(
+                                        val.value()
+                                            .split(",")
+                                            .map(|part| Ident::new(part, Span::call_site())),
+                                    );
                                 }
                                 _ => {}
                             }

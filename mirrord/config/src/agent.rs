@@ -1,19 +1,17 @@
-use mirrord_config_derive::MirrordConfig;
+use mirrord_config_derive::MirrordConfig2;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::config::source::MirrordConfigSource;
 
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = AgentConfig)]
-pub struct AgentFileConfig {
+#[derive(MirrordConfig2, Default, Clone, PartialEq, Eq, Debug)]
+#[config(map_to = "AgentFileConfig", derive = "Default,Eq,PartialEq,JsonSchema")]
+pub struct AgentConfig {
     /// Log level for the agent.
     ///
     /// Supports anything that would work with `RUST_LOG`.
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
-    pub log_level: Option<String>,
+    pub log_level: String,
 
     /// Namespace where the agent shall live.
     ///
@@ -35,19 +33,19 @@ pub struct AgentFileConfig {
     /// Supports any valid kubernetes [image pull
     /// policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
-    pub image_pull_policy: Option<String>,
+    pub image_pull_policy: String,
 
     /// Controls how long the agent pod persists for, after the local process terminated (in
     /// seconds).
     ///
     /// Can be useful for collecting logs.
     #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
-    pub ttl: Option<u16>,
+    pub ttl: u16,
 
     /// Runs the agent as an [ephemeral
     /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
-    pub ephemeral: Option<bool>,
+    pub ephemeral: bool,
 
     /// Controls how long the agent lives when there are no connections.
     ///
@@ -60,7 +58,7 @@ pub struct AgentFileConfig {
     ///
     /// If initialization takes longer than this value, mirrord exits.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
-    pub startup_timeout: Option<u64>,
+    pub startup_timeout: u64,
 }
 
 #[cfg(test)]
