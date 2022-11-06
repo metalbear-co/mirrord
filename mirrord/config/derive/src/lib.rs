@@ -6,6 +6,7 @@ use syn::{
     GenericArgument, Ident, Lit, Meta, NestedMeta, PathArguments, Type,
 };
 
+mod field;
 mod file;
 
 #[derive(Eq, PartialEq, Debug)]
