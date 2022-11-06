@@ -30,3 +30,7 @@ where
         self.unwrap_or_default().generate_config()
     }
 }
+
+pub trait FromMirrordConfig {
+    type Generator: MirrordConfig<Generated = Self>;
+}

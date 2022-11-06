@@ -1,10 +1,12 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{
     spanned::Spanned, Data, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed,
     GenericArgument, Ident, Lit, Meta, NestedMeta, PathArguments, Type,
 };
+
+mod file;
 
 #[derive(Eq, PartialEq, Debug)]
 enum FieldAttr {
@@ -249,6 +251,37 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let input = syn::parse_macro_input!(input as DeriveInput);
 
     match mirrord_config_macro(input) {
+        Ok(tokens) => tokens.into(),
+        Err(diag) => diag.emit_as_expr_tokens().into(),
+    }
+}
+
+/// Macro Logic
+fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
+    let DeriveInput {
+        data, ident, vis, ..
+    } = input;
+
+    let fields = match data {
+        Data::Struct(DataStruct { fields, .. }) => match fields {
+            Fields::Named(FieldsNamed { named, .. }) => {
+                named.into_iter().map(|field| field.into()).collect()
+            }
+            _ => return Err(ident.span().error("Unnamed Structs are not supported")),
+        },
+        _ => return Err(ident.span().error("Enums and Unions are not supported")),
+    };
+
+    let output = file::FileStruct::new(vis, ident, fields).into_token_stream();
+
+    Ok(output)
+}
+
+#[proc_macro_derive(MirrordConfig2, attributes(config))]
+pub fn mirrord_config2(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = syn::parse_macro_input!(input as DeriveInput);
+
+    match mirrord_config_macro2(input) {
         Ok(tokens) => tokens.into(),
         Err(diag) => diag.emit_as_expr_tokens().into(),
     }
