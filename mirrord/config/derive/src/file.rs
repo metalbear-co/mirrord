@@ -1,8 +1,14 @@
 use proc_macro2::{Span, TokenStream};
+use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
 use quote::{quote, ToTokens};
-use syn::{Ident, Visibility};
+use syn::{
+    spanned::Spanned, Data, DataStruct, DeriveInput, Fields, FieldsNamed, Ident, Visibility,
+};
 
-use crate::{field::FileStructField, flag::ConfigFlags};
+use crate::{
+    field::FileStructField,
+    flag::{ConfigFlags, ConfigFlagsType},
+};
 
 #[derive(Debug)]
 pub struct FileStruct {
@@ -14,24 +20,39 @@ pub struct FileStruct {
 }
 
 impl FileStruct {
-    pub fn new(
-        vis: Visibility,
-        source: Ident,
-        fields: Vec<FileStructField>,
-        flags: ConfigFlags,
-    ) -> Self {
-        let ConfigFlags { map_to, derive, .. } = flags;
+    pub fn new(input: DeriveInput) -> Result<Self, Diagnostic> {
+        let DeriveInput {
+            attrs,
+            data,
+            ident: source,
+            vis,
+            ..
+        } = input;
+
+        let ConfigFlags { map_to, derive, .. } =
+            ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
+
+        let fields = match data {
+            Data::Struct(DataStruct { fields, .. }) => match fields {
+                Fields::Named(FieldsNamed { named, .. }) => named
+                    .into_iter()
+                    .map(|field| FileStructField::try_from(field))
+                    .collect::<Result<_, _>>()?,
+                _ => return Err(fields.span().error("Unnamed Structs are not supported")),
+            },
+            _ => return Err(source.span().error("Enums and Unions are not supported")),
+        };
 
         let ident =
             map_to.unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
 
-        FileStruct {
+        Ok(FileStruct {
             vis,
             source,
             ident,
             fields,
             derive,
-        }
+        })
     }
 }
 

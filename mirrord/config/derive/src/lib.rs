@@ -260,30 +260,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
 /// Macro Logic
 fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
-    let DeriveInput {
-        attrs,
-        data,
-        ident,
-        vis,
-        ..
-    } = input;
-
-    let fields = match data {
-        Data::Struct(DataStruct { fields, .. }) => match fields {
-            Fields::Named(FieldsNamed { named, .. }) => named
-                .into_iter()
-                .map(|field| field::FileStructField::try_from(field))
-                .collect::<Result<_, Diagnostic>>()?,
-            _ => return Err(ident.span().error("Unnamed Structs are not supported")),
-        },
-        _ => return Err(ident.span().error("Enums and Unions are not supported")),
-    };
-
-    let flags = flag::ConfigFlags::new(&attrs, flag::ConfigFlagsType::Container)?;
-
-    let output = file::FileStruct::new(vis, ident, fields, flags).into_token_stream();
-
-    Ok(output)
+    file::FileStruct::new(input).map(|file| file.into_token_stream())
 }
 
 #[proc_macro_derive(MirrordConfig2, attributes(config))]
