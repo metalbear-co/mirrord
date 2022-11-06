@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - using gcloud auth for kubernetes. (mistakenly loaded layer into it)
 - debugging Go on VSCode. We patch to use our own delivered delve.
+- Changed layer not to crash when connection is closed by agent. Closed [#693](https://github.com/metalbear-co/mirrord/issues/693).
 
 ## 3.7.0
 
