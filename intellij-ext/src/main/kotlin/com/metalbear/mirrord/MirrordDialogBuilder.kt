@@ -3,7 +3,10 @@ package com.metalbear.mirrord
 import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.GridBagLayout
+import java.awt.GridLayout
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 
@@ -12,6 +15,7 @@ object MirrordDialogBuilder {
     private const val dialogHeading: String = "mirrord"
     private const val podLabel = "Select Pod"
     private const val namespaceLabel = "Select Namespace"
+    private const val namespaceTextBoxLabel = "Enter Namespace"
 
     fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
         setCenterPanel(dialogPanel)
@@ -21,6 +25,11 @@ object MirrordDialogBuilder {
     fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel = JPanel(BorderLayout()).apply {
         size = Dimension(260, 360)
         add(createSelectionDialog(namespaceLabel, namespaces), BorderLayout.CENTER)
+    }
+
+    fun createMirrordNamespaceTextDialog(namespace: JTextField): JPanel = JPanel(BorderLayout()).apply {
+        size = Dimension(200, 300)
+        add(createTextDialog(namespaceTextBoxLabel, namespace), BorderLayout.CENTER)
     }
 
     fun createMirrordConfigDialog(
@@ -81,4 +90,16 @@ object MirrordDialogBuilder {
                 preferredSize = Dimension(250, 350)
             })
         }
+
+    private fun createTextDialog(label: String, item: JTextField): JPanel =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(10, 5, 10, 5)
+            add(JLabel(label).apply {
+                alignmentX = JLabel.LEFT_ALIGNMENT
+            })
+            add(Box.createRigidArea(Dimension(0, 5)))
+            add(item)
+        }
+
 }
