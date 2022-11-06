@@ -1718,7 +1718,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord-macro"
+name = "mirrord-layer-macro"
 version = "3.7.0"
 dependencies = [
  "proc-macro2",
