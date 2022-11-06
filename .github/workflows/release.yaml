@@ -260,10 +260,20 @@ jobs:
         build_binaries_macos,
         release_docker_image,
       ]
-    runs-on: ubuntu-latest
+    runs-on: macos-12
     steps:
       - uses: actions/checkout@v2
         id: version
+      - name: build patched Delve
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+        run: |
+          git clone https://github.com/metalbear-co/delve
+          cd delve/cmd/dlv
+          go build
+      - name: copy delve into intellij-ext
+        run: cp delve/cmd/dlv intellij-ext/
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts

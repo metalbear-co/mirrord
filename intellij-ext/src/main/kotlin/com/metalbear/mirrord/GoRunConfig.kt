@@ -3,8 +3,11 @@ package com.metalbear.mirrord
 import com.goide.execution.GoRunConfigurationBase
 import com.goide.execution.GoRunningState
 import com.goide.execution.extension.GoRunConfigurationExtension
+import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
+import com.intellij.openapi.application.PathManager
+import java.nio.file.Paths
 
 class GoRunConfig : GoRunConfigurationExtension() {
     companion object {
@@ -48,5 +51,28 @@ class GoRunConfig : GoRunConfigurationExtension() {
             MirrordListener.envSet = true
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
+    }
+
+    override fun patchExecutor(
+        configuration: GoRunConfigurationBase<*>,
+        runnerSettings: RunnerSettings?,
+        executor: GoExecutor,
+        runnerId: String,
+        state: GoRunningState<out GoRunConfigurationBase<*>>,
+        commandLineType: GoRunningState.CommandLineType
+    ) {
+        if (commandLineType == GoRunningState.CommandLineType.RUN &&
+            MirrordListener.enabled && !MirrordListener.envSet &&
+            System.getProperty("os.name").toLowerCase().startsWith("mac")
+        ) {
+
+            val delvePath = getCustomDelvePath()
+            executor.withExePath(delvePath)
+        }
+        super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
+    }
+
+    private fun getCustomDelvePath(): String {
+        return Paths.get(PathManager.getPluginsPath(), "mirrord", "dlv").toString()
     }
 }

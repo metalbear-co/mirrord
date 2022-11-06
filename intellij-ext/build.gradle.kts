@@ -106,6 +106,10 @@ tasks {
                 if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
             }
         }
+        // custom delve
+        from(file("$projectDir/dlv")) {
+            into(pluginName.get())
+        }
     }
 
     // Configure UI tests plugin
