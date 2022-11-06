@@ -22,7 +22,6 @@ data class MirrordDefaultConfig(
     // ignorePorts: temporary patch to ignore ports which would cause `connect` to fail
     // as the debugger tried to connect to higher ranged ports.
     val ignorePorts: String = "45000-65535",
-    val defaultPodNamespace: String = "default"
 )
 
 private fun getSharedLibPath(libName: String): String {

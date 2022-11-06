@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 - mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
-- IntelliJ: `DEFAULT_POD_NAMESPACE` to allow the user to specify which namespace to use.
+- IntelliJ: fallback to using a textfield if listing namespaces fails
 
 ### Fixed
 - IntelliJ: Fix occurring of small namespace selection window and make mirrord dialogs resizable
