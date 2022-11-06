@@ -1,7 +1,7 @@
 # How to Run the E2E tests
 
 To run the tests locally with the latest mirrord-agent image, run the following in the mirrord directory:
-- `docker build -t test . --file mirrord-agent/Dockerfile`
+- `docker build -t test . --file mirrord/agent/Dockerfile`
 - `minikube image load test` (you might have to specify `-p <PROFILE-NAME>` as well)
 - `cargo test --package tests --lib -- tests --nocapture`
 
