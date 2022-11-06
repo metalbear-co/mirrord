@@ -1,6 +1,7 @@
 use proc_macro2::{Span, TokenStream};
+use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
 use quote::{quote, ToTokens};
-use syn::{Attribute, Ident, Lit, Meta, NestedMeta};
+use syn::{spanned::Spanned, Attribute, Ident, Lit, Meta, NestedMeta};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ConfigFlagsType {
@@ -17,7 +18,7 @@ pub struct ConfigFlags {
 }
 
 impl ConfigFlags {
-    pub fn new(attrs: &Vec<Attribute>, mode: ConfigFlagsType) -> Self {
+    pub fn new(attrs: &Vec<Attribute>, mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
         let mut flags = ConfigFlags::default();
 
         for meta in attrs
@@ -46,7 +47,12 @@ impl ConfigFlags {
                                 Lit::Str(val) => {
                                     flags.map_to = Some(Ident::new(&val.value(), Span::call_site()))
                                 }
-                                _ => {}
+                                _ => {
+                                    return Err(meta
+                                        .lit
+                                        .span()
+                                        .error("map_to should be a string literal as value"))
+                                }
                             }
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
@@ -61,16 +67,21 @@ impl ConfigFlags {
                                             .map(|part| Ident::new(part, Span::call_site())),
                                     );
                                 }
-                                _ => {}
+                                _ => {
+                                    return Err(meta
+                                        .lit
+                                        .span()
+                                        .error("derive should be a string literal as value"))
+                                }
                             }
                         }
-                        _ => {}
+                        _ => return Err(meta.span().error("unsupported config attribute flag")),
                     }
                 }
             }
         }
 
-        flags
+        Ok(flags)
     }
 }
 

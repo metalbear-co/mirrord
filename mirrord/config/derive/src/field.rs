@@ -1,3 +1,4 @@
+use proc_macro2_diagnostics::Diagnostic;
 use quote::{quote, ToTokens};
 use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
@@ -76,19 +77,21 @@ impl FileStructField {
     }
 }
 
-impl From<Field> for FileStructField {
-    fn from(field: Field) -> Self {
-        let flags = ConfigFlags::new(&field.attrs, ConfigFlagsType::Field);
+impl TryFrom<Field> for FileStructField {
+    type Error = Diagnostic;
+
+    fn try_from(field: Field) -> Result<Self, Self::Error> {
+        let flags = ConfigFlags::new(&field.attrs, ConfigFlagsType::Field)?;
         let option = Self::is_option(&field);
 
         let Field { ident, vis, ty, .. } = field;
 
-        FileStructField {
+        Ok(FileStructField {
             flags,
             ident,
             option,
             ty,
             vis,
-        }
+        })
     }
 }
