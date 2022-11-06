@@ -22,8 +22,6 @@ data class MirrordDefaultConfig(
     // ignorePorts: temporary patch to ignore ports which would cause `connect` to fail
     // as the debugger tried to connect to higher ranged ports.
     val ignorePorts: String = "45000-65535",
-    // defaultPodNamespace: use to spawn the namespace dialog for the provided namespace.
-    // for example, if the user doesn't have permissions to list the namespace, they may override this.
     val defaultPodNamespace: String = "default"
 )
 
