@@ -93,7 +93,7 @@ fn is_closed_connection(flags: u16) -> bool {
 ///
 /// Used when no `user_interface` is specified in [`prepare_sniffer`] to prevent mirrord from
 /// defaulting to the wrong network interface (`eth0`), as sometimes the user's machine doesn't have
-/// it available (or is not the correct one).
+/// it available (i.e. their default network is `enp2s0`).
 #[tracing::instrument(level = "trace")]
 async fn resolve_interface() -> Result<Option<String>, AgentError> {
     // Connect to a remote address so we can later get the default network interface.
@@ -103,26 +103,9 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
     // `sin_port: 0`.
     let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
     let raw_local_address = SockaddrStorage::from(local_address);
-    debug!("raw_local_address {raw_local_address:#?}");
-
-    // nix::ifaddrs::getifaddrs()?.for_each(|iface| {
-    //     debug!("iface {iface:#?}");
-
-    //     iface.address.inspect(|address| {
-    //         let v4 = address.as_sockaddr_in();
-    //         let v6 = address.as_sockaddr_in6();
-
-    //         let raw_v4 = raw_local_address.as_sockaddr_in();
-    //         let raw_v6 = raw_local_address.as_sockaddr_in6();
-
-    //         debug!("(v4 {:#?} | raw {:#?})", v4, raw_v4);
-    //         debug!("(v6 {:#?} | raw {:#?})", v6, raw_v6);
-    //     });
-    // });
 
     // Try to find an interface that matches the local ip we have.
     let usable_interface_name = nix::ifaddrs::getifaddrs()?
-        .inspect(|iface| debug!("({:#?}, {raw_local_address:#?}", iface))
         .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
 
     debug!("usable_interface_name {usable_interface_name:#?}");
@@ -133,6 +116,7 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
 // TODO(alex): Errors here are not reported back anywhere, we end up with a generic fail of:
 // "ERROR ThreadId(03) mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
 // error: SnifferCommand sender failed with `channel closed`"
+//
 // And to make matters worse, the error reported back to the user is the very generic:
 // "mirrord-layer received an unexpected response from the agent pod!"
 #[tracing::instrument(level = "trace")]
@@ -142,8 +126,9 @@ async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture
     let interface = if let Some(network_interface) = network_interface {
         network_interface
     } else {
-        resolve_interface().await?.unwrap()
-        // .unwrap_or_else(|| format!("eth0"))
+        resolve_interface()
+            .await?
+            .unwrap_or_else(|| format!("eth0"))
     };
 
     trace!("Using {interface:#?} interface.");
