@@ -336,9 +336,12 @@
         },
         "outgoing": {
           "description": "Tunnel outgoing network operations through mirrord.",
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_OutgoingFileConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         }
