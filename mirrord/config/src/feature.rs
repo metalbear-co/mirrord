@@ -47,7 +47,7 @@ use crate::{
 /// tcp = true
 /// udp = true
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq,Eq"))]
 pub struct FeatureConfig {
