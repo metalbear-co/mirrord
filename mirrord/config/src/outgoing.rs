@@ -1,6 +1,5 @@
-use mirrord_config_derive::MirrordConfig;
+use mirrord_config_derive::MirrordConfig2;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::{
     config::{
@@ -9,15 +8,17 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = OutgoingConfig)]
-pub struct OutgoingFileConfig {
+#[derive(MirrordConfig2, Default, PartialEq, Eq, Clone, Debug)]
+#[config(
+    map_to = "OutgoingFileConfig",
+    derive = "Default,PartialEq,Eq,JsonSchema"
+)]
+pub struct OutgoingConfig {
     #[config(env = "MIRRORD_TCP_OUTGOING", default = "true")]
-    pub tcp: Option<bool>,
+    pub tcp: bool,
 
     #[config(env = "MIRRORD_UDP_OUTGOING", default = "true")]
-    pub udp: Option<bool>,
+    pub udp: bool,
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {

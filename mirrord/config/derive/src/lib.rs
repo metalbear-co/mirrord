@@ -243,10 +243,6 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
                 Ok(#mapped_name #mapped_fields_impl)
             }
         }
-
-        impl crate::config::FromMirrordConfig for #mapped_name {
-            type Generator = #ident;
-        }
     };
 
     Ok(output)

@@ -320,8 +320,8 @@ mod tests {
                 startup_timeout: None,
             },
             feature: FeatureFileConfig {
-                env: ToggleableConfig::Enabled(true),
-                fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)),
+                env: ToggleableConfig::Enabled(true).into(),
+                fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
@@ -329,7 +329,8 @@ mod tests {
                         tcp: Some(true),
                         udp: Some(false),
                     })),
-                }),
+                })
+                .into(),
                 capture_error_trace: None,
             },
             connect_tcp: None,

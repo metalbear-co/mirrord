@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use super::FsModeConfig;
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -87,6 +87,10 @@ impl FsConfig {
     pub fn is_write(&self) -> bool {
         self.mode.is_write()
     }
+}
+
+impl FromMirrordConfig for FsConfig {
+    type Generator = super::FsUserConfig;
 }
 
 #[cfg(test)]

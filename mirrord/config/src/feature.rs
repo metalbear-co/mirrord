@@ -1,10 +1,8 @@
-use mirrord_config_derive::MirrordConfig;
+use mirrord_config_derive::MirrordConfig2;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::{
-    config::source::MirrordConfigSource, env::EnvFileConfig, fs::FsUserConfig,
-    network::NetworkFileConfig, util::ToggleableConfig,
+    config::source::MirrordConfigSource, env::EnvConfig, fs::FsConfig, network::NetworkConfig,
 };
 
 /// Configuration for mirrord features.
@@ -49,38 +47,36 @@ use crate::{
 /// tcp = true
 /// udp = true
 /// ```
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = FeatureConfig)]
-pub struct FeatureFileConfig {
+#[derive(MirrordConfig2, Default, PartialEq, Eq, Clone, Debug)]
+#[config(
+    map_to = "FeatureFileConfig",
+    derive = "Default,PartialEq,Eq,JsonSchema"
+)]
+pub struct FeatureConfig {
     /// Controls the environment variables feature, see [`EnvFileConfig`].
     ///
     /// For more information, check the environment variables
     /// [technical reference](https://mirrord.dev/docs/reference/env/).
-    #[serde(default)]
-    #[config(nested)]
-    pub env: ToggleableConfig<EnvFileConfig>,
+    #[config(nested, toggleable, from_default)]
+    pub env: EnvConfig,
 
     /// Controls the file operations feature, see [`FsUserConfig`].
     ///
     /// For more information, check the file operations
     /// [technical reference](https://mirrord.dev/docs/reference/fileops/).
-    #[serde(default)]
-    #[config(nested)]
-    pub fs: ToggleableConfig<FsUserConfig>,
+    #[config(nested, toggleable, from_default)]
+    pub fs: FsConfig,
 
     /// Controls the network feature, see [`NetworkFileConfig`].
     ///
     /// For more information, check the network traffic
     /// [technical reference](https://mirrord.dev/docs/reference/traffic/).
-    #[serde(default)]
-    #[config(nested)]
-    pub network: ToggleableConfig<NetworkFileConfig>,
+    #[config(nested, toggleable, from_default)]
+    pub network: NetworkConfig,
 
     /// Controls the crash reporting feature.
     ///
     /// With this feature enabled, mirrord generates a nice crash report log.
-    #[serde(default)]
     #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = "false")]
-    pub capture_error_trace: Option<bool>,
+    pub capture_error_trace: bool,
 }

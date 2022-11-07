@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -91,6 +91,10 @@ impl MirrordToggleableConfig for EnvFileConfig {
             overrides: None,
         })
     }
+}
+
+impl FromMirrordConfig for EnvConfig {
+    type Generator = EnvFileConfig;
 }
 
 #[cfg(test)]
