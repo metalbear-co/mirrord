@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
 
@@ -89,7 +89,7 @@ fn is_closed_connection(flags: u16) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-/// Connects to a remote address (`8.8.8.8`) so we can find which network interface to use.
+/// Connects to a remote address (`8.8.8.8:53`) so we can find which network interface to use.
 ///
 /// Used when no `user_interface` is specified in [`prepare_sniffer`] to prevent mirrord from
 /// defaulting to the wrong network interface (`eth0`), as sometimes the user's machine doesn't have
@@ -97,29 +97,53 @@ fn is_closed_connection(flags: u16) -> bool {
 #[tracing::instrument(level = "trace")]
 async fn resolve_interface() -> Result<Option<String>, AgentError> {
     // Connect to a remote address so we can later get the default network interface.
-    let temporary_socket = TcpStream::connect("8.8.8.8").await?;
-    let local_address = temporary_socket.local_addr()?;
+    let temporary_socket = TcpStream::connect("8.8.8.8:53").await?;
+
+    // Create comparison address here with `port: 0`, to match the network interface's address of
+    // `sin_port: 0`.
+    let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
     let raw_local_address = SockaddrStorage::from(local_address);
+    debug!("raw_local_address {raw_local_address:#?}");
+
+    // nix::ifaddrs::getifaddrs()?.for_each(|iface| {
+    //     debug!("iface {iface:#?}");
+
+    //     iface.address.inspect(|address| {
+    //         let v4 = address.as_sockaddr_in();
+    //         let v6 = address.as_sockaddr_in6();
+
+    //         let raw_v4 = raw_local_address.as_sockaddr_in();
+    //         let raw_v6 = raw_local_address.as_sockaddr_in6();
+
+    //         debug!("(v4 {:#?} | raw {:#?})", v4, raw_v4);
+    //         debug!("(v6 {:#?} | raw {:#?})", v6, raw_v6);
+    //     });
+    // });
 
     // Try to find an interface that matches the local ip we have.
     let usable_interface_name = nix::ifaddrs::getifaddrs()?
+        .inspect(|iface| debug!("({:#?}, {raw_local_address:#?}", iface))
         .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
 
+    debug!("usable_interface_name {usable_interface_name:#?}");
+    // panic!("END");
     Ok(usable_interface_name)
 }
 
+// TODO(alex): Errors here are not reported back anywhere, we end up with a generic fail of:
+// "ERROR ThreadId(03) mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
+// error: SnifferCommand sender failed with `channel closed`"
+// And to make matters worse, the error reported back to the user is the very generic:
+// "mirrord-layer received an unexpected response from the agent pod!"
 #[tracing::instrument(level = "trace")]
-async fn prepare_sniffer(user_interface: Option<String>) -> Result<RawCapture, AgentError> {
-    debug!("prepare_sniffer -> Preparing interface.");
-
+async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture, AgentError> {
     // Priority is whatever the user set as an option to mirrord, otherwise we try to get the
     // appropriate interface.
-    let interface = if let Some(user_interface) = user_interface {
-        user_interface
+    let interface = if let Some(network_interface) = network_interface {
+        network_interface
     } else {
-        resolve_interface()
-            .await?
-            .unwrap_or_else(|| format!("eth0"))
+        resolve_interface().await?.unwrap()
+        // .unwrap_or_else(|| format!("eth0"))
     };
 
     trace!("Using {interface:#?} interface.");
@@ -294,10 +318,11 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace")]
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        user_interface: Option<String>,
+        network_interface: Option<String>,
     ) -> Result<TCPConnectionSniffer, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
@@ -307,8 +332,7 @@ impl TCPConnectionSniffer {
             set_namespace(namespace).unwrap();
         }
 
-        debug!("preparing sniffer");
-        let raw_capture = prepare_sniffer(user_interface).await?;
+        let raw_capture = prepare_sniffer(network_interface).await?;
 
         Ok(TCPConnectionSniffer {
             receiver,
@@ -325,10 +349,10 @@ impl TCPConnectionSniffer {
     pub async fn start(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        user_interface: Option<String>,
+        network_interface: Option<String>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let sniffer = Self::new(receiver, pid, user_interface).await?;
+        let sniffer = Self::new(receiver, pid, network_interface).await?;
         sniffer.run(cancel_token).await
     }
 

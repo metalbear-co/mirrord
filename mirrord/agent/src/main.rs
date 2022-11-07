@@ -294,12 +294,10 @@ async fn start_agent() -> Result<(), AgentError> {
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
     let _ = run_thread(dns_worker(dns_receiver, pid));
 
-    let user_interface = (!args.interface.is_empty()).then_some(args.interface);
-
     let sniffer_task = run_thread(TCPConnectionSniffer::start(
         sniffer_command_rx,
         pid,
-        user_interface,
+        args.network_interface,
         cancellation_token.clone(),
     ));
 
