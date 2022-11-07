@@ -107,14 +107,13 @@ tasks {
             }
         }
         // custom delve
-        from(file("$projectDir/dlv")) {
+        val delveExecutable = "$projectDir/dlv"
+        from(file(delveExecutable)) {
             into(pluginName.get())
         }
-
-        val dlvExecutable = inputs.sourceFiles.files.find { it.name == "dlv" }
-            ?: throw StopExecutionException("Expected delve executable: dlv >> Not Found")
-        // make delve an executable
-        dlvExecutable.setExecutable(true)
+        if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+            if (!inputs.sourceFiles.files.contains(File(delveExecutable))) throw StopExecutionException("Expected delve: $delveExecutable >> Not Found")
+        }
     }
 
     // Configure UI tests plugin

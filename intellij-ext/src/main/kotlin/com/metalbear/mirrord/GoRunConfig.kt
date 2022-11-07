@@ -62,10 +62,15 @@ class GoRunConfig : GoRunConfigurationExtension() {
         commandLineType: GoRunningState.CommandLineType
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
-            MirrordListener.enabled && MirrordListener.envSet &&
+            MirrordListener.enabled && !MirrordListener.envSet &&
             System.getProperty("os.name").toLowerCase().startsWith("mac")
         ) {
             val delvePath = getCustomDelvePath()
+            // convert the delve file to an executable
+            val delveExecutable = Paths.get(delvePath).toFile()
+            if (!delveExecutable.canExecute()) {
+                delveExecutable.setExecutable(true)
+            }
             executor.withExePath(delvePath)
         }
         super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
