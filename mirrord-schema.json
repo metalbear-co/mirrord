@@ -257,7 +257,7 @@
           ]
         },
         "env": {
-          "description": "Controls the environment variables feature, see [`EnvFileConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
+          "description": "Controls the environment variables feature, see [`EnvConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
@@ -268,7 +268,7 @@
           ]
         },
         "fs": {
-          "description": "Controls the file operations feature, see [`FsUserConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
+          "description": "Controls the file operations feature, see [`FsConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
@@ -279,7 +279,7 @@
           ]
         },
         "network": {
-          "description": "Controls the network feature, see [`NetworkFileConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
+          "description": "Controls the network feature, see [`NetworkConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
