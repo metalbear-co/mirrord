@@ -4,7 +4,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig, Result},
+    config::{
+        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
+        MirrordConfig, Result,
+    },
     util::string_or_struct_option,
 };
 
@@ -32,7 +35,7 @@ pub enum TargetFileConfig {
     },
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
     pub path: Option<Target>,
@@ -43,6 +46,10 @@ impl Default for TargetFileConfig {
     fn default() -> Self {
         TargetFileConfig::Simple(None)
     }
+}
+
+impl FromMirrordConfig for TargetConfig {
+    type Generator = TargetFileConfig;
 }
 
 impl MirrordConfig for TargetFileConfig {

@@ -71,7 +71,7 @@ impl ToTokens for FileStruct {
         let field_impl = fields.iter().map(|field| field.implmentation(source));
 
         tokens.extend(quote! {
-            #[derive(Debug, Clone, serde::Deserialize, #(#derive),*)]
+            #[derive(Clone, Debug, Default, serde::Deserialize, #(#derive),*)]
             #[serde(deny_unknown_fields)]
             #(#doc)*
             #vis struct #ident { #(#field_definitions),* }

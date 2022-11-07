@@ -81,17 +81,13 @@ impl FileStructField {
         }
 
         if flags.nested {
-            impls.push(quote! { self.#ident.map(crate::config::MirrordConfig::generate_config).transpose()? })
+            impls.push(quote! { Some(self.#ident.unwrap_or_default().generate_config()?) })
         } else {
             impls.push(quote! { self.#ident });
         }
 
         if let Some(default) = flags.default.as_ref() {
             impls.push(default.to_token_stream());
-        }
-
-        if flags.from_default {
-            impls.push(quote! { crate::config::from_default::FromDefault::default() })
         }
 
         let unwrapper = option.is_none().then(|| {

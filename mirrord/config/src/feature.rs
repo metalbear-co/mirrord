@@ -48,10 +48,8 @@ use crate::{
 /// udp = true
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
-#[config(
-    map_to = "FeatureFileConfig",
-    derive = "Default,PartialEq,Eq,JsonSchema"
-)]
+#[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq,Eq"))]
 pub struct FeatureConfig {
     /// Controls the environment variables feature, see [`EnvFileConfig`].
     ///
