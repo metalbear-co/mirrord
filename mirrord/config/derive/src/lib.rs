@@ -248,7 +248,7 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     Ok(output)
 }
 
-#[proc_macro_derive(MirrordConfig, attributes(config))]
+#[proc_macro_derive(AsMirrordConfig, attributes(config))]
 pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
 
@@ -263,7 +263,7 @@ fn mirrord_config_macro2(input: DeriveInput) -> Result<TokenStream, Diagnostic> 
     file::FileStruct::new(input).map(|file| file.into_token_stream())
 }
 
-#[proc_macro_derive(MirrordConfig2, attributes(config))]
+#[proc_macro_derive(MirrordConfig, attributes(config))]
 pub fn mirrord_config2(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
 

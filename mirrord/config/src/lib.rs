@@ -19,7 +19,7 @@ pub mod util;
 /// including if you only made documentation changes.
 use std::path::Path;
 
-use mirrord_config_derive::MirrordConfig;
+use mirrord_config_derive::AsMirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -72,7 +72,7 @@ use crate::{
 /// [feature.network]
 /// incoming = "steal"
 /// ```
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(AsMirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = LayerConfig)]
 pub struct LayerFileConfig {

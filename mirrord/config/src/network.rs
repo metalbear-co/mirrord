@@ -1,4 +1,4 @@
-use mirrord_config_derive::MirrordConfig2;
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use crate::{
@@ -29,7 +29,7 @@ use crate::{
 /// [feature.network.outgoing]
 /// tcp = true
 /// ```
-#[derive(MirrordConfig2, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(
     map_to = "NetworkFileConfig",
     derive = "Default,PartialEq,Eq,JsonSchema"

@@ -1,4 +1,4 @@
-use mirrord_config_derive::MirrordConfig;
+use mirrord_config_derive::AsMirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -39,7 +39,7 @@ use crate::{
 /// mode = write
 /// include = "^.*\.baz$"
 /// ```
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(AsMirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[config(map_to = FsConfig)]
 pub struct AdvancedFsUserConfig {

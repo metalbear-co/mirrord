@@ -1,10 +1,10 @@
-use mirrord_config_derive::MirrordConfig2;
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use crate::config::source::MirrordConfigSource;
 
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
-#[derive(MirrordConfig2, Default, Clone, PartialEq, Eq, Debug)]
+#[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "Default,Eq,PartialEq,JsonSchema")]
 pub struct AgentConfig {
     /// Log level for the agent.
