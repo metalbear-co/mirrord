@@ -107,12 +107,14 @@ tasks {
             }
         }
         // custom delve
-        val delveExecutable = "$projectDir/dlv"
-        from(file(delveExecutable)) {
-            into(pluginName.get())
-        }
-        if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
-            if (!inputs.sourceFiles.files.contains(File(delveExecutable))) throw StopExecutionException("Expected delve: $delveExecutable >> Not Found")
+        val delveExecutables = mapOf("aarch64" to "$projectDir/dlv_aarch64", "amd64" to "$projectDir/dlv_amd64")
+        delveExecutables.forEach { (_, delve) ->
+            from(file(delve)) {
+                into(pluginName.get())
+            }
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(delve))) throw StopExecutionException("Expected delve executable: $delve >> Not Found")
+            }
         }
     }
 

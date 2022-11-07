@@ -63,21 +63,21 @@ class GoRunConfig : GoRunConfigurationExtension() {
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
             MirrordListener.enabled && !MirrordListener.envSet &&
-            System.getProperty("os.name").toLowerCase().startsWith("mac") &&
-            System.getProperty("os.arch") == "aaarch64"
+            System.getProperty("os.name").toLowerCase().startsWith("mac")
         ) {
-            val delvePath = getCustomDelvePath()
+            val arch = System.getProperty("os.arch")
+            val delvePath = getCustomDelvePath(arch)
             // convert the delve file to an executable
             val delveExecutable = Paths.get(delvePath).toFile()
-            if (!delveExecutable.canExecute()) {
+            if (delveExecutable.exists() && !delveExecutable.canExecute()) {
                 delveExecutable.setExecutable(true)
+                executor.withExePath(delvePath)
             }
-            executor.withExePath(delvePath)
         }
         super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
     }
 
-    private fun getCustomDelvePath(): String {
-        return Paths.get(PathManager.getPluginsPath(), "mirrord", "dlv").toString()
+    private fun getCustomDelvePath(arch: String): String {
+        return Paths.get(PathManager.getPluginsPath(), "mirrord", "dlv_$arch").toString()
     }
 }
