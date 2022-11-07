@@ -69,8 +69,10 @@ class GoRunConfig : GoRunConfigurationExtension() {
             val delvePath = getCustomDelvePath(arch)
             // convert the delve file to an executable
             val delveExecutable = Paths.get(delvePath).toFile()
-            if (delveExecutable.exists() && !delveExecutable.canExecute()) {
-                delveExecutable.setExecutable(true)
+            if (delveExecutable.exists()) {
+                if (!delveExecutable.canExecute()) {
+                    delveExecutable.setExecutable(true)
+                }
                 executor.withExePath(delvePath)
             }
         }
