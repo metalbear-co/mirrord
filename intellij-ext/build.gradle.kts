@@ -110,6 +110,11 @@ tasks {
         from(file("$projectDir/dlv")) {
             into(pluginName.get())
         }
+
+        val dlvExecutable = inputs.sourceFiles.files.find { it.name == "dlv" }
+            ?: throw StopExecutionException("Expected delve executable: dlv >> Not Found")
+        // make delve an executable
+        dlvExecutable.setExecutable(true)
     }
 
     // Configure UI tests plugin
