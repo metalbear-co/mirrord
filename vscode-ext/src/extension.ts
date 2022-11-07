@@ -249,6 +249,10 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 				if (config.type === "go") {
 					config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+					// use our custom delve to fix being loaded into debugserver
+					if (os.platform() === "darwin") {
+						config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
+					}
 				}
 
 				return resolve(config);
