@@ -188,7 +188,7 @@
       "additionalProperties": false
     },
     "DeploymentTarget": {
-      "description": "Mirror the deployment specified by [`PodTarget::deployment`].",
+      "description": "Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
       "required": [
         "deployment"
