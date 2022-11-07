@@ -35,7 +35,7 @@ impl FileStruct {
             Data::Struct(DataStruct { fields, .. }) => match fields {
                 Fields::Named(FieldsNamed { named, .. }) => named
                     .into_iter()
-                    .map(|field| FileStructField::try_from(field))
+                    .map(FileStructField::try_from)
                     .collect::<Result<_, _>>()?,
                 _ => return Err(fields.span().error("Unnamed Structs are not supported")),
             },
@@ -68,7 +68,7 @@ impl ToTokens for FileStruct {
         } = &self;
 
         let field_definitions = fields.iter().map(|field| field.definition());
-        let field_impl = fields.iter().map(|field| field.implmentation(&source));
+        let field_impl = fields.iter().map(|field| field.implmentation(source));
 
         tokens.extend(quote! {
             #[derive(Debug, Clone, serde::Deserialize, #(#derive),*)]

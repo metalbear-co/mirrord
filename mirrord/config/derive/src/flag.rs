@@ -19,7 +19,7 @@ pub struct ConfigFlags {
 }
 
 impl ConfigFlags {
-    pub fn new(attrs: &Vec<Attribute>, mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
+    pub fn new(attrs: &[Attribute], mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
         let mut flags = ConfigFlags {
             doc: attrs
                 .iter()
@@ -71,7 +71,7 @@ impl ConfigFlags {
                                 Lit::Str(val) => {
                                     flags.derive.extend(
                                         val.value()
-                                            .split(",")
+                                            .split(',')
                                             .map(|part| Ident::new(part, Span::call_site())),
                                     );
                                 }
