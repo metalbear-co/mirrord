@@ -109,9 +109,12 @@
         },
         "mode": {
           "description": "File operations mode, defaults to read-only, see [`FsModeConfig`].",
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         }

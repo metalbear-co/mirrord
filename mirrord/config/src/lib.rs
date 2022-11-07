@@ -93,7 +93,7 @@ pub struct LayerConfig {
     /// - `pod/{sample-pod}/[container]/{sample-container}`;
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
-    #[config(nested, from_default)]
+    #[config(nested)]
     pub target: TargetConfig,
 
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
@@ -109,11 +109,11 @@ pub struct LayerConfig {
     pub connect_agent_port: Option<u16>,
 
     /// Agent configuration, see [`agent::AgentFileConfig`].
-    #[config(nested, from_default)]
+    #[config(nested)]
     pub agent: AgentConfig,
 
     /// Controls mirrord features, see [`feature::FeatureFileConfig`].
-    #[config(nested, from_default)]
+    #[config(nested)]
     pub feature: FeatureConfig,
 }
 

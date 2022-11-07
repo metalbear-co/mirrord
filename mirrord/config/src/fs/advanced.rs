@@ -1,10 +1,9 @@
-use mirrord_config_derive::AsMirrordConfig;
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
-use super::FsModeConfig;
+use super::{FsModeConfig, FsUserConfig};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -39,12 +38,14 @@ use crate::{
 /// mode = write
 /// include = "^.*\.baz$"
 /// ```
-#[derive(AsMirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = FsConfig)]
-pub struct AdvancedFsUserConfig {
+#[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug)]
+#[config(
+    map_to = "AdvancedFsUserConfig",
+    derive = "PartialEq,Eq,JsonSchema",
+    generator = "FsUserConfig"
+)]
+pub struct FsConfig {
     /// File operations mode, defaults to read-only, see [`FsModeConfig`].
-    #[serde(default)]
     #[config(nested)]
     pub mode: FsModeConfig,
 
@@ -87,10 +88,6 @@ impl FsConfig {
     pub fn is_write(&self) -> bool {
         self.mode.is_write()
     }
-}
-
-impl FromMirrordConfig for FsConfig {
-    type Generator = super::FsUserConfig;
 }
 
 #[cfg(test)]

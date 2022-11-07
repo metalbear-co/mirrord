@@ -55,21 +55,21 @@ pub struct FeatureConfig {
     ///
     /// For more information, check the environment variables
     /// [technical reference](https://mirrord.dev/docs/reference/env/).
-    #[config(nested, toggleable, from_default)]
+    #[config(nested, toggleable)]
     pub env: EnvConfig,
 
     /// Controls the file operations feature, see [`FsConfig`].
     ///
     /// For more information, check the file operations
     /// [technical reference](https://mirrord.dev/docs/reference/fileops/).
-    #[config(nested, toggleable, from_default)]
+    #[config(nested, toggleable)]
     pub fs: FsConfig,
 
     /// Controls the network feature, see [`NetworkConfig`].
     ///
     /// For more information, check the network traffic
     /// [technical reference](https://mirrord.dev/docs/reference/traffic/).
-    #[config(nested, toggleable, from_default)]
+    #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
     /// Controls the crash reporting feature.

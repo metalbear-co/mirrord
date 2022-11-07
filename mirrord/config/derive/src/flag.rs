@@ -15,10 +15,10 @@ pub struct ConfigFlags {
     pub map_to: Option<Ident>,
     pub env: Option<EnvFlag>,
     pub default: Option<DefaultFlag>,
-    pub from_default: bool,
     pub doc: Vec<Attribute>,
     pub nested: bool,
     pub toggleable: bool,
+    pub generator: Option<Ident>,
 }
 
 impl ConfigFlags {
@@ -49,11 +49,6 @@ impl ConfigFlags {
                             if mode == ConfigFlagsType::Field && path.is_ident("toggleable") =>
                         {
                             flags.toggleable = true
-                        }
-                        NestedMeta::Meta(Meta::Path(path))
-                            if mode == ConfigFlagsType::Field && path.is_ident("from_default") =>
-                        {
-                            flags.from_default = true
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
@@ -92,6 +87,23 @@ impl ConfigFlags {
                                             .split(',')
                                             .map(|part| Ident::new(part, Span::call_site())),
                                     );
+                                }
+                                _ => {
+                                    return Err(meta
+                                        .lit
+                                        .span()
+                                        .error("derive should be a string literal as value"))
+                                }
+                            }
+                        }
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Container
+                                && meta.path.is_ident("generator") =>
+                        {
+                            match meta.lit {
+                                Lit::Str(val) => {
+                                    flags.generator =
+                                        Some(Ident::new(&val.value(), Span::call_site()))
                                 }
                                 _ => {
                                     return Err(meta

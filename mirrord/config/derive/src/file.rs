@@ -64,11 +64,19 @@ impl ToTokens for FileStruct {
             vis,
             fields,
             source,
-            flags: ConfigFlags { doc, derive, .. },
+            flags:
+                ConfigFlags {
+                    doc,
+                    derive,
+                    generator,
+                    ..
+                },
         } = &self;
 
         let field_definitions = fields.iter().map(|field| field.definition());
         let field_impl = fields.iter().map(|field| field.implmentation(source));
+
+        let generator = generator.as_ref().unwrap_or_else(|| &ident);
 
         tokens.extend(quote! {
             #[derive(Clone, Debug, Default, serde::Deserialize, #(#derive),*)]
@@ -87,7 +95,7 @@ impl ToTokens for FileStruct {
             }
 
             impl crate::config::FromMirrordConfig for #source {
-                type Generator = #ident;
+                type Generator = #generator;
             }
         });
     }

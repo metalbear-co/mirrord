@@ -41,7 +41,7 @@ pub struct NetworkConfig {
     pub incoming: IncomingConfig,
 
     /// Tunnel outgoing network operations through mirrord.
-    #[config(toggleable, nested, from_default)]
+    #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
     /// Resolve DNS via the remote pod.
