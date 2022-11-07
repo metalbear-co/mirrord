@@ -108,8 +108,6 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
     let usable_interface_name = nix::ifaddrs::getifaddrs()?
         .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
 
-    debug!("usable_interface_name {usable_interface_name:#?}");
-    // panic!("END");
     Ok(usable_interface_name)
 }
 
