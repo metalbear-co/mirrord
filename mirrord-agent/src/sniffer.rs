@@ -9,6 +9,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
+use nix::sys::socket::SockaddrStorage;
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -18,6 +19,7 @@ use pnet::packet::{
 };
 use rawsocket::RawCapture;
 use tokio::{
+    net::TcpStream,
     select,
     sync::mpsc::{Receiver, Sender},
 };
@@ -87,9 +89,40 @@ fn is_closed_connection(flags: u16) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
+/// Connects to a remote address (`8.8.8.8`) so we can find which network interface to use.
+///
+/// Used when no `user_interface` is specified in [`prepare_sniffer`] to prevent mirrord from
+/// defaulting to the wrong network interface (`eth0`), as sometimes the user's machine doesn't have
+/// it available (or is not the correct one).
+#[tracing::instrument(level = "trace")]
+async fn resolve_interface() -> Result<Option<String>, AgentError> {
+    // Connect to a remote address so we can later get the default network interface.
+    let temporary_socket = TcpStream::connect("8.8.8.8").await?;
+    let local_address = temporary_socket.local_addr()?;
+    let raw_local_address = SockaddrStorage::from(local_address);
+
+    // Try to find an interface that matches the local ip we have.
+    let usable_interface_name = nix::ifaddrs::getifaddrs()?
+        .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
+
+    Ok(usable_interface_name)
+}
+
+#[tracing::instrument(level = "trace")]
+async fn prepare_sniffer(user_interface: Option<String>) -> Result<RawCapture, AgentError> {
     debug!("prepare_sniffer -> Preparing interface.");
 
+    // Priority is whatever the user set as an option to mirrord, otherwise we try to get the
+    // appropriate interface.
+    let interface = if let Some(user_interface) = user_interface {
+        user_interface
+    } else {
+        resolve_interface()
+            .await?
+            .unwrap_or_else(|| format!("eth0"))
+    };
+
+    trace!("Using {interface:#?} interface.");
     let capture = RawCapture::from_interface_name(&interface)?;
     // We start with a BPF that drops everything so we won't receive *EVERYTHING*
     // as we don't know what the layer will ask us to listen for, so this is essentially setting
@@ -264,7 +297,7 @@ impl TCPConnectionSniffer {
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        interface: String,
+        user_interface: Option<String>,
     ) -> Result<TCPConnectionSniffer, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
@@ -275,7 +308,7 @@ impl TCPConnectionSniffer {
         }
 
         debug!("preparing sniffer");
-        let raw_capture = prepare_sniffer(interface)?;
+        let raw_capture = prepare_sniffer(user_interface).await?;
 
         Ok(TCPConnectionSniffer {
             receiver,
@@ -292,10 +325,10 @@ impl TCPConnectionSniffer {
     pub async fn start(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        interface: String,
+        user_interface: Option<String>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let sniffer = Self::new(receiver, pid, interface).await?;
+        let sniffer = Self::new(receiver, pid, user_interface).await?;
         sniffer.run(cancel_token).await
     }
 
