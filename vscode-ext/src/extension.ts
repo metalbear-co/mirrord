@@ -84,20 +84,30 @@ async function changeSettings() {
 				globalContext.workspaceState.update('excludeEnvironmentVariables', value);
 			});
 		} else if (setting.startsWith('Change namespace')) {
-			const namespaces: {
-				response: any;
-				body: V1NamespaceList;
-			} = await getK8sApi().listNamespace();
-			const namespaceNames = namespaces.body.items.map(namespace => namespace.metadata!.name!);
-			vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
-				if (namespaceName === undefined) {
-					return;
-				}
-				if (setting.startsWith('Change namespace for mirrord agent')) {
-					globalContext.workspaceState.update('agentNamespace', namespaceName);
-				} else if (setting.startsWith('Change namespace for impersonated pod')) {
-					globalContext.workspaceState.update('impersonatedPodNamespace', namespaceName);
-				}
+			const namespaces = await getK8sApi().listNamespace().then((namespaces: any) => {
+				const namespaceNames = namespaces.body.items.map((namespace: { metadata: any; }) => namespace.metadata!.name!);
+				vscode.window.showQuickPick(namespaceNames, { placeHolder: 'Select namespace' }).then(async namespaceName => {
+					if (namespaceName === undefined) {
+						return;
+					}
+					if (setting.startsWith('Change namespace for mirrord agent')) {
+						globalContext.workspaceState.update('agentNamespace', namespaceName);
+					} else if (setting.startsWith('Change namespace for impersonated pod')) {
+						globalContext.workspaceState.update('impersonatedPodNamespace', namespaceName);
+					}
+				});
+			}).catch((err: any) => {
+				vscode.window.showWarningMessage('Failed to list namespaces: ' + err);
+				vscode.window.showInputBox({ prompt: 'Enter namespace', value: agentNamespace }).then(async namespaceName => {
+					if (namespaceName === undefined) {
+						return;
+					}
+					if (setting.startsWith('Change namespace for mirrord agent')) {
+						globalContext.workspaceState.update('agentNamespace', namespaceName);
+					} else if (setting.startsWith('Change namespace for impersonated pod')) {
+						globalContext.workspaceState.update('impersonatedPodNamespace', namespaceName);
+					}
+				});
 			});
 		}
 	});
