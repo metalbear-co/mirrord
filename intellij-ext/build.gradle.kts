@@ -24,11 +24,11 @@ repositories {
     mavenCentral()
 }
 dependencies {
-    implementation("io.kubernetes:client-java:16.0.0") {
+    implementation("com.github.zafarkhaja:java-semver:0.9.0")
+    implementation("io.kubernetes:client-java:16.0.1") {
         exclude(group = "org.slf4j", module = "slf4j-api")
         exclude(group = "org.yaml", module = "snakeyaml")
     }
-    implementation("com.github.zafarkhaja:java-semver:0.9.0")
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin

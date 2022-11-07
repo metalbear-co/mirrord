@@ -11,7 +11,7 @@ use std::{ffi::CString, mem::ManuallyDrop};
 
 use frida_gum::interceptor::Interceptor;
 use libc::c_char;
-use mirrord_macro::hook_fn;
+use mirrord_layer_macro::hook_fn;
 
 use crate::replace_symbol;
 

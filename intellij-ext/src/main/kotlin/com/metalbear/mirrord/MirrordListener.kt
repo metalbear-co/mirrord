@@ -26,8 +26,12 @@ class MirrordListener : ExecutionListener {
     }
 
     companion object {
-        var enabled: Boolean = false
         var id: String = ""
+        var enabled: Boolean = false
+            set(value) {
+                id = ""
+                field = value
+            }
         var envSet: Boolean = false
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
@@ -43,29 +47,41 @@ class MirrordListener : ExecutionListener {
                 } catch (e: Exception) {
                     MirrordEnabler.notify(
                         "Error occurred while fetching namespaces from Kubernetes context.\n " +
-                                "mirrord will use the default namespace from kube configuration.\n `${e.message}`",
-                        NotificationType.ERROR,
+                                "If you're missing permissions, use the textbox to write the namespace.\n `${e.message}`",
+                        NotificationType.WARNING,
                         env.project
                     )
                     null
                 }
 
-                // we need the following check to make sure in case the dialog is spawned, we get an
-                // OK exit code and a non-empty selection from the user
-                val showNamespaceDialog = if (namespaces != null) {
+                // in case listing namespace fails, we will use a textbox to get the namespace from the user
+                val podNamespace = if (namespaces != null) {
                     val namespaceDialog = namespaces.let { MirrordDialogBuilder.createMirrordNamespaceDialog(it) }.let {
                         MirrordDialogBuilder.createDialogBuilder(
                             it
                         )
                     }
-                    namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty
+                    if (namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
+                        namespaces.selectedValue
+                    } else {
+                        null
+                    }
                 } else {
-                    true
+                    val namespaceTextField = JTextField()
+                    val namespaceTextDialog =
+                        MirrordDialogBuilder.createMirrordNamespaceTextDialog(namespaceTextField).let {
+                            MirrordDialogBuilder.createDialogBuilder(
+                                it
+                            )
+                        }
+                    if (namespaceTextDialog.show() == DialogWrapper.OK_EXIT_CODE && namespaceTextField.text.isNotEmpty()) {
+                        namespaceTextField.text
+                    } else {
+                        null
+                    }
                 }
 
-                val podNamespace = namespaces?.selectedValue ?: kubeDataProvider.getPodNamespace()
-
-                if (showNamespaceDialog) {
+                if (podNamespace != null) {
                     val pods = try {
                         kubeDataProvider.getNameSpacedPods(podNamespace).asJBList()
                     } catch (e: Exception) {
@@ -132,7 +148,6 @@ class MirrordListener : ExecutionListener {
                         }
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
-
                         envSet = envMap != null
                     }
                 } else {
@@ -146,6 +161,12 @@ class MirrordListener : ExecutionListener {
 
     private fun List<String>.asJBList() = JBList(this).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
+    }
+
+    override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
+        id = ""
+        envSet = false
+        super.processNotStarted(executorId, env)
     }
 
     @Suppress("UNCHECKED_CAST")

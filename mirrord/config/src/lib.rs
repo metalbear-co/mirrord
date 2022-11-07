@@ -352,7 +352,7 @@ mod tests {
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
     }
 
-    const SCHEMA_FILE_PATH: &str = "./../mirrord-schema.json";
+    const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
 
     /// Writes the config schema to a file (uploaded to the schema store).
     fn write_schema_to_file(schema: &RootSchema) -> File {

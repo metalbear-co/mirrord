@@ -298,7 +298,7 @@ impl Application {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
-                    "../target/debug/fileops"
+                    "../../target/debug/fileops"
                 )
             }
         }

@@ -4,7 +4,7 @@ use std::os::unix::io::RawFd;
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
-use mirrord_macro::{hook_fn, hook_guard_fn};
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use tracing::{error, info, trace};
 
 use super::ops::*;

@@ -7,7 +7,7 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
-use mirrord_macro::hook_guard_fn;
+use mirrord_layer_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
 use tracing::debug;
 
