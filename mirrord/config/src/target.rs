@@ -168,7 +168,7 @@ impl FromSplit for PodTarget {
     }
 }
 
-/// Mirror the deployment specified by [`PodTarget::deployment`].
+/// Mirror the deployment specified by [`DeploymentTarget::deployment`].
 #[derive(Debug, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
 pub struct DeploymentTarget {
     /// Deployment to mirror.
