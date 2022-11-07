@@ -325,10 +325,10 @@ mod tests {
                 network: ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
-                    outgoing: ToggleableConfig::Config(OutgoingFileConfig {
+                    outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
-                    }),
+                    })),
                 }),
                 capture_error_trace: None,
             },

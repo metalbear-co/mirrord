@@ -1,4 +1,5 @@
 pub mod default_value;
+pub mod from_default;
 pub mod from_env;
 pub mod source;
 
@@ -32,5 +33,5 @@ where
 }
 
 pub trait FromMirrordConfig {
-    type Generator: MirrordConfig<Generated = Self>;
+    type Generator: MirrordConfig;
 }

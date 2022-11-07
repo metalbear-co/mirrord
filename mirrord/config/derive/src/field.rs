@@ -21,6 +21,10 @@ impl FileStructField {
             return None;
         };
 
+        if seg.ident != "Option" {
+            return None;
+        }
+
         match &seg.arguments {
             PathArguments::AngleBracketed(generics) => match generics.args.first() {
                 Some(GenericArgument::Type(ty)) => Some(ty.clone()),
@@ -44,9 +48,21 @@ impl FileStructField {
 
         let ty = option.as_ref().unwrap_or(ty);
 
+        let target = if flags.nested {
+            let inner = quote! { <#ty as crate::config::FromMirrordConfig>::Generator };
+
+            if flags.toggleable {
+                quote! { crate::util::ToggleableConfig<#inner> }
+            } else {
+                inner
+            }
+        } else {
+            quote! { #ty }
+        };
+
         quote! {
             #(#docs)*
-            #vis #ident: Option<#ty>
+            #vis #ident: Option<#target>
         }
     }
 
@@ -64,10 +80,18 @@ impl FileStructField {
             impls.push(env.to_token_stream());
         }
 
-        impls.push(quote! { self.#ident });
+        if flags.nested {
+            impls.push(quote! { self.#ident.map(crate::config::MirrordConfig::generate_config).transpose()? })
+        } else {
+            impls.push(quote! { self.#ident });
+        }
 
         if let Some(default) = flags.default.as_ref() {
             impls.push(default.to_token_stream());
+        }
+
+        if flags.from_default {
+            impls.push(quote! { crate::config::from_default::FromDefault::new() })
         }
 
         let unwrapper = option.is_none().then(|| {

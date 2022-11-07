@@ -15,7 +15,10 @@ pub struct ConfigFlags {
     pub map_to: Option<Ident>,
     pub env: Option<EnvFlag>,
     pub default: Option<DefaultFlag>,
+    pub from_default: bool,
     pub doc: Vec<Attribute>,
+    pub nested: bool,
+    pub toggleable: bool,
 }
 
 impl ConfigFlags {
@@ -37,6 +40,21 @@ impl ConfigFlags {
             if let Meta::List(list) = meta {
                 for meta in list.nested {
                     match meta {
+                        NestedMeta::Meta(Meta::Path(path))
+                            if mode == ConfigFlagsType::Field && path.is_ident("nested") =>
+                        {
+                            flags.nested = true
+                        }
+                        NestedMeta::Meta(Meta::Path(path))
+                            if mode == ConfigFlagsType::Field && path.is_ident("toggleable") =>
+                        {
+                            flags.toggleable = true
+                        }
+                        NestedMeta::Meta(Meta::Path(path))
+                            if mode == ConfigFlagsType::Field && path.is_ident("from_default") =>
+                        {
+                            flags.from_default = true
+                        }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
                         {
