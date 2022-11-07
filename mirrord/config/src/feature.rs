@@ -51,21 +51,21 @@ use crate::{
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq,Eq"))]
 pub struct FeatureConfig {
-    /// Controls the environment variables feature, see [`EnvFileConfig`].
+    /// Controls the environment variables feature, see [`EnvConfig`].
     ///
     /// For more information, check the environment variables
     /// [technical reference](https://mirrord.dev/docs/reference/env/).
     #[config(nested, toggleable, from_default)]
     pub env: EnvConfig,
 
-    /// Controls the file operations feature, see [`FsUserConfig`].
+    /// Controls the file operations feature, see [`FsConfig`].
     ///
     /// For more information, check the file operations
     /// [technical reference](https://mirrord.dev/docs/reference/fileops/).
     #[config(nested, toggleable, from_default)]
     pub fs: FsConfig,
 
-    /// Controls the network feature, see [`NetworkFileConfig`].
+    /// Controls the network feature, see [`NetworkConfig`].
     ///
     /// For more information, check the network traffic
     /// [technical reference](https://mirrord.dev/docs/reference/traffic/).
