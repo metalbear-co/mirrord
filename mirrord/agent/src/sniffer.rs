@@ -126,7 +126,7 @@ async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture
     } else {
         resolve_interface()
             .await?
-            .unwrap_or_else(|| format!("eth0"))
+            .unwrap_or_else(|| "eth0".to_string())
     };
 
     trace!("Using {interface:#?} interface.");
