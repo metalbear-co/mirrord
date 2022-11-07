@@ -63,7 +63,8 @@ class GoRunConfig : GoRunConfigurationExtension() {
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
             MirrordListener.enabled && !MirrordListener.envSet &&
-            System.getProperty("os.name").toLowerCase().startsWith("mac")
+            System.getProperty("os.name").toLowerCase().startsWith("mac") &&
+            !MirrordListener.defaultFlow
         ) {
             val arch = System.getProperty("os.arch")
             val delvePath = getCustomDelvePath(arch)
