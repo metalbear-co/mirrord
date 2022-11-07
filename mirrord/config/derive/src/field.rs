@@ -91,7 +91,7 @@ impl FileStructField {
         }
 
         if flags.from_default {
-            impls.push(quote! { crate::config::from_default::FromDefault::new() })
+            impls.push(quote! { crate::config::from_default::FromDefault::default() })
         }
 
         let unwrapper = option.is_none().then(|| {

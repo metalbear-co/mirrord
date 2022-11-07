@@ -2,14 +2,8 @@ use std::marker::PhantomData;
 
 use crate::config::source::MirrordConfigSource;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FromDefault<T>(PhantomData<T>);
-
-impl<T> FromDefault<T> {
-    pub fn new() -> Self {
-        FromDefault(PhantomData::<T>)
-    }
-}
 
 impl<T> MirrordConfigSource for FromDefault<T>
 where
@@ -29,7 +23,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let value = FromDefault::<i32>::new();
+        let value = FromDefault::<i32>::default();
 
         assert_eq!(value.source_value(), Some(0));
     }
