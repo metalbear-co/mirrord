@@ -107,9 +107,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
         args.binary, args.binary_args
     );
 
-    #[cfg(target_os = "macos")]
-    sip_patch(&mut args.binary)?;
-
     if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
@@ -209,10 +206,15 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
-    let mut binary_args = args.binary_args.clone();
-    binary_args.insert(0, args.binary.clone());
+    #[cfg(target_os = "macos")]
+    let binary = sip_patch(&args.binary)?;
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
 
-    let err = execvp(args.binary.clone(), binary_args);
+    let mut binary_args = args.binary_args.clone();
+    binary_args.insert(0, binary.clone());
+
+    let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
     Err(anyhow!("Failed to execute binary"))
 }

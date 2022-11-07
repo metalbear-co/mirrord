@@ -12,7 +12,7 @@ mod main {
         fs::Permissions,
         io::{self, Read},
         os::{macos::fs::MetadataExt, unix::prelude::PermissionsExt},
-        path::Path,
+        path::{Path, PathBuf},
     };
 
     use object::{
@@ -98,6 +98,26 @@ mod main {
         codesign::sign(output)
     }
 
+    fn patch_script<P: AsRef<Path>, K: AsRef<Path>>(
+        original_path: P,
+        patched_path: K,
+        new_shebang: &str,
+    ) -> Result<()> {
+        let data = std::fs::read(original_path.as_ref())?;
+        let original_shebang_size = data
+            .iter()
+            .position(|&c| c == u8::try_from('\n').unwrap())
+            .unwrap_or(0); // Leaving the original shebang there in the second line is fine.
+        let contents = &data[original_shebang_size..];
+        let mut new_contents = (String::from("#!") + new_shebang + "\n")
+            .as_bytes()
+            .to_vec();
+        new_contents.extend(contents);
+        std::fs::write(patched_path.as_ref(), new_contents)?;
+        std::fs::set_permissions(patched_path.as_ref(), Permissions::from_mode(0o755))?;
+        codesign::sign(patched_path) // TODO: is this necessary for scripts?
+    }
+
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
     fn read_shebang<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
@@ -133,64 +153,86 @@ mod main {
         Ok(shebang)
     }
 
-    enum BinaryType {
-        Executable,
-        Shebang(String),
+    enum SipStatus {
+        /// The binary that ends up being executed is SIP protected.
+        /// The Option is `Some(SipStatus)` when this file is not a SIP binary but a file with a
+        /// shebang which points to a SIP binary (possibly via a chain of files with shebangs).
+        SomeSIP(PathBuf, Option<Box<SipStatus>>),
+        /// The binary that ends up being executed is not SIP protected.
+        NoSIP,
     }
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
-    fn is_sip<P: AsRef<Path>>(path: P) -> Result<bool> {
-        let metadata = std::fs::metadata(&path)?;
+    fn get_sip_status<P: AsRef<Path> + AsRef<std::ffi::OsStr>>(path: P) -> Result<SipStatus> {
+        let complete_path = which(&path)?;
+        let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
-            return Ok(true);
+            return Ok(SipStatus::SomeSIP(complete_path, None));
         }
-        if let Some(path) = read_shebang(&path)? {
-            let full_path = which(&path)?;
-            is_sip(full_path)
-        } else {
-            return Ok(false);
+        if let Some(target_path) = read_shebang(&complete_path)? {
+            // On a circular shebang graph, we would recurse until the stack overflows
+            // but so would running without mirrord, right?
+            return match get_sip_status(target_path)? {
+                SipStatus::NoSIP => Ok(SipStatus::NoSIP), /* The file at the end of the shebang
+                                                            * chain is not protected. */
+                some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
+            };
         }
+        Ok(SipStatus::NoSIP)
     }
 
-    pub fn sip_patch(binary_path: &mut String) -> Result<()> {
-        let complete_path = which(&binary_path)?;
-
-        if !is_sip(&complete_path)? {
-            return Ok(());
-        }
-
+    /// Only call this function on a file that is SomeSIP.
+    /// Patch shebang scripts recursively and patch final binary.
+    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = temp_dir().join("mirrord-bin").join(
-            &complete_path
+            &path
                 .strip_prefix("/")
                 .map_err(|e| SipError::UnlikelyError(e.to_string()))?,
         );
 
+        // A string of the path of new created file to run instead of the SIPed file.
+        let patched_path_string = Ok(output
+            .to_str()
+            .ok_or_else(|| SipError::UnlikelyError("Failed to convert path to string".to_string()))?
+            .to_string());
+
         // Patched version already exists
         if output.exists() {
-            *binary_path = output
-                .to_str()
-                .ok_or_else(|| {
-                    SipError::UnlikelyError("Failed to convert path to string".to_string())
-                })?
-                .to_string();
-            return Ok(());
+            return patched_path_string;
         }
 
         std::fs::create_dir_all(output.parent().ok_or_else(|| {
             SipError::UnlikelyError("Failed to get parent directory".to_string())
         })?)?;
 
-        if let Ok(()) = patch_binary(&complete_path, &output) {
-            *binary_path = output
-                .to_str()
-                .ok_or_else(|| {
-                    SipError::UnlikelyError("Failed to convert path to string".to_string())
-                })?
-                .to_string();
+        match shebang_target {
+            None => {
+                // The file is a sip protected binary.
+                patch_binary(&path, &output)?;
+                return patched_path_string;
+            }
+            // The file is a script with a shebang. Patch recursively.
+            Some(sip_file) => {
+                if let SipStatus::SomeSIP(target_path, shebang_target) = *sip_file {
+                    let new_target = patch_some_sip(&target_path, shebang_target)?;
+                    patch_script(&target_path, &output, &new_target)?;
+                    return patched_path_string;
+                }
+                // This function should only be called on a file which has SomeSIP SipStatus.
+                // If the file has a shebang pointing to a file which is NoSIP, this file should not
+                // have SomeSIP status in the first place.
+                panic!("Internal mirrord error.");
+            }
         }
-        Ok(())
+    }
+
+    pub fn sip_patch(binary_path: &str) -> Result<String> {
+        if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
+            return patch_some_sip(&path, shebang_target);
+        }
+        Ok(String::from(binary_path))
     }
 
     #[cfg(test)]
@@ -202,7 +244,7 @@ mod main {
 
         #[test]
         fn is_sip_true() {
-            assert!(is_sip("/bin/ls").unwrap());
+            assert!(get_sip_status("/bin/ls").unwrap());
         }
 
         #[test]
@@ -211,12 +253,12 @@ mod main {
             let data = std::fs::read("/bin/ls").unwrap();
             f.write(&data).unwrap();
             f.flush().unwrap();
-            assert!(!is_sip(f.path().to_str().unwrap()).unwrap());
+            assert!(!get_sip_status(f.path().to_str().unwrap()).unwrap());
         }
 
         #[test]
         fn is_sip_notfound() {
-            let err = is_sip("/donald/duck/was/a/duck/not/a/quack/a/duck").unwrap_err();
+            let err = get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck").unwrap_err();
             assert!(err.to_string().contains("No such file or directory"));
         }
 
@@ -225,7 +267,7 @@ mod main {
             let path = "/bin/ls";
             let output = "/tmp/ls_mirrord_test";
             patch_binary(path, output).unwrap();
-            assert!(!is_sip(output).unwrap());
+            assert!(!get_sip_status(output).unwrap());
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(output)
                 .env("DYLD_PRINT_LIBRARIES", "1")
