@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- intelliJ: use custom delve on macos
+
 ## 3.7.2
 
 ### Fixed
