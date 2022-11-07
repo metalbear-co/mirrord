@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- vscode: fallback to textbox if namespace listing fails
+
 ## 3.7.2
 
 ### Fixed
