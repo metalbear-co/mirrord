@@ -158,12 +158,10 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
 
-    // TODO(alex) [mid] 2022-11-08: Improve this error.
     #[error("mirrord-layer: Failed setting up mirrord with configuration error `{0}`!")]
     Config(#[from] ConfigError),
 
-    // TODO(alex) [mid] 2022-11-08: Improve this error.
-    #[error("mirrord-layer: No process found!")]
+    #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
     NoProcessFound,
 }
 
