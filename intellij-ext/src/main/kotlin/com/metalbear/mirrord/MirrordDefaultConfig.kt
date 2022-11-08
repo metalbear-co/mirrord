@@ -19,7 +19,9 @@ data class MirrordDefaultConfig(
     val rustLog: LogLevel = LogLevel.INFO,
     val overrideEnvVarsExclude: String = "",
     val overrideEnvVarsInclude: String = "*",
-    val ignorePorts: String = "45000-65535"
+    // ignorePorts: temporary patch to ignore ports which would cause `connect` to fail
+    // as the debugger tried to connect to higher ranged ports.
+    val ignorePorts: String = "45000-65535",
 )
 
 private fun getSharedLibPath(libName: String): String {
