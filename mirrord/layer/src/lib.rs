@@ -169,14 +169,11 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 #[cfg(not(test))]
 #[ctor]
 fn mirrord_layer_entry_point() {
-    match layer_pre_initialization() {
-        Ok(_) => (),
-        Err(fail) => {
-            // TODO(alex) [mid] 2022-11-08: Improve these.
-            eprintln!("Failed initialization with {fail:#?}");
-            panic!("mirrord-layer: Cannot recover, closing!")
-        }
-    };
+    if let Err(fail) = layer_pre_initialization() {
+        // TODO(alex) [mid] 2022-11-08: Improve these.
+        eprintln!("Failed initialization with {fail:#?}");
+        panic!("mirrord-layer: Cannot recover, closing!")
+    }
 }
 
 /// Occurs after [`layer_pre_initialization`] has succeeded.
