@@ -20,6 +20,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
+    use tracing::debug;
     use which::which;
 
     use super::*;
@@ -174,8 +175,8 @@ mod main {
             // On a circular shebang graph, we would recurse until the stack overflows
             // but so would running without mirrord, right?
             return match get_sip_status(target_path)? {
-                SipStatus::NoSIP => Ok(SipStatus::NoSIP), /* The file at the end of the shebang
-                                                            * chain is not protected. */
+                // The file at the end of the shebang chain is not protected.
+                SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
             };
         }
@@ -193,41 +194,64 @@ mod main {
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
-        let patched_path_string = Ok(output
+        let patched_path_string = output
             .to_str()
             .ok_or_else(|| SipError::UnlikelyError("Failed to convert path to string".to_string()))?
-            .to_string());
+            .to_string();
 
-        // Patched version already exists
         if output.exists() {
-            return patched_path_string;
+            debug!(
+                "Using existing SIP-patched version of {:?}: {}",
+                path, patched_path_string
+            );
+            return Ok(patched_path_string);
         }
 
         std::fs::create_dir_all(output.parent().ok_or_else(|| {
             SipError::UnlikelyError("Failed to get parent directory".to_string())
         })?)?;
 
-        match shebang_target {
+        return match shebang_target {
             None => {
                 // The file is a sip protected binary.
+                debug!(
+                    "{:?} is a SIP protected binary, making non protected version at: {}",
+                    path, patched_path_string
+                );
                 patch_binary(&path, &output)?;
-                return patched_path_string;
+                Ok(patched_path_string)
             }
             // The file is a script with a shebang. Patch recursively.
             Some(sip_file) => {
                 if let SipStatus::SomeSIP(target_path, shebang_target) = *sip_file {
+                    debug!(
+                        "{:?} is a script with a shebang that leads to a SIP protected binary.",
+                        path
+                    );
+                    debug!(
+                        "Patching {:?} recursively and making a version of the script with an altered shebang at: {}",
+                        target_path,
+                        patched_path_string,
+                    );
                     let new_target = patch_some_sip(&target_path, shebang_target)?;
                     patch_script(&target_path, &output, &new_target)?;
-                    return patched_path_string;
+                    Ok(patched_path_string)
+                } else {
+                    // This function should only be called on a file which has SomeSIP SipStatus.
+                    // If the file has a shebang pointing to a file which is NoSIP, this file should
+                    // not have SomeSIP status in the first place.
+                    Err(SipError::UnlikelyError(
+                        "Internal mirrord error.".to_string(),
+                    ))
                 }
-                // This function should only be called on a file which has SomeSIP SipStatus.
-                // If the file has a shebang pointing to a file which is NoSIP, this file should not
-                // have SomeSIP status in the first place.
-                panic!("Internal mirrord error.");
             }
-        }
+        };
     }
 
+    /// Check if the file that the user wants to execute is a SIP protected binary (or a script
+    /// starting with a shebang that leads to a SIP protected binary). If it is, create a
+    /// non-protected version of the file and return the path to it. If it is not, the original
+    /// path is copied and returned.
     pub fn sip_patch(binary_path: &str) -> Result<String> {
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
             return patch_some_sip(&path, shebang_target);
