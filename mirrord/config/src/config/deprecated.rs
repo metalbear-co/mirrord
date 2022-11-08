@@ -1,17 +1,17 @@
 use crate::config::source::MirrordConfigSource;
 
 #[derive(Clone)]
-pub struct Depricated<T>(String, T);
+pub struct Deprecated<T>(String, T);
 
-impl<T> Depricated<T> {
+impl<T> Deprecated<T> {
     pub fn new(message: &'static str, inner: T) -> Self {
-        Depricated(message.to_owned(), inner)
+        Deprecated(message.to_owned(), inner)
     }
 
     pub fn untagged(container: &'static str, attr: &'static str, inner: T) -> Self {
-        Depricated(
+        Deprecated(
             format!(
-                "Depricated field {}.{}, it will be removed in several versions",
+                "Deprecated field {}.{}, it will be removed in several versions",
                 container, attr
             ),
             inner,
@@ -19,7 +19,7 @@ impl<T> Depricated<T> {
     }
 }
 
-impl<T> MirrordConfigSource for Depricated<T>
+impl<T> MirrordConfigSource for Deprecated<T>
 where
     T: MirrordConfigSource,
 {
