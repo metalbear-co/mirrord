@@ -20,7 +20,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::{debug, trace};
+    use tracing::debug;
     use which::which;
 
     use super::*;
@@ -110,7 +110,6 @@ mod main {
         new_shebang: &str,
     ) -> Result<()> {
         if let Some(original_shebang) = read_shebang_from_file(&original_path)? {
-            debug!("original_shebang: {}", original_shebang); // TODO: DELETE
             let data = std::fs::read(original_path.as_ref())?;
             let contents = &data[original_shebang.len()..];
             let mut new_contents = String::from("#!") + new_shebang;
@@ -120,8 +119,8 @@ mod main {
                 })?,
             );
             std::fs::write(patched_path.as_ref(), new_contents)?;
-            std::fs::set_permissions(patched_path.as_ref(), Permissions::from_mode(0o755))?;
-            codesign::sign(patched_path) // TODO: is this necessary for scripts?
+            std::fs::set_permissions(patched_path.as_ref(), std::fs::metadata(original_path)?.permissions())?;
+            Ok(())
         } else {
             // This should never happen, if we're in this function the file is a script that starts
             // with a shebang.
@@ -186,7 +185,6 @@ mod main {
     /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
     /// file the shebang points to.
     fn get_sip_status(path: &str) -> Result<SipStatus> {
-        trace!("which {}", path);
         // If which fails, try using the given path as is.
         let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
         if !complete_path.exists() {
@@ -350,7 +348,32 @@ mod main {
         #[test]
         fn shebang_from_string() {
             let contents = "#!/usr/bin/env bash\n".to_string();
-            assert_eq!(get_shebang_from_string(&contents).unwrap(), "#!/usr/bin/env")
+            assert_eq!(
+                get_shebang_from_string(&contents).unwrap(),
+                "#!/usr/bin/env"
+            )
+        }
+
+        /// Run `sip_patch` on a script with a shebang that points to `env`, verify that a path to
+        /// a new script is returned, in which the shebang points to a patched version of `env`
+        /// that is not SIPed.
+        #[test]
+        fn patch_shebang_and_binary() {
+            let mut script = tempfile::NamedTempFile::new().unwrap();
+            let script_contents = "#!/usr/bin/env bash\nexit\n";
+            script.write(script_contents.as_ref()).unwrap();
+            script.flush().unwrap();
+            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap();
+            let new_shebang = read_shebang_from_file(changed_script_path)
+                .unwrap()
+                .unwrap();
+            let patched_env_binary_path = &new_shebang[2..];
+            // Check DYLD_* features work on it:
+            let output = std::process::Command::new(patched_env_binary_path)
+                .env("DYLD_PRINT_LIBRARIES", "1")
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
         }
     }
 }
