@@ -8,6 +8,7 @@ mod whitespace;
 #[cfg(target_os = "macos")]
 mod main {
     use std::{
+        collections::HashSet,
         env::temp_dir,
         fs::Permissions,
         io::{self, Read},
@@ -27,7 +28,7 @@ mod main {
     pub use crate::error::SipError;
     use crate::{
         error::Result,
-        SipError::{FileNotFound, UnlikelyError},
+        SipError::{CyclicShebangs, FileNotFound, UnlikelyError},
     };
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
@@ -119,7 +120,10 @@ mod main {
                 })?,
             );
             std::fs::write(patched_path.as_ref(), new_contents)?;
-            std::fs::set_permissions(patched_path.as_ref(), std::fs::metadata(original_path)?.permissions())?;
+            std::fs::set_permissions(
+                patched_path.as_ref(),
+                std::fs::metadata(original_path)?.permissions(),
+            )?;
             Ok(())
         } else {
             // This should never happen, if we're in this function the file is a script that starts
@@ -180,31 +184,40 @@ mod main {
         NoSIP,
     }
 
-    /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
-    /// suggest)
-    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
-    /// file the shebang points to.
-    fn get_sip_status(path: &str) -> Result<SipStatus> {
+    /// Determine status recursively, keep seen_paths, and return an error if there is a cycle.
+    fn get_sip_status_rec(path: &str, seen_paths: &mut HashSet<PathBuf>) -> Result<SipStatus> {
         // If which fails, try using the given path as is.
         let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
         if !complete_path.exists() {
             return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
+        let canonical_path = complete_path.canonicalize()?;
+        if seen_paths.contains(&canonical_path) {
+            return Err(CyclicShebangs(canonical_path.to_string_lossy().to_string()));
+        }
+        seen_paths.insert(canonical_path);
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
         if let Some(shebang) = read_shebang_from_file(&complete_path)? {
-            // On a circular shebang graph, we would recurse until the stack overflows
-            // but so would running without mirrord, right?
             // Start from index 2 of shebang to get only the path.
-            return match get_sip_status(&shebang[2..])? {
+            return match get_sip_status_rec(&shebang[2..], seen_paths)? {
                 // The file at the end of the shebang chain is not protected.
                 SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
             };
         }
         Ok(SipStatus::NoSIP)
+    }
+
+    /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
+    /// suggest)
+    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
+    /// file the shebang points to.
+    fn get_sip_status(path: &str) -> Result<SipStatus> {
+        let mut seen_paths = HashSet::new();
+        get_sip_status_rec(path, &mut seen_paths)
     }
 
     /// Only call this function on a file that is SomeSIP.
@@ -374,6 +387,18 @@ mod main {
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        /// Run `sip_patch` on a file that has a shebang that points to itself and verify that
+        /// a `CyclicShebangs` error is returned.
+        #[test]
+        fn cyclic_shebangs() {
+            let mut script = tempfile::NamedTempFile::new().unwrap();
+            let contents = "#!".to_string() + script.path().to_str().unwrap();
+            script.write(contents.as_bytes()).unwrap();
+            script.flush().unwrap();
+            let res = sip_patch(script.path().to_str().unwrap());
+            assert!(matches!(res, Err(CyclicShebangs(_))));
         }
     }
 }

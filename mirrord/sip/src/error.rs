@@ -27,4 +27,7 @@ pub enum SipError {
 
     #[error("Can't perform SIP check - executable file not found at `{0}`")]
     FileNotFound(String),
+
+    #[error("Can't perform SIP check - there is a cycle in the shebang graph, found at `{0}`")]
+    CyclicShebangs(String),
 }
