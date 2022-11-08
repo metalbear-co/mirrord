@@ -18,7 +18,7 @@ where
     fn source_value(self) -> Option<T::Result> {
         self.2.source_value().map(|result| {
             println!(
-                "Warning field {}.{} is marked as unstable, Please note api may change",
+                "Warning: field {}.{} is marked as unstable. Please note API may change",
                 self.0, self.1
             );
             result

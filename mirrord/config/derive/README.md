@@ -10,7 +10,7 @@ This crate implements the derive macro `MirrordConfig`, which introduces the `co
     - `nested` to use a value of a type that itself implement `MirrordConfig`. The value used is its `Generated` type.
     - `env = &str` to load the value from the specified environment variable, if it's populated.
     - `default = &str` to set a default value to the field. This also implicitly `unwrap`s it.
-    - `unstable` mark field as unstable and print a error message to the client
+    - `unstable` mark field as unstable and print an error message to the user
     - `depricated | depricated = &str` mark field as depricated and print either a default message or a custom one
 
 
