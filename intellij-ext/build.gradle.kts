@@ -106,6 +106,16 @@ tasks {
                 if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
             }
         }
+        // custom delve
+        val delveExecutables = mapOf("aarch64" to "$projectDir/dlv_aarch64", "amd64" to "$projectDir/dlv_amd64")
+        delveExecutables.forEach { (_, delve) ->
+            from(file(delve)) {
+                into(pluginName.get())
+            }
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(delve))) throw StopExecutionException("Expected delve executable: $delve >> Not Found")
+            }
+        }
     }
 
     // Configure UI tests plugin
