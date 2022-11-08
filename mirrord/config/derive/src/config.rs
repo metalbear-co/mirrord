@@ -79,7 +79,7 @@ impl ToTokens for ConfigStruct {
         let field_definitions = fields.iter().map(|field| field.definition());
         let field_impl = fields.iter().map(|field| field.implmentation(source));
 
-        let generator = generator.as_ref().unwrap_or_else(|| &ident);
+        let generator = generator.as_ref().unwrap_or(ident);
 
         tokens.extend(quote! {
             #[derive(Clone, Debug, Default, serde::Deserialize, #(#derive),*)]
