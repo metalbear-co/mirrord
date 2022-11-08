@@ -19,7 +19,7 @@ use pnet::packet::{
 };
 use rawsocket::RawCapture;
 use tokio::{
-    net::{TcpStream, UdpSocket},
+    net::UdpSocket,
     select,
     sync::mpsc::{Receiver, Sender},
 };
