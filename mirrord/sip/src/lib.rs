@@ -26,6 +26,7 @@ mod main {
     use super::*;
     pub use crate::error::SipError;
     use crate::{error::Result, SipError::UnlikelyError};
+    use crate::SipError::FileNotFound;
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -161,6 +162,7 @@ mod main {
         Ok(shebang)
     }
 
+    #[derive(Debug)]
     enum SipStatus {
         /// The binary that ends up being executed is SIP protected.
         /// The Option is `Some(SipStatus)` when this file is not a SIP binary but a file with a
@@ -174,7 +176,11 @@ mod main {
     /// suggest)
     fn get_sip_status(path: &str) -> Result<SipStatus> {
         trace!("which {}", path);
-        let complete_path = which(&path)?;
+        // If which fails, try using the given path as is.
+        let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
+        if !complete_path.exists() {
+            return Err(FileNotFound(complete_path.to_string_lossy().to_string()))
+        }
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
@@ -278,7 +284,7 @@ mod main {
 
         #[test]
         fn is_sip_true() {
-            assert!(get_sip_status("/bin/ls").unwrap());
+            assert!(matches!(get_sip_status("/bin/ls"), Ok(SipStatus::SomeSIP(_, _))));
         }
 
         #[test]
@@ -287,13 +293,13 @@ mod main {
             let data = std::fs::read("/bin/ls").unwrap();
             f.write(&data).unwrap();
             f.flush().unwrap();
-            assert!(!get_sip_status(f.path().to_str().unwrap()).unwrap());
+            assert!(matches!(get_sip_status(f.path().to_str().unwrap()).unwrap(), SipStatus::NoSIP));
         }
 
         #[test]
         fn is_sip_notfound() {
             let err = get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck").unwrap_err();
-            assert!(err.to_string().contains("No such file or directory"));
+            assert!(err.to_string().contains("executable file not found"));
         }
 
         #[test]
@@ -301,7 +307,21 @@ mod main {
             let path = "/bin/ls";
             let output = "/tmp/ls_mirrord_test";
             patch_binary(path, output).unwrap();
-            assert!(!get_sip_status(output).unwrap());
+            assert!(matches!(get_sip_status(output).unwrap(), SipStatus::NoSIP));
+            // Check DYLD_* features work on it:
+            let output = std::process::Command::new(output)
+                .env("DYLD_PRINT_LIBRARIES", "1")
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        #[test]
+        fn patch_script_with_shebang() {
+            let path = "/bin/ls";
+            let output = "/tmp/ls_mirrord_test";
+            patch_binary(path, output).unwrap();
+            assert!(matches!(get_sip_status(output).unwrap(), SipStatus::NoSIP));
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(output)
                 .env("DYLD_PRINT_LIBRARIES", "1")
