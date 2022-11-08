@@ -2,10 +2,10 @@ use proc_macro2_diagnostics::Diagnostic;
 use quote::{quote, ToTokens};
 use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
-use crate::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
+use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
 #[derive(Debug)]
-pub struct FileStructField {
+pub struct ConfigField {
     ident: Option<Ident>,
     option: Option<Type>,
     ty: Type,
@@ -13,7 +13,7 @@ pub struct FileStructField {
     flags: ConfigFlags,
 }
 
-impl FileStructField {
+impl ConfigField {
     fn is_option(field: &Field) -> Option<Type> {
         let seg = if let Type::Path(ty) = &field.ty {
             ty.path.segments.first()?
@@ -35,7 +35,7 @@ impl FileStructField {
     }
 
     pub fn definition(&self) -> impl ToTokens {
-        let FileStructField {
+        let ConfigField {
             ident,
             vis,
             ty,
@@ -67,7 +67,7 @@ impl FileStructField {
     }
 
     pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {
-        let FileStructField {
+        let ConfigField {
             ident,
             option,
             flags,
@@ -103,7 +103,7 @@ impl FileStructField {
     }
 }
 
-impl TryFrom<Field> for FileStructField {
+impl TryFrom<Field> for ConfigField {
     type Error = Diagnostic;
 
     fn try_from(field: Field) -> Result<Self, Self::Error> {
@@ -112,7 +112,7 @@ impl TryFrom<Field> for FileStructField {
 
         let Field { ident, vis, ty, .. } = field;
 
-        Ok(FileStructField {
+        Ok(ConfigField {
             flags,
             ident,
             option,

@@ -5,21 +5,24 @@ use syn::{
     spanned::Spanned, Data, DataStruct, DeriveInput, Fields, FieldsNamed, Ident, Visibility,
 };
 
-use crate::{
-    field::FileStructField,
+mod field;
+mod flag;
+
+use crate::config::{
+    field::ConfigField,
     flag::{ConfigFlags, ConfigFlagsType},
 };
 
 #[derive(Debug)]
-pub struct FileStruct {
+pub struct ConfigStruct {
     vis: Visibility,
     ident: Ident,
-    fields: Vec<FileStructField>,
+    fields: Vec<ConfigField>,
     source: Ident,
     flags: ConfigFlags,
 }
 
-impl FileStruct {
+impl ConfigStruct {
     pub fn new(input: DeriveInput) -> Result<Self, Diagnostic> {
         let DeriveInput {
             attrs,
@@ -35,7 +38,7 @@ impl FileStruct {
             Data::Struct(DataStruct { fields, .. }) => match fields {
                 Fields::Named(FieldsNamed { named, .. }) => named
                     .into_iter()
-                    .map(FileStructField::try_from)
+                    .map(ConfigField::try_from)
                     .collect::<Result<_, _>>()?,
                 _ => return Err(fields.span().error("Unnamed Structs are not supported")),
             },
@@ -47,7 +50,7 @@ impl FileStruct {
             .clone()
             .unwrap_or_else(|| Ident::new(&format!("File{}", &source), Span::call_site()));
 
-        Ok(FileStruct {
+        Ok(ConfigStruct {
             vis,
             source,
             ident,
@@ -57,9 +60,9 @@ impl FileStruct {
     }
 }
 
-impl ToTokens for FileStruct {
+impl ToTokens for ConfigStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let FileStruct {
+        let ConfigStruct {
             ident,
             vis,
             fields,
