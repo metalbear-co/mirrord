@@ -141,36 +141,48 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
     }
 }
 
-#[ctor]
-fn before_init() {
-    if !cfg!(test) {
-        let args = std::env::args().collect::<Vec<_>>();
-        let given_process = args.first().unwrap().split('/').last().unwrap();
+/// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
+fn layer_pre_initialization() -> Result<(), LayerError> {
+    let args = std::env::args().collect::<Vec<_>>();
+    let given_process = args
+        .first()
+        .and_then(|arg| arg.split('/').last())
+        .ok_or(LayerError::NoProcessFound)?;
 
-        let config = std::env::var("MIRRORD_CONFIG_FILE")
-            .ok()
-            .and_then(|val| val.parse::<PathBuf>().ok())
-            .map(|path| LayerFileConfig::from_path(&path).unwrap())
-            .unwrap_or_default()
-            .generate_config();
+    let mut config = std::env::var("MIRRORD_CONFIG_FILE")
+        .map(PathBuf::from)
+        .map(|path| LayerFileConfig::from_path(&path))?
+        .unwrap_or_default()
+        .generate_config()?;
 
-        match config {
-            Ok(mut config) => {
-                nix_devbox_patch(&mut config);
-                let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+    nix_devbox_patch(&mut config);
+    let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-                if should_load(given_process, skip_processes) {
-                    init(config);
-                }
-            }
-            Err(err) => {
-                panic!("Failed to load config: {}", err);
-            }
-        }
+    if should_load(given_process, skip_processes) {
+        layer_start(config);
     }
+
+    Ok(())
 }
 
-fn init(config: LayerConfig) {
+/// The one true start of mirrord-layer.
+#[cfg(not(test))]
+#[ctor]
+fn mirrord_layer_entry_point() {
+    match layer_pre_initialization() {
+        Ok(_) => (),
+        Err(fail) => {
+            // TODO(alex) [mid] 2022-11-08: Improve these.
+            eprintln!("Failed initialization with {fail:#?}");
+            panic!("mirrord-layer: Cannot recover, closing!")
+        }
+    };
+}
+
+/// Occurs after [`layer_pre_initialization`] has succeeded.
+///
+/// Starts the main parts of mirrord-layer.
+fn layer_start(config: LayerConfig) {
     if config.feature.capture_error_trace {
         tracing_subscriber::registry()
             .with(
