@@ -30,7 +30,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 serde_json = "1"
 anyhow = "1"
-nix = "0.24"
+nix = { version = "0.24", features = ["net"] }
 clap = { version = "3", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
