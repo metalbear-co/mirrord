@@ -4,7 +4,7 @@ use syn::DeriveInput;
 mod config;
 
 #[proc_macro_derive(MirrordConfig, attributes(config))]
-pub fn mirrord_config2(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
 
     match config::ConfigStruct::new(input) {
