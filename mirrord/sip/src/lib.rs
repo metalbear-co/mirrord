@@ -25,8 +25,10 @@ mod main {
 
     use super::*;
     pub use crate::error::SipError;
-    use crate::{error::Result, SipError::UnlikelyError};
-    use crate::SipError::FileNotFound;
+    use crate::{
+        error::Result,
+        SipError::{FileNotFound, UnlikelyError},
+    };
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -107,7 +109,7 @@ mod main {
         patched_path: K,
         new_shebang: &str,
     ) -> Result<()> {
-        if let Some(original_shebang) = read_shebang(&original_path)? {
+        if let Some(original_shebang) = read_shebang_from_file(&original_path)? {
             debug!("original_shebang: {}", original_shebang); // TODO: DELETE
             let data = std::fs::read(original_path.as_ref())?;
             let contents = &data[original_shebang.len()..];
@@ -129,17 +131,16 @@ mod main {
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
-    fn read_shebang<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
-        let mut f = std::fs::File::open(path)?;
-        let mut buffer = String::new();
-        match f.read_to_string(&mut buffer) {
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
-            Err(e) => return Err(SipError::IO(e)),
-        }
-
+    /// Extract shebang from file contexts.
+    /// # Examples
+    ///
+    /// ```
+    /// let contents = "#!/usr/bin/env bash\n".to_string();
+    /// assert_eq!(get_shebang_from_string(contents), "#!/usr/bin/env")
+    /// ```
+    fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
-        let mut content: &str = &buffer;
+        let mut content: &str = &file_contents;
         if content.starts_with(BOM) {
             content = &content[BOM.len()..];
         }
@@ -159,7 +160,20 @@ mod main {
                     .map(|s| s.to_string());
             }
         }
-        Ok(shebang)
+        shebang
+    }
+
+    /// Including '#!', just until whitespace, no arguments.
+    fn read_shebang_from_file<P: AsRef<Path>>(path: P) -> Result<Option<String>> {
+        let mut f = std::fs::File::open(path)?;
+        let mut buffer = String::new();
+        match f.read_to_string(&mut buffer) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
+            Err(e) => return Err(SipError::IO(e)),
+        }
+
+        Ok(get_shebang_from_string(&buffer))
     }
 
     #[derive(Debug)]
@@ -174,18 +188,20 @@ mod main {
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
+    /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
+    /// file the shebang points to.
     fn get_sip_status(path: &str) -> Result<SipStatus> {
         trace!("which {}", path);
         // If which fails, try using the given path as is.
         let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
         if !complete_path.exists() {
-            return Err(FileNotFound(complete_path.to_string_lossy().to_string()))
+            return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
-        if let Some(shebang) = read_shebang(&complete_path)? {
+        if let Some(shebang) = read_shebang_from_file(&complete_path)? {
             // On a circular shebang graph, we would recurse until the stack overflows
             // but so would running without mirrord, right?
             // Start from index 2 of shebang to get only the path.
@@ -284,7 +300,10 @@ mod main {
 
         #[test]
         fn is_sip_true() {
-            assert!(matches!(get_sip_status("/bin/ls"), Ok(SipStatus::SomeSIP(_, _))));
+            assert!(matches!(
+                get_sip_status("/bin/ls"),
+                Ok(SipStatus::SomeSIP(_, _))
+            ));
         }
 
         #[test]
@@ -293,7 +312,10 @@ mod main {
             let data = std::fs::read("/bin/ls").unwrap();
             f.write(&data).unwrap();
             f.flush().unwrap();
-            assert!(matches!(get_sip_status(f.path().to_str().unwrap()).unwrap(), SipStatus::NoSIP));
+            assert!(matches!(
+                get_sip_status(f.path().to_str().unwrap()).unwrap(),
+                SipStatus::NoSIP
+            ));
         }
 
         #[test]
@@ -318,16 +340,16 @@ mod main {
 
         #[test]
         fn patch_script_with_shebang() {
-            let path = "/bin/ls";
-            let output = "/tmp/ls_mirrord_test";
-            patch_binary(path, output).unwrap();
-            assert!(matches!(get_sip_status(output).unwrap(), SipStatus::NoSIP));
-            // Check DYLD_* features work on it:
-            let output = std::process::Command::new(output)
-                .env("DYLD_PRINT_LIBRARIES", "1")
-                .output()
+            let mut original_file = tempfile::NamedTempFile::new().unwrap();
+            let patched_path = temp_dir().join(original_file.path().strip_prefix("/").unwrap());
+            original_file
+                .write("#!/usr/bin/env bash\n".as_ref())
                 .unwrap();
-            assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+            original_file.flush().unwrap();
+            std::fs::create_dir_all(patched_path.parent().unwrap()).unwrap();
+            patch_script(original_file.path(), &patched_path, "/test/shebang").unwrap();
+            let new_contents = std::fs::read(&patched_path).unwrap();
+            assert_eq!(new_contents, "#!/test/shebang bash\n".as_bytes())
         }
     }
 }
