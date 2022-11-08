@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Bypass SIP on MacOS on the executed binary, (also via shebang).
+  See [[#649](https://github.com/metalbear-co/mirrord/issues/649)].
+  This does not yet include binaries that are executed by the first binary.
+
 ## 3.7.3
 
 ### Fixed
