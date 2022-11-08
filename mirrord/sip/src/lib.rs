@@ -20,12 +20,12 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::debug;
+    use tracing::{debug, trace};
     use which::which;
 
     use super::*;
-    use crate::error::Result;
     pub use crate::error::SipError;
+    use crate::{error::Result, SipError::UnlikelyError};
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -99,24 +99,31 @@ mod main {
         codesign::sign(output)
     }
 
+    /// Creates a new file at `patched_path` which has the same contents as `original_path` except
+    /// for the shebang which is `new_shebang`.
     fn patch_script<P: AsRef<Path>, K: AsRef<Path>>(
         original_path: P,
         patched_path: K,
         new_shebang: &str,
     ) -> Result<()> {
-        let data = std::fs::read(original_path.as_ref())?;
-        let original_shebang_size = data
-            .iter()
-            .position(|&c| c == u8::try_from('\n').unwrap())
-            .unwrap_or(0); // Leaving the original shebang there in the second line is fine.
-        let contents = &data[original_shebang_size..];
-        let mut new_contents = (String::from("#!") + new_shebang + "\n")
-            .as_bytes()
-            .to_vec();
-        new_contents.extend(contents);
-        std::fs::write(patched_path.as_ref(), new_contents)?;
-        std::fs::set_permissions(patched_path.as_ref(), Permissions::from_mode(0o755))?;
-        codesign::sign(patched_path) // TODO: is this necessary for scripts?
+        if let Some(original_shebang) = read_shebang(&original_path)? {
+            debug!("original_shebang: {}", original_shebang); // TODO: DELETE
+            let data = std::fs::read(original_path.as_ref())?;
+            let contents = &data[original_shebang.len()..];
+            let mut new_contents = String::from("#!") + new_shebang;
+            new_contents.push_str(
+                std::str::from_utf8(contents).map_err(|_utf| {
+                    UnlikelyError("Can't read script contents as utf8".to_string())
+                })?,
+            );
+            std::fs::write(patched_path.as_ref(), new_contents)?;
+            std::fs::set_permissions(patched_path.as_ref(), Permissions::from_mode(0o755))?;
+            codesign::sign(patched_path) // TODO: is this necessary for scripts?
+        } else {
+            // This should never happen, if we're in this function the file is a script that starts
+            // with a shebang.
+            Err(UnlikelyError("Can't read shebang anymore.".to_string()))
+        }
     }
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
@@ -165,16 +172,18 @@ mod main {
 
     /// Checks the SF_RESTRICTED flags on a file (there might be a better check, feel free to
     /// suggest)
-    fn get_sip_status<P: AsRef<Path> + AsRef<std::ffi::OsStr>>(path: P) -> Result<SipStatus> {
+    fn get_sip_status(path: &str) -> Result<SipStatus> {
+        trace!("which {}", path);
         let complete_path = which(&path)?;
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
-        if let Some(target_path) = read_shebang(&complete_path)? {
+        if let Some(shebang) = read_shebang(&complete_path)? {
             // On a circular shebang graph, we would recurse until the stack overflows
             // but so would running without mirrord, right?
-            return match get_sip_status(target_path)? {
+            // Start from index 2 of shebang to get only the path.
+            return match get_sip_status(&shebang[2..])? {
                 // The file at the end of the shebang chain is not protected.
                 SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
@@ -229,12 +238,13 @@ mod main {
                         path
                     );
                     debug!(
-                        "Patching {:?} recursively and making a version of the script with an altered shebang at: {}",
+                        "Shebang points to: {:?}. Patching it recursively and making a version of {:?} with an altered shebang at: {}",
                         target_path,
+                        path,
                         patched_path_string,
                     );
                     let new_target = patch_some_sip(&target_path, shebang_target)?;
-                    patch_script(&target_path, &output, &new_target)?;
+                    patch_script(&path, &output, &new_target)?;
                     Ok(patched_path_string)
                 } else {
                     // This function should only be called on a file which has SomeSIP SipStatus.

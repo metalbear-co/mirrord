@@ -8,10 +8,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
-use exec::execvp;
-
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use errno;
+use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_progress::TaskProgress;
 #[cfg(target_os = "macos")]
@@ -223,8 +222,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno::Errno(86)) = err { // "Bad CPU type in executable"
-        if did_sip_patch { // We did a SIP patch.
+    if let exec::Error::Errno(errno::Errno(86)) = err {
+        // "Bad CPU type in executable"
+        if did_sip_patch {
+            // We did a SIP patch.
             error!(
                 "The file you are trying to run, {}, is either SIP protected or a script with a
                 shebang that leads to a SIP protected binary. In order to bypass SIP protection,
