@@ -1,9 +1,7 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
 use quote::{quote, ToTokens};
-use syn::{
-    spanned::Spanned, Data, DataStruct, DeriveInput, Fields, FieldsNamed, Ident, Visibility,
-};
+use syn::{Data, DataStruct, DeriveInput, Fields, FieldsNamed, Ident, Visibility};
 
 mod field;
 mod flag;
@@ -34,13 +32,19 @@ impl ConfigStruct {
 
         let flags = ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
 
-        let fields = if let Data::Struct(DataStruct { fields: Fields::Named(FieldsNamed { named, .. }), .. }) = data {
+        let fields = if let Data::Struct(DataStruct {
+            fields: Fields::Named(FieldsNamed { named, .. }),
+            ..
+        }) = data
+        {
             Ok(named
                 .into_iter()
                 .map(ConfigField::try_from)
                 .collect::<Result<_, _>>()?)
         } else {
-            Err(source.span().error("Enums, Unions, and Unnamed Structs are not supported"))
+            Err(source
+                .span()
+                .error("Enums, Unions, and Unnamed Structs are not supported"))
         }?;
 
         let ident = flags

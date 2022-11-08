@@ -21,13 +21,15 @@ impl ConfigField {
             None
         }?;
 
-(seq.ident == "Option").then(|| {
-    if let PathArguments::AngleBracketed(Some(GenericArgument::Type(ty))) = &seq.arguments {
-        Some(ty.clone())
-    } else {
-        None
-    }
-})       
+        (seg.ident == "Option")
+            .then(|| match &seg.arguments {
+                PathArguments::AngleBracketed(generics) => match generics.args.first() {
+                    Some(GenericArgument::Type(ty)) => Some(ty.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .flatten()
     }
 
     pub fn definition(&self) -> impl ToTokens {
