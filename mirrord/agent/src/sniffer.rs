@@ -19,7 +19,7 @@ use pnet::packet::{
 };
 use rawsocket::RawCapture;
 use tokio::{
-    net::TcpStream,
+    net::{TcpStream, UdpSocket},
     select,
     sync::mpsc::{Receiver, Sender},
 };
@@ -97,7 +97,8 @@ fn is_closed_connection(flags: u16) -> bool {
 #[tracing::instrument(level = "trace")]
 async fn resolve_interface() -> Result<Option<String>, AgentError> {
     // Connect to a remote address so we can later get the default network interface.
-    let temporary_socket = TcpStream::connect("8.8.8.8:53").await?;
+    let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
+    temporary_socket.connect("8.8.8.8:53").await?;
 
     // Create comparison address here with `port: 0`, to match the network interface's address of
     // `sin_port: 0`.
