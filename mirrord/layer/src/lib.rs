@@ -396,6 +396,10 @@ async fn thread_loop(
                     Some(Ok(message)) => {
                         if let Err(err) = layer.handle_daemon_message(
                             message).await {
+                            if let LayerError::SendErrorConnection(_) = err {
+                                info!("Connection closed by agent");
+                                continue;
+                            }
                             error!("Error handling daemon message: {:?}", err);
                             break;
                         }

@@ -24,11 +24,11 @@ repositories {
     mavenCentral()
 }
 dependencies {
-    implementation("io.kubernetes:client-java:16.0.0") {
+    implementation("com.github.zafarkhaja:java-semver:0.9.0")
+    implementation("io.kubernetes:client-java:16.0.1") {
         exclude(group = "org.slf4j", module = "slf4j-api")
         exclude(group = "org.yaml", module = "snakeyaml")
     }
-    implementation("com.github.zafarkhaja:java-semver:0.9.0")
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
@@ -104,6 +104,16 @@ tasks {
             // NOTE: comment this line when developing locally without either of shared libs
             if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
                 if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
+            }
+        }
+        // custom delve
+        val delveExecutables = mapOf("aarch64" to "$projectDir/dlv_aarch64", "amd64" to "$projectDir/dlv_amd64")
+        delveExecutables.forEach { (_, delve) ->
+            from(file(delve)) {
+                into(pluginName.get())
+            }
+            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+                if (!inputs.sourceFiles.files.contains(File(delve))) throw StopExecutionException("Expected delve executable: $delve >> Not Found")
             }
         }
     }

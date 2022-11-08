@@ -7,21 +7,45 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Fixed
-- using gcloud auth for kubernetes. (mistakenly loaded layer into it)
+## 3.7.3
 
+### Fixed
+- mirrord-agent: No longer resolves to `eth0` by default, now we first try to resolve the appropriate network interface, if this fails then we use `eth0` as a last resort. Fixes [#670](https://github.com/metalbear-co/mirrord/issues/670).
+
+### Changed
+- intelliJ: use custom delve on macos
+
+## 3.7.2
+
+### Fixed
+- Release: fix broken docker build step caused by folder restructure
+
+## 3.7.1
+
+### Fixed
+
+- using gcloud auth for kubernetes. (mistakenly loaded layer into it)
+- debugging Go on VSCode. We patch to use our own delivered delve.
+- Changed layer not to crash when connection is closed by agent. Closed [#693](https://github.com/metalbear-co/mirrord/issues/693).
+
+### Changed
+
+- IntelliJ: fallback to using a textfield if listing namespaces fails
 
 ## 3.7.0
 
 ### Added
+
 - mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
 
 ### Fixed
+
 - IntelliJ: Fix occurring of small namespace selection window and make mirrord dialogs resizable
 - IntelliJ: Fix bug when pressing cancel in mirrord dialog and rerunning the application no mirrord window appears again
 - VS Code: Fix crash occurring because it used deprecated env vars.
 
 ### Changed
+
 - mirrord-config: Take `schema` feature out of feature flag (now it's always on).
 - mirrord-config: Add docs for the user config types.
 
