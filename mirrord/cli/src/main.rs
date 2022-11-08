@@ -270,7 +270,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.commands {
-        Commands::Exec(mut args) => exec(&mut args)?,
+        Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
             extract_library(Some(path))?;
         } // Commands::Login(args) => login(args)?,
