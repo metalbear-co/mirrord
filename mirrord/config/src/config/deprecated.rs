@@ -7,16 +7,6 @@ impl<T> Deprecated<T> {
     pub fn new(message: &'static str, inner: T) -> Self {
         Deprecated(message.to_owned(), inner)
     }
-
-    pub fn untagged(container: &'static str, attr: &'static str, inner: T) -> Self {
-        Deprecated(
-            format!(
-                "Deprecated field {}.{}, it will be removed in several versions",
-                container, attr
-            ),
-            inner,
-        )
-    }
 }
 
 impl<T> MirrordConfigSource for Deprecated<T>

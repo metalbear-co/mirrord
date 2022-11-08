@@ -13,7 +13,7 @@ enum FieldAttr {
     Env(Lit),
     Default(Lit),
     Unstable,
-    Deprecated(Option<Lit>),
+    Deprecated(Lit),
 }
 
 /// Parse and create Ident from map_to attribute
@@ -47,9 +47,6 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unstable") => Ok(FieldAttr::Unstable),
-        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("deprecated") => {
-            Ok(FieldAttr::Deprecated(None))
-        }
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
             Ok(FieldAttr::Env(meta.lit))
         }
@@ -57,7 +54,7 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
             Ok(FieldAttr::Default(meta.lit))
         }
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("deprecated") => {
-            Ok(FieldAttr::Deprecated(Some(meta.lit)))
+            Ok(FieldAttr::Deprecated(meta.lit))
         }
         _ => Err(meta.span().error("unsupported config attribute flag")),
     }
@@ -184,10 +181,7 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> Result<TokenStream, Diag
         .iter()
         .filter(|flag| matches!(flag, FieldAttr::Deprecated(_) | FieldAttr::Unstable))
         .map(|attr| match attr {
-            FieldAttr::Deprecated(None) => {
-                quote! { .layer(|next| crate::config::deprecated::Deprecated::untagged(stringify!(#parent), stringify!(#ident), next)) }
-            }
-            FieldAttr::Deprecated(Some(ident)) => {
+            FieldAttr::Deprecated(ident) => {
                 quote! { .layer(|next| crate::config::deprecated::Deprecated::new(#ident, next)) }
             }
             FieldAttr::Unstable => quote! { .layer(|next| crate::config::unstable::Unstable::new(stringify!(#parent), stringify!(#ident), next)) },
