@@ -16,22 +16,18 @@ pub struct ConfigField {
 impl ConfigField {
     fn is_option(field: &Field) -> Option<Type> {
         let seg = if let Type::Path(ty) = &field.ty {
-            ty.path.segments.first()?
+            ty.path.segments.first()
         } else {
-            return None;
-        };
+            None
+        }?;
 
-        if seg.ident != "Option" {
-            return None;
-        }
-
-        match &seg.arguments {
-            PathArguments::AngleBracketed(generics) => match generics.args.first() {
-                Some(GenericArgument::Type(ty)) => Some(ty.clone()),
-                _ => None,
-            },
-            _ => None,
-        }
+(seq.ident == "Option").then(|| {
+    if let PathArguments::AngleBracketed(Some(GenericArgument::Type(ty))) = &seq.arguments {
+        Some(ty.clone())
+    } else {
+        None
+    }
+})       
     }
 
     pub fn definition(&self) -> impl ToTokens {

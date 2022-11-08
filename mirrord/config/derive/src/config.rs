@@ -34,16 +34,14 @@ impl ConfigStruct {
 
         let flags = ConfigFlags::new(&attrs, ConfigFlagsType::Container)?;
 
-        let fields = match data {
-            Data::Struct(DataStruct { fields, .. }) => match fields {
-                Fields::Named(FieldsNamed { named, .. }) => named
-                    .into_iter()
-                    .map(ConfigField::try_from)
-                    .collect::<Result<_, _>>()?,
-                _ => return Err(fields.span().error("Unnamed Structs are not supported")),
-            },
-            _ => return Err(source.span().error("Enums and Unions are not supported")),
-        };
+        let fields = if let Data::Struct(DataStruct { fields: Fields::Named(FieldsNamed { named, .. }), .. }) = data {
+            Ok(named
+                .into_iter()
+                .map(ConfigField::try_from)
+                .collect::<Result<_, _>>()?)
+        } else {
+            Err(source.span().error("Enums, Unions, and Unnamed Structs are not supported"))
+        }?;
 
         let ident = flags
             .map_to
