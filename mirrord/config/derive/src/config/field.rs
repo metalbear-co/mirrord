@@ -31,6 +31,40 @@ impl ConfigField {
         })?
     }
 
+    ///
+    //* Will create the stuct definition part of the code
+    //*
+    //* #### 1
+    //* ```rust
+    //* #[config(env = "TEST")]
+    //* pub test: String,
+    //* ```
+    //* Will output
+    //* ```rust
+    //* pub test: Option<String>
+    //* ```
+    //*
+    //* #### 2
+    //* ```rust
+    //* #[config(nested)]
+    //* pub test: OtherConfig,
+    //* ```
+    //* Will output
+    //* ```rust
+    //* pub test: <OtherConfig as crate::config::FromMirrordConfig>::Generator
+    //* ```
+    //*
+    //* #### 3
+    //* ```rust
+    //* #[config(rename = "test2")]
+    //* pub test: OtherConfig,
+    //* ```
+    //* Will output
+    //* ```rust
+    //* #[serde(rename = "test2")]
+    //* pub test: Option<String>
+    //* ```
+    ///
     pub fn definition(&self) -> impl ToTokens {
         let ConfigField {
             ident,
@@ -69,6 +103,21 @@ impl ConfigField {
         }
     }
 
+    ///
+    //* Will create the actual implementation of the
+    //*
+    //* #### 1
+    //* ```rust
+    //* #[config(env = "TEST")]
+    //* pub test: String,
+    //* ```
+    //* Will output
+    //* ```rust
+    //* test: (crate::config::from_env::FromEnv::new("TEST"), self.test)
+    //*           .source_value()
+    //*           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
+    //* ```
+    ///
     pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {
         let ConfigField {
             ident,
