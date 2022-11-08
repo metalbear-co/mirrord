@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 # Changed
 
-- mirrord-config: refactored macro so future implementations will be easier
+- mirrord-config: added `depricated` and `unstable` tags to MirrordConfg macro for messaging user when using sed fields
 
 ## 3.7.3
 
