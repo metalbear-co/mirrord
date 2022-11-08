@@ -1619,6 +1619,7 @@ version = "3.7.0"
 dependencies = [
  "anyhow",
  "clap",
+ "errno",
  "exec",
  "mirrord-auth",
  "mirrord-layer",

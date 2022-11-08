@@ -9,6 +9,9 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use exec::execvp;
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use errno;
 use mirrord_auth::AuthConfig;
 use mirrord_progress::TaskProgress;
 #[cfg(target_os = "macos")]
@@ -208,6 +211,9 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     let binary = sip_patch(&args.binary)?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let did_sip_patch = &binary != &args.binary;
+
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
 
@@ -216,6 +222,24 @@ fn exec(args: &ExecArgs) -> Result<()> {
 
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno::Errno(86)) = err { // "Bad CPU type in executable"
+        if did_sip_patch { // We did a SIP patch.
+            error!(
+                "The file you are trying to run, {}, is either SIP protected or a script with a
+                shebang that leads to a SIP protected binary. In order to bypass SIP protection,
+                mirrord creates a non-SIP version of the binary and runs that one instead of the
+                protected one. The non-SIP version is however an x86_64 file, so in order to run
+                it on apple hardware, rosetta has to be installed.
+                Rosetta can be installed by runnning:
+
+                softwareupdate --install-rosetta
+
+                ",
+                &args.binary
+            )
+        }
+    }
     Err(anyhow!("Failed to execute binary"))
 }
 
