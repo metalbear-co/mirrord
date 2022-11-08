@@ -132,12 +132,7 @@ mod main {
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
     /// Extract shebang from file contexts.
-    /// # Examples
-    ///
-    /// ```
-    /// let contents = "#!/usr/bin/env bash\n".to_string();
-    /// assert_eq!(get_shebang_from_string(contents), "#!/usr/bin/env")
-    /// ```
+    /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
         let mut content: &str = &file_contents;
@@ -350,6 +345,12 @@ mod main {
             patch_script(original_file.path(), &patched_path, "/test/shebang").unwrap();
             let new_contents = std::fs::read(&patched_path).unwrap();
             assert_eq!(new_contents, "#!/test/shebang bash\n".as_bytes())
+        }
+
+        #[test]
+        fn shebang_from_string() {
+            let contents = "#!/usr/bin/env bash\n".to_string();
+            assert_eq!(get_shebang_from_string(&contents).unwrap(), "#!/usr/bin/env")
         }
     }
 }
