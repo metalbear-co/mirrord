@@ -493,7 +493,7 @@ async fn start_layer_thread(
                     debug_assert_eq!(std::env::var(key), Ok(value));
                 }
 
-                if let Some(overrides) = &config.feature.env.r#override {
+                if let Some(overrides) = &config.feature.env.overrides {
                     for (key, value) in overrides {
                         std::env::set_var(key, value);
                     }

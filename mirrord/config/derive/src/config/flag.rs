@@ -11,14 +11,17 @@ pub enum ConfigFlagsType {
 
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
-    pub derive: Vec<Ident>,
-    pub map_to: Option<Ident>,
-    pub env: Option<EnvFlag>,
-    pub default: Option<DefaultFlag>,
     pub doc: Vec<Attribute>,
-    pub nested: bool,
-    pub toggleable: bool,
+
+    pub derive: Vec<Ident>,
     pub generator: Option<Ident>,
+    pub map_to: Option<Ident>,
+
+    pub default: Option<DefaultFlag>,
+    pub env: Option<EnvFlag>,
+    pub nested: bool,
+    pub rename: Option<Lit>,
+    pub toggleable: bool,
 }
 
 impl ConfigFlags {
@@ -59,6 +62,11 @@ impl ConfigFlags {
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
                         {
                             flags.default = Some(DefaultFlag(meta.lit))
+                        }
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
+                        {
+                            flags.rename = Some(meta.lit)
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Container

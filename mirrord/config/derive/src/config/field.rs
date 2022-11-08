@@ -14,6 +14,7 @@ pub struct ConfigField {
 }
 
 impl ConfigField {
+    /// Check if field is Option<T> and if so return type of T
     fn is_option(field: &Field) -> Option<Type> {
         let seg = if let Type::Path(ty) = &field.ty {
             ty.path.segments.first()
@@ -56,8 +57,14 @@ impl ConfigField {
             quote! { #ty }
         };
 
+        let reanme = flags
+            .rename
+            .as_ref()
+            .map(|rename| quote! { #[serde(rename = #rename)] });
+
         quote! {
             #(#docs)*
+            #reanme
             #vis #ident: Option<#target>
         }
     }

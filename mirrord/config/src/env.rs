@@ -78,7 +78,8 @@ pub struct EnvConfig {
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
     /// undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.
-    pub r#override: Option<HashMap<String, String>>,
+    #[config(rename = "override")]
+    pub overrides: Option<HashMap<String, String>>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -86,7 +87,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
         Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value(),
-            r#override: None,
+            overrides: None,
         })
     }
 }
