@@ -170,13 +170,14 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 #[ctor]
 fn mirrord_layer_entry_point() {
     if let Err(fail) = layer_pre_initialization() {
-        panic!(
+        eprintln!(
             r"
             mirrord-layer: Encountered unrecoverable error during initialization!
 
             >> Detailed error: {fail:#?}
             "
         );
+        std::process::exit(-1)
     }
 }
 
