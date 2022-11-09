@@ -149,6 +149,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
 
+    // TODO(alex) [high] 2022-11-08: Crashing here, we don't have this var set, it should not crash.
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
         .map(PathBuf::from)
         .map(|path| LayerFileConfig::from_path(&path))?
@@ -166,18 +167,21 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 }
 
 /// The one true start of mirrord-layer.
-#[cfg(not(test))]
 #[ctor]
 fn mirrord_layer_entry_point() {
-    if let Err(fail) = layer_pre_initialization() {
-        eprintln!(
-            r"
+    // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
+    // a profile, for example `cargo check --profile=dev`.
+    if !cfg!(test) {
+        if let Err(fail) = layer_pre_initialization() {
+            eprintln!(
+                r"
             mirrord-layer: Encountered unrecoverable error during initialization!
 
             >> Detailed error: {fail:#?}
             "
-        );
-        std::process::exit(-1)
+            );
+            std::process::exit(-1)
+        }
     }
 }
 
