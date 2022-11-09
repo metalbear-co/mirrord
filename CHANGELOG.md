@@ -7,9 +7,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Fixed
-- `ci.yaml`: Remove outdated comment about mirrord schema.
-
 ## 3.7.3
 
 ### Fixed
