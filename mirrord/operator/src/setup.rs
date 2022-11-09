@@ -60,8 +60,8 @@ impl OperatorSetup for Operator {
 pub struct OperatorNamespace(Namespace);
 
 impl OperatorNamespace {
-    pub fn name(&self) -> String {
-        self.0.metadata.name.clone().unwrap_or_default()
+    pub fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
     }
 }
 
@@ -124,7 +124,7 @@ impl OperatorDeployment {
         let namespace = Deployment {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
-                namespace: Some(namespace.name()),
+                namespace: Some(namespace.name().to_owned()),
                 labels: Some(app_labels),
                 ..Default::default()
             },
@@ -152,7 +152,7 @@ impl OperatorServiceAccount {
         let sa = ServiceAccount {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
-                namespace: Some(namespace.name()),
+                namespace: Some(namespace.name().to_owned()),
                 labels: Some(app_labels.clone()),
                 ..Default::default()
             },
