@@ -143,8 +143,8 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
 }
 
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
-fn layer_pre_initialization(args: Vec<String>) -> Result<(), LayerError> {
-    // let args = std::env::args().collect::<Vec<_>>();
+fn layer_pre_initialization() -> Result<(), LayerError> {
+    let args = std::env::args().collect::<Vec<_>>();
 
     println!("pre_initialization args {args:#?}");
 
@@ -176,8 +176,14 @@ fn mirrord_layer_entry_point() {
     // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
     // a profile, for example `cargo check --profile=dev`.
     if !cfg!(test) {
-        let args = std::env::args().collect::<Vec<_>>();
-        let _ = panic::catch_unwind(|| layer_pre_initialization(args));
+        let _ = panic::catch_unwind(|| {
+            if let Err(fail) = layer_pre_initialization() {
+                match fail {
+                    LayerError::NoProcessFound => (),
+                    _ => std::process::exit(-1),
+                }
+            }
+        });
     }
 }
 
