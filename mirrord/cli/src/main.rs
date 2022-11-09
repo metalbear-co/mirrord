@@ -278,7 +278,7 @@ fn main() -> Result<()> {
         // Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup { file, namespace } => {
-                let operator = Operator::new(namespace.unwrap_or_default());
+                let operator = Operator::new(namespace);
 
                 match file {
                     Some(path) => operator.to_writer(File::create(path)?)?,

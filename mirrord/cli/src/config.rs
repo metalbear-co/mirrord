@@ -158,11 +158,15 @@ pub(super) struct OperatorArgs {
 
 #[derive(Subcommand, Debug)]
 pub(super) enum OperatorCommand {
+    /// Create deployment for operator
+    #[clap(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
     Setup {
+        /// Output to kubernetes specs to file instead of stdout and piping to kubectl
         #[clap(short, long, value_parser)]
         file: Option<PathBuf>,
 
-        #[clap(short, long, value_parser)]
-        namespace: Option<OperatorNamespace>,
+        /// Set namespace to setup operator in
+        #[clap(short, long, value_parser, default_value = "mirrord")]
+        namespace: OperatorNamespace,
     },
 }

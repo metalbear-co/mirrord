@@ -65,12 +65,6 @@ impl OperatorNamespace {
     }
 }
 
-impl Default for OperatorNamespace {
-    fn default() -> Self {
-        OperatorNamespace::from_str("mirrord").expect("infallible")
-    }
-}
-
 impl FromStr for OperatorNamespace {
     type Err = Infallible;
 
