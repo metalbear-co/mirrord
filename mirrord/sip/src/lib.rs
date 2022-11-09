@@ -110,26 +110,22 @@ mod main {
         patched_path: K,
         new_shebang: &str,
     ) -> Result<()> {
-        if let Some(original_shebang) = read_shebang_from_file(&original_path)? {
-            let data = std::fs::read(original_path.as_ref())?;
-            let contents = &data[original_shebang.len()..];
-            let mut new_contents = String::from("#!") + new_shebang;
-            new_contents.push_str(
-                std::str::from_utf8(contents).map_err(|_utf| {
+        read_shebang_from_file(&original_path)?
+            .map(|original_shebang| -> Result<()> {
+                let data = std::fs::read(original_path.as_ref())?;
+                let contents = &data[original_shebang.len()..];
+                let mut new_contents = String::from("#!") + new_shebang;
+                new_contents.push_str(std::str::from_utf8(contents).map_err(|_utf| {
                     UnlikelyError("Can't read script contents as utf8".to_string())
-                })?,
-            );
-            std::fs::write(patched_path.as_ref(), new_contents)?;
-            std::fs::set_permissions(
-                patched_path.as_ref(),
-                std::fs::metadata(original_path)?.permissions(),
-            )?;
-            Ok(())
-        } else {
-            // This should never happen, if we're in this function the file is a script that starts
-            // with a shebang.
-            Err(UnlikelyError("Can't read shebang anymore.".to_string()))
-        }
+                })?);
+                std::fs::write(patched_path.as_ref(), new_contents)?;
+                std::fs::set_permissions(
+                    patched_path.as_ref(),
+                    std::fs::metadata(original_path)?.permissions(),
+                )?;
+                Ok(())
+            })
+            .ok_or(UnlikelyError("Can't read shebang anymore.".to_string()))?
     }
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
