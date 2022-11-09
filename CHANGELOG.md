@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- fix markdown job by adding the checkout action
+
 ## 3.7.3
 
 ### Fixed
