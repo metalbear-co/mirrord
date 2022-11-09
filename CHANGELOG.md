@@ -10,6 +10,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - VS Code Extension: add JSON schema
+- Bypass SIP on MacOS on the executed binary, (also via shebang).
+  See [[#649](https://github.com/metalbear-co/mirrord/issues/649)].
+  This does not yet include binaries that are executed by the first binary.
 
 ### Fixed
 
