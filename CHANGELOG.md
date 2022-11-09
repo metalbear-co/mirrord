@@ -11,6 +11,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - vscode: fallback to textbox if namespace listing fails
 
+## 3.7.3
+
+### Fixed
+- mirrord-agent: No longer resolves to `eth0` by default, now we first try to resolve the appropriate network interface, if this fails then we use `eth0` as a last resort. Fixes [#670](https://github.com/metalbear-co/mirrord/issues/670).
+
+### Changed
+- intelliJ: use custom delve on macos
+
 ## 3.7.2
 
 ### Fixed

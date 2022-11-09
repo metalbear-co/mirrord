@@ -23,8 +23,8 @@ pub struct Args {
     pub communication_timeout: u16,
 
     /// Interface to use
-    #[clap(short = 'i', long, default_value = "eth0", value_parser)]
-    pub interface: String,
+    #[clap(short = 'i', long, value_parser)]
+    pub network_interface: Option<String>,
 
     /// Inform the agent to use `proc/1/root` as the root directory.
     #[clap(short = 'e', long, default_value_t = false, value_parser)]

@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
 
@@ -9,6 +9,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
+use nix::sys::socket::SockaddrStorage;
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
     ip::IpNextHeaderProtocols,
@@ -18,6 +19,7 @@ use pnet::packet::{
 };
 use rawsocket::RawCapture;
 use tokio::{
+    net::UdpSocket,
     select,
     sync::mpsc::{Receiver, Sender},
 };
@@ -87,9 +89,48 @@ fn is_closed_connection(flags: u16) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-fn prepare_sniffer(interface: String) -> Result<RawCapture, AgentError> {
-    debug!("prepare_sniffer -> Preparing interface.");
+/// Connects to a remote address (`8.8.8.8:53`) so we can find which network interface to use.
+///
+/// Used when no `user_interface` is specified in [`prepare_sniffer`] to prevent mirrord from
+/// defaulting to the wrong network interface (`eth0`), as sometimes the user's machine doesn't have
+/// it available (i.e. their default network is `enp2s0`).
+#[tracing::instrument(level = "trace")]
+async fn resolve_interface() -> Result<Option<String>, AgentError> {
+    // Connect to a remote address so we can later get the default network interface.
+    let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
+    temporary_socket.connect("8.8.8.8:53").await?;
 
+    // Create comparison address here with `port: 0`, to match the network interface's address of
+    // `sin_port: 0`.
+    let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
+    let raw_local_address = SockaddrStorage::from(local_address);
+
+    // Try to find an interface that matches the local ip we have.
+    let usable_interface_name = nix::ifaddrs::getifaddrs()?
+        .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
+
+    Ok(usable_interface_name)
+}
+
+// TODO(alex): Errors here are not reported back anywhere, we end up with a generic fail of:
+// "ERROR ThreadId(03) mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
+// error: SnifferCommand sender failed with `channel closed`"
+//
+// And to make matters worse, the error reported back to the user is the very generic:
+// "mirrord-layer received an unexpected response from the agent pod!"
+#[tracing::instrument(level = "trace")]
+async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture, AgentError> {
+    // Priority is whatever the user set as an option to mirrord, otherwise we try to get the
+    // appropriate interface.
+    let interface = if let Some(network_interface) = network_interface {
+        network_interface
+    } else {
+        resolve_interface()
+            .await?
+            .unwrap_or_else(|| "eth0".to_string())
+    };
+
+    trace!("Using {interface:#?} interface.");
     let capture = RawCapture::from_interface_name(&interface)?;
     // We start with a BPF that drops everything so we won't receive *EVERYTHING*
     // as we don't know what the layer will ask us to listen for, so this is essentially setting
@@ -261,10 +302,11 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace")]
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        interface: String,
+        network_interface: Option<String>,
     ) -> Result<TCPConnectionSniffer, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
@@ -274,8 +316,7 @@ impl TCPConnectionSniffer {
             set_namespace(namespace).unwrap();
         }
 
-        debug!("preparing sniffer");
-        let raw_capture = prepare_sniffer(interface)?;
+        let raw_capture = prepare_sniffer(network_interface).await?;
 
         Ok(TCPConnectionSniffer {
             receiver,
@@ -292,10 +333,10 @@ impl TCPConnectionSniffer {
     pub async fn start(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
-        interface: String,
+        network_interface: Option<String>,
         cancel_token: CancellationToken,
     ) -> Result<(), AgentError> {
-        let sniffer = Self::new(receiver, pid, interface).await?;
+        let sniffer = Self::new(receiver, pid, network_interface).await?;
         sniffer.run(cancel_token).await
     }
 

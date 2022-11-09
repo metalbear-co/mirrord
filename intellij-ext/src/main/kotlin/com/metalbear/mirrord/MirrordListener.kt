@@ -33,6 +33,9 @@ class MirrordListener : ExecutionListener {
                 field = value
             }
         var envSet: Boolean = false
+
+        // defaultFlow: keeps track of whether we are doing the mirrord config or not
+        var defaultFlow: Boolean = false
         var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
     }
 
@@ -81,6 +84,8 @@ class MirrordListener : ExecutionListener {
                     }
                 }
 
+                defaultFlow = podNamespace == null
+
                 if (podNamespace != null) {
                     val pods = try {
                         kubeDataProvider.getNameSpacedPods(podNamespace).asJBList()
@@ -90,6 +95,7 @@ class MirrordListener : ExecutionListener {
                             NotificationType.ERROR,
                             env.project
                         )
+                        defaultFlow = true
                         return@invokeLater super.processStartScheduled(executorId, env)
                     }
 
@@ -152,10 +158,10 @@ class MirrordListener : ExecutionListener {
                     }
                 } else {
                     id = ""
+                    defaultFlow = true
                 }
             }
         }
-        // FAILURE: Just call the parent implementation
         return super.processStartScheduled(executorId, env)
     }
 
