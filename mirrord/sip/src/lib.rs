@@ -10,9 +10,8 @@ mod main {
     use std::{
         collections::HashSet,
         env::temp_dir,
-        fs::Permissions,
         io::{self, Read},
-        os::{macos::fs::MetadataExt, unix::prelude::PermissionsExt},
+        os::macos::fs::MetadataExt,
         path::{Path, PathBuf},
     };
 
@@ -91,26 +90,30 @@ mod main {
         }
     }
 
-    /// Patches a binary to disable SIP.
-    /// Right now it extracts x64 binary from fat/MachO binary and patches it.
+    /// Read the contents (or just the x86_64 section in case of a fat file) from the SIP binary at
+    /// `path`, write it into `output`, give it the same permissions, and sign the new binary.
     fn patch_binary<P: AsRef<Path>, K: AsRef<Path>>(path: P, output: K) -> Result<()> {
         let data = std::fs::read(path.as_ref())?;
         let binary_info = BinaryInfo::from_object_bytes(&data)?;
 
         let x64_binary = &data[binary_info.offset..binary_info.offset + binary_info.size];
         std::fs::write(output.as_ref(), x64_binary)?;
-        std::fs::set_permissions(output.as_ref(), Permissions::from_mode(0o755))?;
+        // Give the new file the same permissions as the old file.
+        std::fs::set_permissions(
+            output.as_ref(),
+            std::fs::metadata(path.as_ref())?.permissions(),
+        )?;
         codesign::sign(output)
     }
 
-    /// Creates a new file at `patched_path` which has the same contents as `original_path` except
-    /// for the shebang which is `new_shebang`.
+    /// Create a new file at `patched_path` with the same contents as `original_path` except for
+    /// the shebang which is `new_shebang`.
     fn patch_script<P: AsRef<Path>, K: AsRef<Path>>(
         original_path: P,
         patched_path: K,
         new_shebang: &str,
     ) -> Result<()> {
-        read_shebang_from_file(&original_path)?
+        read_shebang_from_file(original_path.as_ref())?
             .map(|original_shebang| -> Result<()> {
                 let data = std::fs::read(original_path.as_ref())?;
                 let contents = &data[original_shebang.len()..];
@@ -119,9 +122,10 @@ mod main {
                     UnlikelyError("Can't read script contents as utf8".to_string())
                 })?);
                 std::fs::write(patched_path.as_ref(), new_contents)?;
+                // Give the new file the same permissions as the old file.
                 std::fs::set_permissions(
                     patched_path.as_ref(),
-                    std::fs::metadata(original_path)?.permissions(),
+                    std::fs::metadata(&original_path)?.permissions(),
                 )?;
                 Ok(())
             })
@@ -130,7 +134,7 @@ mod main {
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
-    /// Extract shebang from file contexts.
+    /// Extract shebang from file contents.
     /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
