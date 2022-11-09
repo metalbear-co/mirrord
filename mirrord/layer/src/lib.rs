@@ -145,6 +145,9 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
 fn layer_pre_initialization() -> Result<(), LayerError> {
     let args = std::env::args().collect::<Vec<_>>();
+
+    println!("pre_initialization args {args:#?}");
+
     let given_process = args
         .first()
         .and_then(|arg| arg.split('/').last())
@@ -152,10 +155,18 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 
     // TODO(alex) [high] 2022-11-08: Crashing here, we don't have this var set, it should not crash.
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
+        .inspect(|a| println!("config file {a:#?}"))
+        .inspect_err(|e| eprintln!("config file {e:#?}"))
         .map(PathBuf::from)
+        .inspect(|a| println!("pathbuf {a:#?}"))
+        .inspect_err(|e| eprintln!("pathbuf {e:#?}"))
         .map(|path| LayerFileConfig::from_path(&path))?
+        .inspect(|a| println!("layer config {a:#?}"))
+        .inspect_err(|e| eprintln!("layer config {e:#?}"))
         .unwrap_or_default()
-        .generate_config()?;
+        .generate_config()
+        .inspect(|a| println!("generated {a:#?}"))
+        .inspect_err(|e| eprintln!("generated {e:#?}"))?;
 
     nix_devbox_patch(&mut config);
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);

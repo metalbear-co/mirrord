@@ -261,7 +261,7 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo +nightly test -p mirrord-layer
+      - run: cargo +nightly test -p mirrord-layer -- --nocapture
 
   integration_tests_macos:
     runs-on: macos-12
