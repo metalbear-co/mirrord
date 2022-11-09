@@ -417,6 +417,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
     steps:
+      - uses: actions/checkout@v2
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "./markdownlint-config.json"
