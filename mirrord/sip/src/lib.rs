@@ -227,13 +227,13 @@ mod main {
         let output = temp_dir().join("mirrord-bin").join(
             &path
                 .strip_prefix("/")
-                .map_err(|e| SipError::UnlikelyError(e.to_string()))?,
+                .map_err(|e| UnlikelyError(e.to_string()))?,
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
         let patched_path_string = output
             .to_str()
-            .ok_or_else(|| SipError::UnlikelyError("Failed to convert path to string".to_string()))?
+            .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
             .to_string();
 
         if output.exists() {
@@ -244,9 +244,11 @@ mod main {
             return Ok(patched_path_string);
         }
 
-        std::fs::create_dir_all(output.parent().ok_or_else(|| {
-            SipError::UnlikelyError("Failed to get parent directory".to_string())
-        })?)?;
+        std::fs::create_dir_all(
+            output
+                .parent()
+                .ok_or_else(|| UnlikelyError("Failed to get parent directory".to_string()))?,
+        )?;
 
         match shebang_target {
             None => {
@@ -278,9 +280,7 @@ mod main {
                     // This function should only be called on a file which has SomeSIP SipStatus.
                     // If the file has a shebang pointing to a file which is NoSIP, this file should
                     // not have SomeSIP status in the first place.
-                    Err(SipError::UnlikelyError(
-                        "Internal mirrord error.".to_string(),
-                    ))
+                    Err(UnlikelyError("Internal mirrord error.".to_string()))
                 }
             }
         }
