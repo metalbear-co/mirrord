@@ -154,8 +154,9 @@ fn layer_pre_initialization(args: Vec<String>) -> Result<(), LayerError> {
         .ok_or(LayerError::NoProcessFound)?;
 
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
+        .map_err(LayerError::from)
         .map(PathBuf::from)
-        .map(|path| LayerFileConfig::from_path(&path).unwrap())
+        .and_then(|path| Ok(LayerFileConfig::from_path(&path)?))
         .unwrap_or_default()
         .generate_config()?;
 
