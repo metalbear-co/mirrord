@@ -7,17 +7,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- fix markdown job by adding the checkout action
+
 ## 3.7.3
 
 ### Fixed
-- mirrord-agent: No longer resolves to `eth0` by default, now we first try to resolve the appropriate network interface, if this fails then we use `eth0` as a last resort. Fixes [#670](https://github.com/metalbear-co/mirrord/issues/670).
+
+- mirrord-agent: No longer resolves to `eth0` by default, now we first try to resolve
+  the appropriate network interface, if this fails then we use `eth0` as a last resort.
+  Fixes [#670](https://github.com/metalbear-co/mirrord/issues/670).
 
 ### Changed
+
 - intelliJ: use custom delve on macos
 
 ## 3.7.2
 
 ### Fixed
+
 - Release: fix broken docker build step caused by folder restructure
 
 ## 3.7.1
@@ -36,7 +45,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord config files. This file has to be manually generated (there is a test to help you remember).
+- mirrord-config: New `mirrord-schema.json` file that contains docs and types which should help the user write their mirrord
+  config files. This file has to be manually generated (there is a test to help you remember).
 
 ### Fixed
 
@@ -61,6 +71,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - IntelliJ plugin: if namespaces can't be accessed, use the default namespace
 
 ### Changed
+
 - Add `/home` to default file exclude list.
 - Changed log level of `Bypassing operation...` from warning to trace.
 - IntelliJ settings default to match CLI/VSCode.
@@ -85,7 +96,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
-- Update target file config to have `namespace` nested inside of `target` and not a separate `target_namespace`. See [#587](https://github.com/metalbear-co/mirrord/issues/587) and [#667](https://github.com/metalbear-co/mirrord/issues/667)
+- Update target file config to have `namespace` nested inside of `target` and not a separate `target_namespace`.
+  See [#587](https://github.com/metalbear-co/mirrord/issues/587) and [#667](https://github.com/metalbear-co/mirrord/issues/667)
 
 ## 3.5.0
 
@@ -99,7 +111,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-layer: Improve error message when user tries to run a program with args without `--`.
 - Add tests for environment variables passed to KubeApi for authentication feature for cli credential fetch
 - Remove openssl/libssl dependency, cross compilation is easier now. (It wasn't needed/used)
-- mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`, where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced` allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
+- mirrord-config: Changed the way [`fs`](mirrord-config/src/fs.rs) works: now it supports 2 modes `Simple` and `Advanced`,
+  where `Simple` is similar to the old behavior (enables read-only, read-write, or disable file ops), and `Advanced`
+  allows the user to specify include and exclude (regexes) filters for [`FileFilter`](mirrord-layer/src/file/filter.rs).
 - Lint `README` and update it for `--target` flag.
 - mirrord-layer: improve error message for invalid targets.
 
@@ -131,7 +145,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Lint Changelog and fix level of a "Changed" tag.
-- File operations - following symlinks now works as expected. Previously, absolute symlinks lead to use our own path instead of target path. For example, AWS/K8S uses `/var/run/..` for service account credentials. In many machines, `/var/run` is symlink to `/run` so we were using `/run/..` instead of `/proc/{target_pid}/root/run`.
+- File operations - following symlinks now works as expected. Previously, absolute symlinks lead to use our own path instead of target path.
+  For example, AWS/K8S uses `/var/run/..` for service account credentials. In many machines, `/var/run` is symlink to `/run`
+  so we were using `/run/..` instead of `/proc/{target_pid}/root/run`.
 - Fix not reappearing window after pressing cancel-button in intelliJ extension.
 
 ## 3.3.0
