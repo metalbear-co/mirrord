@@ -248,7 +248,7 @@ mod main {
             SipError::UnlikelyError("Failed to get parent directory".to_string())
         })?)?;
 
-        return match shebang_target {
+        match shebang_target {
             None => {
                 // The file is a sip protected binary.
                 debug!(
@@ -283,7 +283,7 @@ mod main {
                     ))
                 }
             }
-        };
+        }
     }
 
     /// Check if the file that the user wants to execute is a SIP protected binary (or a script
