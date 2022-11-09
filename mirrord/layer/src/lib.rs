@@ -160,7 +160,7 @@ fn layer_pre_initialization(args: Vec<String>) -> Result<(), LayerError> {
         .map(PathBuf::from)
         .inspect(|a| println!("pathbuf {a:#?}"))
         .inspect_err(|e| eprintln!("pathbuf {e:#?}"))
-        .map(|path| LayerFileConfig::from_path(&path))?
+        .map(|path| LayerFileConfig::from_path(&path).unwrap_or_default())
         .inspect(|a| println!("layer config {a:#?}"))
         .inspect_err(|e| eprintln!("layer conifg {e:#?}"))
         .unwrap_or_default()
