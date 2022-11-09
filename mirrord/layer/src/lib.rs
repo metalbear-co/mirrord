@@ -15,6 +15,7 @@ extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    panic,
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -172,16 +173,7 @@ fn mirrord_layer_entry_point() {
     // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
     // a profile, for example `cargo check --profile=dev`.
     if !cfg!(test) {
-        if let Err(fail) = layer_pre_initialization() {
-            eprintln!(
-                r"
-            mirrord-layer: Encountered unrecoverable error during initialization!
-
-            >> Detailed error: {fail:#?}
-            "
-            );
-            std::process::exit(-1)
-        }
+        let _ = panic::catch_unwind(layer_pre_initialization);
     }
 }
 
