@@ -184,7 +184,7 @@ mod main {
         NoSIP,
     }
 
-    /// Determine status recursively, keep seen_paths, and return an error if there is a cycle.
+    /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical reference.
     fn get_sip_status_rec(path: &str, seen_paths: &mut HashSet<PathBuf>) -> Result<SipStatus> {
         // If which fails, try using the given path as is.
         let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
