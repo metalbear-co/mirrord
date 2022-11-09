@@ -146,8 +146,6 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
 fn layer_pre_initialization() -> Result<(), LayerError> {
     let args = std::env::args().collect::<Vec<_>>();
 
-    println!("pre_initialization args {args:#?}");
-
     let given_process = args
         .first()
         .and_then(|arg| arg.split('/').last())
