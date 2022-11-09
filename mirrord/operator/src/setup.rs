@@ -174,22 +174,3 @@ impl OperatorSetup for OperatorServiceAccount {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn basic() -> Result<()> {
-        let op = Operator::default();
-
-        let mut res = Vec::new();
-
-        op.to_writer(&mut res)?;
-
-        println!("{}", String::from_utf8(res).unwrap());
-
-        Ok(())
-    }
-}
