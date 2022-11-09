@@ -34,7 +34,13 @@
 					"when": "mirrord.activated"
 				}
 			]
-		}
+		},
+		"jsonValidation": [
+			{
+				"fileMatch": "*.mirrord.json",
+				"url": "https://raw.githubusercontent.com/metalbear-co/mirrord/main/mirrord-schema.json"
+			}
+		]
 	},
 	"main": "./out/extension.js",
 	"scripts": {
