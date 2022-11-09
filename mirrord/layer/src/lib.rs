@@ -143,8 +143,8 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
 }
 
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
-fn layer_pre_initialization() -> Result<(), LayerError> {
-    let args = std::env::args().collect::<Vec<_>>();
+fn layer_pre_initialization(args: Vec<String>) -> Result<(), LayerError> {
+    // let args = std::env::args().collect::<Vec<_>>();
 
     println!("pre_initialization args {args:#?}");
 
@@ -162,11 +162,11 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .inspect_err(|e| eprintln!("pathbuf {e:#?}"))
         .map(|path| LayerFileConfig::from_path(&path))?
         .inspect(|a| println!("layer config {a:#?}"))
-        .inspect_err(|e| eprintln!("layer config {e:#?}"))
+        .inspect_err(|e| eprintln!("layer conifg {e:#?}"))
         .unwrap_or_default()
         .generate_config()
         .inspect(|a| println!("generated {a:#?}"))
-        .inspect_err(|e| eprintln!("generated {e:#?}"))?;
+        .inspect_err(|e| eprintln!("config file {e:#?}"))?;
 
     nix_devbox_patch(&mut config);
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
@@ -184,7 +184,8 @@ fn mirrord_layer_entry_point() {
     // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
     // a profile, for example `cargo check --profile=dev`.
     if !cfg!(test) {
-        let _ = panic::catch_unwind(layer_pre_initialization);
+        let args = std::env::args().collect::<Vec<_>>();
+        let _ = panic::catch_unwind(|| layer_pre_initialization(args));
     }
 }
 
