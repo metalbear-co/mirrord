@@ -17,6 +17,7 @@ edition.workspace = true
 
 [dependencies]
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
+mirrord-operator = { path = "../operator" }
 mirrord-progress = { path = "../progress" }
 
 clap.workspace = true

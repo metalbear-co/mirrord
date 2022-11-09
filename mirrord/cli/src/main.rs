@@ -10,6 +10,7 @@ use clap::Parser;
 use config::*;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
+use mirrord_operator::setup::{Operator, OperatorSetup};
 use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
@@ -273,8 +274,20 @@ fn main() -> Result<()> {
         Commands::Exec(args) => exec(&args)?,
         Commands::Extract { path } => {
             extract_library(Some(path))?;
-        } // Commands::Login(args) => login(args)?,
+        }
+        // Commands::Login(args) => login(args)?,
+        Commands::Operator(operator) => match operator.command {
+            OperatorCommand::Setup { file, namespace } => {
+                let operator = Operator::new(namespace.unwrap_or_default());
+
+                match file {
+                    Some(path) => operator.to_writer(File::create(path)?)?,
+                    None => operator.to_writer(std::io::stdout())?,
+                }
+            }
+        },
     }
+
     Ok(())
 }
 

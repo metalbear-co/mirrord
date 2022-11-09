@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
+use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -17,6 +18,7 @@ pub(super) enum Commands {
         path: String,
     },
     // Login(LoginArgs),
+    Operator(Box<OperatorArgs>),
 }
 
 #[derive(Args, Debug)]
@@ -146,4 +148,21 @@ pub(super) struct LoginArgs {
     /// Don't open web browser automatically and just print url
     #[clap(long)]
     pub no_open: bool,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorArgs {
+    #[clap(subcommand)]
+    pub command: OperatorCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum OperatorCommand {
+    Setup {
+        #[clap(short, long, value_parser)]
+        file: Option<PathBuf>,
+
+        #[clap(short, long, value_parser)]
+        namespace: Option<OperatorNamespace>,
+    },
 }

@@ -1588,6 +1588,7 @@ dependencies = [
  "exec",
  "mirrord-auth",
  "mirrord-layer",
+ "mirrord-operator",
  "mirrord-progress",
  "rand 0.8.5",
  "regex",
@@ -1724,6 +1725,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "mirrord-operator"
+version = "3.7.3"
+dependencies = [
+ "k8s-openapi",
+ "kube",
+ "rstest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.14",
+ "thiserror",
 ]
 
 [[package]]
