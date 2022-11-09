@@ -12,7 +12,7 @@ use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 //*  #[config(env = "TEST")]
 //*             |-----ty-----|
 //* |vis||ident|      |option|
-//*  pub  flag:  Opton<Foobar>;
+//*  pub  flag:  Opton<Foobar>,
 //* ```
 ///
 #[derive(Debug)]

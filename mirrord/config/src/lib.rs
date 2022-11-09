@@ -73,7 +73,7 @@ use crate::{
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq,Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).

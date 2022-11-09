@@ -59,7 +59,7 @@ use crate::{
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq,Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
     /// Include only these remote environment variables in the local process.
     ///

@@ -99,7 +99,7 @@ impl ConfigFlags {
                                     flags.derive.extend(
                                         val.value()
                                             .split(',')
-                                            .map(|part| Ident::new(part, Span::call_site())),
+                                            .map(|part| Ident::new(part.trim(), Span::call_site())),
                                     );
                                 }
                                 _ => {

@@ -10,7 +10,7 @@ use crate::{
 
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq,Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
     #[config(env = "MIRRORD_TCP_OUTGOING", default = "true")]
     pub tcp: bool,

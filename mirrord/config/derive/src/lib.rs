@@ -1,8 +1,11 @@
+#![doc = include_str!("../README.md")]
+
 use quote::ToTokens;
 use syn::DeriveInput;
 
 mod config;
 
+#[doc = include_str!("../README.md")]
 #[proc_macro_derive(MirrordConfig, attributes(config))]
 pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);

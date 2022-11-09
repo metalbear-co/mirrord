@@ -49,7 +49,7 @@ use crate::{
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq,Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
     /// Controls the environment variables feature, see [`EnvConfig`].
     ///
