@@ -431,6 +431,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
     steps:
+      - uses: actions/checkout@v2
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
@@ -451,6 +452,7 @@ jobs:
         test_agent,
         lint,
         test_mirrord_config,
+        test_mirrord_layer,
         test_mirrord_protocol,
         test_mirrord_sip,
         build_intellij_plugin,
@@ -468,6 +470,7 @@ jobs:
       (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
       (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
       (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+      (needs.test_mirrord_layer.result == 'success' || needs.test_mirrord_layer.result == 'skipped') &&
       (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
       (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
       (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
