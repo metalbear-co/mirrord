@@ -153,20 +153,11 @@ fn layer_pre_initialization(args: Vec<String>) -> Result<(), LayerError> {
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
 
-    // TODO(alex) [high] 2022-11-08: Crashing here, we don't have this var set, it should not crash.
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
-        .inspect(|a| println!("config file {a:#?}"))
-        .inspect_err(|e| eprintln!("config file {e:#?}"))
         .map(PathBuf::from)
-        .inspect(|a| println!("pathbuf {a:#?}"))
-        .inspect_err(|e| eprintln!("pathbuf {e:#?}"))
         .map(|path| LayerFileConfig::from_path(&path).unwrap())
-        .inspect(|a| println!("layer config {a:#?}"))
-        .inspect_err(|e| eprintln!("layer conifg {e:#?}"))
         .unwrap_or_default()
-        .generate_config()
-        .inspect(|a| println!("generated {a:#?}"))
-        .inspect_err(|e| eprintln!("config file {e:#?}"))?;
+        .generate_config()?;
 
     nix_devbox_patch(&mut config);
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
