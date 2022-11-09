@@ -9,6 +9,12 @@ pub enum ConfigFlagsType {
     Field,
 }
 
+///
+//* Contains flags parsed from `#[config(...)]` and `#[doc]` attributes
+//*
+//* ConfigFlagsType::Container -> ["derive", "generator", "map_to"]
+//* ConfigFlagsType::Field -> ["default", "env", "nested", "rename", "toggleable"]
+///
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
     pub doc: Vec<Attribute>,

@@ -4,6 +4,17 @@ use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
 use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
+///
+//* Representation of a single field
+//*
+//* ```
+//* |---------flags---------|
+//*  #[config(env = "TEST")]
+//*             |-----ty-----|
+//* |vis||ident|      |option|
+//*  pub  flag:  Opton<Foobar>;
+//* ```
+///
 #[derive(Debug)]
 pub struct ConfigField {
     ident: Option<Ident>,
