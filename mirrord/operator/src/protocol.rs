@@ -11,19 +11,7 @@ pub type AgentSession = u64;
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ProxiedMessage<T> {
     pub session: AgentSession,
-    inner: T,
-}
-
-impl<T> ProxiedMessage<T> {
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
-impl<T> From<(AgentSession, T)> for ProxiedMessage<T> {
-    fn from((session, inner): (AgentSession, T)) -> Self {
-        ProxiedMessage { session, inner }
-    }
+    pub inner: T,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
