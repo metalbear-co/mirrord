@@ -17,9 +17,10 @@ edition.workspace = true
 [features]
 default = []
 client = ["protocol", "dep:futures"]
-protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes", "dep:mirrord-protocol"]
+protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes",  "dep:mirrord-config", "dep:mirrord-protocol"]
 
 [dependencies]
+mirrord-config = { path = "../config", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
 
 actix-codec = { workspace = true, optional = true }
@@ -37,4 +38,5 @@ tokio.workspace = true
 
 
 [dev-dependencies]
+anyhow = "1"
 rstest = "0.15"

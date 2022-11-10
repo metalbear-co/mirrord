@@ -1732,11 +1732,13 @@ name = "mirrord-operator"
 version = "3.7.3"
 dependencies = [
  "actix-codec",
+ "anyhow",
  "bincode",
  "bytes",
  "futures",
  "k8s-openapi",
  "kube",
+ "mirrord-config",
  "mirrord-protocol",
  "rstest",
  "schemars",

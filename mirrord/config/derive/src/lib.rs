@@ -229,7 +229,7 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     };
 
     let output = quote! {
-        #[derive(Clone, Debug, Default, PartialEq, Eq)]
+        #[derive(Clone, serde::Serialize, serde::Deserialize, Debug, Default, PartialEq, Eq)]
         #vis #mapped_type #mapped_name #generics #mapped_fields
 
         impl crate::config::MirrordConfig for #ident {

@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
@@ -29,7 +29,7 @@ use crate::{
 ///
 /// fs = write
 /// ```
-#[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
     Disabled,

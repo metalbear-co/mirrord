@@ -3,12 +3,48 @@ use std::io;
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
+use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+
+pub type AgentSession = u64;
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ProxiedMessage<T> {
+    pub session: AgentSession,
+    inner: T,
+}
+
+impl<T> ProxiedMessage<T> {
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T> From<(AgentSession, T)> for ProxiedMessage<T> {
+    fn from((session, inner): (AgentSession, T)) -> Self {
+        ProxiedMessage { session, inner }
+    }
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AgentInitialize {
+    #[bincode(with_serde)]
+    pub agent: AgentConfig,
+    #[bincode(with_serde)]
+    pub target: TargetConfig,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct AgentCreated {
+    pub session: AgentSession,
+}
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OperatorMessage {
-    Client(ClientMessage),
-    Daemon(DaemonMessage),
+    Initialize(AgentInitialize),
+    Created(AgentCreated),
+    Client(ProxiedMessage<ClientMessage>),
+    Daemon(ProxiedMessage<DaemonMessage>),
 }
 
 pub struct OperatorCodec {

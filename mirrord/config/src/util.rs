@@ -3,7 +3,7 @@ use std::{fmt, marker::PhantomData, slice::Join, str::FromStr};
 use schemars::JsonSchema;
 use serde::{
     de::{self, MapAccess, Visitor},
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
 };
 
 use crate::config::{ConfigError, MirrordConfig, Result};
@@ -44,7 +44,7 @@ where
     }
 }
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum VecOrSingle<T> {
     Single(T),
