@@ -13,8 +13,10 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+
 [features]
 default = []
+client = ["protocol", "dep:futures"]
 protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes", "dep:mirrord-protocol"]
 
 [dependencies]
@@ -25,11 +27,13 @@ bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true, features = ["derive"] }
+futures = { workspace = true, optional = true }
 schemars = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 serde_yaml = "0.9"
 thiserror.workspace = true
+tokio.workspace = true
 
 
 [dev-dependencies]

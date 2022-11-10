@@ -1,3 +1,6 @@
+#[cfg(feature = "client")]
+pub mod client;
+
 /// Operator Setup functinality
 pub mod setup;
 

@@ -1734,6 +1734,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "futures",
  "k8s-openapi",
  "kube",
  "mirrord-protocol",
@@ -1743,6 +1744,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.14",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
