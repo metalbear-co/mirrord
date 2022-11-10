@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-layer: Remove `unwrap` from initialization functions.
+
 ### Added
 
 - VS Code Extension: add JSON schema
