@@ -132,6 +132,10 @@ impl Default for IndexAllocator<usize> {
     }
 }
 
+/// Helper that creates a new [`tokio::runtime::Runtime`], and immediately blocks on it.
+///
+/// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
+/// caller's runtime.
 pub fn run_thread<T>(future: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,

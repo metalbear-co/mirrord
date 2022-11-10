@@ -14,6 +14,7 @@ use dns::{dns_worker, DnsRequest};
 use error::AgentError;
 use file::FileManager;
 use futures::{
+    future::TryFutureExt,
     stream::{FuturesUnordered, StreamExt},
     SinkExt,
 };
@@ -76,9 +77,11 @@ impl State {
 }
 
 struct ClientConnectionHandler {
-    /// Used to prevent closing the main loop (`handle_loop`) when any request is done (tcp
-    /// outgoing feature). Stays `true` until `agent` receives an `ExitRequest`.
+    /// Used to prevent closing the main loop [`ClientConnectionHandler::start`] when any
+    /// request is done (tcp outgoing feature). Stays `true` until `agent` receives an
+    /// `ExitRequest`.
     id: ClientID,
+    /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
@@ -91,16 +94,16 @@ struct ClientConnectionHandler {
 }
 
 impl ClientConnectionHandler {
-    /// A loop that handles client connection and state. Breaks upon receiver/sender drop.
-    pub async fn start(
+    /// Initializes [`ClientConnectionHandler`].
+    #[tracing::instrument(level = "trace")]
+    pub async fn new(
         id: ClientID,
         stream: TcpStream,
         pid: Option<u64>,
         ephemeral: bool,
         sniffer_command_sender: Sender<SnifferCommand>,
-        cancel_token: CancellationToken,
         dns_sender: Sender<DnsRequest>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<Self, AgentError> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
             None if ephemeral => FileManager::new(Some(1)),
@@ -125,7 +128,7 @@ impl ClientConnectionHandler {
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
-        let mut client_handler = ClientConnectionHandler {
+        let client_handler = ClientConnectionHandler {
             id,
             file_manager,
             stream,
@@ -138,16 +141,14 @@ impl ClientConnectionHandler {
             dns_sender,
         };
 
-        client_handler.handle_loop(cancel_token).await?;
-        Ok(())
+        Ok(client_handler)
     }
 
+    /// Starts a loop that handles client connection and state.
+    ///
+    /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
-        Ok(self.stream.send(response).await?)
-    }
-
-    async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
+    async fn start(mut self, cancellation_token: CancellationToken) -> Result<(), AgentError> {
         let mut running = true;
         while running {
             select! {
@@ -181,7 +182,7 @@ impl ClientConnectionHandler {
                 message = self.udp_outgoing_api.daemon_message() => {
                     self.respond(DaemonMessage::UdpOutgoing(message?)).await?;
                 },
-                _ = token.cancelled() => {
+                _ = cancellation_token.cancelled() => {
                     break;
                 }
             }
@@ -190,7 +191,15 @@ impl ClientConnectionHandler {
         Ok(())
     }
 
-    /// Handle incoming messages from the client. Returns False if the client disconnected.
+    /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
+        Ok(self.stream.send(response).await?)
+    }
+
+    /// Handles incoming messages from the connected client (`mirrord-layer`).
+    ///
+    /// Returns `false` if the client disconnected.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
         match message {
@@ -315,14 +324,30 @@ async fn start_agent() -> Result<(), AgentError> {
                     let cancellation_token = cancellation_token.clone();
                     let dns_sender = dns_sender.clone();
                     let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::start(client_id, stream, pid, args.ephemeral_container, sniffer_command_tx, cancellation_token, dns_sender).await {
-                            Ok(_) => {
-                                debug!("ClientConnectionHandler::start -> Client {} disconnected", client_id);
+                        match ClientConnectionHandler::new(
+                                client_id,
+                                stream,
+                                pid,
+                                args.ephemeral_container,
+                                sniffer_command_tx,
+                                dns_sender,
+                            )
+                            .and_then(|client| client.start(cancellation_token))
+                            .await
+                            {
+                                Ok(_) => {
+                                    debug!(
+                                        "ClientConnectionHandler::start -> Client {} disconnected",
+                                        client_id
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
+                                        client_id, e
+                                    );
+                                }
                             }
-                            Err(e) => {
-                                error!("ClientConnectionHandler::start -> Client {} disconnected with error: {}", client_id, e);
-                            }
-                        }
                         client_id
 
                     });
