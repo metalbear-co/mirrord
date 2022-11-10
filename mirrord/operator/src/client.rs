@@ -30,7 +30,7 @@ pub async fn connect(
                 Some(Ok(msg)) = codec.next() => {
                      match msg {
                         OperatorMessage::Daemon(msg) => {
-                            if let Err(_) = daemon_tx.send(msg.inner).await {
+                            if let Err(_) = daemon_tx.send(msg).await {
                                 println!("DaemonMessage Dropped");
                                 break;
                             }
@@ -39,7 +39,7 @@ pub async fn connect(
                     }
                 }
                 Some(client_msg) = client_rx.recv() => {
-                    if let Err(_) = codec.send(OperatorMessage::Client((0, client_msg).into())).await {
+                    if let Err(_) = codec.send(OperatorMessage::Client(client_msg)).await {
                         println!("DaemonMessage Dropped");
                         break;
                     }

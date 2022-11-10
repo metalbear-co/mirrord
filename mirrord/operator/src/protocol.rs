@@ -6,20 +6,6 @@ use bytes::{Buf, BufMut, BytesMut};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
-pub type AgentSession = u64;
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ProxiedMessage<T> {
-    pub session: AgentSession,
-    pub inner: T,
-}
-
-impl<T> From<(AgentSession, T)> for ProxiedMessage<T> {
-    fn from((session, inner): (AgentSession, T)) -> Self {
-        ProxiedMessage { session, inner }
-    }
-}
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AgentInitialize {
     #[bincode(with_serde)]
@@ -29,16 +15,10 @@ pub struct AgentInitialize {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct AgentCreated {
-    pub session: AgentSession,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OperatorMessage {
     Initialize(AgentInitialize),
-    Created(AgentCreated),
-    Client(ProxiedMessage<ClientMessage>),
-    Daemon(ProxiedMessage<DaemonMessage>),
+    Client(ClientMessage),
+    Daemon(DaemonMessage),
 }
 
 pub struct OperatorCodec {
