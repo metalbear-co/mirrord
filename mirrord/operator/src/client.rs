@@ -30,7 +30,7 @@ pub async fn connect(
                 Some(Ok(msg)) = codec.next() => {
                      match msg {
                         OperatorMessage::Daemon(msg) => {
-                            if let Err(_) = daemon_tx.send(msg.into_inner()).await {
+                            if let Err(_) = daemon_tx.send(msg.inner).await {
                                 println!("DaemonMessage Dropped");
                                 break;
                             }

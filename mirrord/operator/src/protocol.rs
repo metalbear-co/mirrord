@@ -14,6 +14,12 @@ pub struct ProxiedMessage<T> {
     pub inner: T,
 }
 
+impl<T> From<(AgentSession, T)> for ProxiedMessage<T> {
+    fn from((session, inner): (AgentSession, T)) -> Self {
+        ProxiedMessage { session, inner }
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AgentInitialize {
     #[bincode(with_serde)]
