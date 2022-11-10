@@ -4,7 +4,7 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
-use tracing::warn;
+use tracing::trace;
 
 use crate::error::HookError;
 
@@ -179,7 +179,7 @@ impl<S> Detour<S> {
         match self {
             Detour::Success(s) => Ok(s.into()),
             Detour::Bypass(b) => {
-                warn!("Bypassing operation due to {:#?}", b);
+                trace!("Bypassing operation due to {:#?}", b);
                 Ok(op(b))
             }
             Detour::Error(e) => Err(e),
