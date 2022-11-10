@@ -12,6 +12,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - mirrord-layer: Remove `unwrap` from initialization functions.
+- Log level of operation bypassing log from warn to trace (for real this time).
+- Perform filesystem operations for paths in `/home` locally by default (for real this time).
 
 ### Added
 
