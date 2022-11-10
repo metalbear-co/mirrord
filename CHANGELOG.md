@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.8.0
+
 ### Changed
 
 - mirrord-layer: Remove `unwrap` from initialization functions.
