@@ -5,6 +5,7 @@ use kube::config::InferConfigError;
 use libc::{c_char, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
+use mirrord_sip::SipError;
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
@@ -58,6 +59,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
     LocalFileCreation(usize),
+
+    #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
+    FailedSipPatch(#[from] SipError),
 }
 
 #[derive(Error, Debug)]
@@ -220,6 +224,7 @@ impl From<HookError> for i64 {
             HookError::Utf8(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
             HookError::LocalFileCreation(_) => libc::EINVAL,
+            HookError::FailedSipPatch(_) => libc::EACCES,
         };
 
         set_errno(errno::Errno(libc_error));

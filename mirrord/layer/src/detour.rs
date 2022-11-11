@@ -4,7 +4,7 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::error::HookError;
 
@@ -80,6 +80,7 @@ pub(crate) enum Bypass {
     ReadOnly(PathBuf),
     EmptyBuffer,
     EmptyOption,
+    NoSipDetected(String),
 }
 
 /// `ControlFlow`-like enum to be used by hooks.
@@ -199,6 +200,24 @@ impl<S> Detour<S> {
             Detour::Success(s) => Detour::Success(op(s)),
             Detour::Bypass(b) => Detour::Bypass(b),
             Detour::Error(e) => Detour::Error(e),
+        }
+    }
+
+    /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
+    ///
+    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
+    /// fail.
+    pub(crate) fn unwrap_or(self, default: S) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(b) => {
+                trace!("Bypassing operation due to {:#?}", b);
+                default
+            }
+            Detour::Error(e) => {
+                debug!("Detour failed with: {:#?}, continuing despite of error.", e);
+                default
+            }
         }
     }
 }

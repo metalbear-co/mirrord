@@ -209,9 +209,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     #[cfg(target_os = "macos")]
-    let binary = sip_patch(&args.binary)?;
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    let did_sip_patch = &binary != &args.binary;
+    let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
 
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
@@ -224,8 +225,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if let exec::Error::Errno(errno::Errno(86)) = err {
         // "Bad CPU type in executable"
-        if did_sip_patch {
-            // We did a SIP patch.
+        if _did_sip_patch {
             error!(
                 "The file you are trying to run, {}, is either SIP protected or a script with a
                 shebang that leads to a SIP protected binary. In order to bypass SIP protection,

@@ -27,7 +27,7 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
-use libc::{c_char, c_int};
+use libc::c_int;
 use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
@@ -45,7 +45,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{error, info, log::debug, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -57,6 +57,7 @@ mod common;
 mod connection;
 mod detour;
 mod error;
+mod exec;
 mod file;
 mod go_env;
 mod macros;
@@ -541,13 +542,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     interceptor.begin_transaction();
 
     unsafe {
-        let _ = replace!(
-            &mut interceptor,
-            "execve",
-            execve_detour,
-            FnExecve,
-            FN_EXECVE
-        );
         let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
         let _ = replace!(
             &mut interceptor,
@@ -559,6 +553,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
+    unsafe { exec::enable_execve_hook(&mut interceptor) };
 
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
@@ -574,17 +569,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     }
 
     interceptor.end_transaction();
-}
-
-/// Hook for `libc::execve`.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn execve_detour(
-    path: *const c_char,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    debug!("Hooked execve!"); // TODO: DELETE
-    FN_EXECVE(path, argv, envp)
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we

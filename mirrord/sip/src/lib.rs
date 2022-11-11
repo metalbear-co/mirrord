@@ -288,14 +288,16 @@ mod main {
     }
 
     /// Check if the file that the user wants to execute is a SIP protected binary (or a script
-    /// starting with a shebang that leads to a SIP protected binary). If it is, create a
-    /// non-protected version of the file and return the path to it. If it is not, the original
-    /// path is copied and returned.
-    pub fn sip_patch(binary_path: &str) -> Result<String> {
+    /// starting with a shebang that leads to a SIP protected binary).
+    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
+    /// If it is not, `Ok(None)`.
+    /// Propagate errors.
+    pub fn sip_patch(binary_path: &str) -> Result<Option<String>> {
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
-            return patch_some_sip(&path, shebang_target);
+            Some(patch_some_sip(&path, shebang_target)).transpose()
+        } else {
+            Ok(None)
         }
-        Ok(String::from(binary_path))
     }
 
     #[cfg(test)]
@@ -377,7 +379,7 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap();
+            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap().unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
