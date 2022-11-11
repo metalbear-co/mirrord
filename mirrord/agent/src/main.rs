@@ -23,7 +23,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use sniffer::{SnifferCommand, TCPConnectionSniffer, TCPSnifferAPI};
+use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -277,13 +277,14 @@ impl ClientConnectionHandler {
     }
 }
 
+/// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
+#[tracing::instrument(level = "trace")]
 async fn start_agent() -> Result<(), AgentError> {
     let args = parse_args();
-
-    debug!("starting with args {args:?}");
+    trace!("Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
-        Ipv4Addr::new(0, 0, 0, 0),
+        Ipv4Addr::UNSPECIFIED,
         args.communicate_port,
     ))
     .await?;
@@ -303,19 +304,18 @@ async fn start_agent() -> Result<(), AgentError> {
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
     let _ = run_thread(dns_worker(dns_receiver, pid));
 
-    let sniffer_task = run_thread(TCPConnectionSniffer::start(
-        sniffer_command_rx,
-        pid,
-        args.network_interface,
-        cancellation_token.clone(),
-    ));
+    let sniffer_cancellation_token = cancellation_token.clone();
+    let sniffer_task = run_thread(
+        TcpConnectionSniffer::new(sniffer_command_rx, pid, args.network_interface)
+            .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
+    );
 
-    info!("agent ready");
+    trace!("agent ready");
     let mut clients = FuturesUnordered::new();
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
-                debug!("start -> Connection accepted from {:?}", addr);
+                trace!("start -> Connection accepted from {:?}", addr);
 
                 if let Some(client_id) = state.generate_id() {
 
@@ -336,7 +336,7 @@ async fn start_agent() -> Result<(), AgentError> {
                             .await
                             {
                                 Ok(_) => {
-                                    debug!(
+                                    trace!(
                                         "ClientConnectionHandler::start -> Client {} disconnected",
                                         client_id
                                     );
@@ -363,20 +363,20 @@ async fn start_agent() -> Result<(), AgentError> {
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
                 if state.clients.is_empty() {
-                    debug!("start_agent -> main thread timeout, no clients connected");
+                    trace!("start_agent -> main thread timeout, no clients connected");
                     break;
                 }
             }
         }
     }
 
-    debug!("start_agent -> shutting down start");
+    trace!("Agent shutting down");
     drop(cancel_guard);
     if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
         error!("start_agent -> sniffer task failed with error: {}", err);
     }
 
-    debug!("shutdown done");
+    trace!("Agent shutdown.");
     Ok(())
 }
 
@@ -391,8 +391,6 @@ async fn main() -> Result<(), AgentError> {
         )
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-
-    debug!("main -> Initializing mirrord-agent.");
 
     match start_agent().await {
         Ok(_) => {

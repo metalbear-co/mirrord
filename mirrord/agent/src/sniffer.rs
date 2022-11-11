@@ -270,7 +270,7 @@ impl Drop for TCPSnifferAPI {
     }
 }
 
-pub struct TCPConnectionSniffer {
+pub struct TcpConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientID>,
     receiver: Receiver<SnifferCommand>,
     client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
@@ -281,8 +281,10 @@ pub struct TCPConnectionSniffer {
     index_allocator: IndexAllocator<ConnectionId>,
 }
 
-impl TCPConnectionSniffer {
-    pub async fn run(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
+impl TcpConnectionSniffer {
+    /// Runs the sniffer loop, capturing packets.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn start(mut self, cancellation_token: CancellationToken) -> Result<(), AgentError> {
         loop {
             select! {
                 command = self.receiver.recv() => {
@@ -293,21 +295,26 @@ impl TCPConnectionSniffer {
                 packet = self.raw_capture.next() => {
                     self.handle_packet(packet?).await?;
                 }
-                _ = cancel_token.cancelled() => {
+                _ = cancellation_token.cancelled() => {
                     break;
                 }
             }
         }
-        debug!("TCPConnectionSniffer exiting");
         Ok(())
     }
 
+    /// Creates and prepares a new [`TcpConnectionSniffer`] that uses BPF filters to capture network
+    /// packets.
+    ///
+    /// The capture uses a network interface specified by the user, if there is none, then it tries
+    /// to find a proper one by starting a connection. If this fails, we use "eth0" as a last
+    /// resort.
     #[tracing::instrument(level = "trace")]
-    pub async fn new(
+    pub(crate) async fn new(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
         network_interface: Option<String>,
-    ) -> Result<TCPConnectionSniffer, AgentError> {
+    ) -> Result<Self, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
                 .join(PathBuf::from(pid.to_string()))
@@ -318,7 +325,7 @@ impl TCPConnectionSniffer {
 
         let raw_capture = prepare_sniffer(network_interface).await?;
 
-        Ok(TCPConnectionSniffer {
+        Ok(Self {
             receiver,
             raw_capture,
             port_subscriptions: Subscriptions::new(),
@@ -328,16 +335,6 @@ impl TCPConnectionSniffer {
             connection_id_to_tcp_identifier: HashMap::new(),
             index_allocator: IndexAllocator::new(),
         })
-    }
-
-    pub async fn start(
-        receiver: Receiver<SnifferCommand>,
-        pid: Option<u64>,
-        network_interface: Option<String>,
-        cancel_token: CancellationToken,
-    ) -> Result<(), AgentError> {
-        let sniffer = Self::new(receiver, pid, network_interface).await?;
-        sniffer.run(cancel_token).await
     }
 
     fn handle_new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
