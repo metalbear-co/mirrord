@@ -221,9 +221,24 @@ mod main {
         get_sip_status_rec(path, &mut seen_paths)
     }
 
+    static EXCLUDE_ENV_VAR_NAME: &str = "MIRRORD_FILE_FILTER_EXCLUDE";
+
+    /// Add the given `path` to excluded paths.
+    fn add_to_file_exclude(path: &str) {
+        std::env::set_var(
+            EXCLUDE_ENV_VAR_NAME,
+            std::env::var(EXCLUDE_ENV_VAR_NAME)
+                .map(|paths| paths + ";")
+                .unwrap_or(String::new())
+                + path,
+        )
+    }
+
     /// Only call this function on a file that is SomeSIP.
     /// Patch shebang scripts recursively and patch final binary.
     fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
+        // TODO: Change output to be with hash of the contents, so that old versions of changed
+        //       files do not get used. (Also change back existing file logic to always use.)
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = temp_dir().join("mirrord-bin").join(
             &path
@@ -237,12 +252,21 @@ mod main {
             .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
             .to_string();
 
+        // So that the files we generate are not looked for on the pod.
+        add_to_file_exclude(&patched_path_string);
+
         if output.exists() {
-            debug!(
-                "Using existing SIP-patched version of {:?}: {}",
-                path, patched_path_string
-            );
-            return Ok(patched_path_string);
+            // TODO: Remove this `if` (leave contents) when we have content hashes in paths.
+            //       For now don't use existing scripts because 1. they're usually not as large as
+            //       binaries so rewriting them is not as bad, and 2. they're more likely to change.
+            if shebang_target.is_none() {
+                // Only use existing if binary (not a script).
+                debug!(
+                    "Using existing SIP-patched version of {:?}: {}",
+                    path, patched_path_string
+                );
+                return Ok(patched_path_string);
+            }
         }
 
         std::fs::create_dir_all(
