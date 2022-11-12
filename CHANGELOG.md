@@ -7,7 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- `MIRRORD_AGENT_NETWORK_INTERFACE` environment variable/file config to let user control which network interface to use. Workaround for [#670](https://github.com/metalbear-co/mirrord/issues/670).
+
 ### Changed
+
 - VS Code Extension: change extension to use a mirrord-config file for configuration
 - VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
 
