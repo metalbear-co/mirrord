@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- VS Code Extension: change extension to use a mirrord-config file for configuration
+- VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
+
 ## 3.8.0
 
 ### Changed
