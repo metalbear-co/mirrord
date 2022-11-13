@@ -373,21 +373,21 @@ jobs:
   release_homebrew:
     needs: release_gh
     runs-on: ubuntu-latest
-    steps:      
+    steps:
       - uses: actions/checkout@v3
-      - name: Get release version          
+      - name: Get release version and hashes
         run: |
           echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
           echo "::set-output name=sha256_mac::$(cat /tmp/release/mirrord_mac_universal.shasum256 | awk '{ print $1 })'"
           echo "::set-output name=sha256_linux_aarch64::$(cat /tmp/release/mirrord_linux_aarch64.shasum256 | awk '{ print $1 })'"
-          echo "::set-output name=sha256_linux_x86_64::$(cat /tmp/release/mirrord_linux_x86_64.shasum256.shasum256 | awk '{ print $1 })'"
+          echo "::set-output name=sha256_linux_x86_64::$(cat /tmp/release/mirrord_linux_x86_64.shasum256 | awk '{ print $1 })'"
       - name: Checkout into homebrew-mirrord
         uses: actions/checkout@v3
         with:
-            repository: metalbear-co/homebrew-mirrord
-            path: ./
-            token: ${{ secrets.GITHUB_PAT }}
-      - name: Update hashes and urls 
+          repository: metalbear-co/homebrew-mirrord
+          path: ./
+          token: ${{ secrets.GITHUB_PAT }}
+      - name: Update hashes and urls
         run: |
           sed 's/\([0-9]\.[0-9]\.[0-9]\)/${{ steps.version.outputs.version }}/g' mirrord.rb
           sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ steps.version.outputs.sha256_mac }}/' mirrord.rb       
@@ -402,5 +402,3 @@ jobs:
         run: |
           git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
           git push --tags
-
-      

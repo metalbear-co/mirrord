@@ -11,6 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - `MIRRORD_AGENT_NETWORK_INTERFACE` environment variable/file config to let user control which network interface to use. Workaround for [#670](https://github.com/metalbear-co/mirrord/issues/670).
 
+- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
+
 ## 3.8.0
 
 ### Changed
