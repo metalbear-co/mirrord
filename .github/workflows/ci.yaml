@@ -439,6 +439,7 @@ jobs:
       runs-on: ubuntu-latest
       steps:      
         - name: Get release version
+          uses: actions/checkout@v3
           run: |
             echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
             echo "::set-output name=sha256_mac::$(cat /tmp/release/mirrord_mac_universal.shasum256 | awk '{ print $1 })'"
@@ -447,8 +448,7 @@ jobs:
         - name: Checkout into homebrew-mirrord
           uses: actions/checkout@v3
           with:
-              repository: metalbear-co/homebrew-mirrord
-        - name: Update hashes and urls 
+              repository: metalbear-co/homebrew-mirrord        
           run: |
             sed 's/\([0-9]\.[0-9]\.[0-9]\)/${{ steps.version.outputs.version }}/g' mirrord.rb
             sed 's/[0-9a-f]\{64\}/${{ steps.version.outputs.sha256_mac }}/' mirrord.rb       
