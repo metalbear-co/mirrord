@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
-    core::v1::{ContainerStatus, Pod},
+    core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod},
 };
 use kube::{
     api::{ListParams, LogParams, PostParams},
@@ -16,7 +16,7 @@ use mirrord_progress::TaskProgress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
 use tokio::pin;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     api::{get_k8s_api, runtime::RuntimeData},
@@ -57,6 +57,24 @@ pub fn choose_container<'a>(
             .find(|&status| !SKIP_NAMES.contains(status.name.as_str()))
             .or_else(|| container_statuses.first())
     }
+}
+
+fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {
+    debug!("pod status: {:?}", &pod.status);
+    pod.status
+        .and_then(|status| {
+            status
+                .ephemeral_container_statuses
+                .and_then(|container_statuses| {
+                    container_statuses
+                        .iter()
+                        .find(|&status| &status.name == container_name)
+                        .and_then(|status| {
+                            status.state.as_ref().map(|state| state.running.is_some())
+                        })
+                })
+        })
+        .unwrap_or(false)
 }
 
 fn get_agent_name() -> String {
@@ -243,9 +261,105 @@ impl ContainerApi for JobContainer {
 #[derive(Debug)]
 pub struct EphemeralContainer;
 
-// #[async_trait]
-// impl ContainerApi for EphemeralContainer {
-//     async fn create_agent() -> Result<String> {
-//         todo!()
-//     }
-// }
+#[async_trait]
+impl ContainerApi for EphemeralContainer {
+    async fn create_agent(
+        client: &Client,
+        agent: &AgentConfig,
+        runtime_data: RuntimeData,
+        agent_image: String,
+        connection_port: u16,
+        progress: &TaskProgress,
+    ) -> Result<String> {
+        let container_progress = progress.subtask("creating ephemeral container...");
+
+        warn!("Ephemeral Containers is an experimental feature
+                  >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
+
+        let mirrord_agent_name = get_agent_name();
+
+        let mut agent_command_line = vec![
+            "./mirrord-agent".to_string(),
+            "-l".to_string(),
+            connection_port.to_string(),
+            "-e".to_string(),
+        ];
+        if let Some(timeout) = agent.communication_timeout {
+            agent_command_line.push("-t".to_string());
+            agent_command_line.push(timeout.to_string());
+        }
+
+        let ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
+            "name": mirrord_agent_name,
+            "image": agent_image,
+            "securityContext": {
+                "capabilities": {
+                    "add": ["NET_RAW", "NET_ADMIN"],
+                },
+                "privileged": true,
+            },
+            "imagePullPolicy": agent.image_pull_policy,
+            "targetContainerName": runtime_data.container_name,
+            "env": [{"name": "RUST_LOG", "value": agent.log_level}],
+            "command": agent_command_line,
+        }))?;
+        debug!("Requesting ephemeral_containers_subresource");
+
+        let pod_api = get_k8s_api(client, agent.namespace.as_deref());
+        let mut ephemeral_containers_subresource: Pod = pod_api
+            .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
+            .await
+            .map_err(KubeApiError::KubeError)?;
+
+        let mut spec = ephemeral_containers_subresource
+            .spec
+            .as_mut()
+            .ok_or(KubeApiError::PodSpecNotFound)?;
+
+        spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
+            Some(mut ephemeral_containers) => {
+                ephemeral_containers.push(ephemeral_container);
+                Some(ephemeral_containers)
+            }
+            None => Some(vec![ephemeral_container]),
+        };
+
+        pod_api
+            .replace_subresource(
+                "ephemeralcontainers",
+                &runtime_data.pod_name,
+                &PostParams::default(),
+                serde_json::to_vec(&ephemeral_containers_subresource)
+                    .map_err(KubeApiError::from)?,
+            )
+            .await
+            .map_err(KubeApiError::KubeError)?;
+
+        let params = ListParams::default()
+            .fields(&format!("metadata.name={}", &runtime_data.pod_name))
+            .timeout(60);
+
+        container_progress.done_with("container created");
+
+        let container_progress = progress.subtask("waiting for container to be ready...");
+
+        let stream = watcher(pod_api.clone(), params).applied_objects();
+        pin!(stream);
+
+        while let Some(Ok(pod)) = stream.next().await {
+            if is_ephemeral_container_running(pod, &mirrord_agent_name) {
+                debug!("container ready");
+                break;
+            } else {
+                debug!("container not ready yet");
+            }
+        }
+
+        wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+
+        container_progress.done_with("container is ready");
+
+        debug!("container is ready");
+        Ok(runtime_data.pod_name.to_string())
+    }
+}
