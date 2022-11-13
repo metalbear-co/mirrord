@@ -434,6 +434,28 @@ jobs:
         with:
           config: "markdownlint-config.json"
           args: "README.md CHANGELOG.md"
+
+  release_homebrew:    
+      runs-on: ubuntu-latest
+      steps:      
+        - name: Get release version
+          run: |
+            echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+            echo "::set-output name=sha256_mac::$(cat /tmp/release/mirrord_mac_universal.shasum256 | awk '{ print $1 })'"
+            echo "::set-output name=sha256_linux_aarch64::$(cat /tmp/release/mirrord_linux_aarch64.shasum256 | awk '{ print $1 })'"
+            echo "::set-output name=sha256_linux_x86_64::$(cat /tmp/release/mirrord_linux_x86_64.shasum256.shasum256 | awk '{ print $1 })'"
+        - name: Checkout into homebrew-mirrord
+          uses: actions/checkout@v3
+          with:
+              repository: metalbear-co/homebrew-mirrord
+        - name: Update hashes and urls 
+          run: |
+            sed 's/\([0-9]\.[0-9]\.[0-9]\)/${{ steps.version.outputs.version }}/g' mirrord.rb
+            sed 's/[0-9a-f]\{64\}/${{ steps.version.outputs.sha256_mac }}/' mirrord.rb       
+            sed 's/[0-9a-f]\{64\}/${{ steps.version.outputs.sha256_linux_aarch64 }}/' mirrord.rb
+            sed 's/[0-9a-f]\{64\}/${{ steps.version.outputs.sha256_linux_x86_64 }}/' mirrord.rb
+        - name: Cat the formula
+          run: cat mirrord.rb
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
@@ -441,6 +463,7 @@ jobs:
     name: ci
     needs:
       [
+        release_homebrew,
         build_mirrord,
         test_agent_image,
         integration_tests_macos,
