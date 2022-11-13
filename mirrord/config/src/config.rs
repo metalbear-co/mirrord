@@ -1,6 +1,8 @@
 pub mod default_value;
+pub mod deprecated;
 pub mod from_env;
 pub mod source;
+pub mod unstable;
 
 use thiserror::Error;
 
