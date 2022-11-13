@@ -28,13 +28,13 @@ const DEFAULT_CONFIG = `
 }
 `;
 
-// Populate the path for the project's .vscode folder
-const VS_CODE_DIR = function () {
+// Populate the path for the project's .mirrord folder
+const MIRRORD_DIR = function () {
 	let folders = vscode.workspace.workspaceFolders;
 	if (folders === undefined) {
 		throw new Error('No workspace folder found');
 	}
-	return vscode.Uri.joinPath(folders[0].uri, '.vscode');
+	return vscode.Uri.joinPath(folders[0].uri, '.mirrord');
 }();
 
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
@@ -51,7 +51,7 @@ function getK8sApi(): CoreV1Api {
 
 // Get the file path to the user's mirrord-config file, if it exists. 
 async function configFilePath() {
-	let vsCodeDir = VS_CODE_DIR;
+	let vsCodeDir = MIRRORD_DIR;
 	let fileUri = vscode.Uri.joinPath(vsCodeDir, '?(*.)mirrord.+(toml|json|y?(a)ml)');
 	let files = glob.sync(fileUri.fsPath);
 	return files[0] || '';
@@ -60,7 +60,7 @@ async function configFilePath() {
 async function openConfig() {
 	let path = await configFilePath();
 	if (!path) {
-		path = vscode.Uri.joinPath(VS_CODE_DIR, 'mirrord.json');
+		path = vscode.Uri.joinPath(MIRRORD_DIR, 'mirrord.json');
 		await vscode.workspace.fs.writeFile(path, Buffer.from(DEFAULT_CONFIG));
 	}
 	vscode.workspace.openTextDocument(path).then(doc => {
