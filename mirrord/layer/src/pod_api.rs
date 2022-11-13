@@ -263,6 +263,11 @@ impl KubernetesAPI {
             agent_command_line.push(timeout.to_string());
         }
 
+        if let Some(network_interface) = &self.config.agent.network_interface {
+            agent_command_line.push("-i".to_string());
+            agent_command_line.push(network_interface.into());
+        }
+
         let ephemeral_container: EphemeralContainer = serde_json::from_value(json!({
             "name": mirrord_agent_name,
             "image": agent_image,
@@ -358,6 +363,11 @@ impl KubernetesAPI {
         if let Some(timeout) = self.config.agent.communication_timeout {
             agent_command_line.push("-t".to_string());
             agent_command_line.push(timeout.to_string());
+        }
+
+        if let Some(network_interface) = &self.config.agent.network_interface {
+            agent_command_line.push("-i".to_string());
+            agent_command_line.push(network_interface.into());
         }
 
         let agent_pod: Job =

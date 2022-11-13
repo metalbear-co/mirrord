@@ -3,6 +3,7 @@ use std::{env::VarError, ptr, str::ParseBoolError};
 use errno::set_errno;
 use kube::config::InferConfigError;
 use libc::{c_char, FILE};
+use mirrord_config::config::ConfigError;
 use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
@@ -156,6 +157,12 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
+
+    #[error("mirrord-layer: Failed setting up mirrord with configuration error `{0}`!")]
+    Config(#[from] ConfigError),
+
+    #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
+    NoProcessFound,
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

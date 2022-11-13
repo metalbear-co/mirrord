@@ -19,6 +19,7 @@ pub mod util;
 /// including if you only made documentation changes.
 use std::path::Path;
 
+use config::ConfigError;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -125,14 +126,14 @@ pub struct LayerFileConfig {
 }
 
 impl LayerFileConfig {
-    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+    pub fn from_path(path: &Path) -> Result<Self, ConfigError> {
         let file = std::fs::read(path)?;
 
         match path.extension().and_then(|os_val| os_val.to_str()) {
-            Some("json") => serde_json::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
-            Some("toml") => toml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
-            Some("yaml") => serde_yaml::from_slice::<Self>(&file[..]).map_err(|err| err.into()),
-            _ => Err(anyhow::Error::msg("unsupported file format")),
+            Some("json") => Ok(serde_json::from_slice::<Self>(&file[..])?),
+            Some("toml") => Ok(toml::from_slice::<Self>(&file[..])?),
+            Some("yaml") => Ok(serde_yaml::from_slice::<Self>(&file[..])?),
+            _ => Err(ConfigError::UnsupportedFormat),
         }
     }
 }
@@ -318,6 +319,7 @@ mod tests {
                 ephemeral: Some(false),
                 communication_timeout: None,
                 startup_timeout: None,
+                network_interface: None,
             },
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),

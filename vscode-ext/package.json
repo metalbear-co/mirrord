@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
-	"version": "3.7.3",
+	"version": "3.8.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -34,7 +34,13 @@
 					"when": "mirrord.activated"
 				}
 			]
-		}
+		},
+		"jsonValidation": [
+			{
+				"fileMatch": "*.mirrord.json",
+				"url": "https://raw.githubusercontent.com/metalbear-co/mirrord/main/mirrord-schema.json"
+			}
+		]
 	},
 	"main": "./out/extension.js",
 	"scripts": {
