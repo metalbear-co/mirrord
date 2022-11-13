@@ -438,10 +438,10 @@ jobs:
   release_homebrew:    
       runs-on: ubuntu-latest
       steps:      
-        - uses: actions/checkout@v3
+        - uses: actions/checkout@v2
         - name: Get release version          
           run: |
-            echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')"
+            echo "::set-output name=version::$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)"
             echo "::set-output name=sha256_mac::$(cat /tmp/release/mirrord_mac_universal.shasum256 | awk '{ print $1 })'"
             echo "::set-output name=sha256_linux_aarch64::$(cat /tmp/release/mirrord_linux_aarch64.shasum256 | awk '{ print $1 })'"
             echo "::set-output name=sha256_linux_x86_64::$(cat /tmp/release/mirrord_linux_x86_64.shasum256.shasum256 | awk '{ print $1 })'"
