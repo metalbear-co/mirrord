@@ -1,0 +1,28 @@
+[package]
+name = "mirrord-kube"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[dependencies]
+mirrord-config = { path = "../config"}
+mirrord-progress = { path = "../progress" }
+
+async-trait = "0.1"
+futures.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+rand = "0.8"
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
