@@ -51,8 +51,7 @@ function getK8sApi(): CoreV1Api {
 
 // Get the file path to the user's mirrord-config file, if it exists. 
 async function configFilePath() {
-	let vsCodeDir = MIRRORD_DIR;
-	let fileUri = vscode.Uri.joinPath(vsCodeDir, '?(*.)mirrord.+(toml|json|y?(a)ml)');
+	let fileUri = vscode.Uri.joinPath(MIRRORD_DIR, '?(*.)mirrord.+(toml|json|y?(a)ml)');
 	let files = glob.sync(fileUri.fsPath);
 	return files[0] || '';
 }
