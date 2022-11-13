@@ -1,11 +1,8 @@
-#[cfg(target_os = "macos")]
+#![cfg(target_os = "macos")]
 mod codesign;
-#[cfg(target_os = "macos")]
 mod error;
-#[cfg(target_os = "macos")]
 mod whitespace;
 
-#[cfg(target_os = "macos")]
 mod main {
     use std::{
         collections::HashSet,
@@ -430,5 +427,4 @@ mod main {
     }
 }
 
-#[cfg(target_os = "macos")]
 pub use main::*;
