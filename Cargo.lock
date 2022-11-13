@@ -1717,6 +1717,7 @@ dependencies = [
  "kube",
  "mirrord-config",
  "mirrord-progress",
+ "mirrord-protocol",
  "rand 0.8.5",
  "serde_json",
  "thiserror",

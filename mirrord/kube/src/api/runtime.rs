@@ -1,9 +1,12 @@
 use std::fmt::{Display, Formatter};
 
-use k8s_openapi::api::core::v1::Pod;
+use async_trait::async_trait;
+use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
+use kube::{api::ListParams, Api, Client};
+use mirrord_config::target::{DeploymentTarget, PodTarget, Target};
 
 use crate::{
-    api::container::choose_container,
+    api::{container::choose_container, get_k8s_api},
     error::{KubeApiError, Result},
 };
 
@@ -101,5 +104,73 @@ impl RuntimeData {
             container_runtime,
             container_name,
         })
+    }
+}
+
+#[async_trait]
+pub trait RuntimeDataProvider {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
+}
+
+#[async_trait]
+impl RuntimeDataProvider for Target {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
+        match self {
+            Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
+            Target::Pod(pod) => pod.runtime_data(client, namespace).await,
+        }
+    }
+}
+
+#[async_trait]
+impl RuntimeDataProvider for DeploymentTarget {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
+        let deployment_api: Api<Deployment> = get_k8s_api(client, namespace);
+        let deployment = deployment_api
+            .get(&self.deployment)
+            .await
+            .map_err(KubeApiError::KubeError)?;
+
+        let deployment_labels = deployment
+            .spec
+            .and_then(|spec| spec.selector.match_labels)
+            .ok_or_else(|| {
+                KubeApiError::DeploymentNotFound(format!(
+                    "Label for deployment: {}, not found!",
+                    self.deployment.clone()
+                ))
+            })?;
+
+        // convert to key value pair
+        let formatted_deployments_labels = deployment_labels
+            .iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect::<Vec<String>>()
+            .join(",");
+
+        let pod_api: Api<Pod> = get_k8s_api(client, namespace);
+        let deployment_pods = pod_api
+            .list(&ListParams::default().labels(&formatted_deployments_labels))
+            .await
+            .map_err(KubeApiError::KubeError)?;
+
+        let first_pod = deployment_pods.items.first().ok_or_else(|| {
+            KubeApiError::DeploymentNotFound(format!(
+                "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
+                self.deployment.clone()
+            ))
+        })?;
+
+        RuntimeData::from_pod(first_pod, &self.container)
+    }
+}
+
+#[async_trait]
+impl RuntimeDataProvider for PodTarget {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
+        let pod_api: Api<Pod> = get_k8s_api(client, namespace);
+        let pod = pod_api.get(&self.pod).await?;
+
+        RuntimeData::from_pod(&pod, &self.container)
     }
 }
