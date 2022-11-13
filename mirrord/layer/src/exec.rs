@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use std::ffi::{CStr, CString};
 
 use frida_gum::interceptor::Interceptor;

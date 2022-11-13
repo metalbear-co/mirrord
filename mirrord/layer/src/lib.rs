@@ -57,6 +57,7 @@ mod common;
 mod connection;
 mod detour;
 mod error;
+#[cfg(target_os = "macos")]
 mod exec;
 mod file;
 mod go_env;
@@ -553,7 +554,11 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
-    unsafe { exec::enable_execve_hook(&mut interceptor) };
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        exec::enable_execve_hook(&mut interceptor)
+    };
 
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };

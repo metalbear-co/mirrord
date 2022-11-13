@@ -18,7 +18,6 @@ edition.workspace = true
 [dependencies]
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
 mirrord-progress = { path = "../progress" }
-mirrord-sip = { path = "../sip" }
 
 clap.workspace = true
 tracing.workspace = true
@@ -30,6 +29,9 @@ exec = "0.3"
 anyhow.workspace = true
 reqwest.workspace = true
 semver = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
 
 
 [build-dependencies]
