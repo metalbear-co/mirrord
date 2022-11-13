@@ -1,68 +1,61 @@
-use std::fmt::{Display, Formatter};
+use mirrord_config::{agent::AgentConfig, target::Target};
+use tokio::io::AsyncRead;
 
-use futures::{AsyncRead, AsyncWrite};
+use crate::{
+    api::container::{EphemeralContainer, JobContainer},
+    error::Result,
+};
 
-use crate::error::Result;
+mod container;
+mod runtime;
 
 pub trait KubeApi {
-    type Stream: AsyncWrite + AsyncRead + Unpin;
-
-    fn as_stream(&self) -> Self::Stream;
+    fn create_agent() -> impl AsyncRead;
 }
 
-pub(crate) enum ContainerRuntime {
-    Docker,
-    Containerd,
-}
-
-impl ContainerRuntime {
-    pub(crate) fn mount_path(&self) -> &str {
-        match self {
-            ContainerRuntime::Docker => "/var/run/docker.sock",
-            ContainerRuntime::Containerd => "/run/",
-        }
-    }
-}
-
-impl Display for ContainerRuntime {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ContainerRuntime::Docker => write!(f, "docker"),
-            ContainerRuntime::Containerd => write!(f, "containerd"),
-        }
-    }
-}
-
-pub trait ContainerApi {
-    fn create_agent() -> Result<String>;
-}
-
-pub struct JobContainer;
-
-impl ContainerApi for JobContainer {
-    fn create_agent() -> Result<String> {
-        todo!()
-    }
-}
-
-pub struct EphemeralContainer;
-
-impl ContainerApi for EphemeralContainer {
-    fn create_agent() -> Result<String> {
-        todo!()
-    }
-}
-
-pub struct KubeApi<Container: ContainerApi> {
+#[derive(Debug)]
+pub struct LocalKubeApi<Container = JobContainer> {
+    agent: AgentConfig,
+    target: Target,
     container: Container,
 }
 
-impl<C> KubeApi<C> {
-    pub fn job() -> KubeApi<JobContainer> {
-        todo!()
+impl LocalKubeApi {
+    pub fn job(agent: AgentConfig, target: Target) -> LocalKubeApi<JobContainer> {
+        LocalKubeApi {
+            agent,
+            target,
+            container: JobContainer,
+        }
     }
 
-    pub fn ephemeral() -> KubeApi<EphemeralContainer> {
-        todo!()
+    pub fn ephemeral(agent: AgentConfig, target: Target) -> LocalKubeApi<EphemeralContainer> {
+        LocalKubeApi {
+            agent,
+            target,
+            container: EphemeralContainer,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::str::FromStr;
+
+    use mirrord_config::{agent::AgentFileConfig, config::MirrordConfig};
+
+    use super::*;
+
+    #[test]
+    fn builder() -> Result<()> {
+        let api = LocalKubeApi::job(
+            AgentFileConfig::default().generate_config().unwrap(),
+            Target::from_str("pod/foo/container/bar").unwrap(),
+        );
+
+        println!("{:#?}", api);
+
+        Ok(())
     }
 }
