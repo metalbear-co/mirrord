@@ -4,7 +4,7 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
-use tracing::{debug, trace};
+use tracing::trace;
 
 use crate::error::HookError;
 
@@ -212,6 +212,7 @@ impl<S> Detour<S> {
     /// Remove the cfg attribute to enable using in other code.
     #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_or(self, default: S) -> S {
+        use tracing::debug;
         match self {
             Detour::Success(s) => s,
             Detour::Bypass(b) => {
