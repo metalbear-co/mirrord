@@ -61,6 +61,13 @@ pub struct AgentFileConfig {
     /// If initialization takes longer than this value, mirrord exits.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
     pub startup_timeout: Option<u64>,
+
+    /// Which network interface to use for mirroring.
+    ///
+    /// The default behavior is try to access the internet and use that interface
+    /// and if that fails it uses eth0.
+    #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
+    pub network_interface: Option<String>,
 }
 
 #[cfg(test)]

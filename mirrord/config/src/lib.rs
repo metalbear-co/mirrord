@@ -319,6 +319,7 @@ mod tests {
                 ephemeral: Some(false),
                 communication_timeout: None,
                 startup_timeout: None,
+                network_interface: None,
             },
             feature: FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true),

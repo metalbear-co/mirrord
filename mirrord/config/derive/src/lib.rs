@@ -12,6 +12,8 @@ enum FieldAttr {
     Nested,
     Env(Lit),
     Default(Lit),
+    Unstable,
+    Deprecated(Lit),
 }
 
 /// Parse and create Ident from map_to attribute
@@ -44,11 +46,15 @@ fn get_config_flag(meta: NestedMeta) -> Result<FieldAttr, Diagnostic> {
     match meta {
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unwrap") => Ok(FieldAttr::Unwrap),
         NestedMeta::Meta(Meta::Path(path)) if path.is_ident("nested") => Ok(FieldAttr::Nested),
+        NestedMeta::Meta(Meta::Path(path)) if path.is_ident("unstable") => Ok(FieldAttr::Unstable),
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("env") => {
             Ok(FieldAttr::Env(meta.lit))
         }
         NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("default") => {
             Ok(FieldAttr::Default(meta.lit))
+        }
+        NestedMeta::Meta(Meta::NameValue(meta)) if meta.path.is_ident("deprecated") => {
+            Ok(FieldAttr::Deprecated(meta.lit))
         }
         _ => Err(meta.span().error("unsupported config attribute flag")),
     }
@@ -171,8 +177,19 @@ fn map_field_name_impl(parent: &Ident, field: Field) -> Result<TokenStream, Diag
         }
     );
 
+    let layers = flags
+        .iter()
+        .filter(|flag| matches!(flag, FieldAttr::Deprecated(_) | FieldAttr::Unstable))
+        .map(|attr| match attr {
+            FieldAttr::Deprecated(ident) => {
+                quote! { .layer(|next| crate::config::deprecated::Deprecated::new(#ident, next)) }
+            }
+            FieldAttr::Unstable => quote! { .layer(|next| crate::config::unstable::Unstable::new(stringify!(#parent), stringify!(#ident), next)) },
+            _ => unreachable!(),
+        });
+
     let output = quote! {
-        #ident: (#(#impls),*).source_value() #unwrapper
+        #ident: (#(#impls),*) #(#layers)* .source_value() #unwrapper
     };
 
     Ok(output)
@@ -222,7 +239,7 @@ fn mirrord_config_macro(input: DeriveInput) -> Result<TokenStream, Diagnostic> {
     let mapped_fields_impl = {
         let named = fields
             .into_iter()
-            .map(|field| map_field_name_impl(&ident, field))
+            .map(|field| map_field_name_impl(&mapped_name, field))
             .collect::<Result<Vec<_>, _>>()?;
 
         quote! { { #(#named),* } }
