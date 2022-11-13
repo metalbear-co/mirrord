@@ -1711,6 +1711,7 @@ dependencies = [
 name = "mirrord-kube"
 version = "3.7.3"
 dependencies = [
+ "actix-codec",
  "async-trait",
  "futures",
  "k8s-openapi",

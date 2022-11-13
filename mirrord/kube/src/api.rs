@@ -1,11 +1,15 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use k8s_openapi::NamespaceResourceScope;
+use futures::{SinkExt, StreamExt};
+use k8s_openapi::{api::core::v1::Pod, NamespaceResourceScope};
 use kube::{Api, Client, Config};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_progress::TaskProgress;
+use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
+use rand::Rng;
 use tokio::sync::mpsc;
+use tracing::error;
 
 use crate::{
     api::{
@@ -38,6 +42,7 @@ pub trait KubernetesAPI {
 
     async fn create_agent(
         &self,
+        progress: &TaskProgress,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
 }
 
@@ -92,8 +97,9 @@ where
 
     async fn create_agent(
         &self,
+        progress: &TaskProgress,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        let rt = self
+        let runtime_data = self
             .target
             .path.as_ref().ok_or_else(|| KubeApiError::InvalidTarget(
                 "No target specified. Please set the `MIRRORD_IMPERSONATED_TARGET` environment variable.".to_owned(),
@@ -101,9 +107,61 @@ where
             .runtime_data(&self.client, self.target.namespace.as_deref())
             .await?;
 
-        println!("{:#?}", rt);
+        let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
 
-        todo!()
+        let pod_agent_name = C::create_agent(
+            &self.client,
+            &self.agent,
+            runtime_data,
+            self.agent.image.clone().unwrap_or_else(|| {
+                concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
+            }),
+            agent_port,
+            progress,
+        )
+        .await?;
+
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+
+        let mut codec = actix_codec::Framed::new(
+            port_forwarder.take_stream(agent_port).unwrap(), // TODO: remove unwrap
+            ClientCodec::new(),
+        );
+
+        let (in_tx, mut in_rx) = mpsc::channel(1000);
+        let (out_tx, out_rx) = mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(msg) = in_rx.recv() => {
+                        if let Err(fail) = codec.send(msg).await {
+                            error!("Error sending client message: {:#?}", fail);
+                            break;
+                        }
+                    }
+                    Some(daemon_message) = codec.next() => {
+                        match daemon_message {
+                            Ok(msg) => {
+                                let _ = out_tx.send(msg).await;
+                            }
+                            Err(err) => {
+                                error!("Error receiving daemon message: {:?}", err);
+                                break;
+                            }
+                        }
+                    }
+                    else => {
+                        error!("agent disconnected");
+
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok((in_tx, out_rx))
     }
 }
 
@@ -131,7 +189,9 @@ mod tests {
         )
         .await?;
 
-        println!("{:#?}", api.create_agent().await);
+        let progress = TaskProgress::new("agent initializing...");
+
+        println!("{:#?}", api.create_agent(&progress).await);
 
         Ok(())
     }

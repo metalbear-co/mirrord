@@ -22,6 +22,7 @@ mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
 mirrord-protocol = { path = "../protocol" }
 
+actix-codec.workspace = true
 async-trait = "0.1"
 futures.workspace = true
 k8s-openapi.workspace = true
