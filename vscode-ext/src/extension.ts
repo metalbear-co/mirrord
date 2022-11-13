@@ -22,13 +22,14 @@ const DEFAULT_CONFIG = `
             "incoming": "mirror",
             "outgoing": true
         },
-        "fs": "write",
+        "fs": "read",
         "env": true
     }
 }
 `;
 
-const VS_CODE_DIR = function() {
+// Populate the path for the project's .vscode folder
+const VS_CODE_DIR = function () {
 	let folders = vscode.workspace.workspaceFolders;
 	if (folders === undefined) {
 		throw new Error('No workspace folder found');
@@ -48,17 +49,12 @@ function getK8sApi(): CoreV1Api {
 	return k8sConfig.makeApiClient(k8s.CoreV1Api);
 }
 
+// Get the file path to the user's mirrord-config file, if it exists. 
 async function configFilePath() {
 	let vsCodeDir = VS_CODE_DIR;
-	let fileUri = vscode.Uri.joinPath(vsCodeDir, 'mirrord.+(toml|json|y?(a)ml)');
+	let fileUri = vscode.Uri.joinPath(vsCodeDir, '?(*.)mirrord.+(toml|json|y?(a)ml)');
 	let files = glob.sync(fileUri.fsPath);
-	if (files.length !== 0) {
-		let file = files[0];
-		return file;
-	}
-	else {
-		return '';
-	}
+	return files[0] || '';
 }
 
 async function openConfig() {
@@ -110,7 +106,7 @@ async function parseNamespace() {
 	let filePath: string = await configFilePath();
 	let parsed;
 	if (filePath) {
-		const file = await (await vscode.workspace.fs.readFile(vscode.Uri.parse(filePath))).toString();
+		const file = (await vscode.workspace.fs.readFile(vscode.Uri.parse(filePath))).toString();
 		if (filePath.endsWith('json')) {
 			parsed = JSON.parse(file);
 		} else if (filePath.endsWith('yaml') || filePath.endsWith('yml')) {
@@ -118,6 +114,7 @@ async function parseNamespace() {
 		} else if (filePath.endsWith('toml')) {
 			parsed = TOML.parse(file);
 		}
+
 	}
 	return parsed?.['target']?.['namespace'] || 'default';
 }
@@ -174,7 +171,14 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
-		const podNamespace = await parseNamespace();
+		let podNamespace: string;
+		try {
+			podNamespace = await parseNamespace();
+		} catch (e: any) {
+			vscode.window.showErrorMessage('Failed to parse mirrord config file', e.message);
+			return;
+		}
+
 		let k8sApi = getK8sApi();
 		// Get pods from kubectl and let user select one to mirror
 		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
