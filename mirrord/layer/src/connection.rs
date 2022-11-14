@@ -91,6 +91,6 @@ pub(crate) async fn connect(
         k8s_api
             .create_connection(agent_ref)
             .await
-            .unwrap_or_else(|err| handle_error(err.into()))
+            .unwrap_or_else(|err| handle_error(err))
     }
 }
