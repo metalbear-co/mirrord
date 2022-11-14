@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.10.0
+
 ### Added
 
 - CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
