@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "actix-codec",
  "async-trait",

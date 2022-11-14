@@ -41,7 +41,7 @@ pub trait ContainerApi {
     ) -> Result<String>;
 }
 
-pub const SKIP_NAMES: LazyLock<HashSet<&'static str>> =
+static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]));
 
 /// Choose container logic:
@@ -130,7 +130,7 @@ impl ContainerApi for JobContainer {
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String> {
-        let agent_image = Self::agent_image(&agent);
+        let agent_image = Self::agent_image(agent);
         let pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
@@ -276,7 +276,7 @@ impl ContainerApi for EphemeralContainer {
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String> {
-        let agent_image = Self::agent_image(&agent);
+        let agent_image = Self::agent_image(agent);
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature
