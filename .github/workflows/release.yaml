@@ -373,6 +373,7 @@ jobs:
   release_homebrew:
     needs: release_gh
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v3
       - name: Get release version and hashes
