@@ -1747,6 +1747,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
+ "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-progress",
  "mirrord-protocol",

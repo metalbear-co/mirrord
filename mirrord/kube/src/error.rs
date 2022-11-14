@@ -45,4 +45,7 @@ pub enum KubeApiError {
 
     #[error("mirrord-layer: Container not found: `{0}`")]
     ContainerNotFound(String),
+
+    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
+    AgentReadyTimeout,
 }

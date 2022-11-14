@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use actix_codec::{AsyncRead, AsyncWrite};
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::{api::core::v1::Pod, NamespaceResourceScope};
@@ -8,8 +9,8 @@ use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_progress::TaskProgress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use rand::Rng;
-use tokio::sync::mpsc;
-use tracing::error;
+use tokio::{net::TcpStream, sync::mpsc};
+use tracing::{error, info};
 
 use crate::{
     api::{
@@ -36,63 +37,57 @@ where
     }
 }
 
-#[async_trait]
-pub trait KubernetesAPI {
-    type Err;
+fn wrap_raw_connection(
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
-    async fn create_connection(
-        client: &Client,
-        agent: &AgentConfig,
-        agent_port: u16,
-        pod_agent_name: String,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_api(client, agent.namespace.as_deref());
-        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+    let (in_tx, mut in_rx) = mpsc::channel(1000);
+    let (out_tx, out_rx) = mpsc::channel(1000);
 
-        let mut codec = actix_codec::Framed::new(
-            port_forwarder.take_stream(agent_port).unwrap(),
-            ClientCodec::new(),
-        );
-
-        let (in_tx, mut in_rx) = mpsc::channel(1000);
-        let (out_tx, out_rx) = mpsc::channel(1000);
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(msg) = in_rx.recv() => {
-                        if let Err(fail) = codec.send(msg).await {
-                            error!("Error sending client message: {:#?}", fail);
-                            break;
-                        }
-                    }
-                    Some(daemon_message) = codec.next() => {
-                        match daemon_message {
-                            Ok(msg) => {
-                                let _ = out_tx.send(msg).await;
-                            }
-                            Err(err) => {
-                                error!("Error receiving daemon message: {:?}", err);
-                                break;
-                            }
-                        }
-                    }
-                    else => {
-                        error!("agent disconnected");
-
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                Some(msg) = in_rx.recv() => {
+                    if let Err(fail) = codec.send(msg).await {
+                        error!("Error sending client message: {:#?}", fail);
                         break;
                     }
                 }
+                Some(daemon_message) = codec.next() => {
+                    match daemon_message {
+                        Ok(msg) => {
+                            let _ = out_tx.send(msg).await;
+                        }
+                        Err(err) => {
+                            error!("Error receiving daemon message: {:?}", err);
+                            break;
+                        }
+                    }
+                }
+                else => {
+                    error!("agent disconnected");
+
+                    break;
+                }
             }
-        });
+        }
+    });
 
-        Ok((in_tx, out_rx))
-    }
+    Ok((in_tx, out_rx))
+}
 
-    async fn create_agent(
+#[async_trait]
+pub trait KubernetesAPI {
+    type AgentRef;
+    type Err;
+
+    async fn create_connection(
         &self,
-        progress: &TaskProgress,
+        agent_ref: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
+
+    async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err>;
 }
 
 pub struct LocalApi<Container = JobContainer> {
@@ -142,12 +137,20 @@ impl<C> KubernetesAPI for LocalApi<C>
 where
     C: ContainerApi + Send + Sync,
 {
+    type AgentRef = (String, u16);
     type Err = KubeApiError;
 
-    async fn create_agent(
+    async fn create_connection(
         &self,
-        progress: &TaskProgress,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
+        (pod_agent_name, agent_port): Self::AgentRef,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+
+        wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
+    }
+
+    async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
         let runtime_data = self
             .target
             .path.as_ref().ok_or_else(|| KubeApiError::InvalidTarget(
@@ -156,7 +159,9 @@ where
             .runtime_data(&self.client, self.target.namespace.as_deref())
             .await?;
 
+        info!("No existing agent, spawning new one.");
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
+        info!("Using port `{agent_port:?}` for communication");
 
         let pod_agent_name = C::create_agent(
             &self.client,
@@ -167,38 +172,25 @@ where
         )
         .await?;
 
-        Self::create_connection(&self.client, &self.agent, agent_port, pod_agent_name).await
+        Ok((pod_agent_name, agent_port))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::str::FromStr;
+pub struct RawConnection;
 
-    use mirrord_config::{
-        agent::AgentFileConfig,
-        config::MirrordConfig,
-        target::{Target, TargetFileConfig},
-    };
+#[async_trait]
+impl KubernetesAPI for RawConnection {
+    type AgentRef = TcpStream;
+    type Err = KubeApiError;
 
-    use super::*;
+    async fn create_connection(
+        &self,
+        stream: Self::AgentRef,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        wrap_raw_connection(stream)
+    }
 
-    #[tokio::test]
-    async fn builder() -> Result<()> {
-        let target = Target::from_str("deploy/py-serv-deployment").unwrap();
-
-        let api = LocalApi::job(
-            AgentFileConfig::default().generate_config().unwrap(),
-            TargetFileConfig::Simple(Some(target))
-                .generate_config()
-                .unwrap(),
-        )
-        .await?;
-
-        let progress = TaskProgress::new("agent initializing...");
-
-        println!("{:#?}", api.create_agent(&progress).await);
-
-        Ok(())
+    async fn create_agent(&self, _: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
+        panic!("RawConnection cannot create agent");
     }
 }

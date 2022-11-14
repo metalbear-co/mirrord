@@ -18,15 +18,15 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use futures::SinkExt;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    AccessFileRequest, AccessFileResponse, ClientCodec, ClientMessage, CloseFileRequest,
-    CloseFileResponse, FileRequest, FileResponse, OpenFileRequest, OpenFileResponse,
-    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse,
-    ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
+    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+    ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+    WriteFileResponse, WriteLimitedFileRequest,
 };
+use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -215,42 +215,30 @@ impl FileHandler {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: HookMessageFile,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         use HookMessageFile::*;
         match message {
-            Open(open) => self.handle_hook_open(open, codec).await,
-            OpenRelative(open_relative) => {
-                self.handle_hook_open_relative(open_relative, codec).await
-            }
+            Open(open) => self.handle_hook_open(open, tx).await,
+            OpenRelative(open_relative) => self.handle_hook_open_relative(open_relative, tx).await,
 
-            Read(read) => self.handle_hook_read(read, codec).await,
-            ReadLine(read) => self.handle_hook_read_line(read, codec).await,
-            ReadLimited(read) => self.handle_hook_read_limited(read, codec).await,
-            Seek(seek) => self.handle_hook_seek(seek, codec).await,
-            Write(write) => self.handle_hook_write(write, codec).await,
-            WriteLimited(write) => self.handle_hook_write_limited(write, codec).await,
-            Close(close) => self.handle_hook_close(close, codec).await,
-            Access(access) => self.handle_hook_access(access, codec).await,
+            Read(read) => self.handle_hook_read(read, tx).await,
+            ReadLine(read) => self.handle_hook_read_line(read, tx).await,
+            ReadLimited(read) => self.handle_hook_read_limited(read, tx).await,
+            Seek(seek) => self.handle_hook_seek(seek, tx).await,
+            Write(write) => self.handle_hook_write(write, tx).await,
+            WriteLimited(write) => self.handle_hook_write_limited(write, tx).await,
+            Close(close) => self.handle_hook_close(close, tx).await,
+            Access(access) => self.handle_hook_access(access, tx).await,
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
-    async fn handle_hook_open(
-        &mut self,
-        open: Open,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<()> {
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_open(&mut self, open: Open, tx: &Sender<ClientMessage>) -> Result<()> {
         let Open {
             file_channel_tx,
             path,
@@ -266,17 +254,14 @@ impl FileHandler {
         let open_file_request = OpenFileRequest { path, open_options };
 
         let request = ClientMessage::FileRequest(FileRequest::Open(open_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_open_relative(
         &mut self,
         open_relative: OpenRelative,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let OpenRelative {
             relative_fd,
@@ -299,17 +284,14 @@ impl FileHandler {
 
         let request =
             ClientMessage::FileRequest(FileRequest::OpenRelative(open_relative_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_read(
         &mut self,
         read: Read<ReadFileResponse>,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Read {
             remote_fd,
@@ -326,17 +308,14 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_read_line(
         &mut self,
         read_line: Read<ReadFileResponse>,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Read {
             remote_fd,
@@ -353,17 +332,14 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::ReadLine(read_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_read_limited(
         &mut self,
         read: Read<ReadFileResponse>,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Read {
             remote_fd,
@@ -381,17 +357,10 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::ReadLimited(read_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    async fn handle_hook_seek(
-        &mut self,
-        seek: Seek,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<()> {
+    async fn handle_hook_seek(&mut self, seek: Seek, tx: &Sender<ClientMessage>) -> Result<()> {
         let Seek {
             remote_fd: fd,
             seek_from,
@@ -410,16 +379,13 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::Seek(seek_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
     async fn handle_hook_write(
         &mut self,
         write: Write<WriteFileResponse>,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Write {
             remote_fd: fd,
@@ -438,17 +404,14 @@ impl FileHandler {
         let write_file_request = WriteFileRequest { fd, write_bytes };
 
         let request = ClientMessage::FileRequest(FileRequest::Write(write_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_write_limited(
         &mut self,
         write: Write<WriteFileResponse>,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Write {
             remote_fd,
@@ -466,17 +429,10 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::WriteLimited(write_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
-    async fn handle_hook_close(
-        &mut self,
-        close: Close,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<()> {
+    async fn handle_hook_close(&mut self, close: Close, tx: &Sender<ClientMessage>) -> Result<()> {
         let Close {
             fd,
             file_channel_tx,
@@ -488,16 +444,13 @@ impl FileHandler {
         let close_file_request = CloseFileRequest { fd };
 
         let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 
     async fn handle_hook_access(
         &mut self,
         access: Access,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<()> {
         let Access {
             path: pathname,
@@ -515,7 +468,7 @@ impl FileHandler {
         let access_file_request = AccessFileRequest { pathname, mode };
 
         let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
-        codec.send(request).await.map_err(From::from)
+        tx.send(request).await.map_err(From::from)
     }
 }
 

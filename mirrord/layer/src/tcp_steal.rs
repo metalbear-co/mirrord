@@ -2,15 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
+    sync::mpsc::Sender,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -88,14 +88,11 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_listen(
         &mut self,
         listen: Listen,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         let port = listen.requested_port;
 
@@ -104,8 +101,7 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        codec
-            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
             .await
             .map_err(From::from)
     }
