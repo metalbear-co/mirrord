@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
+
 ### Changed
 
 - VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
@@ -22,8 +26,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - VS Code Extension: change extension to use a mirrord-config file for configuration
 - VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
-
-- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
 
 ## 3.8.0
 
