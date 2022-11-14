@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "libc",
 ]
@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "atty",
  "termspin",
@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "memchr",
  "object",
@@ -2709,7 +2709,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.9.0"
+version = "3.10.0"
 dependencies = [
  "libc",
 ]
