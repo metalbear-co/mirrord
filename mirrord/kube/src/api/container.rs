@@ -25,11 +25,17 @@ use crate::{
 
 #[async_trait]
 pub trait ContainerApi {
+    fn agent_image(agent: &AgentConfig) -> String {
+        match &agent.image {
+            Some(image) => image.clone(),
+            None => concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_owned(),
+        }
+    }
+
     async fn create_agent(
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
-        agent_image: String,
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String>;
@@ -121,10 +127,10 @@ impl ContainerApi for JobContainer {
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
-        agent_image: String,
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String> {
+        let agent_image = Self::agent_image(&agent);
         let pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
@@ -267,10 +273,10 @@ impl ContainerApi for EphemeralContainer {
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
-        agent_image: String,
         connection_port: u16,
         progress: &TaskProgress,
     ) -> Result<String> {
+        let agent_image = Self::agent_image(&agent);
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature

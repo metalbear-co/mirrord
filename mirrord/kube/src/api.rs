@@ -40,6 +40,55 @@ where
 pub trait KubernetesAPI {
     type Err;
 
+    async fn create_connection(
+        client: &Client,
+        agent: &AgentConfig,
+        agent_port: u16,
+        pod_agent_name: String,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let pod_api: Api<Pod> = get_k8s_api(client, agent.namespace.as_deref());
+        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+
+        let mut codec = actix_codec::Framed::new(
+            port_forwarder.take_stream(agent_port).unwrap(),
+            ClientCodec::new(),
+        );
+
+        let (in_tx, mut in_rx) = mpsc::channel(1000);
+        let (out_tx, out_rx) = mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(msg) = in_rx.recv() => {
+                        if let Err(fail) = codec.send(msg).await {
+                            error!("Error sending client message: {:#?}", fail);
+                            break;
+                        }
+                    }
+                    Some(daemon_message) = codec.next() => {
+                        match daemon_message {
+                            Ok(msg) => {
+                                let _ = out_tx.send(msg).await;
+                            }
+                            Err(err) => {
+                                error!("Error receiving daemon message: {:?}", err);
+                                break;
+                            }
+                        }
+                    }
+                    else => {
+                        error!("agent disconnected");
+
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok((in_tx, out_rx))
+    }
+
     async fn create_agent(
         &self,
         progress: &TaskProgress,
@@ -113,55 +162,12 @@ where
             &self.client,
             &self.agent,
             runtime_data,
-            self.agent.image.clone().unwrap_or_else(|| {
-                concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_string()
-            }),
             agent_port,
             progress,
         )
         .await?;
 
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
-        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
-
-        let mut codec = actix_codec::Framed::new(
-            port_forwarder.take_stream(agent_port).unwrap(), // TODO: remove unwrap
-            ClientCodec::new(),
-        );
-
-        let (in_tx, mut in_rx) = mpsc::channel(1000);
-        let (out_tx, out_rx) = mpsc::channel(1000);
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(msg) = in_rx.recv() => {
-                        if let Err(fail) = codec.send(msg).await {
-                            error!("Error sending client message: {:#?}", fail);
-                            break;
-                        }
-                    }
-                    Some(daemon_message) = codec.next() => {
-                        match daemon_message {
-                            Ok(msg) => {
-                                let _ = out_tx.send(msg).await;
-                            }
-                            Err(err) => {
-                                error!("Error receiving daemon message: {:?}", err);
-                                break;
-                            }
-                        }
-                    }
-                    else => {
-                        error!("agent disconnected");
-
-                        break;
-                    }
-                }
-            }
-        });
-
-        Ok((in_tx, out_rx))
+        Self::create_connection(&self.client, &self.agent, agent_port, pod_agent_name).await
     }
 }
 
