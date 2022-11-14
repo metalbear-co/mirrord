@@ -1,5 +1,6 @@
 #![cfg(target_os = "macos")]
 
+use std::env;
 use std::ffi::{CStr, CString};
 
 use frida_gum::interceptor::Interceptor;
@@ -22,6 +23,11 @@ use crate::{
     file::ops::str_from_rawish,
     replace,
 };
+
+
+static MAX_ENV_VARS_NUM: usize = 1024;
+static AGENT_NAME_VAR_NAME: &str = "MIRRORD_CONNECT_AGENT";
+static AGENT_PORT_VAR_NAME: &str = "MIRRORD_CONNECT_PORT";
 
 pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "execve", execve_detour, FnExecve, FN_EXECVE);
@@ -48,12 +54,12 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
 
 /// Does the null terminated pointer array `env_arr` contain an env var named `var_name`.
 fn env_contains_var(env_arr: &Nul<*const c_char>, var_name: &str) -> bool {
-    // The array is not checked to actually be null terminated. So limit number of taken args.
-    let max_env_vars_num = 1024;
+    // The items in the array are pointers to strings with the form "KEY=VALUE".
     let prefix = var_name.to_owned() + "=";
     env_arr
         .iter()
-        .take(max_env_vars_num)
+        // The array is not checked to actually be null terminated. So limit number of taken args.
+        .take(MAX_ENV_VARS_NUM)
         .map(|ptr| unsafe { CStr::from_ptr(ptr.clone()) }) // Can't be null.
         .map(Some) // str_from_rawish takes an option.
         .map(str_from_rawish)
@@ -64,6 +70,35 @@ fn env_contains_var(env_arr: &Nul<*const c_char>, var_name: &str) -> bool {
         })
 }
 
+/// "MY_KEY" -> "MY_KEY=MY_VALUE"
+fn get_env_var_item(var_name: &str) -> String {
+    for (k, v) in std::env::vars() {
+        println!("{}: {}", k, v);
+    }
+    let mut res = var_name.to_string();
+    res.push_str("=");
+    // Unwrap, because if we're hooking the agent name must have been set already.
+    res.push_str(&env::var(var_name).unwrap());
+    res
+}
+
+fn string_from_rawish(rawish_path: &CStr) -> Detour<String> {
+    str_from_rawish(Some(rawish_path)).map(|s| s.to_string())
+}
+
+fn get_new_envp_with_agent(env_arr: &Nul<*const c_char>) -> Detour<Vec<String>> {
+    let mut env_vars: Vec<String> = env_arr
+        .iter()
+        .take(MAX_ENV_VARS_NUM)
+        .map(|ptr| unsafe { CStr::from_ptr(ptr.clone()) }) // Can't be null.
+        .map(string_from_rawish)
+        .collect::<Detour<Vec<_>>>()?;
+
+    env_vars.push(get_env_var_item(AGENT_NAME_VAR_NAME));
+    env_vars.push(get_env_var_item(AGENT_PORT_VAR_NAME));
+    Success(env_vars)
+}
+
 /// Check if array contains the agent vars, if not return pointer to new array that does.
 unsafe fn add_exiting_agent_if_missing(envp: *const *const c_char) -> Detour<Vec<String>> {
     if envp == (0 as *const *const c_char) {
@@ -71,11 +106,10 @@ unsafe fn add_exiting_agent_if_missing(envp: *const *const c_char) -> Detour<Vec
         return Error(NullPointer);
     }
     let env_arr = Nul::new_unchecked(envp);
-    if env_contains_var(env_arr, "MIRRORD_CONNECT_AGENT") {
+    if env_contains_var(env_arr, AGENT_NAME_VAR_NAME) {
         Bypass(AgentAlreadyInEnv)
     } else {
-        Success(vec!["TODO".to_string()]) // TODO: remove this line
-                                          // get_new_envp_with_agent(env_arr) // TODO: uncomment.
+        get_new_envp_with_agent(env_arr)
     }
 }
 
