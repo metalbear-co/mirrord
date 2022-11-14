@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
+
 ### Changed
 
 - VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
