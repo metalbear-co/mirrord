@@ -6,15 +6,19 @@ use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::sip_patch;
+use null_terminated::Nul;
 use tracing::{debug, warn};
 
 use crate::{
     detour::{
-        Bypass::NoSipDetected,
+        Bypass::{AgentAlreadyInEnv, NoSipDetected},
         Detour,
         Detour::{Bypass, Error, Success},
     },
-    error::{HookError, HookError::Null},
+    error::{
+        HookError,
+        HookError::{Null, NullPointer},
+    },
     file::ops::str_from_rawish,
     replace,
 };
@@ -42,6 +46,39 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
     }
 }
 
+/// Does the null terminated pointer array `env_arr` contain an env var named `var_name`.
+fn env_contains_var(env_arr: &Nul<*const c_char>, var_name: &str) -> bool {
+    // The array is not checked to actually be null terminated. So limit number of taken args.
+    let max_env_vars_num = 1024;
+    let prefix = var_name.to_owned() + "=";
+    env_arr
+        .iter()
+        .take(max_env_vars_num)
+        .map(|ptr| unsafe { CStr::from_ptr(ptr.clone()) }) // Can't be null.
+        .map(Some) // str_from_rawish takes an option.
+        .map(str_from_rawish)
+        .any(|detour_str| {
+            detour_str
+                .map(|k_v| k_v.starts_with(&prefix))
+                .unwrap_or(false)
+        })
+}
+
+/// Check if array contains the agent vars, if not return pointer to new array that does.
+unsafe fn add_exiting_agent_if_missing(envp: *const *const c_char) -> Detour<Vec<String>> {
+    if envp == (0 as *const *const c_char) {
+        // Not allowed on macos.
+        return Error(NullPointer);
+    }
+    let env_arr = Nul::new_unchecked(envp);
+    if env_contains_var(env_arr, "MIRRORD_CONNECT_AGENT") {
+        Bypass(AgentAlreadyInEnv)
+    } else {
+        Success(vec!["TODO".to_string()]) // TODO: remove this line
+                                          // get_new_envp_with_agent(env_arr) // TODO: uncomment.
+    }
+}
+
 /// Hook for `libc::execve`.
 ///
 /// Patch file if it is SIPed, then call normal execve (on the patched file if patched, otherwise
@@ -66,5 +103,22 @@ pub(crate) unsafe extern "C" fn execve_detour(
             Err(err) => Error(Null(err)),
         })
         .unwrap_or(path); // Continue even if there were errors - just run without patching.
-    FN_EXECVE(final_path, argv, envp)
+    let mut ptr_vec: Vec<*const c_char> = Vec::new();
+    let final_envp = add_exiting_agent_if_missing(envp)
+        .map(|string_vec| {
+            string_vec.iter().for_each(|string| {
+                if let Ok(c_string) = CString::new(string.to_owned()) {
+                    ptr_vec.push(c_string.as_ptr());
+                }
+            });
+            ptr_vec.push(0 as *const c_char); // Push null pointer to terminate array.
+            <&Nul<*const c_char> as ::std::convert::TryFrom<_>>::try_from(
+                &ptr_vec as &[*const c_char],
+            )
+            .map(|arr| arr.as_ptr())
+            .unwrap() // Infallible
+        })
+        .unwrap_or(envp);
+
+    FN_EXECVE(final_path, argv, final_envp)
 }
