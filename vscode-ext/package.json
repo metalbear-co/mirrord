@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
-	"version": "3.8.0",
+	"version": "3.9.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -37,7 +37,7 @@
 		},
 		"jsonValidation": [
 			{
-				"fileMatch": "*.mirrord.json",
+				"fileMatch": "*mirrord.json",
 				"url": "https://raw.githubusercontent.com/metalbear-co/mirrord/main/mirrord-schema.json"
 			}
 		]
@@ -67,7 +67,7 @@
 		"@vscode/test-electron": "^2.0.3",
 		"esbuild": "^0.14.23",
 		"eslint": "^8.6.0",
-		"glob": "^7.2.0",
+		"glob": "^7.2.3",
 		"mocha": "^9.1.3",
 		"prettier": "2.5.1",
 		"typescript": "^4.5.4",
@@ -75,7 +75,9 @@
 	},
 	"dependencies": {
 		"@kubernetes/client-node": "^0.16.3",
+		"es5-ext": "<=0.10.53",
 		"ffi-napi": "^4.0.3",
+		"minipass": "^3.3.5",
 		"nan": "^2.15.0",
 		"node-go-require": "^2.0.0",
 		"node-netstat": "^1.8.0",
@@ -83,7 +85,7 @@
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",
 		"semver": "^7.3.7",
-		"es5-ext": "<=0.10.53",
-		"minipass": "^3.3.5"
+		"toml": "^3.0.0",
+		"yaml": "^2.1.3"
 	}
 }

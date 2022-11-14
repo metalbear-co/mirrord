@@ -7,9 +7,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
+
+## 3.9.0
+
 ### Added
 
 - `MIRRORD_AGENT_NETWORK_INTERFACE` environment variable/file config to let user control which network interface to use. Workaround for [#670](https://github.com/metalbear-co/mirrord/issues/670).
+- mirrord-config: `deprecated` and `unstable` tags to MirrordConfg macro for messaging user when using said fields
+
+### Changed
+
+- VS Code Extension: change extension to use a mirrord-config file for configuration
+- VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
 
 - CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
 
