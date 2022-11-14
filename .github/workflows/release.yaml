@@ -387,7 +387,7 @@ jobs:
         with:
           repository: metalbear-co/homebrew-mirrord
           path: ./
-          token: ${{ secrets.GITHUB_PAT }}
+          token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
           sed 's/\([0-9]\.[0-9]\.[0-9]\)/${{ steps.version.outputs.version }}/g' mirrord.rb
