@@ -2,6 +2,13 @@ pub trait MirrordConfigSource: Sized {
     type Result;
 
     fn source_value(self) -> Option<Self::Result>;
+
+    fn layer<L>(self, layer_fn: impl Fn(Self) -> L) -> L
+    where
+        L: MirrordConfigSource<Result = Self::Result>,
+    {
+        layer_fn(self)
+    }
 }
 
 impl<T> MirrordConfigSource for Option<T>

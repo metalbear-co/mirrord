@@ -297,9 +297,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.74"
+version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "581f5dba903aac52ea3feb5ec4810848460ee833876f1f9b0fdeab1f19091574"
+checksum = "76a284da2e6fe2092f2353e51713435363112dfd60030e22add80be333fb928f"
 
 [[package]]
 name = "cesu8"
@@ -496,9 +496,9 @@ dependencies = [
 
 [[package]]
 name = "cxx"
-version = "1.0.80"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b7d4e43b25d3c994662706a1d4fcfc32aaa6afd287502c111b237093bb23f3a"
+checksum = "97abf9f0eca9e52b7f81b945524e76710e6cb2366aead23b7d4fbf72e281f888"
 dependencies = [
  "cc",
  "cxxbridge-flags",
@@ -508,9 +508,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-build"
-version = "1.0.80"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84f8829ddc213e2c1368e51a2564c552b65a8cb6a28f31e576270ac81d5e5827"
+checksum = "7cc32cc5fea1d894b77d269ddb9f192110069a8a9c1f1d441195fba90553dea3"
 dependencies = [
  "cc",
  "codespan-reporting",
@@ -523,15 +523,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.80"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e72537424b474af1460806647c41d4b6d35d09ef7fe031c5c2fa5766047cc56a"
+checksum = "8ca220e4794c934dc6b1207c3b42856ad4c302f2df1712e9f8d2eec5afaacf1f"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.80"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "309e4fb93eed90e1e14bea0da16b209f81813ba9fc7830c20ed151dd7bc0a4d7"
+checksum = "b846f081361125bfc8dc9d3940c84e1fd83ba54bbca7b17cd29483c828be0704"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "libc",
 ]
@@ -1099,9 +1099,9 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
 name = "hyper"
-version = "0.14.22"
+version = "0.14.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abfba89e19b959ca163c7752ba59d737c1ceea53a5d31a149c805446fc958064"
+checksum = "034711faac9d2166cb1baf1a2fb0b60b1f277f8492fd72176c17f3515e1abd3c"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "actix-codec",
  "bollard",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1783,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "atty",
  "termspin",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "memchr",
  "object",
@@ -2728,7 +2728,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.7.3"
+version = "3.9.0"
 dependencies = [
  "libc",
 ]
