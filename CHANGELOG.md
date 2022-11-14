@@ -8,6 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 ### Changed
+
 - VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
 
 ## 3.9.0
