@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Only recommend `--accept-invalid-certificates` on connection errors if not already set.
+- Terminate user application on connection error instead of only stopping mirrord.
+
 ## 3.10.0
 
 ### Added
