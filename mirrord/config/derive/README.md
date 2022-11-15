@@ -3,19 +3,18 @@
 This crate implements the derive macro `MirrordConfig`, which introduces the `config` attribute:
 
 - On a struct:
-    - `map_to = &str` set the name of the new generated struct (defaults to `format!("Mapped{}", <struct name>)`)
-    - `derive = &str` extend `derive` statement with extra values
-    - `generator = &str` set the `type Generator` for `FromMirrordConfig`
+    - `map_to = &str` set the name of the new generated struct (defaults to `format!("File{}", <struct name>)`).
+    - `derive = &str` extend `derive` statement with extra values.
+    - `generator = &str` set the `type Generator` for `FromMirrordConfig`.
 
 - On struct fields:
     - `nested` to use a value of a type that itself implement `MirrordConfig`. The value used is its `Generated` type.
     - `toggleable` wrap field with `ToggleableConfig` so will be allowed to pass bool instead of entire field
     - `env = &str` to load the value from the specified environment variable, if it's populated.
     - `default = &str` to set a default value to the field. This also implicitly `unwrap`s it.
-    - `unstable` mark field as unstable and print an error message to the user
-    - `deprecated | deprecated = &str` mark field as deprecated and print either a default message or a custom one
-    - `rename = &str` to set a default value to the field. This also implicitly `unwrap`s it.
-
+    - `unstable` mark field as unstable and print an error message to the user.
+    - `deprecated | deprecated = &str` mark field as deprecated and print either a default message or a custom one.
+    - `rename = &str` pass `#[serde(rename = &str)]` to generated struct.
 
 Example
 
