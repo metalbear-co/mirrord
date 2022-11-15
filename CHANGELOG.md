@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- CI: download shasums and add git username/email to make the homebrew release work
+
 ## 3.10.0
 
 ### Added

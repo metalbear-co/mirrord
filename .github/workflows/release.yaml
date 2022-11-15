@@ -327,37 +327,39 @@ jobs:
       - name: Create mirrord linux-x64 zip file
         run: |
           zip mirrord_linux_x86_64.zip mirrord
-          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
-        working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
+          shasum -a 256 /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
       - name: Create mirrord linux-aarch64 zip file
         run: |
           zip mirrord_linux_aarch64.zip mirrord
-          shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
-        working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
+          shasum -a 256 /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
       - name: Create mirrord macos zip file
         run: |
           zip mirrord_mac_universal.zip mirrord
-          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
-        working-directory: /tmp/artifacts/universal-apple-darwin
+          shasum -a 256 /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
+      # used for the homebrew formula
+      - uses: actions/upload-artifact@v3
+        with:
+          name: shasum
+          path: ./*.shasum256
+          if-no-files-found: error
       - name: Prepare binaries for upload
         run: |
           mkdir /tmp/release
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
+          mv mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
 
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
-
+          mv mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
 
           mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
-
+          mv mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+          
           mv /tmp/artifacts/vscode-ext/* /tmp/release/
           mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
@@ -375,13 +377,16 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_dispatch'
     steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: /tmp/artifacts
       - uses: actions/checkout@v3
       - name: Get release version and hashes
         run: |
           echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_OUTPUT
-          echo "sha256_mac=$(cat /tmp/release/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
-          echo "sha256_linux_aarch64=$(cat /tmp/release/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
-          echo "sha256_linux_x86_64=$(cat /tmp/release/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_mac=$(cat /tmp/artifacts/shasum/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
       - name: Checkout into homebrew-mirrord
         uses: actions/checkout@v3
         with:
@@ -390,16 +395,18 @@ jobs:
           token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
-          sed 's/\([0-9]\.[0-9]\.[0-9]\)/${{ steps.version.outputs.version }}/g' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ steps.version.outputs.sha256_mac }}/' mirrord.rb       
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ steps.version.outputs.sha256_linux_aarch64 }}/' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ steps.version.outputs.sha256_linux_x86_64 }}/' mirrord.rb
-      - name: Commit
+          sed -i -e 's/\([0-9]\.[0-9]\.[0-9]\)/"${{ steps.version.outputs.version }}"/g' mirrord.rb
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ steps.version.outputs.sha256_mac }}"/' mirrord.rb       
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ steps.version.outputs.sha256_linux_aarch64 }}"/' mirrord.rb
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ steps.version.outputs.sha256_linux_x86_64 }}"/' mirrord.rb
+      - name: Commit to metalbear-co/homebrew-mirrord
         run: |
+          git config --global user.email "eyal@metalbear.co"
+          git config --global user.name "Eyal Bukchin"
           git add .
           git commit -m "Update to ${{ steps.version.outputs.version }}"
           git push
-      - name: Tag
+      - name: Create a new Tag
         run: |
           git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
           git push --tags
