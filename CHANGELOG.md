@@ -7,6 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+- Remove `unimplemented` for some IO cases, we now return `Unknown` instead. Also added warning logs for these cases to track.
+
 ## 3.10.0
 
 ### Added

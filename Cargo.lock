@@ -1779,6 +1779,7 @@ dependencies = [
  "bytes",
  "serde",
  "thiserror",
+ "tracing",
  "trust-dns-resolver",
 ]
 
