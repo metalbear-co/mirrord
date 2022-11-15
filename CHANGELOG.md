@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- CI: fix `release_gh` zip file step
+
 ## 3.10.1
 
 ### Changed

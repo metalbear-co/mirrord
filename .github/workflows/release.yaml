@@ -327,20 +327,26 @@ jobs:
       - name: Create mirrord linux-x64 zip file
         run: |
           zip mirrord_linux_x86_64.zip mirrord
-          shasum -a 256 /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
+          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
+        working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
       - name: Create mirrord linux-aarch64 zip file
         run: |
           zip mirrord_linux_aarch64.zip mirrord
-          shasum -a 256 /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
+          shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
+        working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
       - name: Create mirrord macos zip file
         run: |
           zip mirrord_mac_universal.zip mirrord
-          shasum -a 256 /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
+          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
+        working-directory: /tmp/artifacts/universal-apple-darwin
       # used for the homebrew formula
       - uses: actions/upload-artifact@v3
         with:
           name: shasum
-          path: ./*.shasum256
+          path: |
+            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
+            /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
+            /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
           if-no-files-found: error
       - name: Prepare binaries for upload
         run: |
@@ -348,18 +354,18 @@ jobs:
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
           mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
-          mv mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
+          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
 
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
           mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
-          mv mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
+          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
 
           mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
-          mv mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
-          
+          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
+
           mv /tmp/artifacts/vscode-ext/* /tmp/release/
           mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
