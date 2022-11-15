@@ -11,7 +11,7 @@ use std::{
 use actix_codec::Framed;
 use cli::parse_args;
 use dns::{dns_worker, DnsRequest};
-use error::AgentError;
+use error::Result;
 use file::FileManager;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
@@ -100,7 +100,7 @@ impl ClientConnectionHandler {
         sniffer_command_sender: Sender<SnifferCommand>,
         cancel_token: CancellationToken,
         dns_sender: Sender<DnsRequest>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<()> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
             None if ephemeral => FileManager::new(Some(1)),
@@ -143,11 +143,11 @@ impl ClientConnectionHandler {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) -> Result<(), AgentError> {
+    async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
         Ok(self.stream.send(response).await?)
     }
 
-    async fn handle_loop(&mut self, token: CancellationToken) -> Result<(), AgentError> {
+    async fn handle_loop(&mut self, token: CancellationToken) -> Result<()> {
         let mut running = true;
         while running {
             select! {
@@ -192,7 +192,7 @@ impl ClientConnectionHandler {
 
     /// Handle incoming messages from the client. Returns False if the client disconnected.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool, AgentError> {
+    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
                 let response = self.file_manager.handle_message(req)?;
@@ -255,7 +255,7 @@ impl ClientConnectionHandler {
         Ok(true)
     }
 
-    async fn handle_client_tcp(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+    async fn handle_client_tcp(&mut self, message: LayerTcp) -> Result<()> {
         match message {
             LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
@@ -268,7 +268,7 @@ impl ClientConnectionHandler {
     }
 }
 
-async fn start_agent() -> Result<(), AgentError> {
+async fn start_agent() -> Result<()> {
     let args = parse_args();
 
     debug!("starting with args {args:?}");
@@ -356,7 +356,7 @@ async fn start_agent() -> Result<(), AgentError> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), AgentError> {
+async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()

@@ -28,7 +28,7 @@ use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::AgentError,
+    error::Result,
     runtime::set_namespace,
     util::{run_thread, IndexAllocator},
 };
@@ -43,7 +43,7 @@ const DNS_PORT: u16 = 53;
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct UdpOutgoingApi {
     /// Holds the `interceptor_task`.
-    _task: thread::JoinHandle<Result<(), AgentError>>,
+    _task: thread::JoinHandle<Result<()>>,
 
     /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<Layer>,
@@ -117,7 +117,7 @@ impl UdpOutgoingApi {
         pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<()> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
                 .join(PathBuf::from(pid.to_string()))
@@ -255,10 +255,7 @@ impl UdpOutgoingApi {
     }
 
     /// Sends a `UdpOutgoingRequest` to the `interceptor_task`.
-    pub(crate) async fn layer_message(
-        &mut self,
-        message: LayerUdpOutgoing,
-    ) -> Result<(), AgentError> {
+    pub(crate) async fn layer_message(&mut self, message: LayerUdpOutgoing) -> Result<()> {
         trace!(
             "UdpOutgoingApi::layer_message -> layer_message {:#?}",
             message
@@ -267,7 +264,7 @@ impl UdpOutgoingApi {
     }
 
     /// Receives a `UdpOutgoingResponse` from the `interceptor_task`.
-    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonUdpOutgoing, AgentError> {
+    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonUdpOutgoing> {
         self.daemon_rx
             .recv()
             .await
