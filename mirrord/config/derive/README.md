@@ -12,6 +12,8 @@ This crate implements the derive macro `MirrordConfig`, which introduces the `co
     - `toggleable` wrap field with `ToggleableConfig` so will be allowed to pass bool instead of entire field
     - `env = &str` to load the value from the specified environment variable, if it's populated.
     - `default = &str` to set a default value to the field. This also implicitly `unwrap`s it.
+    - `unstable` mark field as unstable and print an error message to the user
+    - `deprecated | deprecated = &str` mark field as deprecated and print either a default message or a custom one
     - `rename = &str` to set a default value to the field. This also implicitly `unwrap`s it.
 
 

@@ -208,7 +208,7 @@ mod tests {
     fn default(
         #[values((None, None), (Some("pod/foobar"), Some(Target::Pod(PodTarget { pod: "foobar".to_string(), container: None }))))]
         path: (Option<&str>, Option<Target>),
-        #[values((None, None))] namespace: (Option<&str>, Option<&str>),
+        #[values((None, None), (Some("foo"), Some("foo")))] namespace: (Option<&str>, Option<&str>),
     ) {
         with_env_vars(
             vec![

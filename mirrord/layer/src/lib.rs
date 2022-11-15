@@ -15,6 +15,7 @@ extern crate alloc;
 use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    panic,
     path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
@@ -141,36 +142,53 @@ pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
     }
 }
 
+/// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
+fn layer_pre_initialization() -> Result<(), LayerError> {
+    let args = std::env::args().collect::<Vec<_>>();
+
+    let given_process = args
+        .first()
+        .and_then(|arg| arg.split('/').last())
+        .ok_or(LayerError::NoProcessFound)?;
+
+    let mut config = std::env::var("MIRRORD_CONFIG_FILE")
+        .map_err(LayerError::from)
+        .map(PathBuf::from)
+        .and_then(|path| Ok(LayerFileConfig::from_path(&path)?))
+        .unwrap_or_default()
+        .generate_config()?;
+
+    nix_devbox_patch(&mut config);
+    let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+
+    if should_load(given_process, skip_processes) {
+        layer_start(config);
+    }
+
+    Ok(())
+}
+
+/// The one true start of mirrord-layer.
 #[ctor]
-fn before_init() {
+fn mirrord_layer_entry_point() {
+    // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
+    // a profile, for example `cargo check --profile=dev`.
     if !cfg!(test) {
-        let args = std::env::args().collect::<Vec<_>>();
-        let given_process = args.first().unwrap().split('/').last().unwrap();
-
-        let config = std::env::var("MIRRORD_CONFIG_FILE")
-            .ok()
-            .and_then(|val| val.parse::<PathBuf>().ok())
-            .map(|path| LayerFileConfig::from_path(&path).unwrap())
-            .unwrap_or_default()
-            .generate_config();
-
-        match config {
-            Ok(mut config) => {
-                nix_devbox_patch(&mut config);
-                let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
-
-                if should_load(given_process, skip_processes) {
-                    init(config);
+        let _ = panic::catch_unwind(|| {
+            if let Err(fail) = layer_pre_initialization() {
+                match fail {
+                    LayerError::NoProcessFound => (),
+                    _ => std::process::exit(-1),
                 }
             }
-            Err(err) => {
-                panic!("Failed to load config: {}", err);
-            }
-        }
+        });
     }
 }
 
-fn init(config: LayerConfig) {
+/// Occurs after [`layer_pre_initialization`] has succeeded.
+///
+/// Starts the main parts of mirrord-layer.
+fn layer_start(config: LayerConfig) {
     if config.feature.capture_error_trace {
         tracing_subscriber::registry()
             .with(

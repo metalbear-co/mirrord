@@ -169,6 +169,13 @@
             "null"
           ]
         },
+        "network_interface": {
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface and if that fails it uses eth0.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "startup_timeout": {
           "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.",
           "type": [

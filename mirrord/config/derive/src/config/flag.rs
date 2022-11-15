@@ -28,6 +28,8 @@ pub struct ConfigFlags {
     pub nested: bool,
     pub rename: Option<Lit>,
     pub toggleable: bool,
+    pub unstable: bool,
+    pub deprecated: Option<Lit>,
 }
 
 impl ConfigFlags {
@@ -59,6 +61,11 @@ impl ConfigFlags {
                         {
                             flags.toggleable = true
                         }
+                        NestedMeta::Meta(Meta::Path(path))
+                            if mode == ConfigFlagsType::Field && path.is_ident("unstable") =>
+                        {
+                            flags.unstable = true
+                        }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
                         {
@@ -73,6 +80,12 @@ impl ConfigFlags {
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
                         {
                             flags.rename = Some(meta.lit)
+                        }
+                        NestedMeta::Meta(Meta::NameValue(meta))
+                            if mode == ConfigFlagsType::Field
+                                && meta.path.is_ident("deprecated") =>
+                        {
+                            flags.deprecated = Some(meta.lit)
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Container

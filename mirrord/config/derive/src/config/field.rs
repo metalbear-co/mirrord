@@ -153,6 +153,20 @@ impl ConfigField {
             impls.push(default.to_token_stream());
         }
 
+        let mut layers = Vec::new();
+
+        if let Some(lit) = flags.deprecated.as_ref() {
+            layers.push(
+                quote! { .layer(|next| crate::config::deprecated::Deprecated::new(#lit, next)) },
+            );
+        }
+
+        if flags.unstable {
+            layers.push(
+                quote! { .layer(|next| crate::config::unstable::Unstable::new(stringify!(#parent), stringify!(#ident), next)) }
+            );
+        }
+
         let unwrapper = option.is_none().then(|| {
             let env_override = match &flags.env {
                 Some(EnvFlag(flag)) => quote! { Some(#flag) },
@@ -162,7 +176,7 @@ impl ConfigField {
             quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
         });
 
-        quote! { #ident: (#(#impls),*).source_value()#unwrapper }
+        quote! { #ident: (#(#impls),*) #(#layers)* .source_value()#unwrapper }
     }
 }
 
