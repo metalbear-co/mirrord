@@ -91,17 +91,18 @@ macro_rules! hook_symbol {
 
 #[macro_export]
 macro_rules! graceful_exit {
-    ($($arg:tt)+) => {
+    ($($arg:tt)+) => {{
         eprintln!($($arg)+);
         graceful_exit!()
-    };
-    () => {
+    }};
+    () => {{
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGTERM,
         )
-        .expect("unable to graceful exit")
-    };
+        .expect("unable to graceful exit");
+        panic!()
+    }};
 }
 
 #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
