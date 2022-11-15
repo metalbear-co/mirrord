@@ -28,7 +28,7 @@ use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::Result,
+    error::{AgentError, Result},
     runtime::set_namespace,
     util::{run_thread, IndexAllocator},
 };

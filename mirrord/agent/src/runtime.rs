@@ -14,7 +14,7 @@ use containerd_client::{
 use nix::sched::setns;
 use tracing::debug;
 
-use crate::error::AgentError;
+use crate::error::{AgentError, Result};
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
