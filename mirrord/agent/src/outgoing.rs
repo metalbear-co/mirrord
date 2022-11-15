@@ -20,7 +20,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
 use crate::{
-    error::Result,
+    error::{AgentError, Result},
     runtime::set_namespace,
     util::{run_thread, IndexAllocator},
 };
