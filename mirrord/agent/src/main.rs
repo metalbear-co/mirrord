@@ -11,7 +11,7 @@ use std::{
 use actix_codec::Framed;
 use cli::parse_args;
 use dns::{dns_worker, DnsRequest};
-use error::Result;
+use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
