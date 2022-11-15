@@ -9,6 +9,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
+- CI: download shasums and add git username/email to make the homebrew release work
+- Remove `unimplemented` for some IO cases, we now return `Unknown` instead. Also added warning logs for these cases to track.
 - Only recommend `--accept-invalid-certificates` on connection errors if not already set.
 - Terminate user application on connection error instead of only stopping mirrord.
 
