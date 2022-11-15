@@ -7,7 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-# Changed
+### Changed
 
 - mirrord-config: refactored macro so future implementations will be easier
 
