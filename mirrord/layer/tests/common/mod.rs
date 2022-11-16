@@ -5,6 +5,7 @@ use std::{
     process::Stdio,
     sync::{Arc, Mutex},
 };
+use std::cmp::min;
 
 use actix_codec::Framed;
 use fancy_regex::Regex;
@@ -266,7 +267,7 @@ impl LayerConnection {
     }
 
     /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
-    pub async fn expect_file_open(&mut self, file_name: &str, fd: usize) {
+    pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: usize) {
         // Verify the app tries to open the expected file.
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
@@ -274,11 +275,11 @@ impl LayerConnection {
                 mirrord_protocol::OpenFileRequest {
                     path: file_name.to_string().into(),
                     open_options: mirrord_protocol::OpenOptionsInternal {
-                        read: false,
-                        write: true,
+                        read: true,
+                        write: false,
                         append: false,
                         truncate: false,
-                        create: true,
+                        create: false,
                         create_new: false,
                     },
                 }
@@ -327,7 +328,8 @@ impl LayerConnection {
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
     pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: usize) {
         let buffer_size = self.expect_file_read(expected_fd).await;
-        let contents = (&contents.as_bytes()[0..buffer_size]).to_vec();
+        let read_amount = min(buffer_size, contents.len());
+        let contents = (&contents.as_bytes()[0..read_amount]).to_vec();
         self.answer_file_read(contents).await;
         // last call should return 0.
         let _buffer_size = self.expect_file_read(expected_fd).await;
@@ -478,6 +480,18 @@ pub fn dylib_path() -> PathBuf {
 }
 
 pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
+    let mut env = HashMap::new();
+    env.insert("RUST_LOG", "warn,mirrord=trace");
+    env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
+    env.insert("MIRRORD_CONNECT_TCP", &addr);
+    env.insert("MIRRORD_REMOTE_DNS", "false");
+    env.insert("MIRRORD_FILE_OPS", "true");
+    env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
+    env.insert("LD_PRELOAD", dylib_path_str);
+    env
+}
+
+pub fn get_env_no_fs<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
