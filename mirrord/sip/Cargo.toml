@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-protocol"
+name = "mirrord-sip"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -14,10 +14,13 @@ publish.workspace = true
 edition.workspace = true
 
 [dependencies]
-actix-codec.workspace = true
-bytes.workspace = true
-thiserror.workspace = true
-trust-dns-resolver.workspace = true
-serde = { version = "1", features = ["derive"] }
-bincode =  { version = "2.0.0-rc.2", features = ["serde"] }
+object = "0.29"
+memchr = "2"
+which = "4.3.0"
+
 tracing.workspace = true
+thiserror.workspace = true
+
+
+[dev-dependencies]
+tempfile = "3.3.0"

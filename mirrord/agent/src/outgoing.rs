@@ -20,7 +20,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
 use crate::{
-    error::AgentError,
+    error::{AgentError, Result},
     runtime::set_namespace,
     util::{run_thread, IndexAllocator},
 };
@@ -34,7 +34,7 @@ type Daemon = DaemonTcpOutgoing;
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct TcpOutgoingApi {
     /// Holds the `interceptor_task`.
-    _task: thread::JoinHandle<Result<(), AgentError>>,
+    _task: thread::JoinHandle<Result<()>>,
 
     /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<Layer>,
@@ -50,7 +50,7 @@ async fn layer_recv(
     writers: &mut HashMap<ConnectionId, OwnedWriteHalf>,
     readers: &mut StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
-) -> Result<(), AgentError> {
+) -> Result<()> {
     match layer_message {
         // [user] -> [layer] -> [agent] -> [layer]
         // `user` is asking us to connect to some remote host.
@@ -143,7 +143,7 @@ impl TcpOutgoingApi {
         pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<()> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
                 .join(PathBuf::from(pid.to_string()))
@@ -206,15 +206,12 @@ impl TcpOutgoingApi {
 
     /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn layer_message(
-        &mut self,
-        message: LayerTcpOutgoing,
-    ) -> Result<(), AgentError> {
+    pub(crate) async fn layer_message(&mut self, message: LayerTcpOutgoing) -> Result<()> {
         Ok(self.layer_tx.send(message).await?)
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.
-    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing, AgentError> {
+    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing> {
         self.daemon_rx
             .recv()
             .await

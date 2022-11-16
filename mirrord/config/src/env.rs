@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, Result},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -58,10 +57,10 @@ use crate::{
 /// [feature.env]
 /// exclude = "USER;SECRET"
 /// ```
-#[derive(MirrordConfig, Default, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = EnvConfig)]
-pub struct EnvFileConfig {
+#[derive(MirrordConfig, Clone, Debug)]
+#[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct EnvConfig {
     /// Include only these remote environment variables in the local process.
     ///
     /// Value is a list separated by ";".
@@ -79,12 +78,12 @@ pub struct EnvFileConfig {
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
     /// undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.
-    #[serde(rename = "override")]
+    #[config(rename = "override")]
     pub overrides: Option<HashMap<String, String>>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config() -> Result<Self::Generated> {
         Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value(),
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value(),
