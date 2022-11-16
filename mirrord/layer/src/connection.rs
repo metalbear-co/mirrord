@@ -2,15 +2,12 @@ use std::time::Duration;
 
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
-    api::{KubernetesAPI, LocalApi, RawConnection},
+    api::{kubernetes::KubernetesAPI, AgentManagment, Connection},
     error::KubeApiError,
 };
 use mirrord_progress::TaskProgress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
-};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log::info;
 
 use crate::{graceful_exit, FAIL_STILL_STUCK};
@@ -48,19 +45,22 @@ fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
 pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
-    if let Some(address) = &config.connect_tcp {
-        let stream = TcpStream::connect(address)
+    let progress = TaskProgress::new("agent initializing...");
+
+    let agent_api = if let Some(address) = &config.connect_tcp {
+        let connection = Connection(address);
+
+        let stream = connection
+            .create_agent(&progress)
             .await
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
 
-        RawConnection
+        connection
             .create_connection(stream)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
     } else {
-        let progress = TaskProgress::new("agent initializing...");
-
-        let k8s_api = LocalApi::create(config.agent.clone(), config.target.clone())
+        let k8s_api = KubernetesAPI::create(config.agent.clone(), config.target.clone())
             .await
             .unwrap_or_else(|err| handle_error(err, config));
 
@@ -85,8 +85,7 @@ pub(crate) async fn connect(
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
                 std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
-                // So children won't show progress as well as it might confuse users
-                std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
                 (pod_agent_name, agent_port)
             }
         };
@@ -95,5 +94,10 @@ pub(crate) async fn connect(
             .create_connection(agent_ref)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    }
+    };
+
+    // So children won't show progress as well as it might confuse users
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    agent_api
 }

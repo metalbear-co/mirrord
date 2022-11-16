@@ -7,6 +7,9 @@ pub enum KubeApiError {
     #[error("mirrord-layer: Kube failed with error `{0}`!")]
     KubeError(#[from] kube::Error),
 
+    #[error("mirrord-layer: Connection to agent failed `{0}`!")]
+    KubeConnectionError(#[from] std::io::Error),
+
     #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] kube::config::InferConfigError),
 
