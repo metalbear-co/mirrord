@@ -464,7 +464,7 @@ jobs:
           path: /tmp/artifacts
       - uses: actions/checkout@v3
       - run: |
-          ls -la /tmp/artifacts/shasum && ls -la /tmp/artifacts/shasum/aarch64-unknown-linux-gnu
+          ls -la /tmp/artifacts/shasum && ls -la /tmp/artifacts/shasum/aarch64-unknown-linux-gnu && cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
           grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1
           cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }'
           cat /tmp/artifacts/shasum/mirrord_linux_aarch64/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }'
