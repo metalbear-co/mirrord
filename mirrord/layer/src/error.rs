@@ -1,10 +1,10 @@
 use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
-use kube::config::InferConfigError;
 use libc::{c_char, FILE};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{tcp::LayerTcp, ConnectionId, ResponseError};
+use mirrord_kube::error::KubeApiError;
+use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
@@ -83,6 +83,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
     SendErrorLayerTcp(#[from] SendError<LayerTcp>),
 
+    #[error("mirrord-layer: Sender<ClientMessage> failed with `{0}`!")]
+    SendErrorClientMessage(#[from] SendError<ClientMessage>),
+
     #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
     SendErrorTcpResponse,
 
@@ -113,50 +116,11 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
 
-    #[error("mirrord-layer: Failed to get `KubeConfig`!")]
-    KubeConfigError(#[from] InferConfigError),
-
-    #[error("mirrord-layer: Failed to get `Spec` for Pod!")]
-    PodSpecNotFound,
-
-    #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
-    JobPodNotFound(String),
-
-    #[error("mirrord-layer: Kube failed with error `{0}`!")]
-    KubeError(#[from] kube::Error),
+    #[error(transparent)]
+    KubeError(#[from] KubeApiError),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
-
-    #[error("mirrord-layer: Container not found: `{0}`")]
-    ContainerNotFound(String),
-
-    #[error("mirrord-layer: Node name wasn't found in pod spec")]
-    NodeNotFound,
-
-    #[error("mirrord-layer: Deployment: `{0} not found!`")]
-    DeploymentNotFound(String),
-
-    #[error("mirrord-layer: Invalid target proivded `{0}`!")]
-    InvalidTarget(String),
-
-    #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
-    ContainerRuntimeParseError(String),
-
-    #[error("mirrord-layer: Pod name not found in response from kube API")]
-    PodNameNotFound,
-
-    #[error("mirrord-layer: Pod status not found in response from kube API")]
-    PodStatusNotFound,
-
-    #[error("mirrord-layer: Container status not found in response from kube API")]
-    ContainerStatusNotFound,
-
-    #[error("mirrord-layer: Container ID not found in response from kube API")]
-    ContainerIdNotFound,
-
-    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
-    AgentReadyTimeout,
 
     #[error("mirrord-layer: Failed setting up mirrord with configuration error `{0}`!")]
     Config(#[from] ConfigError),

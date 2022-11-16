@@ -19,6 +19,7 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
+mirrord-kube = { path = "../kube", features = ["env_guard"] }
 mirrord-sip = { path = "../sip" }
 
 ctor = "0.1"
