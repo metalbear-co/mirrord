@@ -15,9 +15,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   This means we now support running bash scripts with mirrord also on MacOS.
   Part of [#649](https://github.com/metalbear-co/mirrord/issues/649).
 
+## 3.10.3
+
 ### Changed
 
+- CLI: change temp lib file to only be created for new versions
 - mirrord-config: refactored macro so future implementations will be easier
+
+### Fixed
+
+- Release: fix homebrew release step
 
 ## 3.10.2
 
