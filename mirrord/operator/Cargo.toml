@@ -16,6 +16,7 @@ edition.workspace = true
 
 [features]
 default = []
+server = ["protocol"]
 client = ["protocol", "dep:futures"]
 protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes",  "dep:mirrord-config", "dep:mirrord-protocol"]
 

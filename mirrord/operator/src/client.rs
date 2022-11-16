@@ -5,7 +5,7 @@ use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{net::TcpStream, sync::mpsc};
 
-use crate::protocol::{AgentInitialize, OperatorCodec, OperatorMessage};
+use crate::protocol::{AgentInitialize, OperatorCodec, OperatorRequest, OperatorResponse};
 
 pub async fn connect(
     config: &LayerConfig,
@@ -15,10 +15,10 @@ pub async fn connect(
 
     let connection = TcpStream::connect("127.0.0.1:8080").await?;
 
-    let mut codec = actix_codec::Framed::new(connection, OperatorCodec::new());
+    let mut codec = actix_codec::Framed::new(connection, OperatorCodec::client());
 
     let _ = codec
-        .send(OperatorMessage::Initialize(AgentInitialize {
+        .send(OperatorRequest::Initialize(AgentInitialize {
             agent: config.agent.clone(),
             target: config.target.clone(),
         }))
@@ -29,7 +29,7 @@ pub async fn connect(
             tokio::select! {
                 Some(Ok(msg)) = codec.next() => {
                      match msg {
-                        OperatorMessage::Daemon(msg) => {
+                        OperatorResponse::Daemon(msg) => {
                             if let Err(_) = daemon_tx.send(msg).await {
                                 println!("DaemonMessage Dropped");
                                 break;
@@ -39,7 +39,7 @@ pub async fn connect(
                     }
                 }
                 Some(client_msg) = client_rx.recv() => {
-                    if let Err(_) = codec.send(OperatorMessage::Client(client_msg)).await {
+                    if let Err(_) = codec.send(OperatorRequest::Client(client_msg)).await {
                         println!("DaemonMessage Dropped");
                         break;
                     }

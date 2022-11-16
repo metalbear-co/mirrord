@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, marker::PhantomData};
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{
@@ -56,55 +56,103 @@ impl<'de> BorrowDecode<'de> for AgentInitialize {
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
-pub enum OperatorMessage {
+pub enum OperatorRequest {
     Initialize(AgentInitialize),
     Client(ClientMessage),
+}
+
+#[derive(Encode, Decode, Debug, Clone)]
+pub enum OperatorResponse {
     Daemon(DaemonMessage),
 }
 
-pub struct OperatorCodec {
+pub struct Client;
+#[cfg(feature = "server")]
+pub struct Server;
+
+pub struct OperatorCodec<T = Client> {
     config: bincode::config::Configuration,
+    _type: PhantomData<T>,
 }
 
 impl OperatorCodec {
-    pub fn new() -> Self {
+    pub fn client() -> OperatorCodec<Client> {
         OperatorCodec {
             config: bincode::config::standard(),
+            _type: PhantomData::<Client>,
         }
     }
 }
 
-impl Default for OperatorCodec {
-    fn default() -> Self {
-        OperatorCodec::new()
-    }
-}
-
-impl Decoder for OperatorCodec {
-    type Item = OperatorMessage;
-    type Error = io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match bincode::decode_from_slice(&src[..], self.config) {
-            Ok((message, read)) => {
-                src.advance(read);
-                Ok(Some(message))
-            }
-            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
+#[cfg(feature = "server")]
+impl OperatorCodec {
+    pub fn server() -> OperatorCodec<Server> {
+        OperatorCodec {
+            config: bincode::config::standard(),
+            _type: PhantomData::<Server>,
         }
     }
 }
 
-impl Encoder<OperatorMessage> for OperatorCodec {
+fn bincode_decode<T: Decode>(
+    src: &mut BytesMut,
+    config: bincode::config::Configuration,
+) -> io::Result<Option<T>> {
+    match bincode::decode_from_slice(&src[..], config) {
+        Ok((message, read)) => {
+            src.advance(read);
+            Ok(Some(message))
+        }
+        Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
+        Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
+    }
+}
+
+fn bincode_encode<T: Encode>(
+    msg: T,
+    dst: &mut BytesMut,
+    config: bincode::config::Configuration,
+) -> io::Result<()> {
+    let encoded = bincode::encode_to_vec(msg, config)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+    dst.reserve(encoded.len());
+    dst.put(&encoded[..]);
+
+    Ok(())
+}
+
+impl Decoder for OperatorCodec<Client> {
+    type Item = OperatorResponse;
     type Error = io::Error;
 
-    fn encode(&mut self, msg: OperatorMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = bincode::encode_to_vec(msg, self.config)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        bincode_decode::<Self::Item>(src, self.config)
+    }
+}
 
-        Ok(())
+impl Encoder<OperatorRequest> for OperatorCodec<Client> {
+    type Error = io::Error;
+
+    fn encode(&mut self, msg: OperatorRequest, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        bincode_encode(msg, dst, self.config)
+    }
+}
+
+#[cfg(feature = "server")]
+impl Decoder for OperatorCodec<Server> {
+    type Item = OperatorRequest;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        bincode_decode::<Self::Item>(src, self.config)
+    }
+}
+
+#[cfg(feature = "server")]
+impl Encoder<OperatorResponse> for OperatorCodec<Server> {
+    type Error = io::Error;
+
+    fn encode(&mut self, msg: OperatorResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        bincode_encode(msg, dst, self.config)
     }
 }
