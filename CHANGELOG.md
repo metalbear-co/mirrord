@@ -7,9 +7,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.10.3
+
 ### Changed
 
+- CLI: change temp lib file to only be created for new versions
 - mirrord-config: refactored macro so future implementations will be easier
+
+### Fixed
+
+- Release: fix homebrew release step
 
 ## 3.10.2
 
