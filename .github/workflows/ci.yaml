@@ -483,10 +483,10 @@ jobs:
           token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
-          sed -i -e 's/\([0-9]\.[0-9]\.[0-9]\)/"${{ env.version }}"/g' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_mac }}"/' mirrord.rb       
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_aarch64 }}"/' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_x86_64 }}"/' mirrord.rb
+          sed -i -e 's/\([0-9]+\.[0-9]+\.[0-9]+\)/${{ env.version }}/g' mirrord.rb
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_mac }}/' mirrord.rb       
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_aarch64 }}/' mirrord.rb
+          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_x86_64 }}/' mirrord.rb
       - run: cat mirrord.rb
       - name: Commit to metalbear-co/homebrew-mirrord
         run: |
