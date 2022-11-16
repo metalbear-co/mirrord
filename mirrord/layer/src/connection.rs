@@ -60,7 +60,7 @@ pub(crate) async fn connect(
     } else {
         let progress = TaskProgress::new("agent initializing...");
 
-        let k8s_api = LocalApi::job(config.agent.clone(), config.target.clone())
+        let k8s_api = LocalApi::create(config.agent.clone(), config.target.clone())
             .await
             .unwrap_or_else(|err| handle_error(err, config));
 

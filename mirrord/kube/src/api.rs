@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use actix_codec::{AsyncRead, AsyncWrite};
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
@@ -90,28 +88,14 @@ pub trait KubernetesAPI {
     async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err>;
 }
 
-pub struct LocalApi<Container = JobContainer> {
+pub struct LocalApi {
     client: Client,
     agent: AgentConfig,
     target: TargetConfig,
-    container: PhantomData<Container>,
 }
 
 impl LocalApi {
-    pub async fn job(agent: AgentConfig, target: TargetConfig) -> Result<LocalApi<JobContainer>> {
-        LocalApi::<JobContainer>::create(agent, target).await
-    }
-
-    pub async fn ephemeral(
-        agent: AgentConfig,
-        target: TargetConfig,
-    ) -> Result<LocalApi<EphemeralContainer>> {
-        LocalApi::<EphemeralContainer>::create(agent, target).await
-    }
-}
-
-impl<C> LocalApi<C> {
-    async fn create(agent: AgentConfig, target: TargetConfig) -> Result<Self> {
+    pub async fn create(agent: AgentConfig, target: TargetConfig) -> Result<Self> {
         #[cfg(feature = "env_guard")]
         let _guard = env_guard::EnvVarGuard::new();
 
@@ -127,16 +111,12 @@ impl<C> LocalApi<C> {
             client,
             agent,
             target,
-            container: PhantomData::<C>,
         })
     }
 }
 
 #[async_trait]
-impl<C> KubernetesAPI for LocalApi<C>
-where
-    C: ContainerApi + Send + Sync,
-{
+impl KubernetesAPI for LocalApi {
     type AgentRef = (String, u16);
     type Err = KubeApiError;
 
@@ -163,14 +143,25 @@ where
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
         info!("Using port `{agent_port:?}` for communication");
 
-        let pod_agent_name = C::create_agent(
-            &self.client,
-            &self.agent,
-            runtime_data,
-            agent_port,
-            progress,
-        )
-        .await?;
+        let pod_agent_name = if self.agent.ephemeral {
+            EphemeralContainer::create_agent(
+                &self.client,
+                &self.agent,
+                runtime_data,
+                agent_port,
+                progress,
+            )
+            .await?
+        } else {
+            JobContainer::create_agent(
+                &self.client,
+                &self.agent,
+                runtime_data,
+                agent_port,
+                progress,
+            )
+            .await?
+        };
 
         Ok((pod_agent_name, agent_port))
     }
