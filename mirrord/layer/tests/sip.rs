@@ -28,22 +28,27 @@ async fn test_sip_with_bash_script(dylib_path: &PathBuf) {
     let test_process =
         TestProcess::start_process(patched_executable, application.get_args(), env).await;
 
-    // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // Accept the connection from the layer in the env binary and verify initial messages.
+    let _env_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // Accept the connection from the layer in the bash binary and verify initial messages.
+    let _bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // Accept the connection from the layer in the cat binary and verify initial messages.
+    let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // TODO: theoretically the connections arrival order could be flipped, should we handle it?
 
     let fd: usize = 1;
 
-    layer_connection
-        .expect_file_open("/very_interesting_file", fd)
+    cat_layer_connection
+        .expect_file_open_for_reading("/very_interesting_file", fd)
         .await;
 
-    layer_connection
+    cat_layer_connection
         .expect_and_answer_file_read("Very interesting contents.", fd)
         .await;
 
-    layer_connection.expect_file_close(fd).await;
+    cat_layer_connection.expect_file_close(fd).await;
 
-    assert!(layer_connection.is_ended().await);
+    assert!(cat_layer_connection.is_ended().await);
 
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();
