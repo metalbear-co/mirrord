@@ -1,4 +1,5 @@
 import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
+import { resolve } from 'path';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
 const TOML = require('toml');
@@ -101,21 +102,29 @@ async function checkVersion(version: string) {
 	});
 }
 
+// Gets namespace from config file
 async function parseNamespace() {
+	let parsed = await parseConfigFile();
+	return parsed?.['target']?.['namespace'] || 'default';
+}
+
+async function parseConfigFile() {
 	let filePath: string = await configFilePath();
-	let parsed;
 	if (filePath) {
 		const file = (await vscode.workspace.fs.readFile(vscode.Uri.parse(filePath))).toString();
 		if (filePath.endsWith('json')) {
-			parsed = JSON.parse(file);
+			return JSON.parse(file);
 		} else if (filePath.endsWith('yaml') || filePath.endsWith('yml')) {
-			parsed = YAML.parse(file);
+			return YAML.parse(file);
 		} else if (filePath.endsWith('toml')) {
-			parsed = TOML.parse(file);
+			return TOML.parse(file);
 		}
-
 	}
-	return parsed?.['target']?.['namespace'] || 'default';
+}
+
+async function isTargetInFile() {
+	let parsed = await parseConfigFile();
+	return (parsed && (typeof (parsed['target']) === 'string' || parsed['target']?.['path']));
 }
 
 
@@ -148,13 +157,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 }
 
-
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 		if (!globalContext.globalState.get('enabled')) {
 			return new Promise(resolve => { resolve(config); });
 		}
-
 
 		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
 			return new Promise(resolve => {
@@ -170,84 +177,69 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
-		let podNamespace: string;
-		try {
-			podNamespace = await parseNamespace();
-		} catch (e: any) {
-			vscode.window.showErrorMessage('Failed to parse mirrord config file', e.message);
-			return;
+		let libraryPath: string;
+		if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
+			libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
+		} else {
+			libraryPath = globalContext.extensionPath;
 		}
+		let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
+		config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 
-		let k8sApi = getK8sApi();
-		// Get pods from kubectl and let user select one to mirror
-		let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
-		let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
-
-		await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
-			return new Promise(async resolve => {
-				console.log(config);
-				// Get pods from kubectl and let user select one to mirror
-				if (k8sApi === null) {
-					return;
-				}
-
-				let libraryPath;
-				if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
-					libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
-				} else {
-					libraryPath = globalContext.extensionPath;
-				}
-				let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
-				globalContext.workspaceState.update('impersonatedPodName', podName);
-				config.env = {
-					...config.env, ...{
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_IMPERSONATED_TARGET': 'pod/' + podName,
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						'MIRRORD_TARGET_NAMESPACE': podNamespace,
+		if (!await isTargetInFile()) { // If target wasn't specified in the config file, let user choose pod from dropdown
+			let podNamespace: string;
+			try {
+				podNamespace = await parseNamespace();
+			} catch (e: any) {
+				vscode.window.showErrorMessage('Failed to parse mirrord config file', e.message);
+				return;
+			}
+			let k8sApi = getK8sApi();
+			// Get pods from kubectl and let user select one to mirror
+			let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
+			let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
+			let impersonatedPodName = '';
+			await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+				return new Promise(async resolve => {
+					if (!k8sApi || !podName) {
+						return;
 					}
-				};
-				let filePath = await configFilePath();
-				if (filePath) {
-					config.env['MIRRORD_CONFIG_FILE'] = filePath;
-				}
-
-				config.env[environmentVariableName] = path.join(libraryPath, libraryName);
-
-				if (config.type === "go") {
-					config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
-					// use our custom delve to fix being loaded into debugserver
-					if (os.platform() === "darwin") {
-						config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
-					}
-				}
-
-				return resolve(config);
-			});
-		});
-
-		// let user select container name if there are multiple containers in the pod
-		const podName = globalContext.workspaceState.get('impersonatedPodName');
-		const pod = pods.body.items.find(p => p.metadata!.name === podName!);
-		const containerNames = pod!.spec!.containers.map(c => c.name!);
-		if (containerNames.length > 1) {
-			return await vscode.window.showQuickPick(containerNames, { placeHolder: 'Select containerName' }).then(async containerName => {
-				return new Promise(resolve => {
-					globalContext.workspaceState.update('impersonatedContainerName', containerName);
-					config.env = {
-						...config.env, ...{
-							// eslint-disable-next-line @typescript-eslint/naming-convention
-							'MIRRORD_IMPERSONATED_CONTAINER_NAME': containerName,
-						}
-					};
+					impersonatedPodName = podName;
+					config.env['MIRRORD_IMPERSONATED_TARGET'] = 'pod/' + impersonatedPodName;
+					config.env['MIRRORD_TARGET_NAMESPACE'] = podNamespace; // This is unnecessary 99% of the time, but it ensures the namespace is the one the pod was selected from
 					return resolve(config);
 				});
 			});
-		} else {
-			return new Promise(resolve => {
-				return resolve(config);
-			});
+
+			// let user select container name if there are multiple containers in the pod		
+			const pod = pods.body.items.find(p => p.metadata!.name === impersonatedPodName!);
+			const containerNames = pod!.spec!.containers.map(c => c.name!);
+			if (containerNames.length > 1) {
+				await vscode.window.showQuickPick(containerNames, { placeHolder: 'Select container' }).then(async containerName => {
+					return new Promise(resolve => {
+						config.env['MIRRORD_IMPERSONATED_CONTAINER_NAME'] = containerName;
+						return resolve(config);
+					});
+				});
+			}
 		}
+
+		let filePath = await configFilePath();
+		if (filePath) {
+			config.env['MIRRORD_CONFIG_FILE'] = filePath;
+		}
+
+		if (config.type === "go") {
+			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+			// use our custom delve to fix being loaded into debugserver
+			if (os.platform() === "darwin") {
+				config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
+			}
+		}
+
+		return new Promise(resolve => {
+			return resolve(config);
+		});
 	}
 }
 

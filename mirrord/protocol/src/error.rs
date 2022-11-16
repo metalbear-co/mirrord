@@ -5,6 +5,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
+use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
@@ -91,7 +92,7 @@ impl From<ResolveError> for ResponseError {
     }
 }
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
 pub enum ErrorKindInternal {
     NotFound,
     PermissionDenied,
@@ -133,6 +134,8 @@ pub enum ErrorKindInternal {
     UnexpectedEof,
     OutOfMemory,
     Other,
+    // Unknown is for uncovered cases (enum is non-exhaustive)
+    Unknown(String),
 }
 
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
@@ -143,9 +146,11 @@ pub enum ResolveErrorKindInternal {
     NoRecordsFound(u16),
     Proto,
     Timeout,
+    // Unknown is for uncovered cases (enum is non-exhaustive)
+    Unknown,
 }
 
-impl const From<io::ErrorKind> for ErrorKindInternal {
+impl From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
         match error_kind {
             io::ErrorKind::NotFound => ErrorKindInternal::NotFound,
@@ -188,7 +193,7 @@ impl const From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::UnexpectedEof => ErrorKindInternal::UnexpectedEof,
             io::ErrorKind::OutOfMemory => ErrorKindInternal::OutOfMemory,
             io::ErrorKind::Other => ErrorKindInternal::Other,
-            _ => unimplemented!(),
+            _ => ErrorKindInternal::Unknown(error_kind.to_string()),
         }
     }
 }
@@ -206,7 +211,10 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-            _ => unimplemented!(),
+            _ => {
+                warn!("unknown error kind: {:?}", error_kind);
+                ResolveErrorKindInternal::Unknown
+            }
         }
     }
 }

@@ -22,11 +22,10 @@ use std::path::Path;
 use config::ConfigError;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::{
-    agent::AgentFileConfig, config::source::MirrordConfigSource, feature::FeatureFileConfig,
-    target::TargetFileConfig, util::VecOrSingle,
+    agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
+    target::TargetConfig, util::VecOrSingle,
 };
 
 /// Main struct for mirrord-layer's configuration
@@ -73,14 +72,14 @@ use crate::{
 /// [feature.network]
 /// incoming = "steal"
 /// ```
-#[derive(MirrordConfig, Deserialize, Default, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[config(map_to = LayerConfig)]
-pub struct LayerFileConfig {
+#[derive(MirrordConfig, Clone, Debug)]
+#[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct LayerConfig {
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
-    pub accept_invalid_certificates: Option<bool>,
+    pub accept_invalid_certificates: bool,
 
     /// Allows mirrord to skip unwanted processes.
     ///
@@ -95,34 +94,28 @@ pub struct LayerFileConfig {
     /// - `pod/{sample-pod}/[container]/{sample-container}`;
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
-    #[serde(default)]
     #[config(nested)]
-    pub target: TargetFileConfig,
+    pub target: TargetConfig,
 
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
-    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
     /// Agent name that already exists that we can connect to.
-    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
     /// Agent listen port that already exists that we can connect to.
-    #[cfg_attr(feature = "schema", schemars(skip))]
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
     /// Agent configuration, see [`agent::AgentFileConfig`].
-    #[serde(default)]
     #[config(nested)]
-    pub agent: AgentFileConfig,
+    pub agent: AgentConfig,
 
     /// Controls mirrord features, see [`feature::FeatureFileConfig`].
-    #[serde(default)]
     #[config(nested)]
-    pub feature: FeatureFileConfig,
+    pub feature: FeatureConfig,
 }
 
 impl LayerFileConfig {
@@ -151,6 +144,8 @@ mod tests {
 
     use super::*;
     use crate::{
+        agent::AgentFileConfig,
+        feature::FeatureFileConfig,
         fs::{FsModeConfig, FsUserConfig},
         incoming::IncomingConfig,
         network::NetworkFileConfig,
@@ -302,15 +297,15 @@ mod tests {
             accept_invalid_certificates: Some(false),
             connect_agent_name: None,
             connect_agent_port: None,
-            target: TargetFileConfig::Advanced {
+            target: Some(TargetFileConfig::Advanced {
                 path: Some(Target::Pod(PodTarget {
                     pod: "test-service-abcdefg-abcd".to_owned(),
                     container: None,
                 })),
                 namespace: Some("default".to_owned()),
-            },
+            }),
             skip_processes: None,
-            agent: AgentFileConfig {
+            agent: Some(AgentFileConfig {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
@@ -320,20 +315,20 @@ mod tests {
                 communication_timeout: None,
                 startup_timeout: None,
                 network_interface: None,
-            },
-            feature: FeatureFileConfig {
-                env: ToggleableConfig::Enabled(true),
-                fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)),
-                network: ToggleableConfig::Config(NetworkFileConfig {
+            }),
+            feature: Some(FeatureFileConfig {
+                env: ToggleableConfig::Enabled(true).into(),
+                fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
+                network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
-                    outgoing: ToggleableConfig::Config(OutgoingFileConfig {
+                    outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
-                    }),
-                }),
+                    })),
+                })),
                 capture_error_trace: None,
-            },
+            }),
             connect_tcp: None,
         };
 
@@ -416,11 +411,11 @@ mod tests {
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
 
-        let mut existing_content = String::with_capacity(compare_content.len());
+        let mut existing_content = String::new();
         let _ = File::open(SCHEMA_FILE_PATH)
             .unwrap()
             .read_to_string(&mut existing_content);
 
-        assert_eq!(existing_content, compare_content);
+        assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
     }
 }
