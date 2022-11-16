@@ -444,9 +444,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          mkdir -p /tmp/artifacts/x86_64-unknown-linux-gnu && echo "foo" >> /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-          mkdir -p /tmp/artifacts/aarch64-unknown-linux-gnu && echo "bar" >> /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-          mkdir -p /tmp/artifacts/universal-apple-darwin && echo "baz" >> /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
+          mkdir -p /tmp/artifacts/x86_64-unknown-linux-gnu && echo "b1ef1cf61ad22d058b38ee0acc2a0b8df2dbe0c38175fb4e4e7d4443586bd488" >> /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
+          mkdir -p /tmp/artifacts/aarch64-unknown-linux-gnu && echo "74fb297f21ffaa35d3f6350167d3b2bc29f628da33bfd065dea123b9e4af5ca9" >> /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
+          mkdir -p /tmp/artifacts/universal-apple-darwin && echo "466615635496fd8b58f594678dc00679a818bded84c7e81a4f0d8b7ab4c681a5" >> /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
       - uses: actions/upload-artifact@v3
         with:
           name: shasum
@@ -480,7 +480,7 @@ jobs:
         with:
           repository: metalbear-co/homebrew-mirrord
           path: ./
-          # token: ${{ secrets.BREW_GITHUB_PAT }}
+          token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
           sed -i -e 's/\([0-9]\.[0-9]\.[0-9]\)/"${{ env.version }}"/g' mirrord.rb
@@ -488,17 +488,17 @@ jobs:
           sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_aarch64 }}"/' mirrord.rb
           sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_x86_64 }}"/' mirrord.rb
       - run: cat mirrord.rb
-      # - name: Commit to metalbear-co/homebrew-mirrord
-      #   run: |
-      #     git config --global user.email "eyal@metalbear.co"
-      #     git config --global user.name "Eyal Bukchin"
-      #     git add .
-      #     git commit -m "Update to ${{ steps.version.outputs.version }}"
-      #     git push
-      # - name: Create a new Tag
-      #   run: |
-      #     git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
-      #     git push --tags
+      - name: Commit to metalbear-co/homebrew-mirrord
+        run: |
+          git config --global user.email "aroram18@mcmaster.ca"
+          git config --global user.name "infiniteregrets"
+          git add .
+          git commit -m "Update to ${{ env.version }}"
+          git push
+      - name: Create a new Tag
+        run: |
+          git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
+          git push --tags
 
   # ci-success:
   #   name: ci
