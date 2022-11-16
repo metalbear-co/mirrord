@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.7.3"
+version = "3.10.2"
 dependencies = [
  "actix-codec",
  "anyhow",

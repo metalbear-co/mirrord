@@ -6,7 +6,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct AgentInitialize {
     #[bincode(with_serde)]
     pub agent: AgentConfig,
@@ -14,7 +14,7 @@ pub struct AgentInitialize {
     pub target: TargetConfig,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum OperatorMessage {
     Initialize(AgentInitialize),
     Client(ClientMessage),
