@@ -13,9 +13,12 @@
     },
     "agent": {
       "description": "Agent configuration, see [`agent::AgentFileConfig`].",
-      "allOf": [
+      "anyOf": [
         {
           "$ref": "#/definitions/AgentFileConfig"
+        },
+        {
+          "type": "null"
         }
       ]
     },
@@ -44,9 +47,12 @@
     },
     "feature": {
       "description": "Controls mirrord features, see [`feature::FeatureFileConfig`].",
-      "allOf": [
+      "anyOf": [
         {
           "$ref": "#/definitions/FeatureFileConfig"
+        },
+        {
+          "type": "null"
         }
       ]
     },
@@ -63,9 +69,12 @@
     },
     "target": {
       "description": "Specifies the running pod to mirror.\n\nSupports: - `pod/{sample-pod}/[container]/{sample-container}`; - `podname/{sample-pod}/[container]/{sample-container}`; - `deployment/{sample-deployment}/[container]/{sample-container}`;",
-      "allOf": [
+      "anyOf": [
         {
           "$ref": "#/definitions/TargetFileConfig"
+        },
+        {
+          "type": "null"
         }
       ]
     }
@@ -100,9 +109,12 @@
         },
         "mode": {
           "description": "File operations mode, defaults to read-only, see [`FsModeConfig`].",
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         }
@@ -186,7 +198,7 @@
       "additionalProperties": false
     },
     "DeploymentTarget": {
-      "description": "Mirror the deployment specified by [`PodTarget::deployment`].",
+      "description": "Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
       "required": [
         "deployment"
@@ -249,33 +261,41 @@
       "properties": {
         "capture_error_trace": {
           "description": "Controls the crash reporting feature.\n\nWith this feature enabled, mirrord generates a nice crash report log.",
-          "default": null,
           "type": [
             "boolean",
             "null"
           ]
         },
         "env": {
-          "description": "Controls the environment variables feature, see [`EnvFileConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
-          "allOf": [
+          "description": "Controls the environment variables feature, see [`EnvConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
+          "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         },
         "fs": {
-          "description": "Controls the file operations feature, see [`FsUserConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
-          "allOf": [
+          "description": "Controls the file operations feature, see [`FsConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
+          "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         },
         "network": {
-          "description": "Controls the network feature, see [`NetworkFileConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
-          "allOf": [
+          "description": "Controls the network feature, see [`NetworkConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
+          "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         }
@@ -343,9 +363,12 @@
         },
         "outgoing": {
           "description": "Tunnel outgoing network operations through mirrord.",
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_OutgoingFileConfig"
+            },
+            {
+              "type": "null"
             }
           ]
         }

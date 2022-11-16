@@ -153,7 +153,7 @@ mod tests {
             ],
             || {
                 let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
-                    mode: FsModeConfig::Read,
+                    mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: None,
                 })
@@ -182,7 +182,7 @@ mod tests {
             ],
             || {
                 let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
-                    mode: FsModeConfig::Read,
+                    mode: Some(FsModeConfig::Read),
                     include: None,
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
                 })
@@ -211,7 +211,7 @@ mod tests {
             ],
             || {
                 let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
-                    mode: FsModeConfig::Read,
+                    mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
                 })
@@ -240,7 +240,7 @@ mod tests {
             ],
             || {
                 let fs_config = FsUserConfig::Advanced(AdvancedFsUserConfig {
-                    mode: FsModeConfig::Write,
+                    mode: Some(FsModeConfig::Write),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
                 })
