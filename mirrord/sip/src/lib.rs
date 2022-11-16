@@ -229,12 +229,14 @@ mod main {
         shebang_target: Option<Box<SipStatus>>,
         tmp_dir: PathBuf,
     ) -> Result<String> {
+
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
-        // Strip root path from binary path, as when joined it will clear the previous.
-        debug!("Using temp dir: {:?} for sip patches", &tmp_dir);
+
         // if which does not work, just use the given path as is.
         let complete_path = which(path.to_string_lossy().to_string()).unwrap_or(path.to_owned());
+
+        // Strip root path from binary path, as when joined it will clear the previous.
         let output = &tmp_dir.join(
             &complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
         );
@@ -347,6 +349,7 @@ mod main {
         let tmp_dir = get_tmp_dir()?;
 
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
+            debug!("Using temp dir: {:?} for sip patches", &tmp_dir);
             Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
         } else {
             Ok(None)
