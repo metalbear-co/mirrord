@@ -14,17 +14,14 @@ use containerd_client::{
 use nix::sched::setns;
 use tracing::debug;
 
-use crate::error::AgentError;
+use crate::error::{AgentError, Result};
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
-pub async fn get_container_pid(
-    container_id: &str,
-    container_runtime: &str,
-) -> Result<u64, AgentError> {
+pub async fn get_container_pid(container_id: &str, container_runtime: &str) -> Result<u64> {
     match container_runtime {
         "docker" => get_docker_container_pid(container_id.to_string()).await,
         "containerd" => get_containerd_container_pid(container_id.to_string()).await,
@@ -35,7 +32,7 @@ pub async fn get_container_pid(
     }
 }
 
-async fn get_docker_container_pid(container_id: String) -> Result<u64, AgentError> {
+async fn get_docker_container_pid(container_id: String) -> Result<u64> {
     let client = Docker::connect_with_local_defaults()?;
     let inspect_options = Some(InspectContainerOptions { size: false });
     let inspect_response = client
@@ -50,7 +47,7 @@ async fn get_docker_container_pid(container_id: String) -> Result<u64, AgentErro
     Ok(pid)
 }
 
-async fn get_containerd_container_pid(container_id: String) -> Result<u64, AgentError> {
+async fn get_containerd_container_pid(container_id: String) -> Result<u64> {
     let channel = match connect(CONTAINERD_SOCK_PATH).await {
         Ok(channel) => channel,
         Err(_) => connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await?,
@@ -71,7 +68,7 @@ async fn get_containerd_container_pid(container_id: String) -> Result<u64, Agent
     Ok(pid as u64)
 }
 
-pub fn set_namespace(ns_path: PathBuf) -> Result<(), AgentError> {
+pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
     let fd: RawFd = File::open(ns_path)?.into_raw_fd();
     debug!("set_namespace -> fd {:#?}", fd);
 

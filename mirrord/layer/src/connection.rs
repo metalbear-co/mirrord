@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::log::info;
 
-use crate::FAIL_STILL_STUCK;
+use crate::{graceful_exit, FAIL_STILL_STUCK};
 
 const FAIL_CREATE_AGENT: &str = r#"
 mirrord-layer failed while trying to establish connection with the agent pod!
@@ -28,17 +28,20 @@ mirrord-layer failed while trying to establish connection with the agent pod!
 >> Check your kubernetes context match where the agent should be spawned.
 "#;
 
-fn handle_error(err: KubeApiError) -> ! {
+fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
     match err {
         KubeApiError::KubeError(kube::Error::HyperError(err)) => {
-            eprintln!("\nmirrord encountered an error accessing the Kubernetes API. Consider passing --accept-invalid-certificates.\n");
+            eprintln!("\nmirrord encountered an error accessing the Kubernetes API.\n");
+            if !config.accept_invalid_certificates {
+                eprintln!("Consider passing --accept-invalid-certificates.\n");
+            }
 
             match err.into_cause() {
-                Some(cause) => panic!("{}", cause),
-                None => panic!("mirrord got KubeError::HyperError"),
+                Some(cause) => graceful_exit!("Exiting due to {}", cause),
+                None => graceful_exit!("mirrord got KubeError::HyperError"),
             }
         }
-        _ => panic!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK} with error {err}"),
+        _ => graceful_exit!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK} with error {err}"),
     }
 }
 
@@ -53,13 +56,13 @@ pub(crate) async fn connect(
         RawConnection
             .create_connection(stream)
             .await
-            .unwrap_or_else(|err| handle_error(err))
+            .unwrap_or_else(|err| handle_error(err, config))
     } else {
         let progress = TaskProgress::new("agent initializing...");
 
         let k8s_api = LocalApi::job(config.agent.clone(), config.target.clone())
             .await
-            .unwrap_or_else(|err| handle_error(err));
+            .unwrap_or_else(|err| handle_error(err, config));
 
         let agent_ref = {
             if let (Some(pod_agent_name), Some(agent_port)) =
@@ -77,7 +80,7 @@ pub(crate) async fn connect(
                 )
                 .await
                 .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-                .unwrap_or_else(|err| handle_error(err));
+                .unwrap_or_else(|err| handle_error(err, config));
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
@@ -91,6 +94,6 @@ pub(crate) async fn connect(
         k8s_api
             .create_connection(agent_ref)
             .await
-            .unwrap_or_else(|err| handle_error(err))
+            .unwrap_or_else(|err| handle_error(err, config))
     }
 }
