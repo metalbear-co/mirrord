@@ -256,7 +256,8 @@ mod main {
                 // Only use existing if binary (not a script).
                 trace!(
                     "Using existing SIP-patched version of {:?}: {}",
-                    path, patched_path_string
+                    path,
+                    patched_path_string
                 );
                 return Ok(patched_path_string);
             }
@@ -273,7 +274,8 @@ mod main {
                 // The file is a sip protected binary.
                 trace!(
                     "{:?} is a SIP protected binary, making non protected version at: {}",
-                    path, patched_path_string
+                    path,
+                    patched_path_string
                 );
                 patch_binary(&path, &output)?;
                 Ok(patched_path_string)
