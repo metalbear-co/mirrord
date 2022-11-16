@@ -389,7 +389,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Get release version and hashes
         run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
+          echo "VERSION=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
           echo "sha256_mac=$(cat /tmp/artifacts/shasum/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV   
@@ -401,7 +401,7 @@ jobs:
           token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
-          sed -i -e 's/\([0-9]\.[0-9]\.[0-9]\)/"${{ env.version }}"/g' mirrord.rb
+          sed -i -e 's/\([0-9]\.[0-9]\.[0-9]\)/"${{ env.VERSION }}"/g' mirrord.rb
           sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_mac }}"/' mirrord.rb       
           sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_aarch64 }}"/' mirrord.rb
           sed -i -e '0,/[0-9a-f]\{64\}/ s//"${{ env.sha256_linux_x86_64 }}"/' mirrord.rb
