@@ -10,6 +10,8 @@ mod common;
 pub use common::*;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
+/// On MacOS, this works because the executable is patched before running, and the calls to
+/// `execve` for `bash` and `cat` are hooked, and the binaries are patched.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
