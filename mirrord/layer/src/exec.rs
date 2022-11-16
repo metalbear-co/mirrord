@@ -1,33 +1,23 @@
 #![cfg(target_os = "macos")]
 
-use std::env;
 use std::ffi::{CStr, CString};
 
 use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::sip_patch;
-use null_terminated::Nul;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::{
     detour::{
-        Bypass::{AgentAlreadyInEnv, NoSipDetected},
+        Bypass::NoSipDetected,
         Detour,
         Detour::{Bypass, Error, Success},
     },
-    error::{
-        HookError,
-        HookError::{Null, NullPointer},
-    },
+    error::{HookError, HookError::Null},
     file::ops::str_from_rawish,
     replace,
 };
-
-
-static MAX_ENV_VARS_NUM: usize = 1024;
-static AGENT_NAME_VAR_NAME: &str = "MIRRORD_CONNECT_AGENT";
-static AGENT_PORT_VAR_NAME: &str = "MIRRORD_CONNECT_PORT";
 
 pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "execve", execve_detour, FnExecve, FN_EXECVE);
@@ -52,67 +42,6 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
     }
 }
 
-/// Does the null terminated pointer array `env_arr` contain an env var named `var_name`.
-fn env_contains_var(env_arr: &Nul<*const c_char>, var_name: &str) -> bool {
-    // The items in the array are pointers to strings with the form "KEY=VALUE".
-    let prefix = var_name.to_owned() + "=";
-    env_arr
-        .iter()
-        // The array is not checked to actually be null terminated. So limit number of taken args.
-        .take(MAX_ENV_VARS_NUM)
-        .map(|ptr| unsafe { CStr::from_ptr(ptr.clone()) }) // Can't be null.
-        .map(Some) // str_from_rawish takes an option.
-        .map(str_from_rawish)
-        .any(|detour_str| {
-            detour_str
-                .map(|k_v| k_v.starts_with(&prefix))
-                .unwrap_or(false)
-        })
-}
-
-/// "MY_KEY" -> "MY_KEY=MY_VALUE"
-fn get_env_var_item(var_name: &str) -> String {
-    for (k, v) in std::env::vars() {
-        println!("{}: {}", k, v);
-    }
-    let mut res = var_name.to_string();
-    res.push_str("=");
-    // Unwrap, because if we're hooking the agent name must have been set already.
-    res.push_str(&env::var(var_name).unwrap());
-    res
-}
-
-fn string_from_rawish(rawish_path: &CStr) -> Detour<String> {
-    str_from_rawish(Some(rawish_path)).map(|s| s.to_string())
-}
-
-fn get_new_envp_with_agent(env_arr: &Nul<*const c_char>) -> Detour<Vec<String>> {
-    let mut env_vars: Vec<String> = env_arr
-        .iter()
-        .take(MAX_ENV_VARS_NUM)
-        .map(|ptr| unsafe { CStr::from_ptr(ptr.clone()) }) // Can't be null.
-        .map(string_from_rawish)
-        .collect::<Detour<Vec<_>>>()?;
-
-    env_vars.push(get_env_var_item(AGENT_NAME_VAR_NAME));
-    env_vars.push(get_env_var_item(AGENT_PORT_VAR_NAME));
-    Success(env_vars)
-}
-
-/// Check if array contains the agent vars, if not return pointer to new array that does.
-unsafe fn add_exiting_agent_if_missing(envp: *const *const c_char) -> Detour<Vec<String>> {
-    if envp == (0 as *const *const c_char) {
-        // Not allowed on macos.
-        return Error(NullPointer);
-    }
-    let env_arr = Nul::new_unchecked(envp);
-    if env_contains_var(env_arr, AGENT_NAME_VAR_NAME) {
-        Bypass(AgentAlreadyInEnv)
-    } else {
-        get_new_envp_with_agent(env_arr)
-    }
-}
-
 /// Hook for `libc::execve`.
 ///
 /// Patch file if it is SIPed, then call normal execve (on the patched file if patched, otherwise
@@ -123,8 +52,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    // TODO: DELETE
-    debug!("Hooked execve!");
     // Do unsafe part of path conversion here.
     let rawish_path = (!path.is_null()).then(|| CStr::from_ptr(path));
     let mut patched_path = CString::default();
@@ -137,22 +64,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
             Err(err) => Error(Null(err)),
         })
         .unwrap_or(path); // Continue even if there were errors - just run without patching.
-    let mut ptr_vec: Vec<*const c_char> = Vec::new();
-    let final_envp = add_exiting_agent_if_missing(envp)
-        .map(|string_vec| {
-            string_vec.iter().for_each(|string| {
-                if let Ok(c_string) = CString::new(string.to_owned()) {
-                    ptr_vec.push(c_string.as_ptr());
-                }
-            });
-            ptr_vec.push(0 as *const c_char); // Push null pointer to terminate array.
-            <&Nul<*const c_char> as ::std::convert::TryFrom<_>>::try_from(
-                &ptr_vec as &[*const c_char],
-            )
-            .map(|arr| arr.as_ptr())
-            .unwrap() // Infallible
-        })
-        .unwrap_or(envp);
 
-    FN_EXECVE(final_path, argv, final_envp)
+    FN_EXECVE(final_path, argv, envp)
 }

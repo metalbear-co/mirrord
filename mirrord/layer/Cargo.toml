@@ -54,7 +54,6 @@ os_info = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
-null-terminated = "0.3.17"
 
 [dev-dependencies]
 base64 = "0.13"

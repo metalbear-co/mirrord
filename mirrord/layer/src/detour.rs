@@ -5,9 +5,8 @@ use core::{
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use tracing::trace;
-use crate::detour::Detour::Success;
 
-use crate::error::HookError;
+use crate::{detour::Detour::Success, error::HookError};
 
 thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
 
@@ -83,8 +82,6 @@ pub(crate) enum Bypass {
     EmptyOption,
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
-    #[cfg(target_os = "macos")]
-    AgentAlreadyInEnv,
 }
 
 /// `ControlFlow`-like enum to be used by hooks.
@@ -231,8 +228,8 @@ impl<S> Detour<S> {
 }
 
 /// Allows you to call `.collect()` on an iterator of Detours and get a Detour of a Vec.
-impl<S> FromIterator<Detour<S>> for Detour<Vec<S>>{
-    fn from_iter<T: IntoIterator<Item=Detour<S>>>(iter: T) -> Detour<Vec<S>> {
+impl<S> FromIterator<Detour<S>> for Detour<Vec<S>> {
+    fn from_iter<T: IntoIterator<Item = Detour<S>>>(iter: T) -> Detour<Vec<S>> {
         let mut res = Vec::new();
         for detour in iter {
             res.push(detour?)
