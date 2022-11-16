@@ -2,7 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
+    config::{
+        from_env::FromEnv, source::MirrordConfigSource, FromMirrordConfig, MirrordConfig, Result,
+    },
     util::MirrordToggleableConfig,
 };
 
@@ -64,7 +66,7 @@ impl FsModeConfig {
 impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
-    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self) -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
 
@@ -73,12 +75,16 @@ impl MirrordConfig for FsModeConfig {
 }
 
 impl MirrordToggleableConfig for FsModeConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config() -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
 
         Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
     }
+}
+
+impl FromMirrordConfig for FsModeConfig {
+    type Generator = FsModeConfig;
 }
 
 #[cfg(test)]

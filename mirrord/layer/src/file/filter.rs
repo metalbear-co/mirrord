@@ -47,6 +47,7 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
         r"(?<usr_path>^/usr/.*$)|",
         r"(?<dev_path>^/dev/.*$)|",
         r"(?<opt_path>^/opt/.*$)|",
+        r"(?<home_path>^/home/.*$)|",
         // support for nixOS.
         r"(?<nix_path>^/nix/.*$)|",
         r"(?<iojs_path>^/home/iojs/.*$)|",

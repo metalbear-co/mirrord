@@ -7,6 +7,62 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-config: refactored macro so future implementations will be easier
+
+## 3.10.2
+
+### Fixed
+
+- CI: fix `release_gh` zip file step
+
+## 3.10.1
+
+### Changed
+
+- CI: download shasums and add git username/email to make the homebrew release work
+- Remove `unimplemented` for some IO cases, we now return `Unknown` instead. Also added warning logs for these cases to track.
+- Only recommend `--accept-invalid-certificates` on connection errors if not already set.
+- Terminate user application on connection error instead of only stopping mirrord.
+
+## 3.10.0
+
+### Added
+
+- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
+
+### Changed
+
+- VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
+
+## 3.9.0
+
+### Added
+
+- `MIRRORD_AGENT_NETWORK_INTERFACE` environment variable/file config to let user control which network interface to use. Workaround for [#670](https://github.com/metalbear-co/mirrord/issues/670).
+- mirrord-config: `deprecated` and `unstable` tags to MirrordConfg macro for messaging user when using said fields
+
+### Changed
+
+- VS Code Extension: change extension to use a mirrord-config file for configuration
+- VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
+
+## 3.8.0
+
+### Changed
+
+- mirrord-layer: Remove `unwrap` from initialization functions.
+- Log level of operation bypassing log from warn to trace (for real this time).
+- Perform filesystem operations for paths in `/home` locally by default (for real this time).
+
+### Added
+
+- VS Code Extension: add JSON schema
+- Bypass SIP on MacOS on the executed binary, (also via shebang).
+  See [[#649](https://github.com/metalbear-co/mirrord/issues/649)].
+  This does not yet include binaries that are executed by the first binary.
+
 ### Fixed
 
 - fix markdown job by adding the checkout action

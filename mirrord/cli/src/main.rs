@@ -8,16 +8,18 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use errno;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_operator::setup::{Operator, OperatorSetup};
 use mirrord_progress::TaskProgress;
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
-#[cfg(target_os = "macos")]
-use {regex::RegexSet, which::which};
 
 mod config;
 
@@ -99,33 +101,6 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn sip_check(binary_path: &str) -> Result<()> {
-    let sip_set = RegexSet::new([
-        r"/System/.*",
-        r"/bin/.*",
-        r"/sbin/.*",
-        r"/usr/.*",
-        r"/var/.*",
-        r"/Applications/.*",
-    ])?;
-    let complete_path = which(binary_path)?;
-
-    let sliced_path = complete_path.to_str().ok_or_else(|| {
-        anyhow!(
-            "Failed to convert path to a string slice: {}",
-            binary_path.to_string()
-        )
-    })?;
-
-    if sip_set.is_match(sliced_path) {
-        println!("[WARNING]: Provided binary: {:?} is located in a SIP directory. mirrord might fail to load into it.
-        >> for more info visit https://support.apple.com/en-us/HT204899", binary_path);
-    }
-
-    Ok(())
-}
-
 fn exec(args: &ExecArgs) -> Result<()> {
     if !args.no_telemetry {
         prompt_outdated_version();
@@ -134,9 +109,6 @@ fn exec(args: &ExecArgs) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
-
-    #[cfg(target_os = "macos")]
-    sip_check(&args.binary)?;
 
     if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
@@ -237,11 +209,39 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let library_path = extract_library(args.extract_path.clone())?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
-    let mut binary_args = args.binary_args.clone();
-    binary_args.insert(0, args.binary.clone());
+    #[cfg(target_os = "macos")]
+    let binary = sip_patch(&args.binary)?;
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let did_sip_patch = &binary != &args.binary;
 
-    let err = execvp(args.binary.clone(), binary_args);
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
+
+    let mut binary_args = args.binary_args.clone();
+    binary_args.insert(0, binary.clone());
+
+    let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno::Errno(86)) = err {
+        // "Bad CPU type in executable"
+        if did_sip_patch {
+            // We did a SIP patch.
+            error!(
+                "The file you are trying to run, {}, is either SIP protected or a script with a
+                shebang that leads to a SIP protected binary. In order to bypass SIP protection,
+                mirrord creates a non-SIP version of the binary and runs that one instead of the
+                protected one. The non-SIP version is however an x86_64 file, so in order to run
+                it on apple hardware, rosetta has to be installed.
+                Rosetta can be installed by runnning:
+
+                softwareupdate --install-rosetta
+
+                ",
+                &args.binary
+            )
+        }
+    }
     Err(anyhow!("Failed to execute binary"))
 }
 

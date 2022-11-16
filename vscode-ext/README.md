@@ -21,7 +21,5 @@ mirrord lets developers run local processes in the context of their cloud enviro
 > For incoming traffic, make sure your local process is listening on the same port as the remote pod.
 ## Settings
 
-- You can control the namespace mirrord will find pods by changing the impersonated pod namespace by clicking the settings button next to the Enable/Disable mirrord button
-- You can also control in which k8s namespace the mirrord-agent will spawn using the same setting button.
-- You can control which container to impersonate within the impersonated pod
-- Different functionality can be turned on or off: outgoing traffic, file operations, environment variables, and DNS.
+mirrord reads its configuration from the following file: `<project-path>/.mirrord/mirrord.json`. You can also prepend a prefix, e.g. `my-config.mirrord.json`, or use .toml or .yaml format.
+It's documented [here](https://mirrord.dev/docs/overview/configuration/). It also supports autocomplete when edited in VS Code.

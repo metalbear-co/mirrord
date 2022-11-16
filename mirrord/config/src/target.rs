@@ -4,7 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig, Result},
+    config::{
+        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
+        MirrordConfig, Result,
+    },
     util::string_or_struct_option,
 };
 
@@ -32,7 +35,7 @@ pub enum TargetFileConfig {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
     pub path: Option<Target>,
@@ -43,6 +46,10 @@ impl Default for TargetFileConfig {
     fn default() -> Self {
         TargetFileConfig::Simple(None)
     }
+}
+
+impl FromMirrordConfig for TargetConfig {
+    type Generator = TargetFileConfig;
 }
 
 impl MirrordConfig for TargetFileConfig {
@@ -161,8 +168,8 @@ impl FromSplit for PodTarget {
     }
 }
 
-/// Mirror the deployment specified by [`PodTarget::deployment`].
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
+/// Mirror the deployment specified by [`DeploymentTarget::deployment`].
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug, JsonSchema)]
 pub struct DeploymentTarget {
     /// Deployment to mirror.
     pub deployment: String,
@@ -201,7 +208,7 @@ mod tests {
     fn default(
         #[values((None, None), (Some("pod/foobar"), Some(Target::Pod(PodTarget { pod: "foobar".to_string(), container: None }))))]
         path: (Option<&str>, Option<Target>),
-        #[values((None, None))] namespace: (Option<&str>, Option<&str>),
+        #[values((None, None), (Some("foo"), Some("foo")))] namespace: (Option<&str>, Option<&str>),
     ) {
         with_env_vars(
             vec![

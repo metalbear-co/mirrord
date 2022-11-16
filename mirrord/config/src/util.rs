@@ -6,7 +6,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
-use crate::config::{ConfigError, MirrordConfig, Result};
+use crate::config::{ConfigError, FromMirrordConfig, MirrordConfig, Result};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn enabled_config() -> Result<Self::Generated, ConfigError> {
@@ -42,6 +42,13 @@ where
             ToggleableConfig::Config(inner) => inner.generate_config(),
         }
     }
+}
+
+impl<T> FromMirrordConfig for ToggleableConfig<T>
+where
+    T: FromMirrordConfig,
+{
+    type Generator = T::Generator;
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
