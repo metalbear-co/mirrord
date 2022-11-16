@@ -410,9 +410,5 @@ jobs:
           git config --global user.email "eyal@metalbear.co"
           git config --global user.name "Eyal Bukchin"
           git add .
-          git commit -m "Update to ${{ steps.version.outputs.version }}"
-          git push
-      - name: Create a new Tag
-        run: |
-          git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
-          git push --tags
+          git commit -m "Update to ${{ env.version }}"
+          git push      

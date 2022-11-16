@@ -494,11 +494,7 @@ jobs:
           git config --global user.name "infiniteregrets"
           git add .
           git commit -m "Update to ${{ env.version }}"
-          git push
-      - name: Create a new Tag
-        run: |
-          git tag -a ${{ github.ref_name }} -m "${{ github.ref_name }}"
-          git push --tags
+          git push      
 
   # ci-success:
   #   name: ci
