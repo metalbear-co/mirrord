@@ -18,7 +18,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::debug;
+    use tracing::trace;
     use which::which;
 
     use super::*;
@@ -254,7 +254,7 @@ mod main {
             //       binaries so rewriting them is not as bad, and 2. they're more likely to change.
             if shebang_target.is_none() {
                 // Only use existing if binary (not a script).
-                debug!(
+                trace!(
                     "Using existing SIP-patched version of {:?}: {}",
                     path, patched_path_string
                 );
@@ -271,7 +271,7 @@ mod main {
         match shebang_target {
             None => {
                 // The file is a sip protected binary.
-                debug!(
+                trace!(
                     "{:?} is a SIP protected binary, making non protected version at: {}",
                     path, patched_path_string
                 );
@@ -281,11 +281,11 @@ mod main {
             // The file is a script with a shebang. Patch recursively.
             Some(sip_file) => {
                 if let SipStatus::SomeSIP(target_path, shebang_target) = *sip_file {
-                    debug!(
+                    trace!(
                         "{:?} is a script with a shebang that leads to a SIP protected binary.",
                         path
                     );
-                    debug!(
+                    trace!(
                         "Shebang points to: {:?}. Patching it recursively and making a version of {:?} with an altered shebang at: {}",
                         target_path,
                         path,
