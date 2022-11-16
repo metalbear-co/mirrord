@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.10.4
+
+### Fixed
+
+- VS Code Extension: Fix crash when no env vars are defined in launch.json
+
 ## 3.10.3
 
 ### Changed
