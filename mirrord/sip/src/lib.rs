@@ -236,9 +236,7 @@ mod main {
         // if which does not work, just use the given path as is.
         let complete_path = which(path.to_string_lossy().to_string()).unwrap_or(path.to_owned());
         let output = &tmp_dir.join(
-            &complete_path
-                .strip_prefix("/")
-                .unwrap_or(&complete_path) // No prefix - no problem.
+            &complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.

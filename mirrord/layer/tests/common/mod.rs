@@ -1,11 +1,11 @@
 use std::{
+    cmp::min,
     collections::HashMap,
     fmt::Debug,
     path::PathBuf,
     process::Stdio,
     sync::{Arc, Mutex},
 };
-use std::cmp::min;
 
 use actix_codec::Framed;
 use fancy_regex::Regex;

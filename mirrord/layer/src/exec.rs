@@ -38,7 +38,8 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
                 for SIP and patch if necessary. However the SIP patch failed with the error: {:?}, \
                 so mirrord did not load into it, and all operations in that program will be \
                 executed locally if its execution without mirrord indeed succeeds.",
-                path, sip_error
+                path,
+                sip_error
             );
             Error(HookError::FailedSipPatch(sip_error))
         }
