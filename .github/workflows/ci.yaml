@@ -3,6 +3,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
+    branches-ignore: [staging-squash-merge.tmp]
   pull_request:
     branches: [main, staging, trying]
 
