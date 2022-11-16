@@ -55,8 +55,11 @@ async fn test_mirroring_with_http(
         TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection =
-        LayerConnection::get_initialized_connection(&listener, application.get_app_port()).await;
+    let mut layer_connection = LayerConnection::get_initialized_connection_with_port(
+        &listener,
+        application.get_app_port(),
+    )
+    .await;
     println!("Application subscribed to port, sending tcp messages.");
 
     layer_connection

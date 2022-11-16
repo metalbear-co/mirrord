@@ -232,6 +232,7 @@ mod main {
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
         // Strip root path from binary path, as when joined it will clear the previous.
+        debug!("Using temp dir: {:?} for sip patches", tmp_dir);
         let output = tmp_dir.join(
             &path
                 .strip_prefix("/")

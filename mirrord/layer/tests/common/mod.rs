@@ -173,7 +173,19 @@ impl LayerConnection {
     /// Accept the library's connection and verify initial ENV message and PortSubscribe message
     /// caused by the listen hook.
     /// Handle flask's 2 process behaviour.
-    pub async fn get_initialized_connection(
+    pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
+        let codec = Self::accept_library_connection(listener).await;
+        LayerConnection {
+            codec,
+            num_connections: 0,
+        }
+    }
+
+    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
+    /// caused by the listen hook.
+    /// Handle flask's 2 process behaviour.
+    /// Also await and verify the app's port subscribe message from layer.
+    pub async fn get_initialized_connection_with_port(
         listener: &TcpListener,
         app_port: u16,
     ) -> LayerConnection {
@@ -252,6 +264,93 @@ impl LayerConnection {
         self.send_tcp_data(message_data, new_connection_id).await;
         self.send_close(new_connection_id).await;
     }
+
+    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    pub async fn expect_file_open(&mut self, file_name: &str, fd: usize) {
+        // Verify the app tries to open the expected file.
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
+                mirrord_protocol::OpenFileRequest {
+                    path: file_name.to_string().into(),
+                    open_options: mirrord_protocol::OpenOptionsInternal {
+                        read: false,
+                        write: true,
+                        append: false,
+                        truncate: false,
+                        create: true,
+                        create_new: false,
+                    },
+                }
+            ))
+        );
+
+        // Answer open.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::OpenFileResponse { fd }),
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_file_read(&mut self, expected_fd: usize) -> usize {
+        // Verify the app reads the file.
+        if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
+            mirrord_protocol::ReadFileRequest {
+                remote_fd: requested_fd,
+                buffer_size,
+            },
+        )) = self.codec.next().await.unwrap().unwrap()
+        {
+            assert_eq!(expected_fd, requested_fd);
+            return buffer_size;
+        }
+        panic!("Expected Read FileRequest.");
+    }
+
+    /// Send file read response with given `contents`.
+    pub async fn answer_file_read(&mut self, contents: Vec<u8>) {
+        let read_amount = contents.len();
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
+                Ok(mirrord_protocol::ReadFileResponse {
+                    bytes: contents,
+                    read_amount,
+                }),
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: usize) {
+        let buffer_size = self.expect_file_read(expected_fd).await;
+        let contents = (&contents.as_bytes()[0..buffer_size]).to_vec();
+        self.answer_file_read(contents).await;
+        // last call should return 0.
+        let _buffer_size = self.expect_file_read(expected_fd).await;
+        self.answer_file_read(vec![]).await;
+    }
+
+    /// Read next layer message and verify it's close.
+    /// Answer that close.
+    pub async fn expect_file_close(&mut self, fd: usize) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
+                mirrord_protocol::CloseFileRequest { fd }
+            ))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
+                Ok(mirrord_protocol::CloseFileResponse {}),
+            )))
+            .await
+            .unwrap();
+    }
 }
 
 #[derive(Debug)]
@@ -263,6 +362,7 @@ pub enum Application {
     PythonSelfConnect,
     PythonDontLoad,
     RustFileOps,
+    EnvBashCat,
 }
 
 impl Application {
@@ -301,6 +401,7 @@ impl Application {
                     "../../target/debug/fileops"
                 )
             }
+            Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
         }
     }
 
@@ -334,6 +435,7 @@ impl Application {
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::RustFileOps => vec![],
+            Application::EnvBashCat => vec![],
         }
     }
 
@@ -343,7 +445,7 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonDontLoad | Application::RustFileOps => {
+            Application::PythonDontLoad | Application::RustFileOps | Application::EnvBashCat => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,
