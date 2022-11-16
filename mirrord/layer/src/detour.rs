@@ -228,17 +228,6 @@ impl<S> Detour<S> {
     }
 }
 
-/// Allows you to call `.collect()` on an iterator of Detours and get a Detour of a Vec.
-impl<S> FromIterator<Detour<S>> for Detour<Vec<S>> {
-    fn from_iter<T: IntoIterator<Item = Detour<S>>>(iter: T) -> Detour<Vec<S>> {
-        let mut res = Vec::new();
-        for detour in iter {
-            res.push(detour?)
-        }
-        Detour::Success(res)
-    }
-}
-
 /// Extends `Option<T>` with the `Option::bypass` function.
 pub(crate) trait OptionExt {
     type Opt;
