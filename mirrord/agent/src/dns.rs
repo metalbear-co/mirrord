@@ -11,7 +11,7 @@ use tokio::sync::{mpsc::Receiver, oneshot::Sender};
 use tracing::{error, trace};
 use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
-use crate::{error::AgentError, runtime::set_namespace};
+use crate::{error::Result, runtime::set_namespace};
 
 #[derive(Debug)]
 pub struct DnsRequest {
@@ -58,7 +58,7 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
 ///
 /// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
 /// `DnsRequest::tx`.
-pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<(), AgentError> {
+pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
     if let Some(pid) = pid {
         let namespace = PathBuf::from("/proc")
             .join(PathBuf::from(pid.to_string()))
