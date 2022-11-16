@@ -112,7 +112,6 @@ impl OperatorDeployment {
                     ..Default::default()
                 }),
                 spec: Some(pod_spec),
-                ..Default::default()
             },
             selector: LabelSelector {
                 match_labels: Some(app_labels.clone()),
@@ -153,7 +152,7 @@ impl OperatorServiceAccount {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 namespace: Some(namespace.name().to_owned()),
-                labels: Some(app_labels.clone()),
+                labels: Some(app_labels),
                 ..Default::default()
             },
             ..Default::default()
