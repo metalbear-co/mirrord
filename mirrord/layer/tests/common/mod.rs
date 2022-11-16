@@ -171,9 +171,7 @@ impl LayerConnection {
         codec
     }
 
-    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
-    /// caused by the listen hook.
-    /// Handle flask's 2 process behaviour.
+    /// Accept the library's connection and verify initial ENV message
     pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
         let codec = Self::accept_library_connection(listener).await;
         LayerConnection {
@@ -185,7 +183,6 @@ impl LayerConnection {
     /// Accept the library's connection and verify initial ENV message and PortSubscribe message
     /// caused by the listen hook.
     /// Handle flask's 2 process behaviour.
-    /// Also await and verify the app's port subscribe message from layer.
     pub async fn get_initialized_connection_with_port(
         listener: &TcpListener,
         app_port: u16,
