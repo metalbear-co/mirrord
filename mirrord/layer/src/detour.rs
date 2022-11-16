@@ -6,7 +6,7 @@ use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use tracing::trace;
 
-use crate::{detour::Detour::Success, error::HookError};
+use crate::error::HookError;
 
 thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
 
@@ -212,7 +212,6 @@ impl<S> Detour<S> {
     /// Remove the cfg attribute to enable using in other code.
     #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_or(self, default: S) -> S {
-        use tracing::debug;
         match self {
             Detour::Success(s) => s,
             Detour::Bypass(b) => {
@@ -220,7 +219,7 @@ impl<S> Detour<S> {
                 default
             }
             Detour::Error(e) => {
-                debug!("Detour failed with: {:#?}, continuing despite of error.", e);
+                trace!("Detour failed with: {:#?}, continuing despite of error.", e);
                 default
             }
         }
@@ -234,7 +233,7 @@ impl<S> FromIterator<Detour<S>> for Detour<Vec<S>> {
         for detour in iter {
             res.push(detour?)
         }
-        Success(res)
+        Detour::Success(res)
     }
 }
 
