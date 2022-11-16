@@ -3,537 +3,476 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches-ignore: [staging-squash-merge.tmp]
   pull_request:
     branches: [main, staging, trying]
 
 jobs:
-  # changed_files:
-  #   runs-on: ubuntu-latest
-  #   outputs:
-  #     rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-  #     intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
-  #     markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 0
-  #     - name: get changed rs files
-  #       id: changed-rs
-  #       uses: tj-actions/changed-files@v32
-  #       with:
-  #         files: |
-  #           **/*.rs
-  #           mirrord/**
-  #           tests/**
-  #           Cargo.toml
-  #           Cargo.lock
-  #           .dockerignore
-  #           rust-toolchain.toml
-  #           rustfmt.toml
-  #           .cargo/**
-  #           .github/workflows/ci.yaml
-  #     - name: get intellij changes
-  #       id: changed-intellij
-  #       uses: tj-actions/changed-files@v32
-  #       with:
-  #         files: |
-  #           intellij-ext/**
-  #     - name: get markdown changes
-  #       id: changed-markdown
-  #       uses: tj-actions/changed-files@v32
-  #       with:
-  #         files: |
-  #           CHANGELOG.md
-  #           README.md
-  #     - name: output test
-  #       run: |
-  #         echo ${{ steps.changed-rs.outputs.any_changed }};
-  #         echo ${{ steps.changed-rs.outputs.all_changed_files }};
-  #         echo ${{ steps.changed-intellij.outputs.any_changed }};
-  #         echo ${{ steps.changed-intellij.outputs.all_changed_files }};
-  #         echo ${{ steps.changed-markdown.outputs.any_changed }};
-  #         echo ${{ steps.changed-markdown.outputs.all_changed_files }};
-  # lint:
-  #   runs-on: ubuntu-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt, clippy
-  #     - uses: Swatinem/rust-cache@v1
-  #     # Needed for agent
-  #     - run: cargo fmt --all -- --check
-  #     - run: cargo clippy -- -D warnings
+  changed_files:
+    runs-on: ubuntu-latest
+    outputs:
+      rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
+      intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
+      markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: get changed rs files
+        id: changed-rs
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            **/*.rs
+            mirrord/**
+            tests/**
+            Cargo.toml
+            Cargo.lock
+            .dockerignore
+            rust-toolchain.toml
+            rustfmt.toml
+            .cargo/**
+            .github/workflows/ci.yaml
+      - name: get intellij changes
+        id: changed-intellij
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            intellij-ext/**
+      - name: get markdown changes
+        id: changed-markdown
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            CHANGELOG.md
+            README.md
+      - name: output test
+        run: |
+          echo ${{ steps.changed-rs.outputs.any_changed }};
+          echo ${{ steps.changed-rs.outputs.all_changed_files }};
+          echo ${{ steps.changed-intellij.outputs.any_changed }};
+          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
+          echo ${{ steps.changed-markdown.outputs.any_changed }};
+          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
+  lint:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v1
+      # Needed for agent
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -- -D warnings
 
-  # test_mirrord_protocol:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}
-  #     - run: |
-  #         cargo test -p mirrord-protocol
+  test_mirrord_protocol:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-protocol
 
-  # test_mirrord_config:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}
-  #     - run: |
-  #         cargo test -p mirrord-config
+  test_mirrord_config:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-config
 
-  # test_mirrord_sip:
-  #   runs-on: macos-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #     - uses: Swatinem/rust-cache@v1
-  #     - run: |
-  #         cargo test -p mirrord-sip
+  test_mirrord_sip:
+    runs-on: macos-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v1
+      - run: |
+          cargo test -p mirrord-sip
 
-  # test_mirrord_layer:
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest]
-  #   runs-on: ${{ matrix.os }}
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}
-  #     - run: |
-  #         cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
+  test_mirrord_layer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}
+      - run: |
+          cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
 
-  # test_agent:
-  #   runs-on: ubuntu-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt
-  #     - uses: Swatinem/rust-cache@v1
-  #     - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+  test_agent:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
-  # test_agent_image:
-  #   runs-on: ubuntu-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: docker/setup-buildx-action@v2
-  #     - name: build and export
-  #       uses: docker/build-push-action@v3
-  #       with:
-  #         context: .
-  #         tags: test
-  #         file: mirrord/agent/Dockerfile
-  #         outputs: type=docker,dest=/tmp/test.tar
-  #         cache-from: type=gha
-  #         cache-to: type=gha,mode=max
-  #     - name: upload image
-  #       uses: actions/upload-artifact@v2
-  #       with:
-  #         name: test
-  #         path: /tmp/test.tar
+  test_agent_image:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: docker/setup-buildx-action@v2
+      - name: build and export
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          tags: test
+          file: mirrord/agent/Dockerfile
+          outputs: type=docker,dest=/tmp/test.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: upload image
+        uses: actions/upload-artifact@v2
+        with:
+          name: test
+          path: /tmp/test.tar
 
-  # test_mirrord_layer_cli:
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   strategy:
-  #     matrix:
-  #       os: [ubuntu-latest, macos-12, macos-11]
-  #       target:
-  #         [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
-  #       exclude:
-  #         - os: ubuntu-latest
-  #           target: x86_64-apple-darwin
-  #         - os: ubuntu-latest
-  #           target: aarch64-apple-darwin
-  #         - os: macos-12
-  #           target: x86_64-unknown-linux-gnu
-  #         - os: macos-11
-  #           target: aarch64-apple-darwin
-  #         - os: macos-11
-  #           target: x86_64-unknown-linux-gnu
-  #   runs-on: ${{ matrix.os }}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: ${{matrix.target}}
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ${{matrix.os}}-${{matrix.target}}
-  #     # For now, just verify it compiles.
-  #     - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+  test_mirrord_layer_cli:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-12, macos-11]
+        target:
+          [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: macos-12
+            target: x86_64-unknown-linux-gnu
+          - os: macos-11
+            target: aarch64-apple-darwin
+          - os: macos-11
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: ${{matrix.target}}
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ${{matrix.os}}-${{matrix.target}}
+      # For now, just verify it compiles.
+      - run: cargo +nightly build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
-  # build_mirrord:
-  #   runs-on: ubuntu-latest
-  #   name: build mirrord
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         key: ubuntu-latest
-  #     - run: cargo +nightly build --manifest-path=./Cargo.toml
-  #     - name: upload layer
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: layer-lib
-  #         path: target/debug/libmirrord_layer.so
-  #         if-no-files-found: error
+  build_mirrord:
+    runs-on: ubuntu-latest
+    name: build mirrord
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-latest
+      - run: cargo +nightly build --manifest-path=./Cargo.toml
+      - name: upload layer
+        uses: actions/upload-artifact@v3
+        with:
+          name: layer-lib
+          path: target/debug/libmirrord_layer.so
+          if-no-files-found: error
 
-  # integration_tests:
-  #   runs-on: ubuntu-latest
-  #   needs: [build_mirrord, changed_files]
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   env:
-  #     MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
-  #   steps:
-  #     - uses: actions/checkout@v2 # Checkout the mirrord repo.
-  #     - uses: actions-rs/toolchain@v1 # Install rust.
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: x86_64-unknown-linux-gnu
-  #     - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-  #       with:
-  #         cache-on-failure: true
-  #     - uses: actions/setup-node@v3 # For http mirroring test.
-  #       with:
-  #         node-version: 14
-  #     - run: npm install express # For http mirroring test with node.
-  #     - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-  #     - run: pip3 install flask # For http mirroring test with Flask.
-  #     - run: pip3 install fastapi # For http mirroring test with FastAPI.
-  #     - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
-  #     - uses: actions/setup-go@v3
-  #       with:
-  #         go-version: "1.19.0"
-  #     - run: |
-  #         cd mirrord/layer/tests/apps/self_open
-  #         go build -o 19
-  #     - run: |
-  #         cd mirrord/layer/tests/apps/fileops
-  #         cargo build
-  #     - name: download layer # Download layer lib built in the `build_mirrord` job.
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: layer-lib
-  #         path: target/debug/
-  #     - run: cargo +nightly test -p mirrord-layer
+  integration_tests:
+    runs-on: ubuntu-latest
+    needs: [build_mirrord, changed_files]
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
+    steps:
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install rust.
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
+        with:
+          cache-on-failure: true
+      - uses: actions/setup-node@v3 # For http mirroring test.
+        with:
+          node-version: 14
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd mirrord/layer/tests/apps/self_open
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/fileops
+          cargo build
+      - name: download layer # Download layer lib built in the `build_mirrord` job.
+        uses: actions/download-artifact@v3
+        with:
+          name: layer-lib
+          path: target/debug/
+      - run: cargo +nightly test -p mirrord-layer
 
-  # integration_tests_macos:
-  #   runs-on: macos-12
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   env:
-  #     MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
-  #   steps:
-  #     - uses: actions/checkout@v2 # Checkout the mirrord repo.
-  #     - uses: actions-rs/toolchain@v1 # Install Rust.
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         target: x86_64-apple-darwin
-  #     - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-  #       with:
-  #         cache-on-failure: true
-  #     - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
-  #       with:
-  #         go-version: "1.19.0"
-  #     - run: | # Build Go app to test http mirroring with.
-  #         cd mirrord/layer/tests/apps/self_open
-  #         go build -o 19
-  #         cd ../app_go
-  #         go build -o 19
-  #     - run: |
-  #         cd mirrord/layer/tests/apps/fileops
-  #         cargo build
-  #     - uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 14
-  #     - run: npm install express # For http mirroring test with node.
-  #     - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-  #     - run: pip3 install flask # For http mirroring test with Flask.
-  #     - run: pip3 install fastapi # For http mirroring test with FastAPI.
-  #     - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
-  #     - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-  #     - run: cargo +nightly test -p mirrord-layer
+  integration_tests_macos:
+    runs-on: macos-12
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
+    steps:
+      - uses: actions/checkout@v2 # Checkout the mirrord repo.
+      - uses: actions-rs/toolchain@v1 # Install Rust.
+        with:
+          profile: minimal
+          toolchain: nightly
+          target: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
+        with:
+          cache-on-failure: true
+      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.19.0"
+      - run: | # Build Go app to test http mirroring with.
+          cd mirrord/layer/tests/apps/self_open
+          go build -o 19
+          cd ../app_go
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/fileops
+          cargo build
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express # For http mirroring test with node.
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - run: cargo +nightly build -p mirrord-layer # Build layer lib. The tests load it into the apps.
+      - run: cargo +nightly test -p mirrord-layer
 
-  # e2e:
-  #   runs-on: ubuntu-latest
-  #   name: e2e
-  #   needs: [build_mirrord, test_agent_image, integration_tests, changed_files]
-  #   if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-  #   env:
-  #     MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         profile: minimal
-  #         toolchain: nightly
-  #         components: rustfmt
-  #     - uses: Swatinem/rust-cache@v1
-  #       with:
-  #         key: ubuntu-latest
-  #         cache-on-failure: true
+  e2e:
+    runs-on: ubuntu-latest
+    name: e2e
+    needs: [build_mirrord, test_agent_image, integration_tests, changed_files]
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v1
+        with:
+          key: ubuntu-latest
+          cache-on-failure: true
 
-  #     - uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 14
-  #     - run: npm install express
-  #     - uses: actions/setup-python@v3
-  #     - run: pip3 install flask
-  #     - run: pip3 install fastapi
-  #     - run: pip3 install uvicorn[standard]
-  #     - uses: actions/setup-go@v3
-  #       with:
-  #         go-version: "1.18.0"
-  #     - run: |
-  #         cd tests/go-e2e
-  #         go build -o 18
-  #     - run: |
-  #         cd tests/go-e2e-fileops
-  #         go build -o 18
-  #     - run: |
-  #         cd tests/go-e2e-env
-  #         go build -o 18
-  #     - run: |
-  #         cd tests/go-e2e-outgoing
-  #         go build -o 18
-  #     - run: |
-  #         cd tests/go-e2e-dns
-  #         go build -o 18
-  #     - uses: actions/setup-go@v3
-  #       with:
-  #         go-version: "1.19.0"
-  #     - run: |
-  #         cd tests/go-e2e
-  #         go build -o 19
-  #     - run: |
-  #         cd tests/go-e2e-fileops
-  #         go build -o 19
-  #     - run: |
-  #         cd tests/go-e2e-env
-  #         go build -o 19
-  #     - run: |
-  #         cd tests/go-e2e-outgoing
-  #         go build -o 19
-  #     - run: |
-  #         cd tests/go-e2e-dns
-  #         go build -o 19
-  #     - run: |
-  #         cd tests/rust-e2e-fileops
-  #         cargo build
-  #     - name: start minikube
-  #       uses: medyagh/setup-minikube@master
-  #       with:
-  #         container-runtime: containerd
-  #     - name: download image
-  #       uses: actions/download-artifact@v2
-  #       with:
-  #         name: test
-  #         path: /tmp
-  #     - run: minikube image load /tmp/test.tar
-  #     - name: cargo test
-  #       run: cargo test -p tests
-  #     - name: switch minikube runtime
-  #       run: |
-  #         minikube delete
-  #         minikube start --container-runtime=docker
-  #         minikube image load /tmp/test.tar
-  #     - name: test with docker runtime
-  #       run: cargo test -p tests
-  #     - name: Collect logs
-  #       if: ${{ failure() }}
-  #       run: |
-  #         kubectl describe pods
-  #         docker exec minikube find /var/log/pods -print -exec cat {} \;
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - run: pip3 install fastapi
+      - run: pip3 install uvicorn[standard]
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.0"
+      - run: |
+          cd tests/go-e2e
+          go build -o 18
+      - run: |
+          cd tests/go-e2e-fileops
+          go build -o 18
+      - run: |
+          cd tests/go-e2e-env
+          go build -o 18
+      - run: |
+          cd tests/go-e2e-outgoing
+          go build -o 18
+      - run: |
+          cd tests/go-e2e-dns
+          go build -o 18
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          cd tests/go-e2e
+          go build -o 19
+      - run: |
+          cd tests/go-e2e-fileops
+          go build -o 19
+      - run: |
+          cd tests/go-e2e-env
+          go build -o 19
+      - run: |
+          cd tests/go-e2e-outgoing
+          go build -o 19
+      - run: |
+          cd tests/go-e2e-dns
+          go build -o 19
+      - run: |
+          cd tests/rust-e2e-fileops
+          cargo build
+      - name: start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: containerd
+      - name: download image
+        uses: actions/download-artifact@v2
+        with:
+          name: test
+          path: /tmp
+      - run: minikube image load /tmp/test.tar
+      - name: cargo test
+        run: cargo test -p tests
+      - name: switch minikube runtime
+        run: |
+          minikube delete
+          minikube start --container-runtime=docker
+          minikube image load /tmp/test.tar
+      - name: test with docker runtime
+        run: cargo test -p tests
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: |
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  # build_intellij_plugin:
-  #   runs-on: ubuntu-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.intellij_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - name: Setup Java
-  #       uses: actions/setup-java@v3
-  #       with:
-  #         distribution: zulu
-  #         java-version: 11
-  #     - name: Build Plugin
-  #       env:
-  #         CI_BUILD_PLUGIN: true
-  #       run: |
-  #         cp CHANGELOG.md intellij-ext/
-  #         cd intellij-ext
-  #         chmod +x ./gradlew
-  #         ./gradlew buildPlugin
+  build_intellij_plugin:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.intellij_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: zulu
+          java-version: 11
+      - name: Build Plugin
+        env:
+          CI_BUILD_PLUGIN: true
+        run: |
+          cp CHANGELOG.md intellij-ext/
+          cd intellij-ext
+          chmod +x ./gradlew
+          ./gradlew buildPlugin
 
-  # lint_markdown:
-  #   runs-on: ubuntu-latest
-  #   needs: changed_files
-  #   if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: avto-dev/markdown-lint@v1
-  #       with:
-  #         config: "markdownlint-config.json"
-  #         args: "README.md CHANGELOG.md"
+  lint_markdown:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: avto-dev/markdown-lint@v1
+        with:
+          config: "markdownlint-config.json"
+          args: "README.md CHANGELOG.md"
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
-
-
-  release_gh:
+  ci-success:
+    name: ci
+    needs:
+      [
+        build_mirrord,
+        test_agent_image,
+        integration_tests_macos,
+        integration_tests,
+        e2e,
+        test_mirrord_layer_cli,
+        test_agent,
+        lint,
+        test_mirrord_config,
+        test_mirrord_layer,
+        test_mirrord_protocol,
+        test_mirrord_sip,
+        build_intellij_plugin,
+        lint_markdown,
+      ]
     runs-on: ubuntu-latest
+    if: |
+      always() &&
+      (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
+      (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+      (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
+      (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+      (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+      (needs.test_mirrord_layer.result == 'success' || needs.test_mirrord_layer.result == 'skipped') &&
+      (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
+      (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
+      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
+      (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped')
     steps:
-      - run: |
-          mkdir -p /tmp/artifacts/x86_64-unknown-linux-gnu && echo "b1ef1cf61ad22d058b38ee0acc2a0b8df2dbe0c38175fb4e4e7d4443586bd488" >> /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-          mkdir -p /tmp/artifacts/aarch64-unknown-linux-gnu && echo "74fb297f21ffaa35d3f6350167d3b2bc29f628da33bfd065dea123b9e4af5ca9" >> /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-          mkdir -p /tmp/artifacts/universal-apple-darwin && echo "466615635496fd8b58f594678dc00679a818bded84c7e81a4f0d8b7ab4c681a5" >> /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
-      - uses: actions/upload-artifact@v3
-        with:
-          name: shasum
-          path: |
-            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-            /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-            /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
-
-  release_homebrew:
-    needs: release_gh
-    runs-on: ubuntu-latest    
-    steps:
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - uses: actions/checkout@v3
-      - run: |
-          ls -la /tmp/artifacts/shasum && ls -la /tmp/artifacts/shasum/aarch64-unknown-linux-gnu && cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-          grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1
-          cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }'
-          cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }'
-          cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }'
-      - name: Get release version and hashes
-        run: |          
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
-          echo "sha256_mac=$(cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-      - name: Checkout into homebrew-mirrord
-        uses: actions/checkout@v3
-        with:
-          repository: metalbear-co/homebrew-mirrord
-          path: ./
-          token: ${{ secrets.BREW_GITHUB_PAT }}
-      - name: Update hashes and urls
-        run: |
-          sed -i -e 's/\([0-9]+\.[0-9]+\.[0-9]+\)/${{ env.version }}/g' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_mac }}/' mirrord.rb       
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_aarch64 }}/' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_x86_64 }}/' mirrord.rb
-      - run: cat mirrord.rb
-      - name: Commit to metalbear-co/homebrew-mirrord
-        run: |
-          git config --global user.email "aroram18@mcmaster.ca"
-          git config --global user.name "infiniteregrets"
-          git add .
-          git commit -m "Update to ${{ env.version }}"
-          git push      
-
-  # ci-success:
-  #   name: ci
-  #   needs:
-  #     [
-  #       build_mirrord,
-  #       test_agent_image,
-  #       integration_tests_macos,
-  #       integration_tests,
-  #       e2e,
-  #       test_mirrord_layer_cli,
-  #       test_agent,
-  #       lint,
-  #       test_mirrord_config,
-  #       test_mirrord_layer,
-  #       test_mirrord_protocol,
-  #       test_mirrord_sip,
-  #       build_intellij_plugin,
-  #       lint_markdown,
-  #       release_gh,
-  #       release_homebrew,
-  #     ]
-  #   runs-on: ubuntu-latest
-  #   if: |
-  #     always() &&
-  #     (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
-  #     (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
-  #     (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
-  #     (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
-  #     (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-  #     (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
-  #     (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
-  #     (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
-  #     (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
-  #     (needs.test_mirrord_layer.result == 'success' || needs.test_mirrord_layer.result == 'skipped') &&
-  #     (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
-  #     (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-  #     (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
-  #     (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped')
-  #   steps:
-  #     - name: CI succeeded
-  #       run: exit 0
+      - name: CI succeeded
+        run: exit 0
