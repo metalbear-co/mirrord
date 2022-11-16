@@ -141,7 +141,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket: Arc<UserSocket> = {
         SOCKETS
@@ -192,6 +192,7 @@ const UDP: ConnectType = !TCP;
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
 /// interception procedure.
+#[tracing::instrument(level = "trace")]
 fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
@@ -254,7 +255,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,

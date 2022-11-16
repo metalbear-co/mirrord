@@ -1646,6 +1646,7 @@ dependencies = [
  "futures",
  "iptables",
  "libc",
+ "mirrord-http",
  "mirrord-protocol",
  "mockall",
  "nix 0.24.2",
@@ -1705,6 +1706,15 @@ dependencies = [
  "proc-macro2-diagnostics",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "mirrord-http"
+version = "3.8.0"
+dependencies = [
+ "httparse",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

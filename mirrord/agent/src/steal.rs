@@ -110,6 +110,7 @@ where
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
@@ -186,6 +187,8 @@ impl IPTableFormatter {
     }
 }
 
+const MINIMAL_HTTP_SIZE: usize = 4;
+
 pub struct StealWorker {
     pub sender: Sender<DaemonTcp>,
     iptables: SafeIpTables<iptables::IPTables>,
@@ -197,6 +200,7 @@ pub struct StealWorker {
 }
 
 impl StealWorker {
+    #[tracing::instrument(level = "debug", skip(sender))]
     pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<Self> {
         Ok(Self {
             sender,
@@ -209,6 +213,7 @@ impl StealWorker {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self, rx, listener))]
     pub async fn handle_loop(
         &mut self,
         mut rx: Receiver<LayerTcpSteal>,
@@ -242,10 +247,11 @@ impl StealWorker {
                 }
             }
         }
-        debug!("TCP Stealer exiting");
+
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         use LayerTcpSteal::*;
         match message {
@@ -254,18 +260,17 @@ impl StealWorker {
                     warn!("Port {port:?} is already subscribed");
                     Ok(())
                 } else {
-                    debug!("adding redirect rule");
                     self.iptables.add_redirect(port, self.listen_port)?;
                     self.ports.insert(port);
                     self.sender.send(DaemonTcp::Subscribed).await?;
-                    debug!("sent subscribed");
+
                     Ok(())
                 }
             }
             ConnectionUnsubscribe(connection_id) => {
-                info!("Closing connection {connection_id:?}");
                 self.write_streams.remove(&connection_id);
                 self.read_streams.remove(&connection_id);
+
                 Ok(())
             }
             PortUnsubscribe(port) => {
@@ -278,6 +283,18 @@ impl StealWorker {
             }
 
             Data(data) => {
+                // TODO(alex) [high] 2022-11-14: We get the data/message here.
+                // "GET / HTTP/1.1\r\nHost: localhost:30000\r\nUser-Agent: ... "
+                //
+                // Now I just need to parse this as an "HTTP" request and then check for the filter?
+                //
+                // 1. Check if `bytes > n`, where `n` is some small number for a small HTTP packet.
+                // 2. Try to parse HTTP message.
+                //
+                // Read on HTTP to get a better understanding of whats going on.
+                //
+                // ADD(alex) [high] 2022-11-16: Start dealing with HTTP/1.1 first.
+
                 if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
                     stream.write_all(&data.bytes[..]).await?;
                     Ok(())
@@ -292,6 +309,7 @@ impl StealWorker {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self, stream))]
     pub async fn handle_incoming_connection(
         &mut self,
         stream: TcpStream,
@@ -315,8 +333,9 @@ impl StealWorker {
             source_port: address.port(),
             address: address.ip(),
         });
+
         self.sender.send(new_connection).await?;
-        debug!("sent new connection");
+
         Ok(())
     }
 
@@ -336,6 +355,7 @@ impl StealWorker {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(rx, tx))]
 pub async fn steal_worker(
     rx: Receiver<LayerTcpSteal>,
     tx: Sender<DaemonTcp>,
@@ -348,13 +368,11 @@ pub async fn steal_worker(
 
         set_namespace(namespace)?;
     }
-    debug!("preparing steal");
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
+
     let mut worker = StealWorker::new(tx, listen_port)?;
-    debug!("finished preparing steal");
     worker.handle_loop(rx, listener).await?;
-    debug!("steal exiting");
 
     Ok(())
 }
@@ -369,6 +387,7 @@ mod orig_dst {
 
     #[cfg(target_os = "linux")]
     #[allow(unsafe_code)]
+    #[tracing::instrument(level = "debug")]
     pub fn orig_dst_addr(sock: &TcpStream) -> io::Result<SocketAddr> {
         use std::os::unix::io::AsRawFd;
         let fd = sock.as_raw_fd();

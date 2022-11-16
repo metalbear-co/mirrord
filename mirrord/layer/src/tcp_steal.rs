@@ -88,7 +88,7 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "debug", skip(self, codec))]
     async fn handle_listen(
         &mut self,
         listen: Listen,

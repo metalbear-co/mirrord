@@ -310,7 +310,10 @@ async fn start_agent() -> Result<(), AgentError> {
             .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
     );
 
-    trace!("agent ready");
+    // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
+    // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables
+    // `MIRRORD_AGENT_RUST_LOG`), then mirrord fails to initialize.
+    info!("agent ready");
     let mut clients = FuturesUnordered::new();
     loop {
         select! {
@@ -363,17 +366,17 @@ async fn start_agent() -> Result<(), AgentError> {
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
                 if state.clients.is_empty() {
-                    trace!("start_agent -> main thread timeout, no clients connected");
+                    trace!("Main thread timeout, no clients connected.");
                     break;
                 }
             }
         }
     }
 
-    trace!("Agent shutting down");
+    trace!("Agent shutting down.");
     drop(cancel_guard);
     if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
-        error!("start_agent -> sniffer task failed with error: {}", err);
+        error!("Sniffer task failed with error: {}", err);
     }
 
     trace!("Agent shutdown.");
