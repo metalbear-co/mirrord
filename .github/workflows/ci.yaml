@@ -444,9 +444,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          touch /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 && echo "foo" >> /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-          touch /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 && echo "bar" >> /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-          touch /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 && echo "baz" >> /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
+          mkdir -p /tmp/artifacts/x86_64-unknown-linux-gnu && echo "foo" >> /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
+          mkdir -p /tmp/artifacts/aarch64-unknown-linux-gnu && echo "bar" >> /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
+          mkdir -p /tmp/artifacts/universal-apple-darwin && echo "baz" >> /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
       - uses: actions/upload-artifact@v3
         with:
           name: shasum
