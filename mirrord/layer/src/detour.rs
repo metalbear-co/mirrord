@@ -82,6 +82,8 @@ pub(crate) enum Bypass {
     EmptyOption,
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
+    #[cfg(target_os = "macos")]
+    ExecOnNonExistingFile(String),
 }
 
 /// `ControlFlow`-like enum to be used by hooks.

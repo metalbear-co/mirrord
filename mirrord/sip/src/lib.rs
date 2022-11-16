@@ -229,7 +229,6 @@ mod main {
         shebang_target: Option<Box<SipStatus>>,
         tmp_dir: PathBuf,
     ) -> Result<String> {
-
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
 
