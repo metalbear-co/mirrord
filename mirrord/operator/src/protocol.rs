@@ -1,17 +1,58 @@
 use std::io;
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{error::DecodeError, Decode, Encode};
+use bincode::{
+    de::BorrowDecode,
+    error::{DecodeError, EncodeError},
+    Decode, Encode,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct AgentInitialize {
-    #[bincode(with_serde)]
     pub agent: AgentConfig,
-    #[bincode(with_serde)]
     pub target: TargetConfig,
+}
+
+impl Encode for AgentInitialize {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let agent = serde_json::to_vec(&self.agent).expect("agent not json serializable");
+        bincode::Encode::encode(&agent, encoder)?;
+
+        let target = serde_json::to_vec(&self.target).expect("target not json serializable");
+        bincode::Encode::encode(&target, encoder)?;
+        Ok(())
+    }
+}
+
+impl Decode for AgentInitialize {
+    fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let agent_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
+        let agent = serde_json::from_slice(&agent_buffer).expect("agent not json deserializable");
+
+        let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
+        let target =
+            serde_json::from_slice(&target_buffer).expect("target not json deserializable");
+
+        Ok(AgentInitialize { agent, target })
+    }
+}
+
+impl<'de> BorrowDecode<'de> for AgentInitialize {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let agent_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
+        let agent = serde_json::from_slice(&agent_buffer).expect("agent not json deserializable");
+
+        let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
+        let target =
+            serde_json::from_slice(&target_buffer).expect("target not json deserializable");
+
+        Ok(AgentInitialize { agent, target })
+    }
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
