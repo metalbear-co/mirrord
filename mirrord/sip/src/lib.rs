@@ -232,11 +232,13 @@ mod main {
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
         // Strip root path from binary path, as when joined it will clear the previous.
-        debug!("Using temp dir: {:?} for sip patches", tmp_dir);
-        let output = tmp_dir.join(
-            &path
+        debug!("Using temp dir: {:?} for sip patches", &tmp_dir);
+        // if which does not work, just use the given path as is.
+        let complete_path = which(path.to_string_lossy().to_string()).unwrap_or(path.to_owned());
+        let output = &tmp_dir.join(
+            &complete_path
                 .strip_prefix("/")
-                .map_err(|e| UnlikelyError(e.to_string()))?,
+                .unwrap_or(&complete_path) // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.

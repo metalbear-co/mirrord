@@ -6,7 +6,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::sip_patch;
-use tracing::warn;
+use tracing::trace;
 
 use crate::{
     detour::{
@@ -31,10 +31,13 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
         Err(sip_error) => {
-            warn!(
-                "The application executed the program {} which mirrord tried to check for SIP and \
-                patch if necessary. However the SIP patch failed with the error: {:?}, so mirrord \
-                did not load into it, and all operations in that program will be executed locally.",
+            // Don't warn. For example /usr/bin/env, which is in the shebang in many scripts and
+            // shims, tries to call a bunch of non-existent `bash`s, so this log is generated a lot.
+            trace!(
+                "The application is trying to execute the program {} which mirrord tried to check \
+                for SIP and patch if necessary. However the SIP patch failed with the error: {:?}, \
+                so mirrord did not load into it, and all operations in that program will be \
+                executed locally if its execution without mirrord indeed succeeds.",
                 path, sip_error
             );
             Error(HookError::FailedSipPatch(sip_error))
