@@ -348,7 +348,7 @@ mod main {
         let tmp_dir = get_tmp_dir()?;
 
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
-            debug!("Using temp dir: {:?} for sip patches", &tmp_dir);
+            trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
             Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
         } else {
             Ok(None)
