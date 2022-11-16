@@ -463,13 +463,17 @@ jobs:
         with:
           path: /tmp/artifacts
       - uses: actions/checkout@v3
-      - run: ls -la /tmp/artifacts/shasum
+      - run: |
+          grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1
+          cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }'
+          cat /tmp/artifacts/shasum/mirrord_linux_aarch64/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }'
+          cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }'
       - name: Get release version and hashes
         run: |
           echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_OUTPUT
-          echo "sha256_mac=$(cat /tmp/artifacts/shasum/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
-          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
-          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_mac=$(cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/mirrord_linux_aarch64/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_OUTPUT
       - name: Checkout into homebrew-mirrord
         uses: actions/checkout@v3
         with:
