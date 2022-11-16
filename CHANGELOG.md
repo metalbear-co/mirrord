@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- CI: Fix regex for homebrew formula
+
 ## 3.10.3
 
 ### Changed
