@@ -116,6 +116,9 @@ pub struct LayerConfig {
     /// Controls mirrord features, see [`feature::FeatureFileConfig`].
     #[config(nested)]
     pub feature: FeatureConfig,
+
+    #[config(env = "MIRRORD_OPERATOR", default = "false")]
+    pub operator: bool,
 }
 
 impl LayerFileConfig {
@@ -330,6 +333,7 @@ mod tests {
                 capture_error_trace: None,
             }),
             connect_tcp: None,
+            operator: None,
         };
 
         assert_eq!(config, expect);

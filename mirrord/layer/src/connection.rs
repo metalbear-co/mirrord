@@ -5,6 +5,7 @@ use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, AgentManagment, Connection},
     error::KubeApiError,
 };
+use mirrord_operator::client::OperatorApi;
 use mirrord_progress::TaskProgress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -59,6 +60,18 @@ pub(crate) async fn connect(
             .create_connection(stream)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
+    } else if config.operator {
+        let operator_api = OperatorApi::new(config.agent.clone(), config.target.clone());
+
+        let agent_ref = operator_api
+            .create_agent(&progress)
+            .await
+            .unwrap_or_else(|err| handle_error(err.into(), config));
+
+        operator_api
+            .create_connection(agent_ref)
+            .await
+            .unwrap_or_else(|err| handle_error(err.into(), config))
     } else {
         let k8s_api = KubernetesAPI::create(config.agent.clone(), config.target.clone())
             .await

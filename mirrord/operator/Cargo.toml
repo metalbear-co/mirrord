@@ -17,13 +17,16 @@ edition.workspace = true
 [features]
 default = []
 server = ["protocol"]
-client = ["protocol", "dep:futures"]
+client = ["protocol", "dep:futures", "dep:mirrord-kube", "dep:mirrord-progress"]
 protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes",  "dep:mirrord-config", "dep:mirrord-protocol"]
 
 [dependencies]
 mirrord-config = { path = "../config", optional = true }
+mirrord-kube = { path = "../kube", optional = true }
+mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
 
+async-trait = "0.1"
 actix-codec = { workspace = true, optional = true }
 bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
