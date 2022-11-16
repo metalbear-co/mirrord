@@ -15,6 +15,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   This means we now support running bash scripts with mirrord also on MacOS.
   Part of [#649](https://github.com/metalbear-co/mirrord/issues/649).
 
+### Fixed
+
+- CI: Fix regex for homebrew formula
+
+## 3.10.4
+
+### Fixed
+
+- VS Code Extension: Fix crash when no env vars are defined in launch.json
+
 ## 3.10.3
 
 ### Changed
