@@ -6,7 +6,7 @@
 
 # With mirrord's SIP bypassing mechanism:
 # 1. We create a SIP-free version of env and a version of this script that has the SIP-free env in its shebang.
-# 2. We call the that version of the script instead of the original.
+# 2. We call that version of the script instead of the original.
 # 3. The patched version of env is executed and mirrrod's layer is loaded into it.
 # 4. env executes bash, mirrrord intercepts that call, makes a SIP-free version of bash and executes that one instead.
 # 5. bash executes cat, mirrrord intercepts that call, makes a SIP-free version of cat and executes that one instead.
