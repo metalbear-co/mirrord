@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - CI: Fix regex for homebrew formula
+- Potentially ignoring write calls (`fd < 2`).
 
 ## 3.10.4
 
