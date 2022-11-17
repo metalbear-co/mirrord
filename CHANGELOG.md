@@ -13,7 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   and create a SIP-free version of the binary on-the-go and execute that instead of
   the SIP binary.
   This means we now support running bash scripts with mirrord also on MacOS.
-  Part of [#649](https://github.com/metalbear-co/mirrord/issues/649).
+  Closes [#649](https://github.com/metalbear-co/mirrord/issues/649).
 
 ### Fixed
 
