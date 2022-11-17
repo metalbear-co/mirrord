@@ -311,7 +311,6 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: usize, offset: u64) -> Detour<
     Detour::Success(file_channel_rx.blocking_recv()??)
 }
 
-#[tracing::instrument(level = "trace")]
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
