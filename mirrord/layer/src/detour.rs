@@ -176,9 +176,7 @@ impl<S> Detour<S> {
     {
         match self {
             Detour::Success(s) => Ok(s.into()),
-            Detour::Bypass(b) => {
-                Ok(op(b))
-            }
+            Detour::Bypass(b) => Ok(op(b)),
             Detour::Error(e) => Err(e),
         }
     }
