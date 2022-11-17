@@ -1,4 +1,7 @@
-use std::collections::VecDeque;
+use std::{
+    collections::{HashMap, VecDeque},
+    os::unix::prelude::{OwnedFd, RawFd},
+};
 
 use mirrord_protocol::{dns::DnsLookup, RemoteResult};
 use tokio::sync::oneshot;
@@ -39,3 +42,18 @@ pub(crate) enum HookMessage {
     File(HookMessageFile),
     GetAddrInfoHook(GetAddrInfoHook),
 }
+
+/// Generic resource that is held by an fd, when dropped closes the fd.
+#[derive(Debug)]
+pub struct ManagedResource<R> {
+    pub fd: OwnedFd,
+    pub resource: R,
+}
+
+impl<R> ManagedResource<R> {
+    pub fn new(fd: OwnedFd, resource: R) -> Self {
+        Self { fd, resource }
+    }
+}
+
+pub type ManagedResourceHashmap<R> = HashMap<RawFd, ManagedResource<R>>;

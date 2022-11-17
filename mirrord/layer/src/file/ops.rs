@@ -1,5 +1,10 @@
 use core::ffi::CStr;
-use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{
+    ffi::CString,
+    io::SeekFrom,
+    os::unix::{io::RawFd, prelude::FromRawFd},
+    path::PathBuf,
+};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
@@ -25,9 +30,9 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<usize> {
         OPEN_FILES
             .lock()?
             .get(&local_fd)
-            .cloned()
             // Bypass if we're not managing the relative part.
-            .ok_or(Bypass::LocalFdNotFound(local_fd))?,
+            .ok_or(Bypass::LocalFdNotFound(local_fd))?
+            .resource,
     )
 }
 
@@ -36,7 +41,10 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<usize> {
 /// `open_flags`, as [`libc::memfd_create`] will always return a `File` with read and write
 /// permissions (which is undesirable).
 #[tracing::instrument(level = "trace")]
-unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: usize) -> Detour<RawFd> {
+unsafe fn create_local_fake_file(
+    fake_local_file_name: CString,
+    remote_fd: usize,
+) -> Detour<ManagedFile> {
     let local_file_fd = unsafe {
         // `mode` is access rights: user, root, ...
         let local_file_fd = libc::shm_open(
@@ -55,7 +63,8 @@ unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: usize
         let _ = close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
     } else {
-        Detour::Success(local_file_fd)
+        let local_fd = OwnedFd::from_raw_fd(local_file_fd);
+        Detour::Success(ManagedFile::new(local_fd, remote_fd))
     }
 }
 
@@ -146,9 +155,10 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
     // the fd to a string.
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
-    let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+    let local_file = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+    let local_file_fd = local_file.fd.as_raw_fd();
 
-    OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
+    OPEN_FILES.lock().unwrap().insert(local_file_fd, local_file);
 
     Detour::Success(local_file_fd)
 }
@@ -174,10 +184,10 @@ pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> D
     let local_file_fd = open(rawish_path, open_options)?;
     let result = OPEN_FILES
         .lock()?
-        .get_key_value(&local_file_fd)
+        .get(&local_file_fd)
         .ok_or(Bypass::LocalFdNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .map(|local_file| local_file.fd.as_raw_fd() as *const RawFd as *mut _)?;
 
     Detour::Success(result)
 }
@@ -205,10 +215,10 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     // here.
     let result = OPEN_FILES
         .lock()?
-        .get_key_value(&fd)
+        .get(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .inspect(|local_file| trace!("fdopen -> {:#?} {:#?}", local_file.fd, local_file.resource))
+        .map(|local_file| local_file.fd.as_raw_fd() as *const RawFd as *mut _)?;
 
     Detour::Success(result)
 }
@@ -243,9 +253,10 @@ pub(crate) fn openat(
 
         let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
-        let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+        let local_file = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+        let local_file_fd = local_file.fd.as_raw_fd();
 
-        OPEN_FILES.lock()?.insert(local_file_fd, remote_fd);
+        OPEN_FILES.lock()?.insert(local_file_fd, local_file);
 
         Detour::Success(local_file_fd)
     }

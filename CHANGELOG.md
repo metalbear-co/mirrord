@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - CI: Fix regex for homebrew formula
+- Possible fd leaks in layer
 
 ## 3.10.4
 

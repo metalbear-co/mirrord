@@ -14,6 +14,7 @@ use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
 use crate::{
+    common::{ManagedResource, ManagedResourceHashmap},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
 };
@@ -21,7 +22,9 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<OwnedFd, Arc<UserSocket>>>> =
+type SocketResource = ManagedResource<Arc<UserSocket>>;
+
+pub(crate) static SOCKETS: LazyLock<Mutex<ManagedResourceHashmap<Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
