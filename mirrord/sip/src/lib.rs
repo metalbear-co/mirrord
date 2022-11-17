@@ -319,7 +319,7 @@ mod main {
 
     /// Get a path to a temp dir that is excluded from FS hooks and is also saved in an env var so
     /// that child processes also use the same one and exclude it from FS hooks.
-    fn get_tmp_dir() -> Result<PathBuf> {
+    pub fn get_tmp_dir() -> Result<PathBuf> {
         env::var(TMP_DIR_ENV_VAR_NAME)
             .map(PathBuf::from)
             .or_else(|_err| {

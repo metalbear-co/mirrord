@@ -34,6 +34,8 @@ use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
+#[cfg(target_os = "macos")]
+use mirrord_sip::get_tmp_dir;
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -152,6 +154,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .first()
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
+
+    // This is for better SIP handling on IDEs. If started by an IDE, SIP handling was not called
+    // before starting the binary, (but we're here so binary was not SIP). This means a temp dir
+    // was not yet set, and was not added to excluded files. In that case, set it now, before
+    // generating the configuration so that if the application calls `execve`, and we patch a SIP
+    // executable, the file hooks bypass our patched files (currently there is no way to add files
+    // to the file filter after it was constructed).
+    #[cfg(target_os = "macos")]
+    let _tmp_dir = get_tmp_dir()
+        .inspect_err(|err| {
+            trace!(
+                "Getting temp dir failed with {:?} in layer_pre_initialization",
+                err
+            )
+        })
+        .unwrap_or_default();
 
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
         .map_err(LayerError::from)
