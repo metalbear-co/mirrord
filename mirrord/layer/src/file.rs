@@ -11,11 +11,12 @@
 /// exclusions to the default).
 use core::fmt;
 use std::{
-    collections::HashMap,
+    hash::{Hash, Hasher},
+    collections::{HashSet},
     io::SeekFrom,
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, prelude::{OwnedFd, AsRawFd}},
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex}, borrow::Borrow,
 };
 
 use futures::SinkExt;
@@ -38,16 +39,35 @@ pub(crate) mod filter;
 pub(crate) mod hooks;
 pub(crate) mod ops;
 
-type LocalFd = RawFd;
-type RemoteFd = usize;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct RemoteFile {
-    fd: RawFd,
+#[derive(Debug)]
+struct LocalFile {
+    local_fd: OwnedFd,
+    remote_fd: usize
 }
 
-pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
-    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
+impl PartialEq for LocalFile {
+    fn eq(&self, other: &LocalFile) -> bool {
+        self.local_fd.as_raw_fd() == other.local_fd.as_raw_fd()
+    }
+}
+
+impl Eq for LocalFile {}
+
+impl Hash for LocalFile {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.local_fd.as_raw_fd().hash(state);
+    }
+}
+
+impl Borrow<RawFd> for LocalFile {
+    fn borrow(&self) -> &RawFd {
+        &self.local_fd.as_raw_fd()
+    }
+}
+
+pub(crate) static OPEN_FILES: LazyLock<Mutex<HashSet<LocalFile>>> =
+    LazyLock::new(|| Mutex::new(HashSet::with_capacity(4)));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
 /// Rust's [`std::fs::OpenOptions`]

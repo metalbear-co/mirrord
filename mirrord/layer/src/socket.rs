@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, prelude::OwnedFd},
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -21,7 +21,7 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<OwnedFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =

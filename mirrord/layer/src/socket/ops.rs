@@ -463,7 +463,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
         .bypass(Bypass::LocalFdNotFound(fd))?
         .clone();
 
-    SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
+    SOCKETS.lock()?.insert(dup_fd as OwnedFd, dup_socket);
 
     Detour::Success(())
 }
