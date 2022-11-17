@@ -171,10 +171,13 @@ pub(crate) struct KubernetesAPI {
 impl KubernetesAPI {
     pub(crate) async fn create_kube_config(config: &LayerConfig) -> Result<Config> {
         if config.accept_invalid_certificates {
-            let mut config = Config::infer().await?;
-            config.accept_invalid_certs = true;
-            warn!("Accepting invalid certificates");
-            Ok(config)
+            let mut kube_config = Config::infer().await?;
+            kube_config.accept_invalid_certs = true;
+            // Only warn the first time connecting to the agent, not on child processes.
+            if config.connect_agent_name.is_none() {
+                warn!("Accepting invalid certificates");
+            }
+            Ok(kube_config)
         } else {
             Config::infer().await.map_err(|err| err.into())
         }
