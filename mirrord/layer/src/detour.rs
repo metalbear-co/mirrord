@@ -216,14 +216,7 @@ impl<S> Detour<S> {
     pub(crate) fn unwrap_or(self, default: S) -> S {
         match self {
             Detour::Success(s) => s,
-            Detour::Bypass(b) => {
-                trace!("Bypassing operation due to {:#?}", b);
-                default
-            }
-            Detour::Error(e) => {
-                trace!("Detour failed with: {:#?}, continuing despite of error.", e);
-                default
-            }
+            Detour::Bypass(_) | Detour::Error(_) => default,
         }
     }
 }

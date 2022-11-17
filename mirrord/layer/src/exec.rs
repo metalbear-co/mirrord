@@ -6,7 +6,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError};
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::{
     detour::{
@@ -31,6 +31,11 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
+            trace!(
+                "The application wants to execute {}, SIP check got FileNotFound. If the file \
+                actually exists, make sure it is excluded from FS ops.",
+                non_existing_bin
+            );
             Bypass(ExecOnNonExistingFile(non_existing_bin))
         }
         Err(sip_error) => {
