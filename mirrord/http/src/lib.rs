@@ -1,24 +1,8 @@
 use thiserror::Error;
 use tracing::debug;
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-
-    /*
-     debug!("data {:#?}", String::from_utf8_lossy(&data.bytes));
-                if data.bytes.len() < MINIMAL_HTTP_SIZE {
-                    warn!("NOT HTTP/1.1");
-                } else {
-                    let mut headers = vec![httparse::EMPTY_HEADER; 4];
-                    let mut request = httparse::Request::new(&mut headers);
-                    debug!("request initial {:#?}", request);
-
-                    let request = request.parse(&data.bytes);
-                    debug!("request {:#?}", request);
-                    debug!("headers {:#?}", headers);
-                }
-    */
-}
+// TODO(alex) [mid] 2022-11-17: To parse http2, set up a client/server (hyper) so we can grab the
+// request, pass it to ourselves (to this dummy hyper thingy) and then "parse" with hyper.
 
 #[derive(Error, Debug)]
 pub enum HttpError {
@@ -47,23 +31,39 @@ const fn validate_length(length: usize) -> Result<(), HttpError> {
 pub fn parse(bytes: &[u8]) -> Result<(), HttpError> {
     validate_length(bytes.len())?;
 
-    let mut headers = vec![httparse::EMPTY_HEADER; 4];
+    let mut headers = vec![httparse::EMPTY_HEADER; 32];
     let mut request = httparse::Request::new(&mut headers);
-    println!("request initial {:#?}", request);
+    debug!("request initial {:#?}", request);
 
     let request = request.parse(&bytes)?;
-    println!("request {:#?}", request);
-    println!("headers {:#?}", headers);
+    debug!("request {:#?}", request);
+    debug!("headers {:#?}", headers);
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
+
     use super::*;
 
     const HTTP1_SAMPLE: &str =
         "GET / HTTP/1.1\r\nHost: localhost:30000\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
+
+    const HTTP1_BIG_REQUEST: &str = "POST / HTTP/1.1\r\nHost: localhost:30000\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\nContent-Length: 1975\r\nContent-Type: application/x-www-form-urlencoded\r\nExpect: 100-continue\r\n\r\n";
+
+    fn tracing_start() {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::ACTIVE)
+                    .compact(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    }
 
     #[test]
     #[should_panic]
@@ -85,5 +85,11 @@ mod tests {
     #[test]
     fn test_parse_http1_sample() {
         parse(HTTP1_SAMPLE.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn test_parse_http1_big() {
+        tracing_start();
+        parse(HTTP1_BIG_REQUEST.as_bytes()).unwrap();
     }
 }

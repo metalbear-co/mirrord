@@ -294,6 +294,10 @@ impl StealWorker {
                 // Read on HTTP to get a better understanding of whats going on.
                 //
                 // ADD(alex) [high] 2022-11-16: Start dealing with HTTP/1.1 first.
+                let data_debug = String::from_utf8_lossy(&data.bytes);
+                debug!("steal received {:#?}", data_debug);
+                let parsed = mirrord_http::parse(&data.bytes);
+                debug!("parsed {:#?}", parsed);
 
                 if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
                     stream.write_all(&data.bytes[..]).await?;

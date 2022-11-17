@@ -1715,6 +1715,7 @@ dependencies = [
  "httparse",
  "thiserror",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
