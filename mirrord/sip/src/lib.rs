@@ -1,14 +1,12 @@
-#[cfg(target_os = "macos")]
+#![cfg(target_os = "macos")]
 mod codesign;
-#[cfg(target_os = "macos")]
 mod error;
-#[cfg(target_os = "macos")]
 mod whitespace;
 
-#[cfg(target_os = "macos")]
 mod main {
     use std::{
         collections::HashSet,
+        env,
         env::temp_dir,
         io::{self, Read},
         os::macos::fs::MetadataExt,
@@ -20,7 +18,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::debug;
+    use tracing::trace;
     use which::which;
 
     use super::*;
@@ -29,6 +27,9 @@ mod main {
         error::Result,
         SipError::{CyclicShebangs, FileNotFound, UnlikelyError},
     };
+
+    static EXCLUDE_ENV_VAR_NAME: &str = "MIRRORD_FILE_FILTER_EXCLUDE";
+    static TMP_DIR_ENV_VAR_NAME: &str = "MIRRORD_TMP_DIR";
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -223,40 +224,58 @@ mod main {
 
     /// Only call this function on a file that is SomeSIP.
     /// Patch shebang scripts recursively and patch final binary.
-    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
+    fn patch_some_sip(
+        path: &PathBuf,
+        shebang_target: Option<Box<SipStatus>>,
+        tmp_dir: PathBuf,
+    ) -> Result<String> {
+        // TODO: Change output to be with hash of the contents, so that old versions of changed
+        //       files do not get used. (Also change back existing file logic to always use.)
+
+        // if which does not work, just use the given path as is.
+        let complete_path = which(path.to_string_lossy().to_string()).unwrap_or(path.to_owned());
+
         // Strip root path from binary path, as when joined it will clear the previous.
-        let output = temp_dir().join("mirrord-bin").join(
-            &path
-                .strip_prefix("/")
-                .map_err(|e| UnlikelyError(e.to_string()))?,
+        let output = &tmp_dir.join(
+            &complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
         let patched_path_string = output
             .to_str()
-            .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
+            .ok_or(UnlikelyError(
+                "Failed to convert path to string".to_string(),
+            ))?
             .to_string();
 
         if output.exists() {
-            debug!(
-                "Using existing SIP-patched version of {:?}: {}",
-                path, patched_path_string
-            );
-            return Ok(patched_path_string);
+            // TODO: Remove this `if` (leave contents) when we have content hashes in paths.
+            //       For now don't use existing scripts because 1. they're usually not as large as
+            //       binaries so rewriting them is not as bad, and 2. they're more likely to change.
+            if shebang_target.is_none() {
+                // Only use existing if binary (not a script).
+                trace!(
+                    "Using existing SIP-patched version of {:?}: {}",
+                    path,
+                    patched_path_string
+                );
+                return Ok(patched_path_string);
+            }
         }
 
         std::fs::create_dir_all(
             output
                 .parent()
-                .ok_or_else(|| UnlikelyError("Failed to get parent directory".to_string()))?,
+                .ok_or(UnlikelyError("Failed to get parent directory".to_string()))?,
         )?;
 
         match shebang_target {
             None => {
                 // The file is a sip protected binary.
-                debug!(
+                trace!(
                     "{:?} is a SIP protected binary, making non protected version at: {}",
-                    path, patched_path_string
+                    path,
+                    patched_path_string
                 );
                 patch_binary(&path, &output)?;
                 Ok(patched_path_string)
@@ -264,17 +283,17 @@ mod main {
             // The file is a script with a shebang. Patch recursively.
             Some(sip_file) => {
                 if let SipStatus::SomeSIP(target_path, shebang_target) = *sip_file {
-                    debug!(
+                    trace!(
                         "{:?} is a script with a shebang that leads to a SIP protected binary.",
                         path
                     );
-                    debug!(
+                    trace!(
                         "Shebang points to: {:?}. Patching it recursively and making a version of {:?} with an altered shebang at: {}",
                         target_path,
                         path,
                         patched_path_string,
                     );
-                    let new_target = patch_some_sip(&target_path, shebang_target)?;
+                    let new_target = patch_some_sip(&target_path, shebang_target, tmp_dir)?;
                     patch_script(&path, &output, &new_target)?;
                     Ok(patched_path_string)
                 } else {
@@ -287,15 +306,55 @@ mod main {
         }
     }
 
+    /// Add the given `path` to excluded paths.
+    fn add_to_file_exclude(path: &str) {
+        env::set_var(
+            EXCLUDE_ENV_VAR_NAME,
+            env::var(EXCLUDE_ENV_VAR_NAME)
+                .map(|paths| paths + ";")
+                .unwrap_or(String::new())
+                + path,
+        )
+    }
+
+    /// Get a path to a temp dir that is excluded from FS hooks and is also saved in an env var so
+    /// that child processes also use the same one and exclude it from FS hooks.
+    pub fn get_tmp_dir() -> Result<PathBuf> {
+        env::var(TMP_DIR_ENV_VAR_NAME)
+            .map(PathBuf::from)
+            .or_else(|_err| {
+                let tmp_dir = temp_dir().join("mirrord-bin");
+                let tmp_dir_string = tmp_dir
+                    .to_str()
+                    .ok_or(UnlikelyError(
+                        "Failed to convert path to string".to_string(),
+                    ))?
+                    .to_string();
+                env::set_var(TMP_DIR_ENV_VAR_NAME, &tmp_dir_string);
+                add_to_file_exclude(&(tmp_dir_string + "/.*$"));
+                Ok(tmp_dir)
+            })
+    }
+
     /// Check if the file that the user wants to execute is a SIP protected binary (or a script
-    /// starting with a shebang that leads to a SIP protected binary). If it is, create a
-    /// non-protected version of the file and return the path to it. If it is not, the original
-    /// path is copied and returned.
-    pub fn sip_patch(binary_path: &str) -> Result<String> {
+    /// starting with a shebang that leads to a SIP protected binary).
+    /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
+    /// If it is not, `Ok(None)`.
+    /// Propagate errors.
+    pub fn sip_patch(binary_path: &str) -> Result<Option<String>> {
+        // Important: do also if the binary has no SIP, so that a temp directory is set, added to
+        // ignored files, and saved in an environment variable, so that if the binary execs SIP
+        // binaries the patched versions are created in a directory that is already added to the
+        // excluded files. (It's currently not possible to add excluded paths when the layer is
+        // already running, and the first call to this function is from the cli.)
+        let tmp_dir = get_tmp_dir()?;
+
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
-            return patch_some_sip(&path, shebang_target);
+            trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
+            Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
+        } else {
+            Ok(None)
         }
-        Ok(String::from(binary_path))
     }
 
     #[cfg(test)]
@@ -377,7 +436,7 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap();
+            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap().unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -404,5 +463,4 @@ mod main {
     }
 }
 
-#[cfg(target_os = "macos")]
 pub use main::*;

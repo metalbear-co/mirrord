@@ -4,8 +4,6 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
-use tracing::trace;
-
 use crate::error::HookError;
 
 thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
@@ -80,6 +78,10 @@ pub(crate) enum Bypass {
     ReadOnly(PathBuf),
     EmptyBuffer,
     EmptyOption,
+    #[cfg(target_os = "macos")]
+    NoSipDetected(String),
+    #[cfg(target_os = "macos")]
+    ExecOnNonExistingFile(String),
 }
 
 /// `ControlFlow`-like enum to be used by hooks.
@@ -178,10 +180,7 @@ impl<S> Detour<S> {
     {
         match self {
             Detour::Success(s) => Ok(s.into()),
-            Detour::Bypass(b) => {
-                trace!("Bypassing operation due to {:#?}", b);
-                Ok(op(b))
-            }
+            Detour::Bypass(b) => Ok(op(b)),
             Detour::Error(e) => Err(e),
         }
     }
@@ -199,6 +198,20 @@ impl<S> Detour<S> {
             Detour::Success(s) => Detour::Success(op(s)),
             Detour::Bypass(b) => Detour::Bypass(b),
             Detour::Error(e) => Detour::Error(e),
+        }
+    }
+
+    /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
+    ///
+    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
+    /// fail.
+    /// Currently defined only on macos because it is only used in macos-only code.
+    /// Remove the cfg attribute to enable using in other code.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn unwrap_or(self, default: S) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(_) | Detour::Error(_) => default,
         }
     }
 }

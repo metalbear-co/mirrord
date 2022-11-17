@@ -9,7 +9,74 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- MacOS: Support for executing SIP binaries in user applications. We hook `execve`
+  and create a SIP-free version of the binary on-the-go and execute that instead of
+  the SIP binary.
+  This means we now support running bash scripts with mirrord also on MacOS.
+  Closes [#649](https://github.com/metalbear-co/mirrord/issues/649).
+
+### Changed
+
+- Only warn about invalid certificates once per agent.
+
+### Fixed
+
+- CI: Fix regex for homebrew formula
+- Potentially ignoring write calls (`fd < 2`).
+
+## 3.10.4
+
+### Fixed
+
+- VS Code Extension: Fix crash when no env vars are defined in launch.json
+
+## 3.10.3
+
+### Changed
+
+- CLI: change temp lib file to only be created for new versions
+- mirrord-config: refactored macro so future implementations will be easier
+
+### Fixed
+
+- Release: fix homebrew release step
+
+## 3.10.2
+
+### Fixed
+
+- CI: fix `release_gh` zip file step
+
+## 3.10.1
+
+### Changed
+
+- CI: download shasums and add git username/email to make the homebrew release work
+- Remove `unimplemented` for some IO cases, we now return `Unknown` instead. Also added warning logs for these cases to track.
+- Only recommend `--accept-invalid-certificates` on connection errors if not already set.
+- Terminate user application on connection error instead of only stopping mirrord.
+
+## 3.10.0
+
+### Added
+
+- CI: Update homebrew formula on release, refer [#484](https://github.com/metalbear-co/mirrord/issues/484)
+
+### Changed
+
+- VS Code Extension: change extension to use the target specified in the mirrord config file, if specified, rather than show the pod dropdown
+
+## 3.9.0
+
+### Added
+
 - `MIRRORD_AGENT_NETWORK_INTERFACE` environment variable/file config to let user control which network interface to use. Workaround for [#670](https://github.com/metalbear-co/mirrord/issues/670).
+- mirrord-config: `deprecated` and `unstable` tags to MirrordConfg macro for messaging user when using said fields
+
+### Changed
+
+- VS Code Extension: change extension to use a mirrord-config file for configuration
+- VS Code Extension: use the IDE's telemetry settings to determine if telemetry should be enabled
 
 ## 3.8.0
 
