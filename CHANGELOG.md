@@ -7,6 +7,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- MacOS: Support for executing SIP binaries in user applications. We hook `execve`
+  and create a SIP-free version of the binary on-the-go and execute that instead of
+  the SIP binary.
+  This means we now support running bash scripts with mirrord also on MacOS.
+  Closes [#649](https://github.com/metalbear-co/mirrord/issues/649).
+
 ### Changed
 
 - Only warn about invalid certificates once per agent.

@@ -77,8 +77,8 @@ fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
 }
 
-/// Converts a [`CStr`] path into a [`PathBuf`], or bypasses when this fails.
-fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
+/// Converts a [`CStr`] path into a [`&str`], or bypasses when this fails.
+pub(crate) fn str_from_rawish(rawish_path: Option<&CStr>) -> Detour<&str> {
     let path = rawish_path
         .map(CStr::to_str)
         .transpose()
@@ -90,10 +90,14 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 
             Bypass::CStrConversion
         })?
-        .map(PathBuf::from)
         .ok_or(HookError::NullPointer)?;
 
     Detour::Success(path)
+}
+
+/// Converts a [`CStr`] path into a [`PathBuf`], or bypasses when this fails.
+fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
+    str_from_rawish(rawish_path).map(PathBuf::from)
 }
 
 /// Blocking wrapper around `libc::open` call.
