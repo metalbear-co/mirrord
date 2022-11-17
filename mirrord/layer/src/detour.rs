@@ -4,8 +4,6 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
-use tracing::trace;
-
 use crate::error::HookError;
 
 thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
@@ -182,10 +180,7 @@ impl<S> Detour<S> {
     {
         match self {
             Detour::Success(s) => Ok(s.into()),
-            Detour::Bypass(b) => {
-                trace!("Bypassing operation due to {:#?}", b);
-                Ok(op(b))
-            }
+            Detour::Bypass(b) => Ok(op(b)),
             Detour::Error(e) => Err(e),
         }
     }
