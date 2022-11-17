@@ -299,12 +299,7 @@ pub(crate) unsafe extern "C" fn write_detour(
     buffer: *const c_void,
     count: size_t,
 ) -> ssize_t {
-    // Avoid writing to `std(in|out|err)`.
-    if fd > 2 {
-        write_logic(fd, buffer, count)
-    } else {
-        FN_WRITE(fd, buffer, count)
-    }
+    write_logic(fd, buffer, count)
 }
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour

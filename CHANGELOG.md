@@ -7,10 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Only warn about invalid certificates once per agent.
+
 ### Fixed
 
 - CI: Fix regex for homebrew formula
 - Possible fd leaks in layer
+- Potentially ignoring write calls (`fd < 2`).
 
 ## 3.10.4
 
