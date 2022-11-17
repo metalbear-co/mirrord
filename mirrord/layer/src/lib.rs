@@ -581,7 +581,10 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
+    if let Some(_) = SOCKETS.lock().unwrap().remove(&fd)
+    {
+        0
+    } else if *enabled_file_ops
         && let Some(local_file) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(local_file.resource);
 
