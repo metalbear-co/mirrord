@@ -10,7 +10,7 @@ use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError, TMP_DIR_ENV_VAR_NAME};
 use null_terminated::Nul;
-use tracing::{debug, log::error, warn};
+use tracing::{error, trace, warn};
 
 use crate::{
     detour::{
@@ -39,11 +39,12 @@ pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
-            debug!(
+            trace!(
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \
                 If the file actually exists and should have been found, make sure it is excluded \
                 from FS ops.",
-                path, non_existing_bin
+                path,
+                non_existing_bin
             );
             Bypass(ExecOnNonExistingFile(non_existing_bin))
         }
@@ -91,7 +92,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>
                         .map_or_else(
                             || arg_str.as_ptr() as *const c_char, // No temp dir, use arg as is.
                             |original_path| {
-                                debug!("Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.", arg_str, original_path);
+                                trace!("Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.", arg_str, original_path);
                                 changed = true;
                                 original_path.as_ptr() as *const c_char
                             })
