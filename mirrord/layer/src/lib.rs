@@ -611,11 +611,9 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
-        let _ = close_file_result
-            .map_err(|fail| {
-                error!("Failed closing file with {fail:#?}");
-                -1
-            });
+        if let Err(fail) = close_file_result {
+            error!("Failed closing file with {fail:#?}");
+        };
     }
     res
 }
