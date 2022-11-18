@@ -24,6 +24,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: Fix regex for homebrew formula
 - Potentially ignoring write calls (`fd < 2`).
 - CI: Fix release for linux aarch64. Fixes [#760](https://github.com/metalbear-co/mirrord/issues/760).
+- Possible cases where we don't close fds correctly.
 
 ## 3.10.4
 

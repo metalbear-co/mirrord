@@ -50,6 +50,9 @@ class FileOpsTest(unittest.TestCase):
         self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)
+        os.close(file)
+        os.close(dir)
+
 
     def _check_path_exists_on_host(self, path):
         # Todo: use the subprocess module here
