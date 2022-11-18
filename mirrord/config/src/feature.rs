@@ -72,6 +72,12 @@ pub struct FeatureConfig {
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
+    /// Controls target pause feature.
+    ///
+    /// With this feature enabled, the target pod(? TODO) is paused while agent is running.
+    #[config(env = "MIRRORD_PAUSE", default = "false")]
+    pub pause: bool,
+
     /// Controls the crash reporting feature.
     ///
     /// With this feature enabled, mirrord generates a nice crash report log.

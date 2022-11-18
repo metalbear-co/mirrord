@@ -2,6 +2,9 @@
 #![feature(hash_drain_filter)]
 #![feature(once_cell)]
 
+use nix::unistd::Pid;
+use nix::sys::signal::{self, Signal};
+
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddrV4},
@@ -17,6 +20,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
+use libc::pid_t;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
@@ -308,6 +312,11 @@ async fn start_agent() -> Result<()> {
             .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
     );
 
+
+    pid.inspect(|pid| {
+        signal::kill(Pid::from_raw(pid.clone() as pid_t), Signal::SIGSTOP).unwrap();
+    });
+
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
     // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables
     // `MIRRORD_AGENT_RUST_LOG`), then mirrord fails to initialize.
@@ -371,6 +380,13 @@ async fn start_agent() -> Result<()> {
             }
         }
     }
+
+    // Resume original container when agent is done.
+    // TODO: remove first inspect
+    pid.inspect(|pid| info!("pid: {}", pid)).inspect(|pid| {
+        signal::kill(Pid::from_raw(pid.clone() as pid_t), Signal::SIGCONT).unwrap();
+    });
+
 
     trace!("Agent shutting down.");
     drop(cancel_guard);

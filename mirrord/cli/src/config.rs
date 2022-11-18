@@ -105,6 +105,10 @@ pub(super) struct ExecArgs {
     #[arg(long = "steal")]
     pub tcp_steal: bool,
 
+    /// Pause target pod(?TODO) while running.
+    #[arg(short, long)]
+    pub pause: bool,
+
     /// Disable tcp/udp outgoing traffic
     #[arg(long)]
     pub no_outgoing: bool,
