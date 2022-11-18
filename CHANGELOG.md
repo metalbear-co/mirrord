@@ -23,6 +23,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - CI: Fix regex for homebrew formula
 - Potentially ignoring write calls (`fd < 2`).
+- Possible cases where we don't close fds correctly.
 
 ## 3.10.4
 

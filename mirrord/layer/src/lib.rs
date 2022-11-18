@@ -606,21 +606,16 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        FN_CLOSE(fd)
-    } else if *enabled_file_ops
+    let res = FN_CLOSE(fd);
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
-        close_file_result
-            .map_err(|fail| {
-                error!("Failed closing file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        FN_CLOSE(fd)
+        if let Err(fail) = close_file_result {
+            error!("Failed closing file with {fail:#?}");
+        };
     }
+    res
 }
 
 // no need to guard because we call another detour which will do the guard for us.
