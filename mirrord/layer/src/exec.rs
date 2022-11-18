@@ -25,7 +25,7 @@ use crate::{
     replace,
 };
 
-static MAX_ARGC: usize = 16;
+const MAX_ARGC: usize = 254;
 
 pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor) {
     let _ = replace!(interceptor, "execve", execve_detour, FnExecve, FN_EXECVE);
