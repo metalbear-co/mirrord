@@ -82,6 +82,12 @@ pub(crate) enum Bypass {
     NoSipDetected(String),
     #[cfg(target_os = "macos")]
     ExecOnNonExistingFile(String),
+    #[cfg(target_os = "macos")]
+    NoTempDirInArgv,
+    #[cfg(target_os = "macos")]
+    TempDirEnvVarNotSet,
+    #[cfg(target_os = "macos")]
+    TooManyArgs,
 }
 
 /// `ControlFlow`-like enum to be used by hooks.

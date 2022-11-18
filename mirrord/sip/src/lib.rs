@@ -29,7 +29,7 @@ mod main {
     };
 
     static EXCLUDE_ENV_VAR_NAME: &str = "MIRRORD_FILE_FILTER_EXCLUDE";
-    static TMP_DIR_ENV_VAR_NAME: &str = "MIRRORD_TMP_DIR";
+    pub static TMP_DIR_ENV_VAR_NAME: &str = "MIRRORD_TMP_DIR";
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
