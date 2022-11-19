@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Only warn about invalid certificates once per agent.
+- Reduce tokio features to needed ones only.
 
 ### Fixed
 
