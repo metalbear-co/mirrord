@@ -10,7 +10,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AgentInitialize {
     pub agent: AgentConfig,
     pub target: TargetConfig,
