@@ -35,7 +35,7 @@ pub enum TargetFileConfig {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
     pub path: Option<Target>,
