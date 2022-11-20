@@ -35,7 +35,7 @@ pub enum TargetFileConfig {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Hash)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
     pub path: Option<Target>,
@@ -113,7 +113,7 @@ mirrord-layer failed to parse the provided target!
 ///
 /// target = "pod/hello-world-abcd-1234"
 /// ```
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
     /// Mirror a deployment.
@@ -140,7 +140,7 @@ impl FromStr for Target {
 }
 
 /// Mirror the pod specified by [`PodTarget::pod`].
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct PodTarget {
     /// Pod to mirror.
     pub pod: String,
@@ -169,7 +169,7 @@ impl FromSplit for PodTarget {
 }
 
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct DeploymentTarget {
     /// Deployment to mirror.
     pub deployment: String,
