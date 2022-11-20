@@ -42,27 +42,40 @@ pub(crate) fn wrap_raw_connection(
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(msg) = in_rx.recv() => {
-                    if let Err(fail) = codec.send(msg).await {
-                        error!("Error sending client message: {:#?}", fail);
-                        break;
-                    }
-                }
-                Some(daemon_message) = codec.next() => {
-                    match daemon_message {
-                        Ok(msg) => {
-                            let _ = out_tx.send(msg).await;
+                msg = in_rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if let Err(fail) = codec.send(msg).await {
+                                error!("Error sending client message: {:#?}", fail);
+                                break;
+                            }
                         }
-                        Err(err) => {
-                            error!("Error receiving daemon message: {:?}", err);
+                        None => {
+                            error!("initiated disconnect from agent");
+
                             break;
                         }
                     }
                 }
-                else => {
-                    error!("agent disconnected");
+                daemon_message = codec.next() => {
+                    match daemon_message {
+                        Some(Ok(msg)) => {
+                            if let Err(fail) = out_tx.send(msg).await {
+                                error!("DaemonMessage dropped: {:#?}", fail);
 
-                    break;
+                                break;
+                            }
+                        }
+                        Some(Err(err)) => {
+                            error!("Error receiving daemon message: {:?}", err);
+                            break;
+                        }
+                        None => {
+                            error!("agent disconnected");
+
+                            break;
+                        }
+                    }
                 }
             }
         }

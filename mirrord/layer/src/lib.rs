@@ -438,7 +438,7 @@ async fn thread_loop(
                         }
                     },
                     None => {
-                        error!("agent disconnected");
+                        error!("agent connection lost");
                         break;
                     }
                 }
