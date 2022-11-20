@@ -9,7 +9,7 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::mpsc,
 };
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::error::{KubeApiError, Result};
 
@@ -53,7 +53,7 @@ pub(crate) fn wrap_raw_connection(
                             }
                         }
                         None => {
-                            error!("initiated disconnect from agent");
+                            warn!("initiated disconnect from agent");
 
                             break;
                         }
