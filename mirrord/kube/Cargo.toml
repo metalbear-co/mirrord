@@ -32,3 +32,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+base64 = "0.13"
+http-body = "0.4"
+hyper = "0.14"
+rstest = "*"
+tower = "0.4"

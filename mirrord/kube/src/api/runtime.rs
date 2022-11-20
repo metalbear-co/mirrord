@@ -174,3 +174,37 @@ impl RuntimeDataProvider for PodTarget {
         RuntimeData::from_pod(&pod, &self.container)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case("pod/foobaz", Target::Pod(PodTarget {pod: "foobaz".to_string(), container: None}))]
+    #[case("deployment/foobaz", Target::Deployment(DeploymentTarget {deployment: "foobaz".to_string(), container: None}))]
+    #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
+    #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
+    #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
+    fn test_target_parses(#[case] target: &str, #[case] expected: Target) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(target, expected)
+    }
+
+    #[rstest]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("deployment/foobaz/blah")]
+    #[should_panic(expected = "InvalidTarget")]
+    #[case::panic("pod/foo/baz")]
+    fn test_target_parse_fails(#[case] target: &str) {
+        let target = target.parse::<Target>().unwrap();
+        assert_eq!(
+            target,
+            Target::Deployment(DeploymentTarget {
+                deployment: "foobaz".to_string(),
+                container: None
+            })
+        )
+    }
+}

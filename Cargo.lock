@@ -1751,16 +1751,21 @@ version = "3.11.0"
 dependencies = [
  "actix-codec",
  "async-trait",
+ "base64",
  "futures",
+ "http-body",
+ "hyper",
  "k8s-openapi",
  "kube",
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.8.5",
+ "rstest",
  "serde_json",
  "thiserror",
  "tokio",
+ "tower",
  "tracing",
 ]
 
