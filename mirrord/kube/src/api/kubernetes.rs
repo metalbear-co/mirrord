@@ -49,11 +49,19 @@ impl KubernetesAPI {
 
         let client = Client::try_from(kube_config).map_err(KubeApiError::from)?;
 
-        Ok(KubernetesAPI {
+        Ok(KubernetesAPI::new(
             client,
-            agent: config.agent.clone(),
-            target: config.target.clone(),
-        })
+            config.agent.clone(),
+            config.target.clone(),
+        ))
+    }
+
+    pub fn new(client: Client, agent: AgentConfig, target: TargetConfig) -> Self {
+        KubernetesAPI {
+            client,
+            agent,
+            target,
+        }
     }
 }
 
