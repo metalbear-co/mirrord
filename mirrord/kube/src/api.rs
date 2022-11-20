@@ -19,6 +19,8 @@ mod env_guard;
 pub mod kubernetes;
 mod runtime;
 
+static CONNECTION_CHANNEL_SIZE: usize = 1000;
+
 pub(crate) fn get_k8s_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
@@ -36,8 +38,8 @@ pub(crate) fn wrap_raw_connection(
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
     let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
-    let (in_tx, mut in_rx) = mpsc::channel(1000);
-    let (out_tx, out_rx) = mpsc::channel(1000);
+    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
         loop {
