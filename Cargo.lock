@@ -1781,6 +1781,7 @@ dependencies = [
  "http-body",
  "hyper",
  "itertools",
+ "k8s-openapi",
  "kube",
  "libc",
  "mirrord-config",
