@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.11.0
+
 ### Added
 
 - MacOS: Support for executing SIP binaries in user applications. We hook `execve`
