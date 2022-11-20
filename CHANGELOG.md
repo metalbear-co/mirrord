@@ -7,9 +7,44 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.11.0
+
+### Added
+
+- MacOS: Support for executing SIP binaries in user applications. We hook `execve`
+  and create a SIP-free version of the binary on-the-go and execute that instead of
+  the SIP binary.
+  This means we now support running bash scripts with mirrord also on MacOS.
+  Closes [#649](https://github.com/metalbear-co/mirrord/issues/649).
+
 ### Changed
 
+- Only warn about invalid certificates once per agent.
+- Reduce tokio features to needed ones only.
+
+### Fixed
+
+- CI: Fix regex for homebrew formula
+- Potentially ignoring write calls (`fd < 2`).
+- CI: Fix release for linux aarch64. Fixes [#760](https://github.com/metalbear-co/mirrord/issues/760).
+- Possible cases where we don't close fds correctly.
+
+## 3.10.4
+
+### Fixed
+
+- VS Code Extension: Fix crash when no env vars are defined in launch.json
+
+## 3.10.3
+
+### Changed
+
+- CLI: change temp lib file to only be created for new versions
 - mirrord-config: refactored macro so future implementations will be easier
+
+### Fixed
+
+- Release: fix homebrew release step
 
 ## 3.10.2
 

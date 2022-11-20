@@ -73,7 +73,7 @@ pub(crate) async fn connect(
             .await
             .unwrap_or_else(|err| handle_error(err.into(), config))
     } else {
-        let k8s_api = KubernetesAPI::create(config.agent.clone(), config.target.clone())
+        let k8s_api = KubernetesAPI::create(config)
             .await
             .unwrap_or_else(|err| handle_error(err, config));
 

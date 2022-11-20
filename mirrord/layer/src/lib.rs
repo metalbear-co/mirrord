@@ -32,6 +32,8 @@ use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
+#[cfg(target_os = "macos")]
+use mirrord_sip::get_tmp_dir;
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -55,11 +57,12 @@ mod common;
 mod connection;
 mod detour;
 mod error;
+#[cfg(target_os = "macos")]
+mod exec;
 mod file;
 mod go_env;
 mod macros;
 mod outgoing;
-// mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
@@ -148,6 +151,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .first()
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
+
+    // This is for better SIP handling on IDEs. If started by an IDE, SIP handling was not called
+    // before starting the binary, (but we're here so binary was not SIP). This means a temp dir
+    // was not yet set, and was not added to excluded files. In that case, set it now, before
+    // generating the configuration so that if the application calls `execve`, and we patch a SIP
+    // executable, the file hooks bypass our patched files (currently there is no way to add files
+    // to the file filter after it was constructed).
+    #[cfg(target_os = "macos")]
+    let _tmp_dir = get_tmp_dir()
+        .inspect_err(|err| {
+            trace!(
+                "Getting temp dir failed with {:?} in layer_pre_initialization",
+                err
+            )
+        })
+        .unwrap_or_default();
 
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
         .map_err(LayerError::from)
@@ -541,6 +560,11 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
 
+    #[cfg(target_os = "macos")]
+    unsafe {
+        exec::enable_execve_hook(&mut interceptor)
+    };
+
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
     }
@@ -569,21 +593,16 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        FN_CLOSE(fd)
-    } else if *enabled_file_ops
+    let res = FN_CLOSE(fd);
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
-        close_file_result
-            .map_err(|fail| {
-                error!("Failed closing file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        FN_CLOSE(fd)
+        if let Err(fail) = close_file_result {
+            error!("Failed closing file with {fail:#?}");
+        };
     }
+    res
 }
 
 // no need to guard because we call another detour which will do the guard for us.

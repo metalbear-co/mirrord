@@ -5,6 +5,8 @@ use libc::{c_char, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
+#[cfg(target_os = "macos")]
+use mirrord_sip::SipError;
 use thiserror::Error;
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
@@ -58,6 +60,10 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
     LocalFileCreation(usize),
+
+    #[cfg(target_os = "macos")]
+    #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
+    FailedSipPatch(#[from] SipError),
 }
 
 #[derive(Error, Debug)]
@@ -184,6 +190,8 @@ impl From<HookError> for i64 {
             HookError::Utf8(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
             HookError::LocalFileCreation(_) => libc::EINVAL,
+            #[cfg(target_os = "macos")]
+            HookError::FailedSipPatch(_) => libc::EACCES,
         };
 
         set_errno(errno::Errno(libc_error));

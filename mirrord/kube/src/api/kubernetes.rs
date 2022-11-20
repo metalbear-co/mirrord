@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client, Config};
-use mirrord_config::{agent::AgentConfig, target::TargetConfig};
-use mirrord_progress::TaskProgress;
+use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[cfg(feature = "env_guard")]
 use crate::api::env_guard::EnvVarGuard;
@@ -27,22 +27,32 @@ pub struct KubernetesAPI {
 }
 
 impl KubernetesAPI {
-    pub async fn create(agent: AgentConfig, target: TargetConfig) -> Result<Self> {
+    pub async fn create(config: &LayerConfig) -> Result<Self> {
         #[cfg(feature = "env_guard")]
         let _guard = EnvVarGuard::new();
 
         #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
-        let mut config = Config::infer().await?;
+        let mut kube_config = if config.accept_invalid_certificates {
+            let mut kube_config = Config::infer().await?;
+            kube_config.accept_invalid_certs = true;
+            // Only warn the first time connecting to the agent, not on child processes.
+            if config.connect_agent_name.is_none() {
+                warn!("Accepting invalid certificates");
+            }
+            kube_config
+        } else {
+            Config::infer().await?
+        };
 
         #[cfg(feature = "env_guard")]
-        _guard.prepare_config(&mut config);
+        _guard.prepare_config(&mut kube_config);
 
-        let client = Client::try_from(config).map_err(KubeApiError::from)?;
+        let client = Client::try_from(kube_config).map_err(KubeApiError::from)?;
 
         Ok(KubernetesAPI {
             client,
-            agent,
-            target,
+            agent: config.agent.clone(),
+            target: config.target.clone(),
         })
     }
 }
@@ -62,7 +72,10 @@ impl AgentManagment for KubernetesAPI {
         wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
     }
 
-    async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
+    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    where
+        P: Progress + Send + Sync,
+    {
         let runtime_data = self
             .target
             .path.as_ref().ok_or_else(|| KubeApiError::InvalidTarget(

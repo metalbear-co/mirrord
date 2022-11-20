@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_kube::api::AgentManagment;
-use mirrord_progress::TaskProgress;
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{
     net::{TcpStream, ToSocketAddrs},
@@ -71,7 +71,10 @@ where
         Ok((client_tx, daemon_rx))
     }
 
-    async fn create_agent(&self, _: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
+    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
+    where
+        P: Progress + Send + Sync,
+    {
         let connection = TcpStream::connect(&self.addr).await?;
 
         let mut codec = actix_codec::Framed::new(connection, OperatorCodec::client());
@@ -93,6 +96,7 @@ mod tests {
     use mirrord_config::{
         config::MirrordConfig, target::TargetFileConfig, LayerConfig, LayerFileConfig,
     };
+    use mirrord_progress::TaskProgress;
 
     use super::*;
 
