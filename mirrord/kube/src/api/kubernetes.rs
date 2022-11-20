@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client, Config};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
-use mirrord_progress::TaskProgress;
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
 use tokio::sync::mpsc;
@@ -62,7 +62,10 @@ impl AgentManagment for KubernetesAPI {
         wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
     }
 
-    async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
+    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    where
+        P: Progress + Send + Sync,
+    {
         let runtime_data = self
             .target
             .path.as_ref().ok_or_else(|| KubeApiError::InvalidTarget(

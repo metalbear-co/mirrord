@@ -12,7 +12,7 @@ use kube::{
     Api, Client,
 };
 use mirrord_config::agent::AgentConfig;
-use mirrord_progress::TaskProgress;
+use mirrord_progress::Progress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
 use tokio::pin;
@@ -32,13 +32,15 @@ pub trait ContainerApi {
         }
     }
 
-    async fn create_agent(
+    async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
         connection_port: u16,
-        progress: &TaskProgress,
-    ) -> Result<String>;
+        progress: &P,
+    ) -> Result<String>
+    where
+        P: Progress + Send + Sync;
 }
 
 static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
@@ -123,13 +125,16 @@ pub struct JobContainer;
 
 #[async_trait]
 impl ContainerApi for JobContainer {
-    async fn create_agent(
+    async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
         connection_port: u16,
-        progress: &TaskProgress,
-    ) -> Result<String> {
+        progress: &P,
+    ) -> Result<String>
+    where
+        P: Progress + Send + Sync,
+    {
         let agent_image = Self::agent_image(agent);
         let pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
@@ -269,13 +274,16 @@ pub struct EphemeralContainer;
 
 #[async_trait]
 impl ContainerApi for EphemeralContainer {
-    async fn create_agent(
+    async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
         runtime_data: RuntimeData,
         connection_port: u16,
-        progress: &TaskProgress,
-    ) -> Result<String> {
+        progress: &P,
+    ) -> Result<String>
+    where
+        P: Progress + Send + Sync,
+    {
         let agent_image = Self::agent_image(agent);
         let container_progress = progress.subtask("creating ephemeral container...");
 

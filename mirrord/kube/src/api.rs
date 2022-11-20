@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Client};
-use mirrord_progress::TaskProgress;
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use tokio::{
     net::{TcpStream, ToSocketAddrs},
@@ -81,7 +81,9 @@ pub trait AgentManagment {
         agent_ref: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
 
-    async fn create_agent(&self, progress: &TaskProgress) -> Result<Self::AgentRef, Self::Err>;
+    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    where
+        P: Progress + Send + Sync;
 }
 
 pub struct Connection<T: ToSocketAddrs>(pub T); // TODO: Replace with generic address
@@ -101,7 +103,10 @@ where
         wrap_raw_connection(stream)
     }
 
-    async fn create_agent(&self, _: &TaskProgress) -> Result<Self::AgentRef, Self::Err> {
+    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
+    where
+        P: Progress + Send + Sync,
+    {
         TcpStream::connect(&self.0)
             .await
             .map_err(KubeApiError::from)
