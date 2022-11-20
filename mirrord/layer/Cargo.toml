@@ -29,7 +29,6 @@ tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear2", version = "0.8", features = ["auto-download"] }
 futures.workspace = true
-k8s-openapi.workspace = true
 kube.workspace = true
 
 tokio.workspace = true
