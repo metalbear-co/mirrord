@@ -20,7 +20,6 @@ mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube", features = ["env_guard"] }
-mirrord-sip = { path = "../sip" }
 
 ctor = "0.1"
 libc = "0.2"
@@ -54,6 +53,9 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
+null-terminated = "0.3"
 
 [dev-dependencies]
 base64 = "0.13"
@@ -62,6 +64,7 @@ hyper = "0.14"
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 
 [lib]
 crate_type = ["cdylib"]

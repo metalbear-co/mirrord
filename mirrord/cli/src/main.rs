@@ -8,6 +8,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
+use const_random::const_random;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use errno;
 use exec::execvp;
@@ -15,7 +16,6 @@ use mirrord_auth::AuthConfig;
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
-use rand::distributions::{Alphanumeric, DistString};
 use semver::Version;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -48,36 +48,25 @@ use mac::temp_dir;
 
 fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
     let progress = TaskProgress::new("initializing mirrord layer...");
-    let library_file = env!("MIRRORD_LAYER_FILE");
-    let library_path = Path::new(library_file);
-
-    let extension = library_path
-        .components()
-        .last()
+    let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
+        .extension()
         .unwrap()
-        .as_os_str()
         .to_str()
-        .unwrap()
-        .split('.')
-        .collect::<Vec<&str>>()[1];
+        .unwrap();
 
-    let file_name = format!(
-        "{}-libmirrord_layer.{extension}",
-        Alphanumeric
-            .sample_string(&mut rand::thread_rng(), 10)
-            .to_lowercase()
-    );
-
+    let file_name = format!("{}-libmirrord_layer.{extension}", const_random!(u64));
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
     };
-    let mut file = File::create(&file_path)
-        .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
-    let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
-    file.write_all(bytes).unwrap();
+    if !file_path.exists() {
+        let mut file = File::create(&file_path)
+            .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
+        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
+        file.write_all(bytes).unwrap();
+        debug!("Extracted library file to {:?}", &file_path);
+    }
 
-    debug!("Extracted library file to {:?}", &file_path);
     progress.done_with("layer initialized");
     Ok(file_path)
 }
@@ -209,23 +198,24 @@ fn exec(args: &ExecArgs) -> Result<()> {
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     #[cfg(target_os = "macos")]
-    let binary = sip_patch(&args.binary)?;
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    let did_sip_patch = &binary != &args.binary;
+    let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
 
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
 
     let mut binary_args = args.binary_args.clone();
-    binary_args.insert(0, binary.clone());
+    binary_args.insert(0, args.binary.clone());
 
+    // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if let exec::Error::Errno(errno::Errno(86)) = err {
         // "Bad CPU type in executable"
-        if did_sip_patch {
-            // We did a SIP patch.
+        if _did_sip_patch {
             error!(
                 "The file you are trying to run, {}, is either SIP protected or a script with a
                 shebang that leads to a SIP protected binary. In order to bypass SIP protection,

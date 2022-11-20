@@ -1,4 +1,4 @@
-use std::{path::Path, process::Command};
+use std::{os::unix::process::ExitStatusExt, path::Path, process::Command};
 
 use crate::error::{Result, SipError};
 
@@ -12,7 +12,7 @@ pub(crate) fn sign<P: AsRef<Path>>(path: P) -> Result<()> {
     if output.status.success() {
         Ok(())
     } else {
-        let code = output.status.code().unwrap(); // shuoldn't happen
+        let code = output.status.into_raw(); // Returns wait status if there's no exit status.
         Err(SipError::Sign(
             code,
             String::from_utf8_lossy(&output.stderr).to_string(),
