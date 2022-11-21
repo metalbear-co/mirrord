@@ -13,7 +13,7 @@ use const_random::const_random;
 use errno;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
-use mirrord_progress::TaskProgress;
+use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use semver::Version;

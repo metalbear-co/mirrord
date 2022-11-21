@@ -5,10 +5,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use futures::{SinkExt, TryFutureExt};
+use futures::TryFutureExt;
 use mirrord_protocol::{
     outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-    ClientCodec, ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId,
 };
 use tokio::{
     net::UdpSocket,
@@ -188,14 +188,11 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoing::Write`: sends a `UdpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: UdpOutgoing,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         match message {
             UdpOutgoing::Connect(Connect {
@@ -215,7 +212,7 @@ impl UdpOutgoingHandler {
                 // suggests using a `HashMap`).
                 self.connect_queue.push_back(channel_tx);
 
-                Ok(codec
+                Ok(tx
                     .send(ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(
                         LayerConnect { remote_address },
                     )))

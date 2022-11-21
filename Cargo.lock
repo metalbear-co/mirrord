@@ -1746,6 +1746,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-kube"
+version = "3.11.0"
+dependencies = [
+ "actix-codec",
+ "async-trait",
+ "base64",
+ "futures",
+ "http-body",
+ "hyper",
+ "k8s-openapi",
+ "kube",
+ "mirrord-config",
+ "mirrord-progress",
+ "mirrord-protocol",
+ "rand 0.8.5",
+ "rstest",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-layer"
 version = "3.11.0"
 dependencies = [
@@ -1766,6 +1790,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
+ "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-progress",
  "mirrord-protocol",
