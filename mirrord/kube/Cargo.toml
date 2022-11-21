@@ -15,6 +15,7 @@ edition.workspace = true
 
 [features]
 default = []
+incluster = []
 env_guard = []
 
 [dependencies]

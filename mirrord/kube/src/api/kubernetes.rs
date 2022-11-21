@@ -1,19 +1,25 @@
 use async_trait::async_trait;
+#[cfg(not(feature = "incluster"))]
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client, Config};
+#[cfg(not(feature = "incluster"))]
+use kube::Api;
+use kube::{Client, Config};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
+#[cfg(feature = "incluster")]
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 #[cfg(feature = "env_guard")]
 use crate::api::env_guard::EnvVarGuard;
+#[cfg(not(feature = "incluster"))]
+use crate::api::get_k8s_api;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
-        get_k8s_api,
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -70,6 +76,24 @@ impl AgentManagment for KubernetesAPI {
     type AgentRef = (String, u16);
     type Err = KubeApiError;
 
+    #[cfg(feature = "incluster")]
+    async fn create_connection(
+        &self,
+        (pod_agent_name, agent_port): Self::AgentRef,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let mirrord_addr = format!(
+            "{}.{}.pod.cluster.local:{}",
+            pod_agent_name,
+            self.agent.namespace.as_deref().unwrap_or("default"),
+            agent_port
+        );
+
+        let conn = TcpStream::connect(&mirrord_addr).await?;
+
+        wrap_raw_connection(conn)
+    }
+
+    #[cfg(not(feature = "incluster"))]
     async fn create_connection(
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
