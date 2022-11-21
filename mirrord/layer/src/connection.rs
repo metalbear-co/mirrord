@@ -60,8 +60,8 @@ pub(crate) async fn connect(
             .create_connection(stream)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if config.operator {
-        let operator_api = OperatorApi::new(config.agent.clone(), config.target.clone());
+    } else if let Some(addr) = &config.operator {
+        let operator_api = OperatorApi::new(addr, config.agent.clone(), config.target.clone());
 
         let agent_ref = operator_api
             .create_agent(&progress)

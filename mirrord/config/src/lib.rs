@@ -117,8 +117,8 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    #[config(env = "MIRRORD_OPERATOR", default = "false")]
-    pub operator: bool,
+    #[config(env = "MIRRORD_OPERATOR")]
+    pub operator: Option<String>,
 }
 
 impl LayerFileConfig {

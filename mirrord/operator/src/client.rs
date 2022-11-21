@@ -13,16 +13,19 @@ use tokio::{
 
 use crate::protocol::{AgentInitialize, OperatorCodec, OperatorRequest, OperatorResponse};
 
-pub struct OperatorApi<T: ToSocketAddrs = &'static str> {
+pub struct OperatorApi<T: ToSocketAddrs> {
     addr: T,
     agent: AgentConfig,
     target: TargetConfig,
 }
 
-impl OperatorApi {
-    pub fn new(agent: AgentConfig, target: TargetConfig) -> Self {
+impl<T> OperatorApi<T>
+where
+    T: ToSocketAddrs,
+{
+    pub fn new(addr: T, agent: AgentConfig, target: TargetConfig) -> Self {
         OperatorApi {
-            addr: "127.0.0.1:8080",
+            addr,
             agent,
             target,
         }
