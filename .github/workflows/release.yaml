@@ -48,6 +48,8 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           key: x86_64-unknown-linux-gnu-ubuntu-latest
+      - name: setup cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
       - name: build mirrord-layer and cli
         run: cross +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
