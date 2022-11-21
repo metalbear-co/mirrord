@@ -11,9 +11,9 @@ use std::{
 use async_trait::async_trait;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, Port,
+    ClientMessage, Port,
 };
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tracing::debug;
 
 use crate::{
@@ -94,17 +94,14 @@ pub(crate) trait TcpHandler {
         handled
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_message(
         &mut self,
         message: HookMessageTcp,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         match message {
-            HookMessageTcp::Listen(listen) => self.handle_listen(listen, codec).await,
+            HookMessageTcp::Listen(listen) => self.handle_listen(listen, tx).await,
         }
     }
 
@@ -154,9 +151,6 @@ pub(crate) trait TcpHandler {
     async fn handle_listen(
         &mut self,
         listen: Listen,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError>;
 }

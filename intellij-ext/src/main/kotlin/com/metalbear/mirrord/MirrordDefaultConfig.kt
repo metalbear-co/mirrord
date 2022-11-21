@@ -15,8 +15,8 @@ data class MirrordDefaultConfig(
     val remoteDns: Boolean = true,
     val tcpOutgoingTraffic: Boolean = true,
     val udpOutgoingTraffic: Boolean = true,
-    val agentRustLog: LogLevel = LogLevel.INFO,
-    val rustLog: LogLevel = LogLevel.INFO,
+    val agentRustLog: LogLevel = LogLevel.WARN,
+    val rustLog: LogLevel = LogLevel.WARN,
     val overrideEnvVarsExclude: String = "",
     val overrideEnvVarsInclude: String = "*",
     // ignorePorts: temporary patch to ignore ports which would cause `connect` to fail

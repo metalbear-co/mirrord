@@ -6,10 +6,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_protocol::{
     tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientCodec, ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -181,15 +180,8 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self.ports
     }
 
-    #[tracing::instrument(level = "trace", skip(self, codec))]
-    async fn handle_listen(
-        &mut self,
-        listen: Listen,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
-    ) -> Result<()> {
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_listen(&mut self, listen: Listen, tx: &Sender<ClientMessage>) -> Result<()> {
         let port = listen.requested_port;
 
         self.ports_mut()
@@ -197,8 +189,7 @@ impl TcpHandler for TcpMirrorHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        codec
-            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+        tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await
             .map_err(From::from)
     }

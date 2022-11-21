@@ -1,18 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
 use async_trait::async_trait;
-use futures::SinkExt;
 use mirrord_config::network::NetworkConfig;
 use mirrord_http::HttpFilter;
 use mirrord_protocol::{
     tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData, TrafficFilter},
-    ClientCodec, ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
+    sync::mpsc::Sender,
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -100,14 +99,11 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
-    #[tracing::instrument(level = "debug", skip(self, codec))]
+    #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_listen(
         &mut self,
         listen: Listen,
-        codec: &mut actix_codec::Framed<
-            impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-            ClientCodec,
-        >,
+        tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         let port = listen.requested_port;
 
@@ -122,13 +118,12 @@ impl TcpHandler for TcpStealHandler {
             HttpFilter::Exclude(exclude) => TrafficFilter::Exclude(exclude.to_string()),
         };
 
-        codec
-            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe((
-                port,
-                traffic_filter,
-            ))))
-            .await
-            .map_err(From::from)
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe((
+            port,
+            traffic_filter,
+        ))))
+        .await
+        .map_err(From::from)
     }
 }
 

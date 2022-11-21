@@ -20,13 +20,11 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{
     config::MirrordConfig, feature::FeatureConfig, network::NetworkConfig, util::VecOrSingle,
@@ -35,7 +33,7 @@ use mirrord_config::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::get_tmp_dir;
@@ -68,7 +66,6 @@ mod file;
 mod go_env;
 mod macros;
 mod outgoing;
-mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
@@ -237,7 +234,7 @@ fn layer_start(config: LayerConfig) {
 
     info!("Initializing mirrord-layer!");
 
-    let connection = RUNTIME.block_on(connection::connect(&config));
+    let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -260,7 +257,7 @@ fn layer_start(config: LayerConfig) {
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
-    RUNTIME.block_on(start_layer_thread(connection, receiver, config));
+    RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
@@ -271,11 +268,9 @@ fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool
     }
 }
 
-struct Layer<T>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-{
-    pub codec: actix_codec::Framed<T, ClientCodec>,
+struct Layer {
+    tx: Sender<ClientMessage>,
+    rx: Receiver<DaemonMessage>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
     tcp_outgoing_handler: TcpOutgoingHandler,
@@ -297,15 +292,17 @@ where
     steal: bool,
 }
 
-impl<T> Layer<T>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-{
-    fn new(codec: actix_codec::Framed<T, ClientCodec>, network_config: NetworkConfig) -> Layer<T> {
+impl Layer {
+    fn new(
+        tx: Sender<ClientMessage>,
+        rx: Receiver<DaemonMessage>,
+        network_config: NetworkConfig,
+    ) -> Layer {
         let steal = network_config.incoming.is_steal();
 
         Self {
-            codec,
+            tx,
+            rx,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
@@ -317,25 +314,29 @@ where
         }
     }
 
+    async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
+        self.tx.send(msg).await.map_err(|err| err.0)
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
             HookMessage::Tcp(message) => {
                 if self.steal {
                     self.tcp_steal_handler
-                        .handle_hook_message(message, &mut self.codec)
+                        .handle_hook_message(message, &self.tx)
                         .await
                         .unwrap();
                 } else {
                     self.tcp_mirror_handler
-                        .handle_hook_message(message, &mut self.codec)
+                        .handle_hook_message(message, &self.tx)
                         .await
                         .unwrap();
                 }
             }
             HookMessage::File(message) => {
                 self.file_handler
-                    .handle_hook_message(message, &mut self.codec)
+                    .handle_hook_message(message, &self.tx)
                     .await
                     .unwrap();
             }
@@ -346,16 +347,16 @@ where
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
-                self.codec.send(request).await.unwrap();
+                self.send(request).await.unwrap();
             }
             HookMessage::TcpOutgoing(message) => self
                 .tcp_outgoing_handler
-                .handle_hook_message(message, &mut self.codec)
+                .handle_hook_message(message, &self.tx)
                 .await
                 .unwrap(),
             HookMessage::UdpOutgoing(message) => self
                 .udp_outgoing_handler
-                .handle_hook_message(message, &mut self.codec)
+                .handle_hook_message(message, &self.tx)
                 .await
                 .unwrap(),
         }
@@ -408,10 +409,8 @@ where
 
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
-    codec: actix_codec::Framed<
-        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-        ClientCodec,
-    >,
+    tx: Sender<ClientMessage>,
+    rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
     let LayerConfig {
@@ -419,7 +418,7 @@ async fn thread_loop(
         ..
     } = config;
 
-    let mut layer = Layer::new(codec, network);
+    let mut layer = Layer::new(tx, rx, network);
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -427,21 +426,21 @@ async fn thread_loop(
             }
             Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
+                    layer.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }
             }
             Some(udp_outgoing_message) = layer.udp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
+                    layer.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }
             }
-            daemon_message = layer.codec.next() => {
+            daemon_message = layer.rx.recv() => {
                 match daemon_message {
-                    Some(Ok(message)) => {
+                    Some(message) => {
                         if let Err(err) = layer.handle_daemon_message(
                             message).await {
                             if let LayerError::SendErrorConnection(_) = err {
@@ -452,23 +451,18 @@ async fn thread_loop(
                             break;
                         }
                     },
-                    Some(Err(err)) => {
-                        error!("Error receiving daemon message: {:?}", err);
-                        break;
-                    }
-
                     None => {
-                        error!("agent disconnected");
+                        error!("agent connection lost");
                         break;
                     }
                 }
             },
             Some(message) = layer.tcp_steal_handler.next() => {
-                layer.codec.send(message).await.unwrap();
+                layer.send(message).await.unwrap();
             },
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
-                    layer.codec.send(ClientMessage::Ping).await.unwrap();
+                    layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
                     layer.ping = true;
                 } else {
@@ -484,16 +478,13 @@ async fn thread_loop(
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
-#[tracing::instrument(level = "trace", skip(connection, receiver))]
+#[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
 async fn start_layer_thread(
-    connection: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    tx: Sender<ClientMessage>,
+    mut rx: Receiver<DaemonMessage>,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
-    // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
-    // -layer)
-    let mut codec = actix_codec::Framed::new(connection, ClientCodec::new());
-
     let (env_vars_filter, env_vars_select) = match (
         config
             .feature
@@ -524,7 +515,7 @@ async fn start_layer_thread(
 
     if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
         // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-        let _codec_result = codec
+        let _codec_result = tx
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,
@@ -532,8 +523,8 @@ async fn start_layer_thread(
             .await;
 
         select! {
-          msg = codec.next() => {
-            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+          msg = rx.recv() => {
+            if let Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars))) = msg {
                 trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
                 for (key, value) in remote_env_vars.into_iter() {
@@ -561,7 +552,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, codec, config));
+    let _ = tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
@@ -616,21 +607,16 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        FN_CLOSE(fd)
-    } else if *enabled_file_ops
+    let res = FN_CLOSE(fd);
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
-        close_file_result
-            .map_err(|fail| {
-                error!("Failed closing file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        FN_CLOSE(fd)
+        if let Err(fail) = close_file_result {
+            error!("Failed closing file with {fail:#?}");
+        };
     }
+    res
 }
 
 // no need to guard because we call another detour which will do the guard for us.

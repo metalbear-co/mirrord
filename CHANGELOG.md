@@ -7,6 +7,18 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- release.yaml: Linux AArch64 for real this time. (embedded so was x64)
+
+### Changed
+
+- IntelliJ: change default log level to warning (match cli/vscode).
+- IntelliJ: don't show progress (can make some tests/scenarios fail).
+- release.yaml: Build layer/cli with Centos 7 compatible glibc (AmazonLinux2 support).
+
+## 3.11.0
+
 ### Added
 
 - MacOS: Support for executing SIP binaries in user applications. We hook `execve`
@@ -18,11 +30,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Only warn about invalid certificates once per agent.
+- Reduce tokio features to needed ones only.
 
 ### Fixed
 
 - CI: Fix regex for homebrew formula
 - Potentially ignoring write calls (`fd < 2`).
+- CI: Fix release for linux aarch64. Fixes [#760](https://github.com/metalbear-co/mirrord/issues/760).
+- Possible cases where we don't close fds correctly.
 
 ## 3.10.4
 

@@ -141,6 +141,7 @@ class MirrordListener : ExecutionListener {
                         mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
                         mirrordEnv["MIRRORD_TCP_OUTGOING"] = tcpOutgoingTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()
+                        mirrordEnv["MIRRORD_PROGRESS_MODE"] = "off"
                         mirrordEnv["RUST_LOG"] = (rustLog.selectedItem as LogLevel).name
                         mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = (agentRustLog.selectedItem as LogLevel).name
                         if (excludeEnv.text.isNotEmpty()) {

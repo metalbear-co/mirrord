@@ -13,7 +13,7 @@ use const_random::const_random;
 use errno;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
-use mirrord_progress::TaskProgress;
+use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use semver::Version;
@@ -207,7 +207,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let binary = args.binary.clone();
 
     let mut binary_args = args.binary_args.clone();
-    binary_args.insert(0, binary.clone());
+    binary_args.insert(0, args.binary.clone());
 
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary, binary_args);
