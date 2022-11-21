@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 - IntelliJ: change default log level to warning (match cli/vscode).
+- IntelliJ: don't show progress (can make some tests/scenarios fail).
 
 ## 3.11.0
 
