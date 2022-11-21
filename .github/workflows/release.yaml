@@ -49,7 +49,7 @@ jobs:
         with:
           key: x86_64-unknown-linux-gnu-ubuntu-latest
       - name: build mirrord-layer and cli
-        run: cargo +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
+        run: cross +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-gnu

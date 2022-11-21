@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - release.yaml: Linux AArch64 for real this time. (embedded so was x64)
 
+### Changed
+
+- release.yaml: Build layer/cli with Centos 7 compatible glibc (AmazonLinux2 support).
+
 ## 3.11.0
 
 ### Added
