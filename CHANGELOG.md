@@ -11,6 +11,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - release.yaml: Linux AArch64 for real this time. (embedded so was x64)
 
+### Changed
+- Create agent in the cli and pass environment variables to exec'd process to improve agent re-use.
+
 ## 3.11.0
 
 ### Added

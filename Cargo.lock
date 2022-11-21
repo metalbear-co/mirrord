@@ -1660,6 +1660,7 @@ dependencies = [
  "errno",
  "exec",
  "mirrord-auth",
+ "mirrord-kube",
  "mirrord-layer",
  "mirrord-progress",
  "mirrord-sip",
