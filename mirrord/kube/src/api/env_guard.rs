@@ -112,3 +112,76 @@ impl EnvVarGuard {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use http_body::Empty;
+    use hyper::body::Body;
+    use k8s_openapi::http::{header::AUTHORIZATION, Request, Response};
+    use kube::{
+        client::ConfigExt,
+        config::{AuthInfo, ExecConfig},
+        Client,
+    };
+    use tower::{service_fn, ServiceBuilder};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn correct_envs_kubectl() {
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "true");
+
+        let _guard = EnvVarGuard::new();
+        let mut config = Config {
+            accept_invalid_certs: true,
+            auth_info: AuthInfo {
+                exec: Some(ExecConfig {
+                    api_version: Some("client.authentication.k8s.io/v1beta1".to_owned()),
+                    command: "node".to_owned(),
+                    args: Some(vec!["../layer/tests/apps/kubectl/auth-util.js".to_owned()]),
+                    env: None,
+                    drop_env: None,
+                }),
+                ..Default::default()
+            },
+            ..Config::new("https://kubernetes.docker.internal:6443".parse().unwrap())
+        };
+
+        _guard.prepare_config(&mut config);
+
+        let _guard = Arc::new(_guard);
+
+        let service = ServiceBuilder::new()
+            .layer(config.base_uri_layer())
+            .option_layer(config.auth_layer().unwrap())
+            .service(service_fn(move |req: Request<Body>| {
+                let _guard = _guard.clone();
+                async move {
+                    let auth_env_vars = req
+                        .headers()
+                        .get(AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|token| token.strip_prefix("Bearer "))
+                        .and_then(|token| base64::decode(token).ok())
+                        .and_then(|value| {
+                            serde_json::from_slice::<HashMap<String, String>>(&value).ok()
+                        })
+                        .ok_or_else(|| {
+                            std::io::Error::new(std::io::ErrorKind::Other, "No Auth Header Sent")
+                        })?;
+
+                    _guard
+                        .is_correct_auth_env(&auth_env_vars)
+                        .map(|_| Response::new(Empty::new()))
+                }
+            }));
+
+        let client = Client::new(service, config.default_namespace);
+
+        std::env::set_var("MIRRORD_TEST_ENV_VAR_KUBECTL", "false");
+
+        client.send(Request::new(Body::empty())).await.unwrap();
+    }
+}

@@ -9,7 +9,7 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::mpsc,
 };
-use tracing::error;
+use tracing::{error, info};
 
 use crate::error::{KubeApiError, Result};
 
@@ -18,6 +18,8 @@ mod container;
 mod env_guard;
 pub mod kubernetes;
 mod runtime;
+
+static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 pub(crate) fn get_k8s_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
@@ -36,33 +38,46 @@ pub(crate) fn wrap_raw_connection(
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
     let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
-    let (in_tx, mut in_rx) = mpsc::channel(1000);
-    let (out_tx, out_rx) = mpsc::channel(1000);
+    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(msg) = in_rx.recv() => {
-                    if let Err(fail) = codec.send(msg).await {
-                        error!("Error sending client message: {:#?}", fail);
-                        break;
-                    }
-                }
-                Some(daemon_message) = codec.next() => {
-                    match daemon_message {
-                        Ok(msg) => {
-                            let _ = out_tx.send(msg).await;
+                msg = in_rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if let Err(fail) = codec.send(msg).await {
+                                error!("Error sending client message: {:#?}", fail);
+                                break;
+                            }
                         }
-                        Err(err) => {
-                            error!("Error receiving daemon message: {:?}", err);
+                        None => {
+                            info!("mirrord-kube: initiated disconnect from agent");
+
                             break;
                         }
                     }
                 }
-                else => {
-                    error!("agent disconnected");
+                daemon_message = codec.next() => {
+                    match daemon_message {
+                        Some(Ok(msg)) => {
+                            if let Err(fail) = out_tx.send(msg).await {
+                                error!("DaemonMessage dropped: {:#?}", fail);
 
-                    break;
+                                break;
+                            }
+                        }
+                        Some(Err(err)) => {
+                            error!("Error receiving daemon message: {:?}", err);
+                            break;
+                        }
+                        None => {
+                            error!("agent disconnected");
+
+                            break;
+                        }
+                    }
                 }
             }
         }
