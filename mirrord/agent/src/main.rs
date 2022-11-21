@@ -121,7 +121,7 @@ impl ClientConnectionHandler {
             if let Err(err) =
                 steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await
             {
-                error!("steal_worker error {:?}", err)
+                error!("mirrord-agent: `steal_worker` failed with {:?}", err)
             }
         });
 

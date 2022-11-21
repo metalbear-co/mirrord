@@ -9,7 +9,7 @@ use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
-use tracing::debug;
+use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
@@ -24,9 +24,10 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
 
-    debug!(
+    trace!(
         "open_logic -> rawish_path {:#?} | open_options {:#?}",
-        rawish_path, open_options
+        rawish_path,
+        open_options
     );
 
     let (Ok(result) | Err(result)) = open(rawish_path, open_options)

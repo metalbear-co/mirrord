@@ -28,7 +28,10 @@ use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use futures::{SinkExt, StreamExt};
 use libc::c_int;
-use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
+use mirrord_config::{
+    config::MirrordConfig, feature::FeatureConfig, network::NetworkConfig, util::VecOrSingle,
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -298,7 +301,9 @@ impl<T> Layer<T>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
-    fn new(codec: actix_codec::Framed<T, ClientCodec>, steal: bool) -> Layer<T> {
+    fn new(codec: actix_codec::Framed<T, ClientCodec>, network_config: NetworkConfig) -> Layer<T> {
+        let steal = network_config.incoming.is_steal();
+
         Self {
             codec,
             ping: false,
@@ -307,7 +312,7 @@ where
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::default(),
+            tcp_steal_handler: TcpStealHandler::new(network_config),
             steal,
         }
     }
@@ -409,7 +414,12 @@ async fn thread_loop(
     >,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(codec, config.feature.network.incoming.is_steal());
+    let LayerConfig {
+        feature: FeatureConfig { network, .. },
+        ..
+    } = config;
+
+    let mut layer = Layer::new(codec, network);
     loop {
         select! {
             hook_message = receiver.recv() => {

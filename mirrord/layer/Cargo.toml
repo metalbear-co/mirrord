@@ -19,6 +19,7 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
+mirrord-http = { path = "../http" }
 
 ctor = "0.1"
 libc = "0.2"

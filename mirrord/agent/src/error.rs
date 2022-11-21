@@ -90,6 +90,10 @@ pub enum AgentError {
 
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
+
+    // TODO(alex) [mid] 2022-11-18: Improve this message.
+    #[error("Failed HTTP handling: `{0}`!")]
+    HttpTraffic(#[from] mirrord_http::HttpError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

@@ -151,6 +151,8 @@ impl FileFilter {
             .unwrap_or(Self::Exclude(exclude))
     }
 
+    // TODO(alex) [low] 2022-11-17: This could take `(op: (T) -> U)` to be generic enough to be in
+    // the `Detour` implementation.
     /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
     /// converting the result a `Detour`.
     ///

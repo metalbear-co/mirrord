@@ -1739,7 +1739,9 @@ dependencies = [
 name = "mirrord-http"
 version = "3.10.4"
 dependencies = [
+ "fancy-regex",
  "httparse",
+ "mirrord-config",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -1766,6 +1768,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
+ "mirrord-http",
  "mirrord-layer-macro",
  "mirrord-progress",
  "mirrord-protocol",

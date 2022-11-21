@@ -51,10 +51,18 @@ pub enum DaemonTcp {
     Subscribed,
 }
 
+// TODO(alex) [low] 2022-11-21: Is this the right abstraction? Kinda duplicated here and in
+// `mirrord-http`, but `Regex` probably doesn't implement `Encode` / `Decode`...
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum TrafficFilter {
+    Include(String),
+    Exclude(String),
+}
+
 /// Messages related to Steal Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpSteal {
-    PortSubscribe(Port),
+    PortSubscribe((Port, TrafficFilter)),
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),

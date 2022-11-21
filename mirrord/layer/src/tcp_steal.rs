@@ -3,8 +3,10 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::SinkExt;
+use mirrord_config::network::NetworkConfig;
+use mirrord_http::HttpFilter;
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData, TrafficFilter},
     ClientCodec, ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
@@ -26,6 +28,16 @@ pub struct TcpStealHandler {
     ports: HashSet<Listen>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
+    http_filter: HttpFilter,
+}
+
+impl TcpStealHandler {
+    pub(crate) fn new(config: NetworkConfig) -> Self {
+        Self {
+            http_filter: config.into(),
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait]
@@ -104,8 +116,17 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
+        // TODO(alex) [high] 2022-11-21: Send config for filters here.
+        let traffic_filter = match &self.http_filter {
+            HttpFilter::Include(include) => TrafficFilter::Include(include.to_string()),
+            HttpFilter::Exclude(exclude) => TrafficFilter::Exclude(exclude.to_string()),
+        };
+
         codec
-            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
+            .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe((
+                port,
+                traffic_filter,
+            ))))
             .await
             .map_err(From::from)
     }

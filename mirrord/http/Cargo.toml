@@ -14,9 +14,11 @@ publish.workspace = true
 edition.workspace = true
 
 [dependencies]
+mirrord-config = { path = "../config"}
 thiserror.workspace = true
 tracing.workspace = true
 httparse = "1.8"
+fancy-regex = { version = "0.10" }
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

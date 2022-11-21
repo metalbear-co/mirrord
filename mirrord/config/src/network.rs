@@ -7,7 +7,7 @@ use crate::{
     },
     incoming::IncomingConfig,
     outgoing::{OutgoingConfig, OutgoingFileConfig},
-    util::MirrordToggleableConfig,
+    util::{MirrordToggleableConfig, VecOrSingle},
 };
 
 /// Controls mirrord network operations.
@@ -47,6 +47,23 @@ pub struct NetworkConfig {
     /// Resolve DNS via the remote pod.
     #[config(env = "MIRRORD_REMOTE_DNS", default = "true")]
     pub dns: bool,
+
+    // TODO(alex) [mid] 2022-11-17: Improve these docs.
+    /// Allows the user to specify regexes that are used to match against HTTP headers when mirrord
+    /// network operations are enabled.
+    ///
+    /// The regexes specified here will make mirrord operate only on requests that match it,
+    /// otherwise the request will not be stolen.
+    #[config(env = "MIRRORD_HTTP_FILTER_INCLUDE")]
+    pub http_include: Option<VecOrSingle<String>>,
+
+    /// Allows the user to specify regexes that are used to match against HTTP headers when mirrord
+    /// network operations are enabled.
+    ///
+    /// The opposite of `include`, requests that match the regexes specified here will bypass
+    /// mirrord (won't be stolen).
+    #[config(env = "MIRRORD_HTTP_FILTER_EXCLUDE")]
+    pub http_exclude: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
@@ -73,6 +90,8 @@ impl MirrordToggleableConfig for NetworkFileConfig {
                     Some("MIRRORD_REMOTE_DNS"),
                 ))?,
             outgoing: OutgoingFileConfig::disabled_config()?,
+            http_include: FromEnv::new("MIRRORD_HTTP_FILTER_INCLUDE").source_value(),
+            http_exclude: FromEnv::new("MIRRORD_HTTP_FILTER_EXCLUDE").source_value(),
         })
     }
 }

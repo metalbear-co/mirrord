@@ -326,6 +326,8 @@ mod tests {
                         tcp: Some(true),
                         udp: Some(false),
                     })),
+                    http_include: None,
+                    http_exclude: None,
                 })),
                 capture_error_trace: None,
             }),

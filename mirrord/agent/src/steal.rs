@@ -4,8 +4,9 @@ use std::{
     path::PathBuf,
 };
 
+use mirrord_http::HttpFilter;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData, TrafficFilter},
     ConnectionId, Port,
 };
 use rand::distributions::{Alphanumeric, DistString};
@@ -197,6 +198,7 @@ pub struct StealWorker {
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
     connection_index: u64,
+    http_filter: HttpFilter,
 }
 
 impl StealWorker {
@@ -210,12 +212,13 @@ impl StealWorker {
             write_streams: HashMap::default(),
             read_streams: StreamMap::default(),
             connection_index: 0,
+            http_filter: Default::default(),
         })
     }
 
     #[tracing::instrument(level = "debug", skip(self, rx, listener))]
-    pub async fn handle_loop(
-        &mut self,
+    pub async fn start(
+        mut self,
         mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
     ) -> Result<()> {
@@ -255,11 +258,18 @@ impl StealWorker {
     pub async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         use LayerTcpSteal::*;
         match message {
-            PortSubscribe(port) => {
+            PortSubscribe((port, traffic_filter)) => {
                 if self.ports.contains(&port) {
                     warn!("Port {port:?} is already subscribed");
                     Ok(())
                 } else {
+                    let http_filter = match traffic_filter {
+                        TrafficFilter::Include(include) => HttpFilter::new_include(include),
+                        TrafficFilter::Exclude(exclude) => HttpFilter::new_exclude(exclude),
+                    };
+
+                    self.http_filter = http_filter;
+
                     self.iptables.add_redirect(port, self.listen_port)?;
                     self.ports.insert(port);
                     self.sender.send(DaemonTcp::Subscribed).await?;
@@ -296,17 +306,22 @@ impl StealWorker {
                 // ADD(alex) [high] 2022-11-16: Start dealing with HTTP/1.1 first.
                 let data_debug = String::from_utf8_lossy(&data.bytes);
                 debug!("steal received {:#?}", data_debug);
-                let parsed = mirrord_http::parse(&data.bytes);
-                debug!("parsed {:#?}", parsed);
+                if self.http_filter.capture_packet(&data.bytes)? {
+                    debug!("captured packet!");
 
-                if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
-                    stream.write_all(&data.bytes[..]).await?;
-                    Ok(())
+                    if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
+                        stream.write_all(&data.bytes[..]).await?;
+                        Ok(())
+                    } else {
+                        warn!(
+                            "Trying to send data to closed connection {:?}",
+                            data.connection_id
+                        );
+                        Ok(())
+                    }
                 } else {
-                    warn!(
-                        "Trying to send data to closed connection {:?}",
-                        data.connection_id
-                    );
+                    debug!("skipped packet!");
+
                     Ok(())
                 }
             }
@@ -359,7 +374,7 @@ impl StealWorker {
     }
 }
 
-#[tracing::instrument(level = "trace", skip(rx, tx))]
+#[tracing::instrument(level = "debug", skip(rx, tx))]
 pub async fn steal_worker(
     rx: Receiver<LayerTcpSteal>,
     tx: Sender<DaemonTcp>,
@@ -375,10 +390,7 @@ pub async fn steal_worker(
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
 
-    let mut worker = StealWorker::new(tx, listen_port)?;
-    worker.handle_loop(rx, listener).await?;
-
-    Ok(())
+    StealWorker::new(tx, listen_port)?.start(rx, listener).await
 }
 
 // orig_dst borrowed from linkerd2-proxy
