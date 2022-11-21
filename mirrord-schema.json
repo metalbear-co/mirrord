@@ -350,6 +350,28 @@
             "null"
           ]
         },
+        "http_exclude": {
+          "description": "Allows the user to specify regexes that are used to match against HTTP headers when mirrord network operations are enabled.\n\nThe opposite of `include`, requests that match the regexes specified here will bypass mirrord (won't be stolen).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "http_include": {
+          "description": "Allows the user to specify regexes that are used to match against HTTP headers when mirrord network operations are enabled.\n\nThe regexes specified here will make mirrord operate only on requests that match it, otherwise the request will not be stolen.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "incoming": {
           "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; - `steal`: redirect incoming requests to the remote pod to the local process",
           "anyOf": [
