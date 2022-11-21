@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- release.yaml: Linux AArch64 for real this time. (embedded so was x64)
+
 ## 3.11.0
 
 ### Added

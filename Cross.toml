@@ -1,0 +1,4 @@
+[build.env]
+passthrough = [
+    "MIRRORD_LAYER_FILE",
+]
