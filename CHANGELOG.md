@@ -11,6 +11,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - release.yaml: Linux AArch64 for real this time. (embedded so was x64)
 
+### Changed
+- IntelliJ: change default log level to warning (match cli/vscode).
+
 ## 3.11.0
 
 ### Added
