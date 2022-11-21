@@ -80,6 +80,32 @@ impl ProgressReport {
 
 static TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+pub trait Progress: Sized {
+    /// Create a subtask report from this task.
+    fn subtask(&self, text: &str) -> TaskProgress;
+
+    fn done(mut self) {
+        self.set_done(None, false);
+    }
+
+    /// Finish the task with the given message.
+    fn done_with(mut self, text: &str) {
+        self.set_done(Some(text), false);
+    }
+
+    /// Fail the task without changing the description.
+    fn fail(mut self) {
+        self.set_done(None, true);
+    }
+
+    /// Fail the task with the given message.
+    fn fail_with(mut self, text: &str) {
+        self.set_done(Some(text), true);
+    }
+
+    fn set_done(&mut self, msg: Option<&str>, failure: bool);
+}
+
 /// Progress report for a single task.
 pub struct TaskProgress {
     group: SharedFrames<Group>,
@@ -129,8 +155,20 @@ impl TaskProgress {
         }
     }
 
+    /// If set to `true` (default), the task is considered failed
+    /// if it gets dropped.
+    ///
+    /// Set this to `false` if the task cannot fail, or failure
+    /// is not important.
+    pub fn fail_on_drop(mut self, fail: bool) -> Self {
+        self.fail_on_drop = fail;
+        self
+    }
+}
+
+impl Progress for TaskProgress {
     /// Create a subtask report from this task.
-    pub fn subtask(&self, text: &str) -> TaskProgress {
+    fn subtask(&self, text: &str) -> TaskProgress {
         let report = get_report();
         let sub_indent = self.indent + 1;
 
@@ -162,36 +200,6 @@ impl TaskProgress {
             done: false,
             fail_on_drop: true,
         }
-    }
-
-    /// Finish the task without changing the description.
-    pub fn done(mut self) {
-        self.set_done(None, false);
-    }
-
-    /// Finish the task with the given message.
-    pub fn done_with(mut self, text: &str) {
-        self.set_done(Some(text), false);
-    }
-
-    /// Fail the task without changing the description.
-    pub fn fail(mut self) {
-        self.set_done(None, true);
-    }
-
-    /// Fail the task with the given message.
-    pub fn fail_with(mut self, text: &str) {
-        self.set_done(Some(text), true);
-    }
-
-    /// If set to `true` (default), the task is considered failed
-    /// if it gets dropped.
-    ///
-    /// Set this to `false` if the task cannot fail, or failure
-    /// is not important.
-    pub fn fail_on_drop(mut self, fail: bool) -> Self {
-        self.fail_on_drop = fail;
-        self
     }
 
     fn set_done(&mut self, msg: Option<&str>, failure: bool) {

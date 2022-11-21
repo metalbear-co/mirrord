@@ -20,20 +20,20 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use actix_codec::{AsyncRead, AsyncWrite};
 use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
-use futures::{SinkExt, StreamExt};
 use libc::c_int;
 use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    ClientCodec, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
+#[cfg(target_os = "macos")]
+use mirrord_sip::get_tmp_dir;
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -57,11 +57,12 @@ mod common;
 mod connection;
 mod detour;
 mod error;
+#[cfg(target_os = "macos")]
+mod exec;
 mod file;
 mod go_env;
 mod macros;
 mod outgoing;
-mod pod_api;
 mod socket;
 mod tcp;
 mod tcp_mirror;
@@ -151,6 +152,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
 
+    // This is for better SIP handling on IDEs. If started by an IDE, SIP handling was not called
+    // before starting the binary, (but we're here so binary was not SIP). This means a temp dir
+    // was not yet set, and was not added to excluded files. In that case, set it now, before
+    // generating the configuration so that if the application calls `execve`, and we patch a SIP
+    // executable, the file hooks bypass our patched files (currently there is no way to add files
+    // to the file filter after it was constructed).
+    #[cfg(target_os = "macos")]
+    let _tmp_dir = get_tmp_dir()
+        .inspect_err(|err| {
+            trace!(
+                "Getting temp dir failed with {:?} in layer_pre_initialization",
+                err
+            )
+        })
+        .unwrap_or_default();
+
     let mut config = std::env::var("MIRRORD_CONFIG_FILE")
         .map_err(LayerError::from)
         .map(PathBuf::from)
@@ -214,7 +231,7 @@ fn layer_start(config: LayerConfig) {
 
     info!("Initializing mirrord-layer!");
 
-    let connection = RUNTIME.block_on(connection::connect(&config));
+    let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     unsafe {
@@ -237,7 +254,7 @@ fn layer_start(config: LayerConfig) {
 
     enable_hooks(*enabled_file_ops, config.feature.network.dns);
 
-    RUNTIME.block_on(start_layer_thread(connection, receiver, config));
+    RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
@@ -248,11 +265,9 @@ fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool
     }
 }
 
-struct Layer<T>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-{
-    pub codec: actix_codec::Framed<T, ClientCodec>,
+struct Layer {
+    tx: Sender<ClientMessage>,
+    rx: Receiver<DaemonMessage>,
     ping: bool,
     tcp_mirror_handler: TcpMirrorHandler,
     tcp_outgoing_handler: TcpOutgoingHandler,
@@ -274,13 +289,11 @@ where
     steal: bool,
 }
 
-impl<T> Layer<T>
-where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-{
-    fn new(codec: actix_codec::Framed<T, ClientCodec>, steal: bool) -> Layer<T> {
+impl Layer {
+    fn new(tx: Sender<ClientMessage>, rx: Receiver<DaemonMessage>, steal: bool) -> Layer {
         Self {
-            codec,
+            tx,
+            rx,
             ping: false,
             tcp_mirror_handler: TcpMirrorHandler::default(),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
@@ -292,25 +305,29 @@ where
         }
     }
 
+    async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
+        self.tx.send(msg).await.map_err(|err| err.0)
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
             HookMessage::Tcp(message) => {
                 if self.steal {
                     self.tcp_steal_handler
-                        .handle_hook_message(message, &mut self.codec)
+                        .handle_hook_message(message, &self.tx)
                         .await
                         .unwrap();
                 } else {
                     self.tcp_mirror_handler
-                        .handle_hook_message(message, &mut self.codec)
+                        .handle_hook_message(message, &self.tx)
                         .await
                         .unwrap();
                 }
             }
             HookMessage::File(message) => {
                 self.file_handler
-                    .handle_hook_message(message, &mut self.codec)
+                    .handle_hook_message(message, &self.tx)
                     .await
                     .unwrap();
             }
@@ -321,16 +338,16 @@ where
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
-                self.codec.send(request).await.unwrap();
+                self.send(request).await.unwrap();
             }
             HookMessage::TcpOutgoing(message) => self
                 .tcp_outgoing_handler
-                .handle_hook_message(message, &mut self.codec)
+                .handle_hook_message(message, &self.tx)
                 .await
                 .unwrap(),
             HookMessage::UdpOutgoing(message) => self
                 .udp_outgoing_handler
-                .handle_hook_message(message, &mut self.codec)
+                .handle_hook_message(message, &self.tx)
                 .await
                 .unwrap(),
         }
@@ -383,13 +400,11 @@ where
 
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
-    codec: actix_codec::Framed<
-        impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
-        ClientCodec,
-    >,
+    tx: Sender<ClientMessage>,
+    rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(codec, config.feature.network.incoming.is_steal());
+    let mut layer = Layer::new(tx, rx, config.feature.network.incoming.is_steal());
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -397,21 +412,21 @@ async fn thread_loop(
             }
             Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
+                    layer.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }
             }
             Some(udp_outgoing_message) = layer.udp_outgoing_handler.recv() => {
                 if let Err(fail) =
-                    layer.codec.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
+                    layer.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
                         error!("Error sending client message: {:#?}", fail);
                         break;
                     }
             }
-            daemon_message = layer.codec.next() => {
+            daemon_message = layer.rx.recv() => {
                 match daemon_message {
-                    Some(Ok(message)) => {
+                    Some(message) => {
                         if let Err(err) = layer.handle_daemon_message(
                             message).await {
                             if let LayerError::SendErrorConnection(_) = err {
@@ -422,23 +437,18 @@ async fn thread_loop(
                             break;
                         }
                     },
-                    Some(Err(err)) => {
-                        error!("Error receiving daemon message: {:?}", err);
-                        break;
-                    }
-
                     None => {
-                        error!("agent disconnected");
+                        error!("agent connection lost");
                         break;
                     }
                 }
             },
             Some(message) = layer.tcp_steal_handler.next() => {
-                layer.codec.send(message).await.unwrap();
+                layer.send(message).await.unwrap();
             },
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
-                    layer.codec.send(ClientMessage::Ping).await.unwrap();
+                    layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
                     layer.ping = true;
                 } else {
@@ -454,16 +464,13 @@ async fn thread_loop(
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
-#[tracing::instrument(level = "trace", skip(connection, receiver))]
+#[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
 async fn start_layer_thread(
-    connection: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    tx: Sender<ClientMessage>,
+    mut rx: Receiver<DaemonMessage>,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
-    // `codec` is used to retrieve messages from the daemon (messages that are sent from -agent to
-    // -layer)
-    let mut codec = actix_codec::Framed::new(connection, ClientCodec::new());
-
     let (env_vars_filter, env_vars_select) = match (
         config
             .feature
@@ -494,7 +501,7 @@ async fn start_layer_thread(
 
     if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
         // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-        let _codec_result = codec
+        let _codec_result = tx
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
                 env_vars_select,
@@ -502,8 +509,8 @@ async fn start_layer_thread(
             .await;
 
         select! {
-          msg = codec.next() => {
-            if let Some(Ok(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars)))) = msg {
+          msg = rx.recv() => {
+            if let Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars))) = msg {
                 trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
                 for (key, value) in remote_env_vars.into_iter() {
@@ -531,7 +538,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, codec, config));
+    let _ = tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
@@ -552,6 +559,11 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        exec::enable_execve_hook(&mut interceptor)
+    };
 
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
@@ -581,21 +593,16 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
         .get()
         .expect("Should be set during initialization!");
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_some() {
-        FN_CLOSE(fd)
-    } else if *enabled_file_ops
+    let res = FN_CLOSE(fd);
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 
-        close_file_result
-            .map_err(|fail| {
-                error!("Failed closing file with {fail:#?}");
-                -1
-            })
-            .unwrap_or_else(|fail| fail)
-    } else {
-        FN_CLOSE(fd)
+        if let Err(fail) = close_file_result {
+            error!("Failed closing file with {fail:#?}");
+        };
     }
+    res
 }
 
 // no need to guard because we call another detour which will do the guard for us.

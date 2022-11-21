@@ -19,7 +19,7 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
-mirrord-sip = { path = "../sip" }
+mirrord-kube = { path = "../kube", features = ["env_guard"] }
 
 ctor = "0.1"
 libc = "0.2"
@@ -29,7 +29,6 @@ tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 frida-gum = { git="https://github.com/metalbear-co/frida-rust.git", branch = "metalbear2", version = "0.8", features = ["auto-download"] }
 futures.workspace = true
-k8s-openapi.workspace = true
 kube.workspace = true
 
 tokio.workspace = true
@@ -53,14 +52,19 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+mirrord-sip = { path = "../sip" }
+null-terminated = "0.3"
 
 [dev-dependencies]
+k8s-openapi.workspace = true
 base64 = "0.13"
 http-body = "0.4"
 hyper = "0.14"
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 
 [lib]
 crate_type = ["cdylib"]

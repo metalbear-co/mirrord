@@ -1,76 +1,16 @@
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::time::Duration;
 
-use actix_codec::{AsyncRead, AsyncWrite, ReadBuf};
 use mirrord_config::LayerConfig;
-use rand::Rng;
-use tokio::net::TcpStream;
+use mirrord_kube::{
+    api::{kubernetes::KubernetesAPI, AgentManagment, Connection},
+    error::KubeApiError,
+};
+use mirrord_progress::TaskProgress;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log::info;
 
-use crate::{error::LayerError, graceful_exit, pod_api::KubernetesAPI, FAIL_STILL_STUCK};
-
-pub(crate) enum AgentConnection<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    TcpStream(TcpStream),
-    Portforwarder(T),
-}
-
-impl<T> AsyncRead for AgentConnection<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Self::TcpStream(stream) => Pin::new(stream).poll_read(cx, buf),
-            Self::Portforwarder(stream) => Pin::new(stream).poll_read(cx, buf),
-        }
-    }
-}
-
-impl<T> AsyncWrite for AgentConnection<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match self.get_mut() {
-            Self::TcpStream(stream) => Pin::new(stream).poll_write(cx, buf),
-            Self::Portforwarder(stream) => Pin::new(stream).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), std::io::Error>> {
-        match self.get_mut() {
-            Self::TcpStream(stream) => Pin::new(stream).poll_flush(cx),
-            Self::Portforwarder(stream) => Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), std::io::Error>> {
-        match self.get_mut() {
-            Self::TcpStream(stream) => Pin::new(stream).poll_shutdown(cx),
-            Self::Portforwarder(stream) => Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
+use crate::{graceful_exit, FAIL_STILL_STUCK};
 
 const FAIL_CREATE_AGENT: &str = r#"
 mirrord-layer failed while trying to establish connection with the agent pod!
@@ -85,9 +25,9 @@ mirrord-layer failed while trying to establish connection with the agent pod!
 >> Check your kubernetes context match where the agent should be spawned.
 "#;
 
-fn handle_error(err: LayerError, config: &LayerConfig) -> ! {
+fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
     match err {
-        LayerError::KubeError(kube::Error::HyperError(err)) => {
+        KubeApiError::KubeError(kube::Error::HyperError(err)) => {
             eprintln!("\nmirrord encountered an error accessing the Kubernetes API.\n");
             if !config.accept_invalid_certificates {
                 eprintln!("Consider passing --accept-invalid-certificates.\n");
@@ -102,18 +42,29 @@ fn handle_error(err: LayerError, config: &LayerConfig) -> ! {
     }
 }
 
-pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead + Unpin {
-    if let Some(address) = &config.connect_tcp {
-        let stream = TcpStream::connect(address)
+pub(crate) async fn connect(
+    config: &LayerConfig,
+) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    let progress = TaskProgress::new("agent initializing...");
+
+    let agent_api = if let Some(address) = &config.connect_tcp {
+        let connection = Connection(address);
+
+        let stream = connection
+            .create_agent(&progress)
             .await
             .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
-        AgentConnection::TcpStream(stream)
+
+        connection
+            .create_connection(stream)
+            .await
+            .unwrap_or_else(|err| handle_error(err, config))
     } else {
-        let k8s_api = KubernetesAPI::new(config)
+        let k8s_api = KubernetesAPI::create(config)
             .await
             .unwrap_or_else(|err| handle_error(err, config));
 
-        let (pod_agent_name, agent_port) = {
+        let agent_ref = {
             if let (Some(pod_agent_name), Some(agent_port)) =
                 (&config.connect_agent_name, config.connect_agent_port)
             {
@@ -123,31 +74,30 @@ pub(crate) async fn connect(config: &LayerConfig) -> impl AsyncWrite + AsyncRead
                 );
                 (pod_agent_name.to_owned(), agent_port)
             } else {
-                info!("No existing agent, spawning new one.");
-                let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
-                info!("Using port `{agent_port:?}` for communication");
-                let pod_agent_name = tokio::time::timeout(
+                let (pod_agent_name, agent_port) = tokio::time::timeout(
                     Duration::from_secs(config.agent.startup_timeout),
-                    k8s_api.create_agent(agent_port),
+                    k8s_api.create_agent(&progress),
                 )
                 .await
-                .unwrap_or(Err(LayerError::AgentReadyTimeout))
+                .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
                 .unwrap_or_else(|err| handle_error(err, config));
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
                 std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
-                // So children won't show progress as well as it might confuse users
-                std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
                 (pod_agent_name, agent_port)
             }
         };
 
-        let mut port_forwarder = match k8s_api.port_forward(&pod_agent_name, agent_port).await {
-            Ok(port_forwarder) => port_forwarder,
-            Err(err) => handle_error(err, config),
-        };
+        k8s_api
+            .create_connection(agent_ref)
+            .await
+            .unwrap_or_else(|err| handle_error(err, config))
+    };
 
-        AgentConnection::Portforwarder(port_forwarder.take_stream(agent_port).unwrap())
-    }
+    // So children won't show progress as well as it might confuse users
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    agent_api
 }

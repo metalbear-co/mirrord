@@ -22,8 +22,13 @@ jobs:
           key: aarch64-unknown-linux-gnu-ubuntu-latest
       - name: setup cross
         run: cargo install cross --git https://github.com/cross-rs/cross
-      - name: build mirrord-layer and cli
-        run: cross +nightly build --release -p mirrord -p mirrord-layer --target=aarch64-unknown-linux-gnu
+      # building layer and cli together leads to weird situation where embedded layer is x64, so split.
+      - name: build mirrord-layer
+        run: cross +nightly build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
+      - name: build mirrord cli
+        env:
+          MIRRORD_LAYER_FILE: target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
+        run: cross +nightly build --release -p mirrord --target=aarch64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
           name: aarch64-unknown-linux-gnu
@@ -401,10 +406,12 @@ jobs:
           token: ${{ secrets.BREW_GITHUB_PAT }}
       - name: Update hashes and urls
         run: |
-          sed -i -e 's/\([0-9]+\.[0-9]+\.[0-9]+\)/${{ env.version }}/g' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_mac }}/' mirrord.rb       
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_aarch64 }}/' mirrord.rb
-          sed -i -e '0,/[0-9a-f]\{64\}/ s//${{ env.sha256_linux_x86_64 }}/' mirrord.rb
+          sed -i -e 's/\([0-9]\+\.[0-9]\+\.[0-9]\+\)/${{ env.version }}/g' mirrord.rb
+          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_mac }}/1' mirrord.rb       
+          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_linux_aarch64 }}/2' mirrord.rb
+          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_linux_x86_64 }}/3' mirrord.rb
+      - name: Display formula (For debugging purposes only)
+        run: cat mirrord.rb
       - name: Commit to metalbear-co/homebrew-mirrord
         run: |
           git config --global user.email "eyal@metalbear.co"

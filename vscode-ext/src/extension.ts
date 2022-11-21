@@ -184,6 +184,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			libraryPath = globalContext.extensionPath;
 		}
 		let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
+		config.env ||= {};
 		config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 
 		if (!await isTargetInFile()) { // If target wasn't specified in the config file, let user choose pod from dropdown
