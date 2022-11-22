@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 #[cfg(not(feature = "incluster"))]
 use k8s_openapi::api::core::v1::Pod;
@@ -90,9 +92,10 @@ impl AgentManagment for KubernetesAPI {
 
         trace!("connecting to pod {}", &mirrord_addr);
 
-        let conn = TcpStream::connect(&mirrord_addr).await?;
-
-        wrap_raw_connection(conn)
+        tokio::select! {
+            conn = TcpStream::connect(&mirrord_addr) => wrap_raw_connection(conn?)
+            _ = tokio::time:sleep(Duration::from_secs(60)) => Err(KubeApiError::AgentReadyTimeout)
+        }
     }
 
     #[cfg(not(feature = "incluster"))]
