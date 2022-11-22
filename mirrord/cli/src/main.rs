@@ -210,8 +210,9 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
     }
 
-    let progress = progress.subtask("preparing to launch process");
-    let library_path = extract_library(args.extract_path.clone(), &progress)?;
+    let sub_progress = progress.subtask("preparing to launch process");
+    let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
+    sub_progress.done_with("ready to launch process");
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     create_agent(&progress)?;
