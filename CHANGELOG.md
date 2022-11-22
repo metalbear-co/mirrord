@@ -16,6 +16,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - IntelliJ: change default log level to warning (match cli/vscode).
 - IntelliJ: don't show progress (can make some tests/scenarios fail).
 - release.yaml: Build layer/cli with Centos 7 compatible glibc (AmazonLinux2 support).
+- Change CPU/memory values requested by the Job agent to the lowest values possible.
 
 ## 3.11.0
 
