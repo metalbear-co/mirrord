@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error};
+use tracing::{error, trace};
 
 use crate::{
     error::LayerError,
@@ -66,7 +66,7 @@ impl TcpHandler for TcpStealHandler {
             .remove(&data.connection_id)
             .ok_or(LayerError::NoConnectionId(data.connection_id))?;
 
-        debug!(
+        trace!(
             "handle_new_data -> writing {:#?} bytes to id {:#?}",
             data.bytes.len(),
             data.connection_id

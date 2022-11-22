@@ -156,7 +156,6 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
         EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
         _ => return None,
     };
-
     trace!("ip_packet {:#?}", ip_packet);
 
     let tcp_packet = match ip_packet.get_next_level_protocol() {
@@ -456,7 +455,10 @@ impl TcpConnectionSniffer {
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.client_senders.get(client_id) {
             sender.send(message).await.map_err(|err| {
-                warn!("Failed sending message to client {}", client_id);
+                warn!(
+                    "Failed to send message to client {} with {:#?}!",
+                    client_id, err
+                );
                 let _ = self.handle_client_closed(*client_id);
                 err
             })?;

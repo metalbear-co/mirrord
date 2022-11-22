@@ -329,7 +329,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
         _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
             libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
             // Note(syscall_linux.go)
             // if flags == 0 {
             // 	return faccessat(dirfd, path, mode)
@@ -354,7 +354,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
     };
     match res {
         -1 => -errno().0 as i64,
-        _ => res as i64,
+        _ => res,
     }
 }
 
@@ -387,7 +387,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
             libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
             // Note(syscall_linux.go)
             // if flags == 0 {
             // 	return faccessat(dirfd, path, mode)
@@ -414,7 +414,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     };
     match res {
         -1 => -errno().0 as i64,
-        _ => res as i64,
+        _ => res,
     }
 }
 

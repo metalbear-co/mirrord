@@ -136,6 +136,7 @@ impl Default for IndexAllocator<usize> {
 ///
 /// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
 /// caller's runtime.
+#[tracing::instrument(level = "trace", skip(future))]
 pub fn run_thread<T>(future: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,

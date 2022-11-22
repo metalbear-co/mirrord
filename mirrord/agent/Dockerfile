@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rustlang/rust:nightly as build-env
+FROM --platform=$BUILDPLATFORM instrumentisto/rust:nightly-2022-11-20 as build-env
 ARG TARGETARCH
 WORKDIR /app
 RUN curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py
@@ -15,7 +15,7 @@ RUN rustup component add --toolchain nightly rustfmt
 RUN rustup target add --toolchain nightly $(cat /.platform)
 RUN apt-get update && apt-get install -y $(cat /.compiler)
 
-RUN cargo +nightly zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
+RUN cargo zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM debian:stable

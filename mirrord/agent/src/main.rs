@@ -187,7 +187,7 @@ impl ClientConnectionHandler {
                 }
             }
         }
-        debug!("client closing");
+
         Ok(())
     }
 
@@ -314,6 +314,7 @@ async fn start_agent() -> Result<()> {
     // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables
     // `MIRRORD_AGENT_RUST_LOG`), then mirrord fails to initialize.
     info!("agent ready");
+
     let mut clients = FuturesUnordered::new();
     loop {
         select! {

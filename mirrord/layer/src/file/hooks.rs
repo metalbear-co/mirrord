@@ -22,10 +22,10 @@ use crate::{
 #[tracing::instrument(level = "trace")]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     trace!(
-        "open_logic -> rawish_path {:#?} | open_options {:#?}",
+        "rawish_path {:#?} | open_options {:#?}",
         rawish_path,
         open_options
     );
@@ -217,7 +217,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = pread(fd, amount_to_read as usize, offset as u64)
+    let (Ok(result) | Err(result)) = pread(fd, amount_to_read, offset as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = amount_to_read.min(read_amount);
