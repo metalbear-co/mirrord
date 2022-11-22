@@ -12,7 +12,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - release.yaml: Linux AArch64 for real this time. (embedded so was x64)
 
 ### Changed
+
 - Create agent in the cli and pass environment variables to exec'd process to improve agent re-use.
+- IntelliJ: change default log level to warning (match cli/vscode).
+- IntelliJ: don't show progress (can make some tests/scenarios fail).
+- release.yaml: Build layer/cli with Centos 7 compatible glibc (AmazonLinux2 support).
 
 ## 3.11.0
 

@@ -1660,6 +1660,7 @@ dependencies = [
  "errno",
  "exec",
  "mirrord-auth",
+ "mirrord-config",
  "mirrord-kube",
  "mirrord-layer",
  "mirrord-progress",
@@ -1668,6 +1669,7 @@ dependencies = [
  "regex",
  "reqwest",
  "semver 1.0.14",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
