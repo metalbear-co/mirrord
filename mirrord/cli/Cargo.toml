@@ -18,6 +18,8 @@ edition.workspace = true
 [dependencies]
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
 mirrord-progress = { path = "../progress" }
+mirrord-kube = { path = "../kube" }
+mirrord-config = { path = "../config" }
 
 clap.workspace = true
 tracing.workspace = true
@@ -30,6 +32,7 @@ anyhow.workspace = true
 reqwest.workspace = true
 semver = "1"
 const-random = "0.1.15"
+tokio.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
