@@ -214,7 +214,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
-    create_agent(&progress)?;
+    create_agent(&sub_progress)?;
 
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
