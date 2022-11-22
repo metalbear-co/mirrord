@@ -11,7 +11,7 @@ use rand::Rng;
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 #[cfg(feature = "env_guard")]
 use crate::api::env_guard::EnvVarGuard;
@@ -88,6 +88,8 @@ impl AgentManagment for KubernetesAPI {
             agent_port
         );
 
+        trace!("connecting to pod {}", &mirrord_addr);
+
         let conn = TcpStream::connect(&mirrord_addr).await?;
 
         wrap_raw_connection(conn)
@@ -99,6 +101,7 @@ impl AgentManagment for KubernetesAPI {
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
         wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
