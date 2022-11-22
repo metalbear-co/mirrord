@@ -217,7 +217,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = pread(fd, amount_to_read as usize, offset as u64)
+    let (Ok(result) | Err(result)) = pread(fd, amount_to_read, offset as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = amount_to_read.min(read_amount);
