@@ -93,10 +93,14 @@ impl AgentManagment for KubernetesAPI {
 
         trace!("connecting to pod {}", &mirrord_addr);
 
-        tokio::select! {
-            conn = TcpStream::connect(&mirrord_addr) => wrap_raw_connection(conn?)
-            _ = tokio::time:sleep(Duration::from_secs(self.agent.startup_timeout)) => Err(KubeApiError::AgentReadyTimeout)
-        }
+        let conn = tokio::time::timeout(
+            Duration::from_secs(self.agent.startup_timeout),
+            TcpStream::connect(&mirrord_addr),
+        )
+        .await
+        .map_err(|_| KubeApiError::AgentReadyTimeout)??;
+
+        wrap_raw_connection(conn)
     }
 
     #[cfg(not(feature = "incluster"))]
