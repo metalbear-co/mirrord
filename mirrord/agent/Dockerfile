@@ -15,7 +15,7 @@ RUN rustup component add --toolchain nightly rustfmt
 RUN rustup target add --toolchain nightly $(cat /.platform)
 RUN apt-get update && apt-get install -y $(cat /.compiler)
 
-RUN cargo zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
+RUN cargo +nightly zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM debian:stable
