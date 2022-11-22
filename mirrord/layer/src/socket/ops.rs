@@ -192,6 +192,7 @@ const UDP: ConnectType = !TCP;
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
 /// interception procedure.
+#[tracing::instrument(level = "trace")]
 fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,

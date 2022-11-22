@@ -148,14 +148,15 @@ struct TcpPacketData {
     flags: u16,
 }
 
+#[tracing::instrument(level = "trace", fields(bytes = %eth_packet.len()))]
 fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacketData)> {
     let eth_packet = EthernetPacket::new(&eth_packet[..])?;
-    debug!("get_tcp_packet_start");
     let ip_packet = match eth_packet.get_ethertype() {
         EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
         _ => return None,
     };
-    debug!("ip_packet");
+
+    trace!("ip_packet");
     let tcp_packet = match ip_packet.get_next_level_protocol() {
         IpNextHeaderProtocols::Tcp => TcpPacket::new(ip_packet.payload())?,
         _ => return None,
@@ -170,7 +171,8 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
         source_port,
         dest_port,
     };
-    debug!("identifier {identifier:?}");
+
+    trace!("identifier {identifier:?}");
     Some((
         identifier,
         TcpPacketData {
@@ -270,7 +272,7 @@ impl Drop for TCPSnifferAPI {
     }
 }
 
-pub struct TCPConnectionSniffer {
+pub struct TcpConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientID>,
     receiver: Receiver<SnifferCommand>,
     client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
@@ -281,8 +283,10 @@ pub struct TCPConnectionSniffer {
     index_allocator: IndexAllocator<ConnectionId>,
 }
 
-impl TCPConnectionSniffer {
-    pub async fn run(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
+impl TcpConnectionSniffer {
+    /// Runs the sniffer loop, capturing packets.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
         loop {
             select! {
                 command = self.receiver.recv() => {
@@ -302,12 +306,18 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
+    /// Creates and prepares a new [`TcpConnectionSniffer`] that uses BPF filters to capture network
+    /// packets.
+    ///
+    /// The capture uses a network interface specified by the user, if there is none, then it tries
+    /// to find a proper one by starting a connection. If this fails, we use "eth0" as a last
+    /// resort.
     #[tracing::instrument(level = "trace")]
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         pid: Option<u64>,
         network_interface: Option<String>,
-    ) -> Result<TCPConnectionSniffer, AgentError> {
+    ) -> Result<Self, AgentError> {
         if let Some(pid) = pid {
             let namespace = PathBuf::from("/proc")
                 .join(PathBuf::from(pid.to_string()))
@@ -318,7 +328,7 @@ impl TCPConnectionSniffer {
 
         let raw_capture = prepare_sniffer(network_interface).await?;
 
-        Ok(TCPConnectionSniffer {
+        Ok(Self {
             receiver,
             raw_capture,
             port_subscriptions: Subscriptions::new(),
@@ -330,16 +340,7 @@ impl TCPConnectionSniffer {
         })
     }
 
-    pub async fn start(
-        receiver: Receiver<SnifferCommand>,
-        pid: Option<u64>,
-        network_interface: Option<String>,
-        cancel_token: CancellationToken,
-    ) -> Result<(), AgentError> {
-        let sniffer = Self::new(receiver, pid, network_interface).await?;
-        sniffer.run(cancel_token).await
-    }
-
+    #[tracing::instrument(level = "trace", skip(self, sender))]
     fn handle_new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
         self.client_senders.insert(client_id, sender);
     }
@@ -355,17 +356,20 @@ impl TCPConnectionSniffer {
             .await
     }
 
+    /// Removes the client with `client_id`, and also unsubscribes its port.
+    #[tracing::instrument(level = "trace", skip(self))]
     fn handle_client_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
         self.client_senders.remove(&client_id);
         self.port_subscriptions.remove_client(client_id);
         self.update_sniffer()
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
 
         if ports.is_empty() {
-            debug!("packet_worker -> empty ports, setting dummy bpf");
+            trace!("Empty ports, setting dummy bpf");
             self.raw_capture
                 .set_filter(rawsocket::filter::build_drop_always())?
         } else {
@@ -381,6 +385,7 @@ impl TCPConnectionSniffer {
             .contains(&port)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
@@ -441,6 +446,8 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
+    /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_message_to_client(
         &mut self,
         client_id: &ClientID,
@@ -448,7 +455,10 @@ impl TCPConnectionSniffer {
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.client_senders.get(client_id) {
             sender.send(message).await.map_err(|err| {
-                warn!("failed to send message to client {}", client_id);
+                warn!(
+                    "Failed to send message to client {} with {:#?}!",
+                    client_id, err
+                );
                 let _ = self.handle_client_closed(*client_id);
                 err
             })?;
@@ -456,12 +466,8 @@ impl TCPConnectionSniffer {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), fields(bytes = %eth_packet.len()))]
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        trace!(
-            "TcpConnectionSniffer::handle_packet -> eth_packet {:#?}",
-            eth_packet.len()
-        );
-
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,
             None => return Ok(()),
@@ -470,13 +476,15 @@ impl TCPConnectionSniffer {
         let dest_port = identifier.dest_port;
         let source_port = identifier.source_port;
         let tcp_flags = tcp_packet.flags;
-        debug!("TcpConnectionSniffer::handle_packet -> dest_port {:#?} | source_port {:#?} | tcp_flags {:#?}", dest_port, source_port, tcp_flags);
+        trace!(
+            "dest_port {:#?} | source_port {:#?} | tcp_flags {:#?}",
+            dest_port,
+            source_port,
+            tcp_flags
+        );
 
         let is_client_packet = self.qualified_port(dest_port);
-        debug!(
-            "TcpConnectionSniffer::handle_packet -> is_client_packet {:#?}",
-            is_client_packet
-        );
+        trace!("is_client_packet {:#?}", is_client_packet);
 
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
@@ -502,10 +510,7 @@ impl TCPConnectionSniffer {
                 };
 
                 let client_ids = self.port_subscriptions.get_topic_subscribers(dest_port);
-                debug!(
-                    "TcpConnectionSniffer::handle_packet -> client_ids {:#?}",
-                    client_ids
-                );
+                trace!("client_ids {:#?}", client_ids);
 
                 let message = DaemonTcp::NewConnection(NewTcpConnection {
                     destination_port: dest_port,
@@ -513,10 +518,7 @@ impl TCPConnectionSniffer {
                     connection_id: id,
                     address: IpAddr::V4(identifier.source_addr),
                 });
-                debug!(
-                    "TcpConnectionSniffer::handle_packet -> message {:#?}",
-                    message
-                );
+                trace!("message {:#?}", message);
 
                 self.send_message_to_clients(client_ids.iter(), message)
                     .await?;
@@ -529,21 +531,14 @@ impl TCPConnectionSniffer {
                 }
             }
         };
-        debug!(
-            "TcpConnectionSniffer::handle_packet -> session {:#?}",
-            session
-        );
+        trace!("session {:#?}", session);
 
         if is_client_packet && !tcp_packet.bytes.is_empty() {
             let message = DaemonTcp::Data(TcpData {
                 bytes: tcp_packet.bytes,
                 connection_id: session.id,
             });
-
-            debug!(
-                "TcpConnectionSniffer::handle_packet -> message {:#?}",
-                message
-            );
+            trace!("message {:#?}", message);
 
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;
