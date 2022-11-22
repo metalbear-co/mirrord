@@ -97,7 +97,7 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let kube_api = KubernetesAPI::create(&config).await?;
     let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
     // Set env var for children to re-use.
-    std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
+    std::env::set_var("MIRRORD_CONNECT_AGENT", pod_agent_name);
     std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
 
     // Stop confusion with layer
@@ -228,6 +228,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
 
+    progress.done();
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
