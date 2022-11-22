@@ -1,3 +1,4 @@
+#[cfg(feature = "incluster")]
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -94,7 +95,7 @@ impl AgentManagment for KubernetesAPI {
 
         tokio::select! {
             conn = TcpStream::connect(&mirrord_addr) => wrap_raw_connection(conn?)
-            _ = tokio::time:sleep(Duration::from_secs(60)) => Err(KubeApiError::AgentReadyTimeout)
+            _ = tokio::time:sleep(Duration::from_secs(self.agent.startup_timeout)) => Err(KubeApiError::AgentReadyTimeout)
         }
     }
 
