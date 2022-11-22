@@ -212,7 +212,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let sub_progress = progress.subtask("preparing to launch process");
     let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
-    sub_progress.done_with("ready to launch process");
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     create_agent(&progress)?;
@@ -229,7 +228,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
 
-    progress.done();
+    sub_progress.done_with("ready to launch process");
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
