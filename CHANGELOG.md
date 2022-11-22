@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.11.2
+
+### Fixed
+
+- Agent dockerfile: fix build for cross arch
+
 ## 3.11.1
 
 ### Fixed
