@@ -99,6 +99,9 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
     // Set env var for children to re-use.
     std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);
     std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
     Ok(())
 }
 
