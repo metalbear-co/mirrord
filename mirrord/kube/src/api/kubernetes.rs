@@ -82,7 +82,7 @@ impl AgentManagment for KubernetesAPI {
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let mirrord_addr = format!(
-            "{}.{}.pod.cluster.local:{}",
+            "{}.{}.pod:{}",
             pod_agent_name,
             self.agent.namespace.as_deref().unwrap_or("default"),
             agent_port
