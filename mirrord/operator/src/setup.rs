@@ -149,7 +149,7 @@ impl OperatorDeployment {
             ..Default::default()
         };
 
-        let namespace = Deployment {
+        let deployment = Deployment {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 namespace: Some(namespace.name().to_owned()),
@@ -160,7 +160,7 @@ impl OperatorDeployment {
             ..Default::default()
         };
 
-        OperatorDeployment(namespace)
+        OperatorDeployment(deployment)
     }
 }
 
