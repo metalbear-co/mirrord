@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main, staging, trying]
 
+# Cancel previous runs on the same PR.
+concurrency: 
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   changed_files:
     runs-on: ubuntu-latest
