@@ -9,11 +9,36 @@ use bincode::{
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use tracing::warn;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AgentInitialize {
-    pub agent: AgentConfig,
-    pub target: TargetConfig,
+    agent: AgentConfig,
+    target: TargetConfig,
+}
+
+impl AgentInitialize {
+    pub fn new(agent: AgentConfig, target: TargetConfig) -> Self {
+        if agent.namespace.is_some() {
+            warn!("setting MIRRORD_AGENT_NAMESPACE is not supported with operator. Ignoring value");
+        }
+
+        AgentInitialize {
+            agent: AgentConfig {
+                namespace: None,
+                ..agent
+            },
+            target,
+        }
+    }
+
+    pub fn agent(&self) -> &AgentConfig {
+        &self.agent
+    }
+
+    pub fn target(&self) -> &TargetConfig {
+        &self.target
+    }
 }
 
 impl Encode for AgentInitialize {

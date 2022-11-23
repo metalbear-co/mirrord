@@ -83,10 +83,10 @@ where
         let mut codec = actix_codec::Framed::new(connection, OperatorCodec::client());
 
         let _ = codec
-            .send(OperatorRequest::Initialize(AgentInitialize {
-                agent: self.agent.clone(),
-                target: self.target.clone(),
-            }))
+            .send(OperatorRequest::Initialize(AgentInitialize::new(
+                self.agent.clone(),
+                self.target.clone(),
+            )))
             .await;
 
         Ok(codec)

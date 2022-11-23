@@ -39,6 +39,7 @@ serde_json.workspace = true
 serde_yaml = "0.9"
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 
 [dev-dependencies]
