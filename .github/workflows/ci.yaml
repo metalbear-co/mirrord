@@ -68,7 +68,6 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
       - run: cargo fmt --all -- --check
-      - run: rustup target add --toolchain nightly aarch64-apple-darwin
       - run: cargo clippy -- -D warnings
 
   lint_macos:
