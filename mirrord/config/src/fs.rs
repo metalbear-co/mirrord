@@ -35,25 +35,16 @@ pub mod mode;
 /// [feature]
 /// fs = "write"
 /// ```
+/// - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local
 ///
-/// - Read-only excluding `.foo` files:
+/// ```yaml
+/// # mirrord-config.yaml
 ///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.fs]
-/// mode = "read"
-/// exclude = "^.*\.foo$"
-/// ```
-///
-/// - Read-write including only `.baz` files:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.fs]
-/// mode = "write"
-/// include = "^.*\.baz$"
+/// [fs]
+/// mode = read
+/// read_write = ["/var/run"]
+/// read_only = ["/etc"]
+/// local_only = ["/lib"]
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]

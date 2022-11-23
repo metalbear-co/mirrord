@@ -14,29 +14,36 @@ use crate::{
 ///
 /// Allows the user to specify:
 ///
-/// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
-/// - `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE`;
-///
+/// What is the default behavior for file operations:
+/// 1. read - Read from the remote file system (default)
+/// 2. write - Read/Write from the remote file system.
+/// 3. local - Read from the local file system.
+/// 4. disabled - Disable file operations.
+/// 
+/// Besides the default behavior, user can specify behavior for specific regex patterns. Case insensitive.
+/// 1. read_write - List of patterns that should be read/write remotely.
+/// 2. read_only - List of patterns that should be read only remotely.
+/// 3. local_only - List of patterns that should be read locally.
+/// 
+/// The logic for choosing the behavior is as follows:
+/// 1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order
+///    if two lists match the same path, we will use the first one (and we do not guarantee what is first)
+/// 2. Check our "special list" - we have an internal at compile time list for different behavior based on patterns
+///    to provide better UX.
+/// 3. If none of the above match, use the default behavior (mode).
+/// 
 /// ## Examples
 ///
-/// - Read-only excluding `.foo` files:
+/// - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local
 ///
 /// ```yaml
 /// # mirrord-config.yaml
 ///
 /// [fs]
 /// mode = read
-/// exclude = "^.*\.foo$"
-/// ```
-///
-/// - Read-write including only `.baz` files:
-///
-/// ```yaml
-/// # mirrord-config.yaml
-///
-/// [fs]
-/// mode = write
-/// include = "^.*\.baz$"
+/// read_write = ["/var/run"]
+/// read_only = ["/etc"]
+/// local_only = ["/lib"]
 /// ```
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug)]
 #[config(
@@ -49,21 +56,36 @@ pub struct FsConfig {
     #[config(nested)]
     pub mode: FsModeConfig,
 
-    /// Allows the user to specify regexes that are used to match against files when mirrord file
+    /// DEPRECATED
+    ///  Allows the user to specify regexes that are used to match against files when mirrord file
     /// operations are enabled.
     ///
     /// The regexes specified here will make mirrord operate only on files that match it, otherwise
     /// the file will be accessed locally (bypassing mirrord).
-    #[config(env = "MIRRORD_FILE_FILTER_INCLUDE")]
+    #[config(env = "MIRRORD_FILE_FILTER_INCLUDE", deprecated="Use access type configuration instead.")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// DEPRECATED
     /// Allows the user to specify regexes that are used to match against files when mirrord file
     /// operations are enabled.
     ///
     /// The opposite of `include`, files that match the regexes specified here will bypass mirrord
     /// and are accessed locally.
-    #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE")]
+    #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE", deprecated="Use access type configuration instead.")]
     pub exclude: Option<VecOrSingle<String>>,
+
+    /// Specify file path patterns that if matched will be read and written to the remote.
+    #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
+    pub read_write: Option<VecOrSingle<String>>,
+
+    /// Specify file path patterns that if matched will be read from the remote.
+    /// if file matching the pattern is opened for writing or read/write it will be opened locally.
+    #[config(env = "MIRRORD_FILE_READ_ONLY_PATTERN")]
+    pub read_only: Option<VecOrSingle<String>>,
+
+    /// Specify file path patterns that if matched will be opened locally.
+    #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
+    pub local: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {

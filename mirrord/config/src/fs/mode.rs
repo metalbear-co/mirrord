@@ -10,9 +10,7 @@ use crate::{
 
 /// Configuration for enabling read-only and read-write file operations.
 ///
-/// Default option for general file configuration. Allows the user to specify:
-///
-/// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
+/// Default option for general file configuration.
 ///
 /// ## Examples
 ///
@@ -38,6 +36,7 @@ pub enum FsModeConfig {
     #[default]
     Read,
     Write,
+    Local,
 }
 
 impl FsModeConfig {
