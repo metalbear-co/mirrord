@@ -16,7 +16,8 @@ use std::{
 };
 
 use fancy_regex::Regex;
-use mirrord_config::{fs::FsConfig, util::VecOrSingle};
+use mirrord_config::{fs::{FsConfig, FsModeConfig}, util::VecOrSingle};
+use regex::{RegexSet, RegexSetBuilder};
 use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
@@ -26,12 +27,12 @@ use crate::detour::{Bypass, Detour};
 ///
 /// You most likely do **NOT** want to include any of these, but if have a reason to do so, then
 /// setting `MIRRORD_FILE_FILTER_INCLUDE` allows you to override this list.
-static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
+fn generate_local_set() -> RegexSet {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
-    [
+    let patterns = [
         r"(?<so_files>^.+\.so$)|",
         r"(?<d_files>^.+\.d$)|",
         r"(?<pyc_files>^.+\.pyc$)|",
@@ -69,14 +70,18 @@ static DEFAULT_EXCLUDE_LIST: LazyLock<String> = LazyLock::new(|| {
         &format!("(^.*{}.*$)|", current_dir.to_string_lossy()),
         &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
     ]
-    .into_iter()
-    .collect()
-});
+    .into_iter();
+    RegexSetBuilder::new(patterns)
+        .case_insensitive(true)
+        .build()
+        .expect("Building local path regex set failed")
+}
 
 /// Global filter used by file operations to bypass (use local) or continue (use remote).
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
-/// Holds the `Regex` that is used to either continue or bypass file path operations (such as
+///  DEPRECATED, behavior preserved but will be deleted once we delete the INCLUDE/EXCLUDE settings.
+///  Holds the `Regex` that is used to either continue or bypass file path operations (such as
 /// [`file::ops::open`]), according to what the user specified.
 ///
 /// The [`FileFilter::Include`] variant takes precedence and erases whatever the user supplied as
@@ -85,70 +90,108 @@ pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 /// Warning: Use [`FileFilter::new`] (or equivalent) when initializing this, otherwise the above
 /// constraint might not be held.
 #[derive(Debug, Clone)]
-pub(crate) enum FileFilter {
+pub(crate) enum OldFilter {
     /// User specified `Regex` containing the file paths that the user wants to include for file
     /// operations.
     ///
     /// Overrides [`FileFilter::Exclude`].
-    Include(Regex),
+    Include(RegexSet),
 
-    /// Combination of [`DEFAULT_EXCLUDE_LIST`] and the user's specified `Regex`.
+    /// User's specified `Regex`.
     ///
     /// Anything not matched by this `Regex` is considered as included.
-    Exclude(Regex),
+    Exclude(RegexSet),
+
+    /// Neither was set (default).
+    Nothing
+}
+
+impl OldFilter {
+    /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
+    /// converting the result a `Detour`.
+    ///
+    /// `op` is used to lazily initialize a `Bypass` case.
+    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, op: F) -> Detour<()>
+    where
+        F: FnOnce() -> Bypass,
+    {
+        // Order matters here, as we want to make `include` the most important pattern. If the user
+        // specified `include`, then we never want to accidentally allow other paths to pass this
+        // check (this is a corner case that is unlikely to happen, as initialization via
+        // `FileFilter::new` should prevent it from ever seeing the light of day).
+        match self {
+            OldFilter::Include(include) if include.is_match(text).unwrap() => Detour::Success(()),
+            OldFilter::Exclude(exclude) if !exclude.is_match(text).unwrap() => Detour::Success(()),
+            OldFilter::Nothing => Detour::Success(()),
+            _ => Detour::Bypass(op()),
+        }
+    }
+}
+pub(crate) struct FileFilter {
+    old_filter: OldFilter,
+    read_only: RegexSet,
+    read_write: RegexSet,
+    local: RegexSet,
+    default_local: RegexSet,
+    mode: FsModeConfig
 }
 
 impl FileFilter {
     /// Initializes a `FileFilter` based on the user configuration.
     ///
-    /// - [`FileFilter::Include`] is returned if the user specified any include path (thus erasing
-    ///   anything passed as exclude);
-    /// - [`FileFilter::Exclude`] also appends the [`DEFAULT_EXCLUDE_LIST`] to the user supplied
-    ///   regex;
+    /// The filter first checks if the user specified any include/exclude regexes. (This will be removed)
+    /// If path matches include, it continues to check if the path has specific behavior,
+    /// if not, it checks if the path matches the default exclude list.
+    /// If not, it does the default behavior set by user (default is read only remote).
     #[tracing::instrument(level = "trace")]
     pub(crate) fn new(fs_config: FsConfig) -> Self {
         let FsConfig {
-            include, exclude, ..
+            include,
+            exclude,
+            read_write,
+            read_only,
+            local,
+            mode
         } = fs_config;
 
         let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
         let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
+        let read_write = RegexSetBuilder::new(read_write.map(VecOrSingle::to_vec).unwrap_or_default())
+            .case_insensitive(true)
+            .build()
+            .expect("Building read-write regex set failed");
+        let read_only = RegexSetBuilder::new(read_only.map(VecOrSingle::to_vec).unwrap_or_default()).case_insensitive(true).build().expect("Building read-only regex set failed");
+        let local = RegexSetBuilder::new(local.map(VecOrSingle::to_vec).unwrap_or_default())
+            .case_insensitive(true)
+            .build()
+            .expect("Building local path regex set failed");
 
-        let default_exclude = DEFAULT_EXCLUDE_LIST.as_ref();
-        let default_exclude_regex =
-            Regex::new(default_exclude).expect("Failed parsing default exclude file regex!");
-
-        // Converts a list of `String` into one big regex-fied `String`.
-        let reduce_to_string = |list: Vec<String>| {
-            list.into_iter()
-                // Turn into capture group `(/folder/first.txt)`.
-                .map(|element| format!("({element})"))
-                // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-                .reduce(|acc, element| format!("{acc}|{element}"))
+        let default_local = generate_local_set();
+        
+        let old_filter = if !include.is_empty() {
+            let include = RegexSetBuilder::new(include)
+                .case_insensitive(true)
+                .build()
+                .expect("Building include regex set failed");
+            OldFilter::Include(include)
+        } else if !exclude.is_empty() {
+            let exclude = RegexSetBuilder::new(exclude)
+                .case_insensitive(true)
+                .build()
+                .expect("Building exclude regex set failed");
+            OldFilter::Exclude(exclude)
+        } else {
+            OldFilter::Nothing
         };
 
-        let exclude = reduce_to_string(exclude)
-            // Add default exclude list.
-            .map(|mut user_exclude| {
-                user_exclude.push_str(&format!("|{default_exclude}"));
-                user_exclude
-            })
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing exclude file regex!")
-            // `exclude` always exists, either as user input, or as our default exclude list.
-            .unwrap_or(default_exclude_regex);
-
-        // Try to generate the final `Regex` based on `include`.
-        reduce_to_string(include)
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing include file regex!")
-            .map(Self::Include)
-            // `include` was empty, so we fallback to `exclude`.
-            .unwrap_or(Self::Exclude(exclude))
+        Self {
+            old_filter,
+            read_only,
+            read_write,
+            local,
+            default_local,
+            mode
+        }
     }
 
     /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
@@ -173,7 +216,7 @@ impl FileFilter {
 
 impl Default for FileFilter {
     fn default() -> Self {
-        Self::Exclude(Regex::new(&DEFAULT_EXCLUDE_LIST).unwrap())
+        Self::new(FsConfig::default())
     }
 }
 

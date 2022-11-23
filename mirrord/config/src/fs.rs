@@ -73,6 +73,9 @@ impl MirrordConfig for FsUserConfig {
                 mode: mode.generate_config()?,
                 include: FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value(),
                 exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value(),
+                read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value(),
+                read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value(),
+                local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value(),
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
         };
@@ -86,11 +89,17 @@ impl MirrordToggleableConfig for FsUserConfig {
         let mode = FsModeConfig::disabled_config()?;
         let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
         let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
+        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value();
+        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value();
+        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value();
 
         Ok(FsConfig {
             mode,
             include,
             exclude,
+            read_write,
+            read_only,
+            local
         })
     }
 }
