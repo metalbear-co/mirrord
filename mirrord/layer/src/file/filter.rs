@@ -16,12 +16,24 @@ use std::{
 };
 
 use fancy_regex::Regex;
-use mirrord_config::{fs::{FsConfig, FsModeConfig}, util::VecOrSingle};
+use mirrord_config::{
+    fs::{FsConfig, FsModeConfig},
+    util::VecOrSingle,
+};
 use regex::{RegexSet, RegexSetBuilder};
 use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
 
+macro_rules! some_regex_match {
+    ($regex:expr, $text:expr) => {
+        if let Some(_regex) = $regex {
+            if _regex.is_match($text) {
+                return true;
+            }
+        }
+    };
+}
 /// List of files that mirrord should ignore, as they probably exist only in the local user machine,
 /// or are system configuration files (that could break the process if we used the remote version).
 ///
@@ -103,7 +115,7 @@ pub(crate) enum OldFilter {
     Exclude(RegexSet),
 
     /// Neither was set (default).
-    Nothing
+    Nothing,
 }
 
 impl OldFilter {
@@ -120,8 +132,8 @@ impl OldFilter {
         // check (this is a corner case that is unlikely to happen, as initialization via
         // `FileFilter::new` should prevent it from ever seeing the light of day).
         match self {
-            OldFilter::Include(include) if include.is_match(text).unwrap() => Detour::Success(()),
-            OldFilter::Exclude(exclude) if !exclude.is_match(text).unwrap() => Detour::Success(()),
+            OldFilter::Include(include) if include.is_match(text) => Detour::Success(()),
+            OldFilter::Exclude(exclude) if !exclude.is_match(text) => Detour::Success(()),
             OldFilter::Nothing => Detour::Success(()),
             _ => Detour::Bypass(op()),
         }
@@ -129,19 +141,33 @@ impl OldFilter {
 }
 pub(crate) struct FileFilter {
     old_filter: OldFilter,
-    read_only: RegexSet,
-    read_write: RegexSet,
-    local: RegexSet,
+    read_only: Option<RegexSet>,
+    read_write: Option<RegexSet>,
+    local: Option<RegexSet>,
     default_local: RegexSet,
-    mode: FsModeConfig
+    mode: FsModeConfig,
+}
+
+/// Builds case insensitive regexes from a list of patterns.
+/// Returns `None` if the list is empty.
+/// Regex error if fails.
+fn build_regex_or_none(patterns: Vec<String>) -> Result<Option<RegexSet>, regex::Error> {
+    if patterns.is_empty() {
+        Ok(None)
+    } else {
+        RegexSetBuilder::new(patterns)
+            .case_insensitive(true)
+            .build()
+            .map(Some)
+    }
 }
 
 impl FileFilter {
     /// Initializes a `FileFilter` based on the user configuration.
     ///
-    /// The filter first checks if the user specified any include/exclude regexes. (This will be removed)
-    /// If path matches include, it continues to check if the path has specific behavior,
-    /// if not, it checks if the path matches the default exclude list.
+    /// The filter first checks if the user specified any include/exclude regexes. (This will be
+    /// removed) If path matches include, it continues to check if the path has specific
+    /// behavior, if not, it checks if the path matches the default exclude list.
     /// If not, it does the default behavior set by user (default is read only remote).
     #[tracing::instrument(level = "trace")]
     pub(crate) fn new(fs_config: FsConfig) -> Self {
@@ -151,23 +177,21 @@ impl FileFilter {
             read_write,
             read_only,
             local,
-            mode
+            mode,
         } = fs_config;
 
         let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
         let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
-        let read_write = RegexSetBuilder::new(read_write.map(VecOrSingle::to_vec).unwrap_or_default())
-            .case_insensitive(true)
-            .build()
-            .expect("Building read-write regex set failed");
-        let read_only = RegexSetBuilder::new(read_only.map(VecOrSingle::to_vec).unwrap_or_default()).case_insensitive(true).build().expect("Building read-only regex set failed");
-        let local = RegexSetBuilder::new(local.map(VecOrSingle::to_vec).unwrap_or_default())
-            .case_insensitive(true)
-            .build()
+        let read_write =
+            build_regex_or_none(read_write.map(VecOrSingle::to_vec).unwrap_or_default())
+                .expect("Building read-write regex set failed");
+        let read_only = build_regex_or_none(read_only.map(VecOrSingle::to_vec).unwrap_or_default())
+            .expect("Building read-only regex set failed");
+        let local = build_regex_or_none(local.map(VecOrSingle::to_vec).unwrap_or_default())
             .expect("Building local path regex set failed");
 
         let default_local = generate_local_set();
-        
+
         let old_filter = if !include.is_empty() {
             let include = RegexSetBuilder::new(include)
                 .case_insensitive(true)
@@ -190,26 +214,35 @@ impl FileFilter {
             read_write,
             local,
             default_local,
-            mode
+            mode,
         }
     }
 
     /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
-    /// converting the result a `Detour`.
+    /// and the whether the path is queried for write converting the result a `Detour`.
     ///
     /// `op` is used to lazily initialize a `Bypass` case.
-    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, op: F) -> Detour<()>
+    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, write: bool, op: F) -> Detour<()>
     where
         F: FnOnce() -> Bypass,
     {
-        // Order matters here, as we want to make `include` the most important pattern. If the user
-        // specified `include`, then we never want to accidentally allow other paths to pass this
-        // check (this is a corner case that is unlikely to happen, as initialization via
-        // `FileFilter::new` should prevent it from ever seeing the light of day).
-        match self {
-            FileFilter::Include(include) if include.is_match(text).unwrap() => Detour::Success(()),
-            FileFilter::Exclude(exclude) if !exclude.is_match(text).unwrap() => Detour::Success(()),
-            _ => Detour::Bypass(op()),
+        // We want the legacy behavior to stay, so first we apply the old filter.
+        self.old_filter.continue_or_bypass_with(text, op)?;
+
+        if some_regex_match!(self.read_write, text) {
+            Detour::Success(())
+        } else if !write && some_regex_match!(self.read_only, text) {
+            Detour::Success(())
+        } else if some_regex_match!(self.local, text) {
+            Detour::Bypass(op())
+        } else if self.default_local.is_match(text) {
+            Detour::Bypass(op())
+        } else {
+            match self.mode {
+                FsModeConfig::Write => Detour::Success(()),
+                FsModeConfig::Read if !write => Detour::Success(()),
+                _ => Detour::Bypass(op()),
+            }
         }
     }
 }
