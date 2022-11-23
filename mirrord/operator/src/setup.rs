@@ -41,7 +41,7 @@ impl Operator {
         let deployment = OperatorDeployment::new(&namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
         let role = OperatorRole::new();
-        let role_binding = OperatorRoleBinding::new(&namespace);
+        let role_binding = OperatorRoleBinding::new(&namespace, &role);
 
         Operator {
             namespace,
@@ -230,6 +230,14 @@ impl OperatorRole {
 
         OperatorRole(role)
     }
+
+    fn as_role_ref(&self) -> RoleRef {
+        RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_owned(),
+            kind: "ClusterRole".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+        }
+    }
 }
 
 impl OperatorSetup for OperatorRole {
@@ -242,17 +250,13 @@ impl OperatorSetup for OperatorRole {
 pub struct OperatorRoleBinding(ClusterRoleBinding);
 
 impl OperatorRoleBinding {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
+    pub fn new(namespace: &OperatorNamespace, role: &OperatorRole) -> Self {
         let role_binding = ClusterRoleBinding {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 ..Default::default()
             },
-            role_ref: RoleRef {
-                api_group: "rbac.authorization.k8s.io".to_owned(),
-                kind: "Role".to_owned(),
-                name: "operator".to_owned(),
-            },
+            role_ref: role.as_role_ref(),
             subjects: Some(vec![Subject {
                 api_group: Some("".to_owned()),
                 kind: "ServiceAccount".to_owned(),
