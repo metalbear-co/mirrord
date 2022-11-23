@@ -203,7 +203,10 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     if let Some(config_file) = &args.config_file {
-        std::env::set_var("MIRRORD_CONFIG_FILE", config_file.clone());
+        // Set canoncialized path to config file, in case forks/children are in different
+        // working directories.
+        let full_path = std::fs::canonicalize(config_file)?;
+        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
     if args.capture_error_trace {
