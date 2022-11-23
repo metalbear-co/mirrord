@@ -10,12 +10,8 @@
 ///
 /// 3. `MIRRORD_FILE_FILTER_EXCLUDE`: similar to the default, it includes everything that is
 /// not filtered by the user (input) regex, and [`DEFAULT_EXCLUDE_LIST`];
-use std::{
-    env,
-    sync::{LazyLock, OnceLock},
-};
+use std::{env, sync::OnceLock};
 
-use fancy_regex::Regex;
 use mirrord_config::{
     fs::{FsConfig, FsModeConfig},
     util::VecOrSingle,
@@ -28,9 +24,9 @@ use crate::detour::{Bypass, Detour};
 macro_rules! some_regex_match {
     ($regex:expr, $text:expr) => {
         if let Some(_regex) = $regex {
-            if _regex.is_match($text) {
-                return true;
-            }
+            _regex.is_match($text)
+        } else {
+            false
         }
     };
 }
@@ -45,44 +41,43 @@ fn generate_local_set() -> RegexSet {
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
     let patterns = [
-        r"(?<so_files>^.+\.so$)|",
-        r"(?<d_files>^.+\.d$)|",
-        r"(?<pyc_files>^.+\.pyc$)|",
-        r"(?<py_files>^.+\.py$)|",
-        r"(?<js_files>^.+\.js$)|",
-        r"(?<pth_files>^.+\.pth$)|",
-        r"(?<plist_files>^.+\.plist$)|",
-        r"(?<cfg_files>^.*venv\.cfg$)|",
-        r"(?<proc_path>^/proc/.*$)|",
-        r"(?<sys_path>^/sys/.*$)|",
-        r"(?<lib_path>^/lib/.*$)|",
-        r"(?<etc_path>^/etc/.*$)|",
-        r"(?<usr_path>^/usr/.*$)|",
-        r"(?<dev_path>^/dev/.*$)|",
-        r"(?<opt_path>^/opt/.*$)|",
-        r"(?<home_path>^/home/.*$)|",
+        r"^.+\.so$",
+        r"^.+\.d$",
+        r"^.+\.pyc$",
+        r"^.+\.py$",
+        r"^.+\.js$",
+        r"^.+\.pth$",
+        r"^.+\.plist$",
+        r"^.*venv\.cfg$",
+        r"^/proc/.*$",
+        r"^/sys/.*$",
+        r"^/lib/.*$",
+        r"^/etc/.*$",
+        r"^/usr/.*$",
+        r"^/dev/.*$",
+        r"^/opt/.*$",
+        r"^/home/.*$",
         // support for nixOS.
-        r"(?<nix_path>^/nix/.*$)|",
-        r"(?<iojs_path>^/home/iojs/.*$)|",
-        r"(?<runner_path>^/home/runner/.*$)|",
+        r"^/nix/.*$",
+        r"^/home/iojs/.*$",
+        r"^/home/runner/.*$",
         // dotnet: `/tmp/clr-debug-pipe-1`
-        r"(?<clr_files>^.*clr-.*-pipe-.*$)|",
+        r"^.*clr-.*-pipe-.*$",
         // dotnet: `/home/{username}/{project}.pdb`
-        r"(?<pdb_files>^.*\.pdb$)|",
+        r"^.*\.pdb$",
         // dotnet: `/home/{username}/{project}.dll`
-        r"(?<dll_files>^.*\.dll$)|",
+        r"^.*\.dll$",
         // jvm.cfg or ANYTHING/jvm.cfg
-        r"(?<jvm_files>.*(^|/)jvm\.cfg$)|",
+        r".*(^|/)jvm\.cfg$",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
-        r"(?<package_json>^.*/package.json$)|",
+        r"^.*/package.json$",
         // macOS
-        r"(?<macos_users>^/Users/.*$)|",
-        r"(?<macos_library>^/Library/.*$)|",
-        &format!("(^.*{}.*$)|", current_dir.to_string_lossy()),
-        &format!("(^.*{}.*$)", current_binary.to_string_lossy()),
-    ]
-    .into_iter();
+        r"^/Users/.*$",
+        r"^/Library/.*$",
+        &format!("^.*{}.*$", current_dir.to_string_lossy()),
+        &format!("^.*{}.*$", current_binary.to_string_lossy()),
+    ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
         .build()
@@ -118,27 +113,6 @@ pub(crate) enum OldFilter {
     Nothing,
 }
 
-impl OldFilter {
-    /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
-    /// converting the result a `Detour`.
-    ///
-    /// `op` is used to lazily initialize a `Bypass` case.
-    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, op: F) -> Detour<()>
-    where
-        F: FnOnce() -> Bypass,
-    {
-        // Order matters here, as we want to make `include` the most important pattern. If the user
-        // specified `include`, then we never want to accidentally allow other paths to pass this
-        // check (this is a corner case that is unlikely to happen, as initialization via
-        // `FileFilter::new` should prevent it from ever seeing the light of day).
-        match self {
-            OldFilter::Include(include) if include.is_match(text) => Detour::Success(()),
-            OldFilter::Exclude(exclude) if !exclude.is_match(text) => Detour::Success(()),
-            OldFilter::Nothing => Detour::Success(()),
-            _ => Detour::Bypass(op()),
-        }
-    }
-}
 pub(crate) struct FileFilter {
     old_filter: OldFilter,
     read_only: Option<RegexSet>,
@@ -226,14 +200,26 @@ impl FileFilter {
     where
         F: FnOnce() -> Bypass,
     {
-        // We want the legacy behavior to stay, so first we apply the old filter.
-        self.old_filter.continue_or_bypass_with(text, op)?;
+        // Order matters here, as we want to make `include` the most important pattern. If the user
+        // specified `include`, then we never want to accidentally allow other paths to pass this
+        // check (this is a corner case that is unlikely to happen, as initialization via
+        // `FileFilter::new` should prevent it from ever seeing the light of day).
+        match &self.old_filter {
+            OldFilter::Include(include) if include.is_match(text) => {}
+            OldFilter::Exclude(exclude) if !exclude.is_match(text) => {}
+            OldFilter::Nothing => {}
+            _ => return Detour::Bypass(op()),
+        }
 
-        if some_regex_match!(self.read_write, text) {
+        if some_regex_match!(&self.read_write, text) {
             Detour::Success(())
-        } else if !write && some_regex_match!(self.read_only, text) {
-            Detour::Success(())
-        } else if some_regex_match!(self.local, text) {
+        } else if some_regex_match!(&self.read_only, text) {
+            if !write {
+                Detour::Success(())
+            } else {
+                Detour::Bypass(op())
+            }
+        } else if some_regex_match!(&self.local, text) {
             Detour::Bypass(op())
         } else if self.default_local.is_match(text) {
             Detour::Bypass(op())
@@ -256,8 +242,9 @@ impl Default for FileFilter {
 #[cfg(test)]
 mod tests {
     use mirrord_config::{fs::FsConfig, util::VecOrSingle};
+    use rstest::*;
 
-    use super::FileFilter;
+    use super::*;
     use crate::detour::{Bypass, Detour};
 
     /// Implementation of helper methods for testing [`Detour`].
@@ -288,17 +275,21 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
+                "first.a".into()
+            ))
             .is_success());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
+                "third.a".into()
+            ))
             .is_bypass());
     }
 
@@ -317,17 +308,21 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
+                "first.a".into()
+            ))
             .is_bypass());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_bypass());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
+                "third.a".into()
+            ))
             .is_success());
     }
 
@@ -349,17 +344,21 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
+                "first.a".into()
+            ))
             .is_success());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", || Bypass::IgnoredFile("third.a".into()))
+            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
+                "third.a".into()
+            ))
             .is_bypass());
     }
 
@@ -375,11 +374,13 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
+                "first.a".into()
+            ))
             .is_success());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_success());
@@ -397,17 +398,86 @@ mod tests {
         let file_filter = FileFilter::new(fs_config);
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", || Bypass::IgnoredFile("first.a".into()))
+            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
+                "first.a".into()
+            ))
             .is_bypass());
 
         assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", || Bypass::IgnoredFile(
+            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
                 "second.a".into()
             ))
             .is_bypass());
 
         assert!(file_filter
-            .continue_or_bypass_with("/dir/third.a", || Bypass::IgnoredFile("second.a".into()))
+            .continue_or_bypass_with("/dir/third.a", false, || Bypass::IgnoredFile(
+                "second.a".into()
+            ))
             .is_success());
+    }
+
+    #[rstest]
+    #[case(FsModeConfig::Write, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Write, "/pain/read_write/test.a", false, false)]
+    #[case(FsModeConfig::Write, "/pain/read_only/test.a", false, false)]
+    #[case(FsModeConfig::Write, "/pain/write.a", false, false)]
+    #[case(FsModeConfig::Write, "/pain/local/test.a", false, true)]
+    #[case(FsModeConfig::Write, "/opt/test.a", false, true)]
+    #[case(FsModeConfig::Write, "/a/test.a", true, true)]
+    #[case(FsModeConfig::Write, "/pain/read_write/test.a", true, false)]
+    #[case(FsModeConfig::Write, "/pain/read_only/test.a", true, true)]
+    #[case(FsModeConfig::Write, "/pain/write.a", true, false)]
+    #[case(FsModeConfig::Write, "/pain/local/test.a", true, true)]
+    #[case(FsModeConfig::Write, "/opt/test.a", true, true)]
+    #[case(FsModeConfig::Read, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Read, "/pain/read_write/test.a", false, false)]
+    #[case(FsModeConfig::Read, "/pain/read_only/test.a", false, false)]
+    #[case(FsModeConfig::Read, "/pain/write.a", false, false)]
+    #[case(FsModeConfig::Read, "/pain/local/test.a", false, true)]
+    #[case(FsModeConfig::Read, "/opt/test.a", false, true)]
+    #[case(FsModeConfig::Read, "/a/test.a", true, true)]
+    #[case(FsModeConfig::Read, "/pain/read_write/test.a", true, false)]
+    #[case(FsModeConfig::Read, "/pain/read_only/test.a", true, true)]
+    #[case(FsModeConfig::Read, "/pain/write.a", true, true)]
+    #[case(FsModeConfig::Read, "/pain/local/test.a", true, true)]
+    #[case(FsModeConfig::Read, "/opt/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/read_write/test.a", false, false)]
+    #[case(FsModeConfig::Local, "/pain/read_only/test.a", false, false)]
+    #[case(FsModeConfig::Local, "/pain/write.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/local/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/opt/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/a/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/read_write/test.a", true, false)]
+    #[case(FsModeConfig::Local, "/pain/read_only/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
+    fn test_include_complex_configuration(#[case] mode: FsModeConfig, #[case] path: &str, #[case] write: bool, #[case] bypass: bool) {
+        let include = Some(VecOrSingle::Multiple(vec![r"/pain/.*\.a".to_string()]));
+        let read_write = Some(VecOrSingle::Multiple(vec![
+            r"/pain/read_write.*\.a".to_string()
+        ]));
+        let read_only = Some(VecOrSingle::Multiple(vec![
+            r"/pain/read_only.*\.a".to_string()
+        ]));
+        let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
+        let fs_config = FsConfig {
+            include,
+            read_write,
+            read_only,
+            local,
+            mode,
+            ..Default::default()
+        };
+
+        let file_filter = FileFilter::new(fs_config);
+
+        assert_eq!(
+            file_filter
+                .continue_or_bypass_with(path, write, || Bypass::IgnoredFile("".into()))
+                .is_bypass(),
+            bypass
+        );
     }
 }

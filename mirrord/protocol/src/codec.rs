@@ -61,6 +61,10 @@ impl OpenOptionsInternal {
     pub fn is_read_only(&self) -> bool {
         self.read && !(self.write || self.append || self.truncate || self.create || self.create_new)
     }
+
+    pub fn is_write(&self) -> bool {
+        self.write || self.append || self.truncate || self.create || self.create_new
+    }
 }
 
 impl From<OpenOptionsInternal> for std::fs::OpenOptions {
