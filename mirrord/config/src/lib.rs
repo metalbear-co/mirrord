@@ -325,6 +325,7 @@ mod tests {
                 communication_timeout: None,
                 startup_timeout: None,
                 network_interface: None,
+                pause: Some(false),
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),
