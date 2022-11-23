@@ -143,10 +143,10 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if let Some(agent_ttl) = &args.agent_ttl {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
-    if let Some(agent_statup_timeout) = &args.agent_statup_timeout {
+    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
         std::env::set_var(
             "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_statup_timeout.to_string(),
+            agent_startup_timeout.to_string(),
         );
     }
 
