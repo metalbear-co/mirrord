@@ -189,7 +189,7 @@ mod main {
     /// reference.
     fn get_sip_status_rec(path: &str, seen_paths: &mut HashSet<PathBuf>) -> Result<SipStatus> {
         // If which fails, try using the given path as is.
-        let complete_path = which(&path).unwrap_or_else(|_| PathBuf::from(&path));
+        let complete_path = which(path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
             return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
@@ -238,7 +238,7 @@ mod main {
 
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = &tmp_dir.join(
-            &complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
+            complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
@@ -276,7 +276,7 @@ mod main {
                     path,
                     patched_path_string
                 );
-                patch_binary(&path, &output)?;
+                patch_binary(path, output)?;
                 Ok(patched_path_string)
             }
             // The file is a script with a shebang. Patch recursively.
@@ -293,7 +293,7 @@ mod main {
                         patched_path_string,
                     );
                     let new_target = patch_some_sip(&target_path, shebang_target, tmp_dir)?;
-                    patch_script(&path, &output, &new_target)?;
+                    patch_script(path, output, &new_target)?;
                     Ok(patched_path_string)
                 } else {
                     // This function should only be called on a file which has SomeSIP SipStatus.
