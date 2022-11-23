@@ -2,11 +2,8 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-#[cfg(not(feature = "incluster"))]
 use k8s_openapi::api::core::v1::Pod;
-#[cfg(not(feature = "incluster"))]
-use kube::Api;
-use kube::{Client, Config};
+use kube::{Api, Client, Config};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -18,11 +15,10 @@ use tracing::{info, trace, warn};
 
 #[cfg(feature = "env_guard")]
 use crate::api::env_guard::EnvVarGuard;
-#[cfg(not(feature = "incluster"))]
-use crate::api::get_k8s_api;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
+        get_k8s_api,
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -84,7 +80,16 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let mirrord_addr = format!("{}:{}", pod_agent_name, agent_port);
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+
+        let pod_addr = pod_api
+            .get(&pod_agent_name)
+            .await?
+            .status
+            .and_then(|status| status.pod_ip.clone())
+            .unwrap_or(pod_agent_name);
+
+        let mirrord_addr = format!("{}:{}", pod_addr, agent_port);
 
         trace!("connecting to pod {}", &mirrord_addr);
 
