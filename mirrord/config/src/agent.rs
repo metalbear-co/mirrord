@@ -67,6 +67,12 @@ pub struct AgentConfig {
     /// and if that fails it uses eth0.
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
+
+    /// Controls target pause feature.
+    ///
+    /// With this feature enabled, the target container is paused while agent is running.
+    #[config(env = "MIRRORD_PAUSE", default = "false")]
+    pub pause: bool,
 }
 
 #[cfg(test)]
