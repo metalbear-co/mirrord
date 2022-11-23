@@ -75,7 +75,22 @@ jobs:
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
 
-
+  lint_macos:
+    runs-on: macos-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: rustfmt, clippy
+          target: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v1
+      # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
 
   test_mirrord_protocol:
     strategy:
@@ -478,6 +493,7 @@ jobs:
         test_mirrord_layer_cli,
         test_agent,
         lint,
+        lint_macos,
         test_mirrord_config,
         test_mirrord_layer,
         test_mirrord_protocol,
@@ -496,6 +512,7 @@ jobs:
       (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
       (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
       (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
       (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
       (needs.test_mirrord_layer.result == 'success' || needs.test_mirrord_layer.result == 'skipped') &&
       (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&

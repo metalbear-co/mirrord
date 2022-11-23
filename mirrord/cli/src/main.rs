@@ -9,8 +9,6 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use const_random::const_random;
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-use errno;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;

@@ -130,7 +130,7 @@ mod main {
                 )?;
                 Ok(())
             })
-            .ok_or(UnlikelyError("Can't read shebang anymore.".to_string()))?
+            .ok_or_else(|| UnlikelyError("Can't read shebang anymore.".to_string()))?
     }
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
@@ -139,14 +139,14 @@ mod main {
     /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
-        let mut content: &str = &file_contents;
+        let mut content: &str = file_contents;
         if content.starts_with(BOM) {
             content = &content[BOM.len()..];
         }
 
         let mut shebang = None;
-        if content.starts_with("#!") {
-            let rest = whitespace::skip(&content[2..]);
+        if let Some(rest) = content.strip_prefix("#!") {
+            let rest = whitespace::skip(rest);
             if !rest.starts_with('[') {
                 let full_shebang = if let Some(idx) = content.find('\n') {
                     &content[..idx]
@@ -189,7 +189,7 @@ mod main {
     /// reference.
     fn get_sip_status_rec(path: &str, seen_paths: &mut HashSet<PathBuf>) -> Result<SipStatus> {
         // If which fails, try using the given path as is.
-        let complete_path = which(&path).unwrap_or(PathBuf::from(&path));
+        let complete_path = which(&path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
             return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
@@ -233,7 +233,8 @@ mod main {
         //       files do not get used. (Also change back existing file logic to always use.)
 
         // if which does not work, just use the given path as is.
-        let complete_path = which(path.to_string_lossy().to_string()).unwrap_or(path.to_owned());
+        let complete_path =
+            which(path.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_owned());
 
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = &tmp_dir.join(
@@ -243,9 +244,7 @@ mod main {
         // A string of the path of new created file to run instead of the SIPed file.
         let patched_path_string = output
             .to_str()
-            .ok_or(UnlikelyError(
-                "Failed to convert path to string".to_string(),
-            ))?
+            .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
             .to_string();
 
         if output.exists() {
@@ -266,7 +265,7 @@ mod main {
         std::fs::create_dir_all(
             output
                 .parent()
-                .ok_or(UnlikelyError("Failed to get parent directory".to_string()))?,
+                .ok_or_else(|| UnlikelyError("Failed to get parent directory".to_string()))?,
         )?;
 
         match shebang_target {
@@ -312,7 +311,7 @@ mod main {
             EXCLUDE_ENV_VAR_NAME,
             env::var(EXCLUDE_ENV_VAR_NAME)
                 .map(|paths| paths + ";")
-                .unwrap_or(String::new())
+                .unwrap_or_else(|_| String::new())
                 + path,
         )
     }
@@ -326,9 +325,7 @@ mod main {
                 let tmp_dir = temp_dir().join("mirrord-bin");
                 let tmp_dir_string = tmp_dir
                     .to_str()
-                    .ok_or(UnlikelyError(
-                        "Failed to convert path to string".to_string(),
-                    ))?
+                    .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
                     .to_string();
                 env::set_var(TMP_DIR_ENV_VAR_NAME, &tmp_dir_string);
                 add_to_file_exclude(&(tmp_dir_string + "/.*$"));
@@ -349,7 +346,7 @@ mod main {
         // already running, and the first call to this function is from the cli.)
         let tmp_dir = get_tmp_dir()?;
 
-        if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(&binary_path)? {
+        if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(binary_path)? {
             trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
             Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
         } else {
