@@ -65,10 +65,17 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt, clippy
+          target: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v1
       # Needed for agent
       - run: cargo fmt --all -- --check
+      - run: rustup target add --toolchain nightly aarch64-apple-darwin
       - run: cargo clippy -- -D warnings
+      # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
+
+
 
   test_mirrord_protocol:
     strategy:
