@@ -17,6 +17,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Agent dockerfile: fix build for cross arch
 
+### Changed
+
+- Added clippy on macOS and cleaned warnings.
+
 ## 3.11.1
 
 ### Fixed

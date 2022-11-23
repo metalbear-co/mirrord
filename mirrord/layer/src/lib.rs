@@ -532,7 +532,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, tx, rx, config));
+    tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
