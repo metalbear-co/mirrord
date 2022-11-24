@@ -32,8 +32,9 @@ macro_rules! some_regex_match {
     };
 }
 
-/// List of files that mirrord should ignore, as they probably exist only in the local user machine,
-/// or are system configuration files (that could break the process if we used the remote version).
+/// List of files that mirrord should use locally, as they probably exist only in the local user
+/// machine, or are system configuration files (that could break the process if we used the remote
+/// version).
 ///
 /// You most likely do **NOT** want to include any of these, but if have a reason to do so, then
 /// setting `MIRRORD_FILE_FILTER_INCLUDE` allows you to override this list.
@@ -86,6 +87,20 @@ fn generate_local_set() -> RegexSet {
         .expect("Building local path regex set failed")
 }
 
+/// List of files that mirrord should use remotely read only
+/// Right now used to return "file not exist" for identity caches (AWS)
+fn generate_remote_ro_set() -> RegexSet {
+    let patterns = [
+        // AWS cli cache
+        // \.aws\/cli\/cache\/.+\.json
+        r".aws/cli/cache/.+\.json$",
+    ];
+    RegexSetBuilder::new(patterns)
+        .case_insensitive(true)
+        .build()
+        .expect("Building local path regex set failed")
+}
+
 /// Global filter used by file operations to bypass (use local) or continue (use remote).
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
@@ -121,6 +136,7 @@ pub(crate) struct FileFilter {
     read_write: Option<RegexSet>,
     local: Option<RegexSet>,
     default_local: RegexSet,
+    default_remote_ro: RegexSet,
     mode: FsModeConfig,
 }
 
@@ -167,6 +183,7 @@ impl FileFilter {
             .expect("Building local path regex set failed");
 
         let default_local = generate_local_set();
+        let default_remote_ro = generate_remote_ro_set();
 
         let old_filter = if !include.is_empty() {
             let include = RegexSetBuilder::new(include)
@@ -190,6 +207,7 @@ impl FileFilter {
             read_write,
             local,
             default_local,
+            default_remote_ro,
             mode,
         }
     }
@@ -221,7 +239,11 @@ impl FileFilter {
             } else {
                 Detour::Bypass(op())
             }
-        } else if some_regex_match!(self.local, text) || self.default_local.is_match(text) {
+        } else if some_regex_match!(self.local, text) {
+            Detour::Bypass(op())
+        } else if self.default_remote_ro.is_match(text) && !write {
+            Detour::Success(())
+        } else if self.default_local.is_match(text) {
             Detour::Bypass(op())
         } else {
             match self.mode {
@@ -453,6 +475,12 @@ mod tests {
     #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
     #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
+    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/1241.json", false, false)]
     fn test_include_complex_configuration(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
@@ -472,6 +500,34 @@ mod tests {
             read_write,
             read_only,
             local,
+            mode,
+            ..Default::default()
+        };
+
+        let file_filter = FileFilter::new(fs_config);
+
+        assert_eq!(
+            file_filter
+                .continue_or_bypass_with(path, write, || Bypass::IgnoredFile("".into()))
+                .is_bypass(),
+            bypass
+        );
+    }
+
+    #[rstest]
+    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/1241.json", false, false)]
+    fn test_remote_read_only_set(
+        #[case] mode: FsModeConfig,
+        #[case] path: &str,
+        #[case] write: bool,
+        #[case] bypass: bool,
+    ) {
+        let fs_config = FsConfig {
             mode,
             ..Default::default()
         };
