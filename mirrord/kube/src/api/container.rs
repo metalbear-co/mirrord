@@ -210,8 +210,8 @@ impl ContainerApi for JobContainer {
                                 {
                                     "requests":
                                     {
-                                        "cpu": "10m",
-                                        "memory": "50Mi"
+                                        "cpu": "1m",
+                                        "memory": "1Mi"
                                     }
                                 }
                             }

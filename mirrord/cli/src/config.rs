@@ -85,7 +85,7 @@ pub(super) struct ExecArgs {
 
     /// Agent Startup Timeout seconds
     #[clap(long, value_parser)]
-    pub agent_statup_timeout: Option<u16>,
+    pub agent_startup_timeout: Option<u16>,
 
     /// Accept/reject invalid certificates.
     #[clap(short = 'c', long, value_parser)]

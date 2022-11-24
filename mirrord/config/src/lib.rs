@@ -17,9 +17,9 @@ pub mod util;
 ///
 /// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 /// including if you only made documentation changes.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use config::ConfigError;
+use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -116,6 +116,16 @@ pub struct LayerConfig {
     /// Controls mirrord features, see [`feature::FeatureFileConfig`].
     #[config(nested)]
     pub feature: FeatureConfig,
+}
+
+impl LayerConfig {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+            LayerFileConfig::from_path(&PathBuf::from(path))?.generate_config()
+        } else {
+            LayerFileConfig::default().generate_config()
+        }
+    }
 }
 
 impl LayerFileConfig {

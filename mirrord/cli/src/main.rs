@@ -9,10 +9,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use const_random::const_random;
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-use errno;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
+use mirrord_config::LayerConfig;
+use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::setup::{Operator, OperatorSetup};
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
@@ -47,8 +47,8 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
-fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
-    let progress = TaskProgress::new("initializing mirrord layer...");
+fn extract_library(dest_dir: Option<String>, progress: &TaskProgress) -> Result<PathBuf> {
+    let progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()
         .unwrap()
@@ -68,7 +68,7 @@ fn extract_library(dest_dir: Option<String>) -> Result<PathBuf> {
         debug!("Extracted library file to {:?}", &file_path);
     }
 
-    progress.done_with("layer initialized");
+    progress.done_with("layer extracted");
     Ok(file_path)
 }
 
@@ -90,7 +90,21 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
-fn exec(args: &ExecArgs) -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn create_agent(progress: &TaskProgress) -> Result<()> {
+    let config = LayerConfig::from_env()?;
+    let kube_api = KubernetesAPI::create(&config).await?;
+    let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
+    // Set env var for children to re-use.
+    std::env::set_var("MIRRORD_CONNECT_AGENT", pod_agent_name);
+    std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+    Ok(())
+}
+
+fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if !args.no_telemetry {
         prompt_outdated_version();
     }
@@ -130,10 +144,10 @@ fn exec(args: &ExecArgs) -> Result<()> {
     if let Some(agent_ttl) = &args.agent_ttl {
         std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
     }
-    if let Some(agent_statup_timeout) = &args.agent_statup_timeout {
+    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
         std::env::set_var(
             "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_statup_timeout.to_string(),
+            agent_startup_timeout.to_string(),
         );
     }
 
@@ -188,15 +202,21 @@ fn exec(args: &ExecArgs) -> Result<()> {
     }
 
     if let Some(config_file) = &args.config_file {
-        std::env::set_var("MIRRORD_CONFIG_FILE", config_file.clone());
+        // Set canoncialized path to config file, in case forks/children are in different
+        // working directories.
+        let full_path = std::fs::canonicalize(config_file)?;
+        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
     if args.capture_error_trace {
         std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
     }
 
-    let library_path = extract_library(args.extract_path.clone())?;
+    let sub_progress = progress.subtask("preparing to launch process");
+    let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
+
+    create_agent(&sub_progress)?;
 
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
@@ -210,6 +230,7 @@ fn exec(args: &ExecArgs) -> Result<()> {
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
 
+    sub_progress.done_with("ready to launch process");
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary, binary_args);
     error!("Couldn't execute {:?}", err);
@@ -260,10 +281,11 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let progress = TaskProgress::new("mirrord cli starting");
     match cli.commands {
-        Commands::Exec(args) => exec(&args)?,
+        Commands::Exec(args) => exec(&args, &progress)?,
         Commands::Extract { path } => {
-            extract_library(Some(path))?;
+            extract_library(Some(path), &progress)?;
         }
         // Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
