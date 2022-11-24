@@ -166,8 +166,12 @@ pub struct DefaultFlag(pub Lit);
 
 impl ToTokens for DefaultFlag {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let default_value = &self.0;
-
-        tokens.extend(quote! { crate::config::default_value::DefaultValue::new(#default_value) });
+        let value = &self.0;
+        let output = match value {
+            Lit::Bool(_) | Lit::Float(_) | Lit::Int(_) => quote! { .unwrap_or(#value)},
+            Lit::Str(_) => quote! { .unwrap_or_else(|| #value.to_string())},
+            _ => unimplemented!("Unsupported default value type"),
+        };
+        tokens.extend(output);
     }
 }

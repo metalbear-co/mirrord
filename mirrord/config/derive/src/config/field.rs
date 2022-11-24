@@ -149,10 +149,6 @@ impl ConfigField {
             impls.push(quote! { self.#ident });
         }
 
-        if let Some(default) = flags.default.as_ref() {
-            impls.push(default.to_token_stream());
-        }
-
         let mut layers = Vec::new();
 
         if let Some(lit) = flags.deprecated.as_ref() {
@@ -173,7 +169,12 @@ impl ConfigField {
                 None => quote! { None }
             };
 
-            quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
+            // unwrap to default if exists
+            if let Some(default) = flags.default.as_ref() {
+                quote! {#default}
+            } else {
+                quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
+            }
         });
 
         let impls = impls

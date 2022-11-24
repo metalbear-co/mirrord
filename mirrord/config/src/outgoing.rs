@@ -2,9 +2,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use crate::{
-    config::{
-        default_value::DefaultValue, from_env::FromEnv, source::MirrordConfigSource, ConfigError,
-    },
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::MirrordToggleableConfig,
 };
 
@@ -12,33 +10,23 @@ use crate::{
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
-    #[config(env = "MIRRORD_TCP_OUTGOING", default = "true")]
+    #[config(env = "MIRRORD_TCP_OUTGOING", default = true)]
     pub tcp: bool,
 
-    #[config(env = "MIRRORD_UDP_OUTGOING", default = "true")]
+    #[config(env = "MIRRORD_UDP_OUTGOING", default = true)]
     pub udp: bool,
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let tcp = FromEnv::new("MIRRORD_TCP_OUTGOING")
-            .or(DefaultValue::new("false"))
             .source_value()
-            .ok_or(ConfigError::ValueNotProvided(
-                "OutgoingFileConfig",
-                "tcp",
-                Some("MIRRORD_TCP_OUTGOING"),
-            ))??;
+            .unwrap_or(Ok(false))?;
         Ok(OutgoingConfig {
             tcp,
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
-                .or(DefaultValue::new("false"))
                 .source_value()
-                .ok_or(ConfigError::ValueNotProvided(
-                    "OutgoingFileConfig",
-                    "udp",
-                    Some("MIRRORD_TCP_OUTGOING"),
-                ))??,
+                .unwrap_or(Ok(false))?,
         })
     }
 }

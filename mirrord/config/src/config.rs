@@ -1,4 +1,3 @@
-pub mod default_value;
 pub mod deprecated;
 pub mod from_env;
 pub mod source;
@@ -17,9 +16,6 @@ pub enum ConfigError {
 
     #[error("value {0:?} for {1:?} is invalid.")]
     InvalidValue(String, &'static str),
-
-    #[error("default value {0:?}")]
-    InvalidDefaultValue(&'static str),
 
     #[error("mirrord-config: IO operation failed with `{0}`")]
     Io(#[from] std::io::Error),
