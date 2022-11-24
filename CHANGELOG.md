@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - CI: cancel previous runs of same PR.
 - cli: set canonical path for config file to avoid possible issues when child processes change current working directory.
+- config: Refactor config proc macro and behavior - we now error if a config value is wrong instead of defaulting.
 
 ### Fixed
 
