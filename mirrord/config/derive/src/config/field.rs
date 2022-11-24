@@ -176,14 +176,10 @@ impl ConfigField {
             quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
         });
 
-        // write a loop that will go through all the impls and put it in format of
-        // `impl1.or(impl2).or(impl3)`
         let impls = impls
             .into_iter()
             .reduce(|acc, impl_| quote! { #acc.or(#impl_) });
 
-        // write a loop that will go through all the layers and put it in format of
-        // `layer1.or(layer2).or(layer3)`
         let layers = layers
             .into_iter()
             .reduce(|acc, layer| quote! { #acc.or(#layer) });
