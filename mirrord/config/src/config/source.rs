@@ -1,104 +1,57 @@
-pub trait MirrordConfigSource: Sized {
-    type Result;
+use crate::config::Result;
 
-    fn source_value(self) -> Option<Self::Result>;
+pub trait MirrordConfigSource: Sized {
+    type Value;
+
+    fn source_value(self) -> Option<Result<Self::Value>>;
 
     fn layer<L>(self, layer_fn: impl Fn(Self) -> L) -> L
     where
-        L: MirrordConfigSource<Result = Self::Result>,
+        L: MirrordConfigSource<Value = Self::Value>,
     {
         layer_fn(self)
     }
-}
 
-impl<T> MirrordConfigSource for Option<T>
-where
-    T: Clone,
-{
-    type Result = T;
-
-    fn source_value(self) -> Option<Self::Result> {
-        self
+    fn or<T: MirrordConfigSource<Value = Self::Value>>(self, fallback: T) -> Or<Self, T> {
+        Or::new(self, fallback)
     }
 }
 
-impl<R, T> MirrordConfigSource for (T,)
-where
-    T: MirrordConfigSource<Result = R>,
-{
-    type Result = T::Result;
+#[derive(Clone)]
+pub struct Or<A, B>(A, B);
 
-    fn source_value(self) -> Option<Self::Result> {
-        self.0.source_value()
+impl<A, B> Or<A, B>
+where
+    A: MirrordConfigSource,
+    B: MirrordConfigSource<Value = A::Value>,
+{
+    fn new(first: A, fallback: B) -> Self {
+        Or(first, fallback)
     }
 }
 
-impl<R, T, V> MirrordConfigSource for (T, V)
+impl<A, B> MirrordConfigSource for Or<A, B>
 where
-    T: MirrordConfigSource<Result = R>,
-    V: MirrordConfigSource<Result = R>,
+    A: MirrordConfigSource,
+    B: MirrordConfigSource<Value = A::Value>,
 {
-    type Result = T::Result;
+    type Value = A::Value;
 
-    fn source_value(self) -> Option<Self::Result> {
+    fn source_value(self) -> Option<Result<Self::Value>> {
         self.0.source_value().or_else(|| self.1.source_value())
     }
 }
 
-impl<R, T, V, K> MirrordConfigSource for (T, V, K)
+impl<V> MirrordConfigSource for Option<V>
 where
-    T: MirrordConfigSource<Result = R>,
-    V: MirrordConfigSource<Result = R>,
-    K: MirrordConfigSource<Result = R>,
+    V: Clone,
 {
-    type Result = T::Result;
+    type Value = V;
 
-    fn source_value(self) -> Option<Self::Result> {
-        self.0
-            .source_value()
-            .or_else(|| self.1.source_value())
-            .or_else(|| self.2.source_value())
+    fn source_value(self) -> Option<Result<Self::Value>> {
+        self.map(Ok)
     }
 }
-
-impl<R, T, V, K, P> MirrordConfigSource for (T, V, K, P)
-where
-    T: MirrordConfigSource<Result = R>,
-    V: MirrordConfigSource<Result = R>,
-    K: MirrordConfigSource<Result = R>,
-    P: MirrordConfigSource<Result = R>,
-{
-    type Result = T::Result;
-
-    fn source_value(self) -> Option<Self::Result> {
-        self.0
-            .source_value()
-            .or_else(|| self.1.source_value())
-            .or_else(|| self.2.source_value())
-            .or_else(|| self.3.source_value())
-    }
-}
-
-impl<R, T, V, K, P, F> MirrordConfigSource for (T, V, K, P, F)
-where
-    T: MirrordConfigSource<Result = R>,
-    V: MirrordConfigSource<Result = R>,
-    K: MirrordConfigSource<Result = R>,
-    P: MirrordConfigSource<Result = R>,
-    F: MirrordConfigSource<Result = R>,
-{
-    type Result = T::Result;
-
-    fn source_value(self) -> Option<Self::Result> {
-        self.0
-            .source_value()
-            .or_else(|| self.1.source_value())
-            .or_else(|| self.2.source_value())
-            .or_else(|| self.3.source_value())
-            .or_else(|| self.4.source_value())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -114,9 +67,11 @@ mod tests {
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] expect: i32) {
         with_env_vars(vec![("TEST_VALUE", env)], || {
-            let val = (FromEnv::new("TEST_VALUE"), None, DefaultValue::new("10"));
+            let val = FromEnv::<i32>::new("TEST_VALUE")
+                .or(None)
+                .or(DefaultValue::new("10"));
 
-            assert_eq!(val.source_value(), Some(expect));
+            assert!(matches!(val.source_value(), Some(Ok(expect))));
         });
     }
 }

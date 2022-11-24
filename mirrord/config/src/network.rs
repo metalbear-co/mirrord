@@ -51,27 +51,25 @@ pub struct NetworkConfig {
 
 impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
+        let incoming = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
+            .or(DefaultValue::new("mirror"))
+            .source_value()
+            .ok_or(ConfigError::ValueNotProvided(
+                "NetworkFileConfig",
+                "incoming",
+                Some("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
+            ))??;
+        let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
+            .or(DefaultValue::new("false"))
+            .source_value()
+            .ok_or(ConfigError::ValueNotProvided(
+                "NetworkFileConfig",
+                "dns",
+                Some("MIRRORD_REMOTE_DNS"),
+            ))??;
         Ok(NetworkConfig {
-            incoming: (
-                FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
-                DefaultValue::new("mirror"),
-            )
-                .source_value()
-                .ok_or(ConfigError::ValueNotProvided(
-                    "NetworkFileConfig",
-                    "incoming",
-                    Some("MIRRORD_AGENT_TCP_STEAL_TRAFFIC"),
-                ))?,
-            dns: (
-                FromEnv::new("MIRRORD_REMOTE_DNS"),
-                DefaultValue::new("false"),
-            )
-                .source_value()
-                .ok_or(ConfigError::ValueNotProvided(
-                    "NetworkFileConfig",
-                    "dns",
-                    Some("MIRRORD_REMOTE_DNS"),
-                ))?,
+            incoming,
+            dns,
             outgoing: OutgoingFileConfig::disabled_config()?,
         })
     }

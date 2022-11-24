@@ -21,27 +21,24 @@ pub struct OutgoingConfig {
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
+        let tcp = FromEnv::new("MIRRORD_TCP_OUTGOING")
+            .or(DefaultValue::new("false"))
+            .source_value()
+            .ok_or(ConfigError::ValueNotProvided(
+                "OutgoingFileConfig",
+                "tcp",
+                Some("MIRRORD_TCP_OUTGOING"),
+            ))??;
         Ok(OutgoingConfig {
-            tcp: (
-                FromEnv::new("MIRRORD_TCP_OUTGOING"),
-                DefaultValue::new("false"),
-            )
-                .source_value()
-                .ok_or(ConfigError::ValueNotProvided(
-                    "OutgoingFileConfig",
-                    "tcp",
-                    Some("MIRRORD_TCP_OUTGOING"),
-                ))?,
-            udp: (
-                FromEnv::new("MIRRORD_UDP_OUTGOING"),
-                DefaultValue::new("false"),
-            )
+            tcp,
+            udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
+                .or(DefaultValue::new("false"))
                 .source_value()
                 .ok_or(ConfigError::ValueNotProvided(
                     "OutgoingFileConfig",
                     "udp",
                     Some("MIRRORD_TCP_OUTGOING"),
-                ))?,
+                ))??,
         })
     }
 }
