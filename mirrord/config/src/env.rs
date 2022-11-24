@@ -85,8 +85,12 @@ pub struct EnvConfig {
 impl MirrordToggleableConfig for EnvFileConfig {
     fn disabled_config() -> Result<Self::Generated> {
         Ok(EnvConfig {
-            include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE").source_value().transpose()?,
-            exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE").source_value().transpose()?,
+            include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")
+                .source_value()
+                .transpose()?,
+            exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
+                .source_value()
+                .transpose()?,
             overrides: None,
         })
     }

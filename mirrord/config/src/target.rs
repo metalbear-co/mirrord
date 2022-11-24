@@ -58,7 +58,8 @@ impl MirrordConfig for TargetFileConfig {
     fn generate_config(self) -> Result<Self::Generated> {
         let config = match self {
             TargetFileConfig::Simple(path) => TargetConfig {
-                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET").or(path)
+                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET")
+                    .or(path)
                     .source_value()
                     .transpose()?,
                 namespace: FromEnv::new("MIRRORD_TARGET_NAMESPACE")
@@ -66,10 +67,12 @@ impl MirrordConfig for TargetFileConfig {
                     .transpose()?,
             },
             TargetFileConfig::Advanced { path, namespace } => TargetConfig {
-                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET").or(path)
+                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET")
+                    .or(path)
                     .source_value()
                     .transpose()?,
-                namespace: FromEnv::new("MIRRORD_TARGET_NAMESPACE").or(namespace)
+                namespace: FromEnv::new("MIRRORD_TARGET_NAMESPACE")
+                    .or(namespace)
                     .source_value()
                     .transpose()?,
             },
