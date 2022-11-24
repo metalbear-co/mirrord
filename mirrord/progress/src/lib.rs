@@ -82,7 +82,7 @@ static TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub trait Progress: Sized {
     /// Create a subtask report from this task.
-    fn subtask(&self, text: &str) -> TaskProgress;
+    fn subtask(&self, text: &str) -> Self;
 
     fn done(mut self) {
         self.set_done(None, false);
@@ -104,6 +104,16 @@ pub trait Progress: Sized {
     }
 
     fn set_done(&mut self, msg: Option<&str>, failure: bool);
+}
+
+pub struct NoProgress;
+
+impl Progress for NoProgress {
+    fn subtask(&self, _: &str) -> NoProgress {
+        NoProgress
+    }
+
+    fn set_done(&mut self, _: Option<&str>, _: bool) {}
 }
 
 /// Progress report for a single task.
