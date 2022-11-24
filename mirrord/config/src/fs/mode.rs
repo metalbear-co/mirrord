@@ -1,9 +1,11 @@
+use std::str::FromStr;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, FromMirrordConfig, MirrordConfig, Result,
+        from_env::FromEnv, source::MirrordConfigSource, FromMirrordConfig, MirrordConfig, Result, ConfigError,
     },
     util::MirrordToggleableConfig,
 };
@@ -49,6 +51,21 @@ impl FsModeConfig {
     }
 }
 
+impl FromStr for FsModeConfig {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "disabled" => Ok(FsModeConfig::Disabled),
+            "read" => Ok(FsModeConfig::Read),
+            "write" => Ok(FsModeConfig::Write),
+            "local" => Ok(FsModeConfig::Local),
+            _ => Err(ConfigError::InvalidFsMode(s.to_string())),
+        }
+    }
+}
+
+
 impl FsModeConfig {
     fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
         match (fs, ro_fs) {
@@ -77,6 +94,7 @@ impl MirrordToggleableConfig for FsModeConfig {
     fn disabled_config() -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let mode = FromEnv::new("MIRRORD_FILE_MODE").source_value();
 
         Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
     }

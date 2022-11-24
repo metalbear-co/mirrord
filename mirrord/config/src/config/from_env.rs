@@ -15,10 +15,10 @@ impl<T> MirrordConfigSource for FromEnv<T>
 where
     T: FromStr,
 {
-    type Result = T;
+    type Result = Result<T, T::Err>;
 
-    fn source_value(self) -> Option<T> {
-        std::env::var(self.0).ok().and_then(|var| var.parse().ok())
+    fn source_value(self) -> Option<Self::Result> {
+        std::env::var(self.0).ok().and_then(|var| Some(var.parse()))
     }
 }
 

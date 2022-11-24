@@ -29,6 +29,9 @@ pub enum ConfigError {
 
     #[error("mirrord-config: Unsupported configuration file format!")]
     UnsupportedFormat,
+
+    #[error("Invalid FS mode `{0}`!")]
+    InvalidFsMode(String),
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
