@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.11.0"
+version = "3.11.2"
 dependencies = [
  "k8s-openapi",
  "kube",
@@ -1842,6 +1842,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.14",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

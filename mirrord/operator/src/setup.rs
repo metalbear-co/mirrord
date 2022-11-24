@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, convert::Infallible, io::Write, str::FromStr};
+use std::{collections::BTreeMap, convert::Infallible, io::Write, str::FromStr, sync::LazyLock};
 
 use k8s_openapi::{
     api::{
@@ -11,6 +11,9 @@ use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
 };
 use thiserror::Error;
+
+static APP_LABELS: LazyLock<BTreeMap<String, String>> =
+    LazyLock::new(|| BTreeMap::from([("app".to_owned(), "operator".to_owned())]));
 
 /// General Operator Error
 #[derive(Debug, Error)]
@@ -41,7 +44,7 @@ impl Operator {
         let deployment = OperatorDeployment::new(&namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
         let role = OperatorRole::new();
-        let role_binding = OperatorRoleBinding::new(&namespace, &role);
+        let role_binding = OperatorRoleBinding::new(&role, &service_account);
 
         Operator {
             namespace,
@@ -109,8 +112,6 @@ pub struct OperatorDeployment(Deployment);
 
 impl OperatorDeployment {
     pub fn new(namespace: &OperatorNamespace) -> Self {
-        let app_labels = BTreeMap::from([("app".to_owned(), "operator".to_owned())]);
-
         let container = Container {
             name: "operator".to_owned(),
             image: Some("ghcr.io/metalbear-co/operator:latest".to_owned()),
@@ -137,13 +138,13 @@ impl OperatorDeployment {
         let spec = DeploymentSpec {
             template: PodTemplateSpec {
                 metadata: Some(ObjectMeta {
-                    labels: Some(app_labels.clone()),
+                    labels: Some(APP_LABELS.clone()),
                     ..Default::default()
                 }),
                 spec: Some(pod_spec),
             },
             selector: LabelSelector {
-                match_labels: Some(app_labels.clone()),
+                match_labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             ..Default::default()
@@ -153,7 +154,7 @@ impl OperatorDeployment {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 namespace: Some(namespace.name().to_owned()),
-                labels: Some(app_labels),
+                labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             spec: Some(spec),
@@ -175,19 +176,26 @@ pub struct OperatorServiceAccount(ServiceAccount);
 
 impl OperatorServiceAccount {
     pub fn new(namespace: &OperatorNamespace) -> Self {
-        let app_labels = BTreeMap::from([("app".to_owned(), "operator".to_owned())]);
-
         let sa = ServiceAccount {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 namespace: Some(namespace.name().to_owned()),
-                labels: Some(app_labels),
+                labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             ..Default::default()
         };
 
         OperatorServiceAccount(sa)
+    }
+
+    fn as_subject(&self) -> Subject {
+        Subject {
+            api_group: Some("".to_owned()),
+            kind: "ServiceAccount".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+            namespace: self.0.metadata.namespace.clone(),
+        }
     }
 }
 
@@ -240,6 +248,12 @@ impl OperatorRole {
     }
 }
 
+impl Default for OperatorRole {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperatorSetup for OperatorRole {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
@@ -250,19 +264,14 @@ impl OperatorSetup for OperatorRole {
 pub struct OperatorRoleBinding(ClusterRoleBinding);
 
 impl OperatorRoleBinding {
-    pub fn new(namespace: &OperatorNamespace, role: &OperatorRole) -> Self {
+    pub fn new(role: &OperatorRole, sa: &OperatorServiceAccount) -> Self {
         let role_binding = ClusterRoleBinding {
             metadata: ObjectMeta {
                 name: Some("operator".to_owned()),
                 ..Default::default()
             },
             role_ref: role.as_role_ref(),
-            subjects: Some(vec![Subject {
-                api_group: Some("".to_owned()),
-                kind: "ServiceAccount".to_owned(),
-                name: "operator".to_owned(),
-                namespace: Some(namespace.name().to_owned()),
-            }]),
+            subjects: Some(vec![sa.as_subject()]),
         };
 
         OperatorRoleBinding(role_binding)
