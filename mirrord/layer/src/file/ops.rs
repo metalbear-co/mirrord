@@ -115,11 +115,11 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path_from_rawish(rawish_path)?;
 
-    FILE_FILTER
-        .get()?
-        .continue_or_bypass_with(path.to_str().unwrap_or_default(), open_options.is_write(), || {
-            Bypass::IgnoredFile(path.clone())
-        })?;
+    FILE_FILTER.get()?.continue_or_bypass_with(
+        path.to_str().unwrap_or_default(),
+        open_options.is_write(),
+        || Bypass::IgnoredFile(path.clone()),
+    )?;
 
     if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -26,6 +26,14 @@ pub(super) enum Commands {
         .multiple(true)
         .args(&["target", "config-file"]),
 ))]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum FsMode {
+    ReadWrite,
+    Read,
+    Local,
+    Disabled,
+}
+
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
@@ -56,6 +64,10 @@ pub(super) struct ExecArgs {
     /// Enable file hooking (Both R/W)
     #[clap(long = "rw", value_parser)]
     pub enable_rw_fs: bool,
+
+    /// Default file system behavior: disabled, read, write, local
+    #[clap(value_parser)]
+    pub fs_mode: Option<FsMode>,
 
     /// The env vars to filter out
     #[clap(short = 'x', long, value_parser)]

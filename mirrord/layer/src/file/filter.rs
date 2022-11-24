@@ -21,15 +21,17 @@ use tracing::warn;
 
 use crate::detour::{Bypass, Detour};
 
+/// Shortcut for checking an optional regex set.
+/// Usage is `some_regex_match(Option<RegexSet>, text)`
 macro_rules! some_regex_match {
     ($regex:expr, $text:expr) => {
-        if let Some(_regex) = $regex {
-            _regex.is_match($text)
-        } else {
-            false
-        }
+        $regex
+            .as_ref()
+            .map(|__regex| __regex.is_match($text))
+            .unwrap_or_default()
     };
 }
+
 /// List of files that mirrord should ignore, as they probably exist only in the local user machine,
 /// or are system configuration files (that could break the process if we used the remote version).
 ///
@@ -211,17 +213,15 @@ impl FileFilter {
             _ => return Detour::Bypass(op()),
         }
 
-        if some_regex_match!(&self.read_write, text) {
+        if some_regex_match!(self.read_write, text) {
             Detour::Success(())
-        } else if some_regex_match!(&self.read_only, text) {
+        } else if some_regex_match!(self.read_only, text) {
             if !write {
                 Detour::Success(())
             } else {
                 Detour::Bypass(op())
             }
-        } else if some_regex_match!(&self.local, text) {
-            Detour::Bypass(op())
-        } else if self.default_local.is_match(text) {
+        } else if some_regex_match!(self.local, text) || self.default_local.is_match(text) {
             Detour::Bypass(op())
         } else {
             match self.mode {
@@ -453,7 +453,12 @@ mod tests {
     #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
     #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
-    fn test_include_complex_configuration(#[case] mode: FsModeConfig, #[case] path: &str, #[case] write: bool, #[case] bypass: bool) {
+    fn test_include_complex_configuration(
+        #[case] mode: FsModeConfig,
+        #[case] path: &str,
+        #[case] write: bool,
+        #[case] bypass: bool,
+    ) {
         let include = Some(VecOrSingle::Multiple(vec![r"/pain/.*\.a".to_string()]));
         let read_write = Some(VecOrSingle::Multiple(vec![
             r"/pain/read_write.*\.a".to_string()

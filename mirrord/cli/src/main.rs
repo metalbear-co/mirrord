@@ -155,10 +155,12 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     if !args.no_fs && args.enable_rw_fs {
+        warn!("--rw is deprecated, use --fs-mode=rw instead");
         std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
     if args.no_fs || args.enable_rw_fs {
+        warn!("--no-fs is deprecated, use --fs-mode=disabled instead");
         std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 

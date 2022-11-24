@@ -19,19 +19,19 @@ use crate::{
 /// 2. write - Read/Write from the remote file system.
 /// 3. local - Read from the local file system.
 /// 4. disabled - Disable file operations.
-/// 
-/// Besides the default behavior, user can specify behavior for specific regex patterns. Case insensitive.
-/// 1. read_write - List of patterns that should be read/write remotely.
+///
+/// Besides the default behavior, user can specify behavior for specific regex patterns. Case
+/// insensitive. 1. read_write - List of patterns that should be read/write remotely.
 /// 2. read_only - List of patterns that should be read only remotely.
 /// 3. local_only - List of patterns that should be read locally.
-/// 
+///
 /// The logic for choosing the behavior is as follows:
-/// 1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order
-///    if two lists match the same path, we will use the first one (and we do not guarantee what is first)
-/// 2. Check our "special list" - we have an internal at compile time list for different behavior based on patterns
-///    to provide better UX.
+/// 1. Check if one of the patterns match the file path, do the corresponding action. There's no
+/// specified order    if two lists match the same path, we will use the first one (and we do not
+/// guarantee what is first) 2. Check our "special list" - we have an internal at compile time list
+/// for different behavior based on patterns    to provide better UX.
 /// 3. If none of the above match, use the default behavior (mode).
-/// 
+///
 /// ## Examples
 ///
 /// - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local
@@ -62,7 +62,10 @@ pub struct FsConfig {
     ///
     /// The regexes specified here will make mirrord operate only on files that match it, otherwise
     /// the file will be accessed locally (bypassing mirrord).
-    #[config(env = "MIRRORD_FILE_FILTER_INCLUDE", deprecated="Use access type configuration instead.")]
+    #[config(
+        env = "MIRRORD_FILE_FILTER_INCLUDE",
+        deprecated = "Use access type configuration instead."
+    )]
     pub include: Option<VecOrSingle<String>>,
 
     /// DEPRECATED
@@ -71,7 +74,10 @@ pub struct FsConfig {
     ///
     /// The opposite of `include`, files that match the regexes specified here will bypass mirrord
     /// and are accessed locally.
-    #[config(env = "MIRRORD_FILE_FILTER_EXCLUDE", deprecated="Use access type configuration instead.")]
+    #[config(
+        env = "MIRRORD_FILE_FILTER_EXCLUDE",
+        deprecated = "Use access type configuration instead."
+    )]
     pub exclude: Option<VecOrSingle<String>>,
 
     /// Specify file path patterns that if matched will be read and written to the remote.
@@ -93,7 +99,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
         let mode = FsModeConfig::disabled_config()?;
         let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
         let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
-        
+
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value();
         let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value();
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value();
@@ -104,7 +110,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             exclude,
             read_write,
             read_only,
-            local
+            local,
         })
     }
 }

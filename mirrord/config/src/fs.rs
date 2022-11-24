@@ -99,7 +99,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             exclude,
             read_write,
             read_only,
-            local
+            local,
         })
     }
 }
