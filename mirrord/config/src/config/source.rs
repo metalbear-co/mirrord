@@ -52,6 +52,7 @@ where
         self.map(Ok)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

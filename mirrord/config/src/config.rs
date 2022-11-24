@@ -16,7 +16,7 @@ pub enum ConfigError {
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 
     #[error("value {0:?} for {1:?} is invalid.")]
-    InvalidValue(&'static str, &'static str),
+    InvalidValue(String, &'static str),
 
     #[error("default value {0:?}")]
     InvalidDefaultValue(&'static str),

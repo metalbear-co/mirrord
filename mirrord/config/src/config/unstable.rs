@@ -21,7 +21,7 @@ where
                 "Warning: field {}.{} is marked as unstable. Please note API may change",
                 self.0, self.1
             );
-            result.map(|result| result)
+            result
         })
     }
 }

@@ -18,11 +18,9 @@ where
     type Value = T;
 
     fn source_value(self) -> Option<Result<Self::Value>> {
-        std::env::var(self.0).ok().and_then(|var| {
-            Some(
-                var.parse()
-                    .map_err(|_| ConfigError::InvalidValue(&var, self.0)),
-            )
+        std::env::var(self.0).ok().map(|var| {
+            var.parse()
+                .map_err(|_| ConfigError::InvalidValue(var.to_string(), self.0))
         })
     }
 }
@@ -36,12 +34,12 @@ mod tests {
 
     #[rstest]
     #[case(None, None)]
-    #[case(Some("13"), Some(13))]
+    #[case(Some("13"), Some(Ok(13)))]
     fn basic(#[case] env: Option<&str>, #[case] expect: Option<i32>) {
         with_env_vars(vec![("TEST_VALUE", env)], || {
-            let value = FromEnv::new("TEST_VALUE");
+            let value = FromEnv::<i32>::new("TEST_VALUE");
 
-            assert_eq!(value.source_value(), expect);
+            assert!(matches!(value.source_value(), expect));
         });
     }
 }
