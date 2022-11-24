@@ -63,11 +63,10 @@ mod tests {
     #[rstest]
     #[case(None, 10)]
     #[case(Some("13"), 13)]
-    fn basic(#[case] env: Option<&str>, #[case] expect: i32) {
-        with_env_vars(vec![("TEST_VALUE", env)], || {
-            let val = FromEnv::<i32>::new("TEST_VALUE").or(None).unwrap_or(10);
-
-            assert!(matches!(val.source_value(), Some(Ok(expect))));
+    fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
+        with_env_vars(vec![("TEST_VALUE", env), ("FALLBACK", Some("10"))], || {
+            let val = FromEnv::<i32>::new("TEST_VALUE").or(FromEnv::new("FALLBACK"));
+            assert_eq!(val.source_value().unwrap().unwrap(), outcome);
         });
     }
 }

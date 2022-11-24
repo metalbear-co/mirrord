@@ -56,7 +56,7 @@ impl MirrordToggleableConfig for NetworkFileConfig {
         let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
             .source_value()
             .transpose()?
-            .unwrap_or(false);
+            .unwrap_or(true);
         Ok(NetworkConfig {
             incoming,
             dns,

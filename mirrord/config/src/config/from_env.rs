@@ -33,13 +33,13 @@ mod tests {
     use crate::util::testing::with_env_vars;
 
     #[rstest]
-    #[case(None, None)]
-    #[case(Some("13"), Some(Ok(13)))]
-    fn basic(#[case] env: Option<&str>, #[case] expect: Option<i32>) {
-        with_env_vars(vec![("TEST_VALUE", env)], || {
+    fn basic() {
+        with_env_vars(vec![("TEST_VALUE", Some("13"))], || {
             let value = FromEnv::<i32>::new("TEST_VALUE");
 
-            assert!(matches!(value.source_value(), expect));
+            assert_eq!(value.source_value().unwrap().unwrap(), 13);
         });
+        let value = FromEnv::<i32>::new("TEST_VALUE");
+        assert!(value.source_value().is_none());
     }
 }
