@@ -17,6 +17,12 @@ edition.workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+mirrord-protocol = { path = "../protocol" }
+
 hyper = { version = "1.0.0-rc.1", features = ["full"] }
 tokio = { version = "*", features = ["full"] }
-httparse = "*"
+httparse = "1"
+fancy-regex = { version = "0.10" }
+
+[dev-dependencies]
+rstest = "*"

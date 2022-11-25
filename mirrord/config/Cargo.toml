@@ -15,11 +15,13 @@ edition.workspace = true
 
 [dependencies]
 mirrord-config-derive = { path = "./derive"}
+mirrord-http = { path = "../http"}
 
+tracing.workspace = true
 anyhow.workspace = true
-serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 toml = "0.5"
 schemars = { version = "0.8.11" }

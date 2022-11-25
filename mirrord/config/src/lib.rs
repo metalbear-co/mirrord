@@ -330,12 +330,14 @@ mod tests {
                 env: ToggleableConfig::Enabled(true).into(),
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
-                    dns: Some(false),
                     incoming: Some(IncomingConfig::Mirror),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
                     })),
+                    dns: Some(false),
+                    http_include: Some(VecOrSingle::Single(".*".to_string())),
+                    http_exclude: Some(VecOrSingle::Single(".*".to_string())),
                 })),
                 capture_error_trace: None,
             }),

@@ -59,3 +59,9 @@ pub enum LayerTcpSteal {
     PortUnsubscribe(Port),
     Data(TcpData),
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum RegexFilter {
+    Include(String),
+    Exclude(String),
+}

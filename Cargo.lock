@@ -1762,6 +1762,7 @@ version = "3.11.2"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
+ "mirrord-http",
  "rstest",
  "schemars",
  "serde",
@@ -1769,6 +1770,7 @@ dependencies = [
  "serde_yaml 0.9.14",
  "thiserror",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -1785,8 +1787,11 @@ dependencies = [
 name = "mirrord-http"
 version = "3.11.2"
 dependencies = [
+ "fancy-regex",
  "httparse",
  "hyper 1.0.0-rc.1",
+ "mirrord-protocol",
+ "rstest",
  "thiserror",
  "tokio",
  "tracing",
