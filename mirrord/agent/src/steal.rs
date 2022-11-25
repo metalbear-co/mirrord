@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
 };
 
+use mirrord_http::hyper_debug;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -198,7 +199,7 @@ pub struct StealWorker {
 }
 
 impl StealWorker {
-    #[tracing::instrument(level = "trace", skip(sender))]
+    #[tracing::instrument(level = "debug", skip(sender))]
     pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<Self> {
         Ok(Self {
             sender,
@@ -211,7 +212,7 @@ impl StealWorker {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self, rx, listener))]
+    #[tracing::instrument(level = "debug", skip(self, rx, listener))]
     pub async fn start(
         mut self,
         mut rx: Receiver<LayerTcpSteal>,
@@ -249,7 +250,7 @@ impl StealWorker {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     pub async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         use LayerTcpSteal::*;
         match message {
@@ -282,6 +283,10 @@ impl StealWorker {
             }
 
             Data(data) => {
+                // TODO(alex) [high] 2022-11-23: Implement http proxy.
+                debug!("data is \n{:#?}", String::from_utf8_lossy(&data.bytes));
+                hyper_debug(&data.bytes).await.unwrap();
+
                 if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
                     stream.write_all(&data.bytes[..]).await?;
                     Ok(())

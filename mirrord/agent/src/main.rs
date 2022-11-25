@@ -222,11 +222,6 @@ impl ClientConnectionHandler {
                 env_vars_filter,
                 env_vars_select,
             }) => {
-                debug!(
-                    "ClientMessage::GetEnvVarsRequest client id {:?} filter {:?} select {:?}",
-                    self.id, env_vars_filter, env_vars_select
-                );
-
                 let pid = self
                     .pid
                     .map(|i| i.to_string())
