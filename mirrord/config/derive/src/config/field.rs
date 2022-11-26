@@ -102,14 +102,14 @@ impl ConfigField {
             quote! { #ty }
         };
 
-        let reanme = flags
+        let rename = flags
             .rename
             .as_ref()
             .map(|rename| quote! { #[serde(rename = #rename)] });
 
         quote! {
             #(#docs)*
-            #reanme
+            #rename
             #vis #ident: Option<#target>
         }
     }
@@ -137,17 +137,18 @@ impl ConfigField {
             ..
         } = &self;
 
+        // Rest of flow is irrelevant for nested config.
+        if flags.nested {
+            return quote! { #ident: self.#ident.unwrap_or_default().generate_config()? };
+        }
+
         let mut impls = Vec::new();
 
         if let Some(env) = flags.env.as_ref() {
             impls.push(env.to_token_stream());
         }
 
-        if flags.nested {
-            impls.push(quote! { Some(self.#ident.unwrap_or_default().generate_config()?) })
-        } else {
-            impls.push(quote! { self.#ident });
-        }
+        impls.push(quote! { self.#ident });
 
         let mut layers = Vec::new();
 
