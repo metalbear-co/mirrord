@@ -71,10 +71,15 @@ impl ConfigFlags {
                         {
                             flags.env = Some(EnvFlag(meta.lit))
                         }
+                        NestedMeta::Meta(Meta::Path(path))
+                        if mode == ConfigFlagsType::Field && path.is_ident("default") =>
+                        {
+                            flags.default = Some(DefaultFlag::Flag)
+                        }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
                         {
-                            flags.default = Some(DefaultFlag(meta.lit))
+                            flags.default = Some(DefaultFlag::Value(meta.lit))
                         }
                         NestedMeta::Meta(Meta::NameValue(meta))
                             if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
@@ -162,16 +167,27 @@ impl ToTokens for EnvFlag {
 }
 
 #[derive(Debug)]
-pub struct DefaultFlag(pub Lit);
+pub enum DefaultFlag {
+    // When default has value
+    Value(Lit),
+    // Just a flag
+    Flag,
+}
 
 impl ToTokens for DefaultFlag {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let value = &self.0;
-        let output = match value {
-            Lit::Bool(_) | Lit::Float(_) | Lit::Int(_) => quote! { .unwrap_or(#value)},
-            Lit::Str(_) => quote! { .unwrap_or_else(|| #value.to_string())},
-            _ => unimplemented!("Unsupported default value type"),
-        };
-        tokens.extend(output);
+        match self {
+            DefaultFlag::Value(lit) => {
+                let output = match lit {
+                    Lit::Bool(_) | Lit::Float(_) | Lit::Int(_) => quote! { .unwrap_or(#lit)},
+                    Lit::Str(_) => quote! { .unwrap_or_else(|| #lit.to_string())},
+                    _ => unimplemented!("Unsupported default value type"),
+                };
+                tokens.extend(output);
+            },
+            DefaultFlag::Flag => {
+                tokens.extend(quote! { .unwrap_or_default() });
+            }
+        }
     }
 }
