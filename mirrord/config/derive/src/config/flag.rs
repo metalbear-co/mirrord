@@ -72,7 +72,7 @@ impl ConfigFlags {
                             flags.env = Some(EnvFlag(meta.lit))
                         }
                         NestedMeta::Meta(Meta::Path(path))
-                        if mode == ConfigFlagsType::Field && path.is_ident("default") =>
+                            if mode == ConfigFlagsType::Field && path.is_ident("default") =>
                         {
                             flags.default = Some(DefaultFlag::Flag)
                         }
@@ -184,7 +184,7 @@ impl ToTokens for DefaultFlag {
                     _ => unimplemented!("Unsupported default value type"),
                 };
                 tokens.extend(output);
-            },
+            }
             DefaultFlag::Flag => {
                 tokens.extend(quote! { .unwrap_or_default() });
             }

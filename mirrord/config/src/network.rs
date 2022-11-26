@@ -35,7 +35,7 @@ pub struct NetworkConfig {
     ///
     /// - `mirror`: mirror incoming requests to the remote pod to the local process;
     /// - `steal`: redirect incoming requests to the remote pod to the local process
-    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = IncomingConfig::Mirror)]
+    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
     pub incoming: IncomingConfig,
 
     /// Tunnel outgoing network operations through mirrord.
