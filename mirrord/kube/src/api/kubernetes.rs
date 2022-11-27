@@ -89,13 +89,13 @@ impl AgentManagment for KubernetesAPI {
             .and_then(|status| status.pod_ip.clone())
             .unwrap_or(pod_agent_name);
 
-        let mirrord_addr = format!("{}:{}", pod_addr, agent_port);
+        let agent_addr = format!("{}:{}", pod_addr, agent_port);
 
-        trace!("connecting to pod {}", &mirrord_addr);
+        trace!("connecting to pod {}", &agent_addr);
 
         let conn = tokio::time::timeout(
             Duration::from_secs(self.agent.startup_timeout),
-            TcpStream::connect(&mirrord_addr),
+            TcpStream::connect(&agent_addr),
         )
         .await
         .map_err(|_| KubeApiError::AgentReadyTimeout)??;

@@ -63,13 +63,13 @@ pub(crate) async fn connect(
     } else if let Some(addr) = &config.operator {
         let operator_api = OperatorApi::new(addr, config.target.clone());
 
-        let agent_ref = operator_api
+        let stream = operator_api
             .create_agent(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err.into(), config));
 
         operator_api
-            .create_connection(agent_ref)
+            .create_connection(stream)
             .await
             .unwrap_or_else(|err| handle_error(err.into(), config))
     } else {
