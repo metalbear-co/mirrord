@@ -16,7 +16,6 @@ use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     panic,
-    path::PathBuf,
     sync::{LazyLock, OnceLock},
 };
 
@@ -26,7 +25,7 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use libc::c_int;
-use mirrord_config::{config::MirrordConfig, util::VecOrSingle, LayerConfig, LayerFileConfig};
+use mirrord_config::{util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -168,12 +167,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         })
         .unwrap_or_default();
 
-    let mut config = std::env::var("MIRRORD_CONFIG_FILE")
-        .map_err(LayerError::from)
-        .map(PathBuf::from)
-        .and_then(|path| Ok(LayerFileConfig::from_path(&path)?))
-        .unwrap_or_default()
-        .generate_config()?;
+    let mut config = LayerConfig::from_env()?;
 
     nix_devbox_patch(&mut config);
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
@@ -538,7 +532,7 @@ async fn start_layer_thread(
         }
     };
 
-    let _ = tokio::spawn(thread_loop(receiver, tx, rx, config));
+    tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.

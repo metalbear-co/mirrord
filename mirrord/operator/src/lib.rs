@@ -1,3 +1,5 @@
+#![feature(once_cell)]
+
 #[cfg(feature = "client")]
 pub mod client;
 

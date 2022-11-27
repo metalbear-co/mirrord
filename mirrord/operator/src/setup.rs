@@ -1,13 +1,24 @@
-use std::{collections::BTreeMap, convert::Infallible, io::Write, str::FromStr};
+use std::{collections::BTreeMap, convert::Infallible, io::Write, str::FromStr, sync::LazyLock};
 
 use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
-        core::v1::{Container, Namespace, PodSpec, PodTemplateSpec, ServiceAccount},
+        core::v1::{
+            Container, ContainerPort, EnvVar, Namespace, PodSpec, PodTemplateSpec, ServiceAccount,
+        },
+        rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
     apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
 };
 use thiserror::Error;
+
+static OPERATOR_NAME: &'static str = "mirrord-operator";
+static OPERATOR_ROLE_NAME: &'static str = "mirrord-operator";
+static OPERATOR_ROLE_BINDING_NAME: &'static str = "mirrord-operator";
+static OPERATOR_SERVICE_ACCOUNT_NAME: &'static str = "mirrord-operator";
+
+static APP_LABELS: LazyLock<BTreeMap<String, String>> =
+    LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
 
 /// General Operator Error
 #[derive(Debug, Error)]
@@ -29,17 +40,25 @@ pub struct Operator {
     namespace: OperatorNamespace,
     deployment: OperatorDeployment,
     service_account: OperatorServiceAccount,
+    role: OperatorRole,
+    role_binding: OperatorRoleBinding,
 }
 
 impl Operator {
     pub fn new(namespace: OperatorNamespace) -> Self {
-        let deployment = OperatorDeployment::new(&namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
+
+        let role = OperatorRole::new();
+        let role_binding = OperatorRoleBinding::new(&role, &service_account);
+
+        let deployment = OperatorDeployment::new(&namespace, &service_account);
 
         Operator {
             namespace,
             deployment,
             service_account,
+            role,
+            role_binding,
         }
     }
 }
@@ -47,8 +66,16 @@ impl Operator {
 impl OperatorSetup for Operator {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         self.namespace.to_writer(&mut writer)?;
+
         writer.write_all(b"---\n")?;
         self.service_account.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.role.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.role_binding.to_writer(&mut writer)?;
+
         writer.write_all(b"---\n")?;
         self.deployment.to_writer(&mut writer)?;
 
@@ -91,47 +118,57 @@ impl OperatorSetup for OperatorNamespace {
 pub struct OperatorDeployment(Deployment);
 
 impl OperatorDeployment {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
-        let app_labels = BTreeMap::from([("app".to_owned(), "operator".to_owned())]);
-
+    pub fn new(namespace: &OperatorNamespace, sa: &OperatorServiceAccount) -> Self {
         let container = Container {
-            name: "operator".to_owned(),
+            name: OPERATOR_NAME.to_owned(),
             image: Some("ghcr.io/metalbear-co/operator:latest".to_owned()),
+            image_pull_policy: Some("IfNotPresent".to_owned()),
+            env: Some(vec![EnvVar {
+                name: "RUST_LOG".to_owned(),
+                value: Some("mirrord=info,operator=info".to_owned()),
+                value_from: None,
+            }]),
+            ports: Some(vec![ContainerPort {
+                name: Some("tcp".to_owned()),
+                container_port: 8080,
+                ..Default::default()
+            }]),
             ..Default::default()
         };
 
         let pod_spec = PodSpec {
             containers: vec![container],
+            service_account_name: Some(sa.name().to_owned()),
             ..Default::default()
         };
 
         let spec = DeploymentSpec {
             template: PodTemplateSpec {
                 metadata: Some(ObjectMeta {
-                    labels: Some(app_labels.clone()),
+                    labels: Some(APP_LABELS.clone()),
                     ..Default::default()
                 }),
                 spec: Some(pod_spec),
             },
             selector: LabelSelector {
-                match_labels: Some(app_labels.clone()),
+                match_labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             ..Default::default()
         };
 
-        let namespace = Deployment {
+        let deployment = Deployment {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
-                labels: Some(app_labels),
+                labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             spec: Some(spec),
             ..Default::default()
         };
 
-        OperatorDeployment(namespace)
+        OperatorDeployment(deployment)
     }
 }
 
@@ -145,14 +182,18 @@ impl OperatorSetup for OperatorDeployment {
 pub struct OperatorServiceAccount(ServiceAccount);
 
 impl OperatorServiceAccount {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
-        let app_labels = BTreeMap::from([("app".to_owned(), "operator".to_owned())]);
+    pub fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
+    }
+}
 
+impl OperatorServiceAccount {
+    pub fn new(namespace: &OperatorNamespace) -> Self {
         let sa = ServiceAccount {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_SERVICE_ACCOUNT_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
-                labels: Some(app_labels),
+                labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
             ..Default::default()
@@ -160,9 +201,97 @@ impl OperatorServiceAccount {
 
         OperatorServiceAccount(sa)
     }
+
+    fn as_subject(&self) -> Subject {
+        Subject {
+            api_group: Some("".to_owned()),
+            kind: "ServiceAccount".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+            namespace: self.0.metadata.namespace.clone(),
+        }
+    }
 }
 
 impl OperatorSetup for OperatorServiceAccount {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorRole(ClusterRole);
+
+impl OperatorRole {
+    pub fn new() -> Self {
+        let role = ClusterRole {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_ROLE_NAME.to_owned()),
+                ..Default::default()
+            },
+            rules: Some(vec![
+                PolicyRule {
+                    api_groups: Some(vec!["".to_owned(), "apps".to_owned(), "batch".to_owned()]),
+                    resources: Some(vec![
+                        "pods".to_owned(),
+                        "deployments".to_owned(),
+                        "jobs".to_owned(),
+                    ]),
+                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["batch".to_owned()]),
+                    resources: Some(vec!["jobs".to_owned()]),
+                    verbs: vec!["create".to_owned()],
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+
+        OperatorRole(role)
+    }
+
+    fn as_role_ref(&self) -> RoleRef {
+        RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_owned(),
+            kind: "ClusterRole".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+        }
+    }
+}
+
+impl Default for OperatorRole {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OperatorSetup for OperatorRole {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorRoleBinding(ClusterRoleBinding);
+
+impl OperatorRoleBinding {
+    pub fn new(role: &OperatorRole, sa: &OperatorServiceAccount) -> Self {
+        let role_binding = ClusterRoleBinding {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_ROLE_BINDING_NAME.to_owned()),
+                ..Default::default()
+            },
+            role_ref: role.as_role_ref(),
+            subjects: Some(vec![sa.as_subject()]),
+        };
+
+        OperatorRoleBinding(role_binding)
+    }
+}
+
+impl OperatorSetup for OperatorRoleBinding {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }

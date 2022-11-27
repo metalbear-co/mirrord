@@ -99,7 +99,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>
             );
         }
         return if changed {
-            ptr_vec.push(0 as *const c_char); // Terminate with null.
+            ptr_vec.push(std::ptr::null::<c_char>()); // Terminate with null.
             Success(ptr_vec)
         } else {
             Bypass(NoTempDirInArgv)

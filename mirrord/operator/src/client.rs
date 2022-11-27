@@ -92,39 +92,3 @@ where
         Ok(codec)
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use mirrord_config::{
-        config::MirrordConfig, target::TargetFileConfig, LayerConfig, LayerFileConfig,
-    };
-    use mirrord_progress::TaskProgress;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn simple() -> anyhow::Result<()> {
-        let LayerConfig { agent, target, .. } = LayerFileConfig {
-            target: Some(TargetFileConfig::Simple(
-                "deploy/py-serv-deployment".parse().ok(),
-            )),
-            ..Default::default()
-        }
-        .generate_config()
-        .unwrap();
-
-        let api = OperatorApi::new(agent, target);
-
-        let progress = TaskProgress::new("starting operator controlled agent");
-        let agent_ref = api.create_agent(&progress).await?;
-
-        let (client_tx, mut daemon_rx) = api.create_connection(agent_ref).await?;
-
-        client_tx.send(ClientMessage::Ping).await?;
-
-        println!("{:?}", daemon_rx.recv().await);
-
-        Ok(())
-    }
-}
