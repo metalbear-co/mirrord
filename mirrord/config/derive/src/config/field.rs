@@ -182,7 +182,11 @@ impl ConfigField {
             .into_iter()
             .reduce(|acc, impl_| quote! { #acc.or(#impl_) });
 
-        quote! { #ident: #impls (#(#layers),*) .source_value().transpose()?#unwrapper }
+        if layers.is_empty() {
+            quote! { #ident: #impls .source_value().transpose()?#unwrapper }
+        } else {
+            quote! { #ident: #impls (#(#layers),*) .source_value().transpose()?#unwrapper }
+        }
     }
 }
 
