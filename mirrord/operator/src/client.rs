@@ -2,7 +2,7 @@ use std::io;
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use mirrord_config::{agent::AgentConfig, target::TargetConfig};
+use mirrord_config::target::TargetConfig;
 use mirrord_kube::api::AgentManagment;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -15,7 +15,6 @@ use crate::protocol::{AgentInitialize, OperatorCodec, OperatorRequest, OperatorR
 
 pub struct OperatorApi<T: ToSocketAddrs> {
     addr: T,
-    agent: AgentConfig,
     target: TargetConfig,
 }
 
@@ -23,12 +22,8 @@ impl<T> OperatorApi<T>
 where
     T: ToSocketAddrs,
 {
-    pub fn new(addr: T, agent: AgentConfig, target: TargetConfig) -> Self {
-        OperatorApi {
-            addr,
-            agent,
-            target,
-        }
+    pub fn new(addr: T, target: TargetConfig) -> Self {
+        OperatorApi { addr, target }
     }
 }
 
@@ -84,7 +79,6 @@ where
 
         let _ = codec
             .send(OperatorRequest::Initialize(AgentInitialize::new(
-                self.agent.clone(),
                 self.target.clone(),
             )))
             .await;

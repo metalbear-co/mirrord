@@ -7,33 +7,17 @@ use bincode::{
     Decode, Encode,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use mirrord_config::{agent::AgentConfig, target::TargetConfig};
+use mirrord_config::target::TargetConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tracing::warn;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AgentInitialize {
-    agent: AgentConfig,
     target: TargetConfig,
 }
 
 impl AgentInitialize {
-    pub fn new(agent: AgentConfig, target: TargetConfig) -> Self {
-        if agent.namespace.is_some() {
-            warn!("setting MIRRORD_AGENT_NAMESPACE is not supported with operator. Ignoring value");
-        }
-
-        AgentInitialize {
-            agent: AgentConfig {
-                namespace: None,
-                ..agent
-            },
-            target,
-        }
-    }
-
-    pub fn agent(&self) -> &AgentConfig {
-        &self.agent
+    pub fn new(target: TargetConfig) -> Self {
+        AgentInitialize { target }
     }
 
     pub fn target(&self) -> &TargetConfig {
@@ -43,9 +27,6 @@ impl AgentInitialize {
 
 impl Encode for AgentInitialize {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let agent = serde_json::to_vec(&self.agent).expect("agent not json serializable");
-        bincode::Encode::encode(&agent, encoder)?;
-
         let target = serde_json::to_vec(&self.target).expect("target not json serializable");
         bincode::Encode::encode(&target, encoder)?;
         Ok(())
@@ -54,14 +35,11 @@ impl Encode for AgentInitialize {
 
 impl Decode for AgentInitialize {
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let agent_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
-        let agent = serde_json::from_slice(&agent_buffer).expect("agent not json deserializable");
-
         let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
         let target =
             serde_json::from_slice(&target_buffer).expect("target not json deserializable");
 
-        Ok(AgentInitialize { agent, target })
+        Ok(AgentInitialize { target })
     }
 }
 
@@ -69,14 +47,11 @@ impl<'de> BorrowDecode<'de> for AgentInitialize {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
-        let agent_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
-        let agent = serde_json::from_slice(&agent_buffer).expect("agent not json deserializable");
-
         let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
         let target =
             serde_json::from_slice(&target_buffer).expect("target not json deserializable");
 
-        Ok(AgentInitialize { agent, target })
+        Ok(AgentInitialize { target })
     }
 }
 

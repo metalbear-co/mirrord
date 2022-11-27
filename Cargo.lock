@@ -1852,7 +1852,6 @@ dependencies = [
  "serde_yaml 0.9.14",
  "thiserror",
  "tokio",
- "tracing",
 ]
 
 [[package]]
