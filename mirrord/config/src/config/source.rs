@@ -65,7 +65,9 @@ mod tests {
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
         with_env_vars(vec![("TEST_VALUE", env), ("FALLBACK", Some("10"))], || {
-            let val = FromEnv::<i32>::new("TEST_VALUE").or(None).or(FromEnv::new("FALLBACK"));
+            let val = FromEnv::<i32>::new("TEST_VALUE")
+                .or(None)
+                .or(FromEnv::new("FALLBACK"));
             assert_eq!(val.source_value().unwrap().unwrap(), outcome);
         });
     }
