@@ -182,11 +182,7 @@ impl ConfigField {
             .into_iter()
             .reduce(|acc, impl_| quote! { #acc.or(#impl_) });
 
-        let layers = layers
-            .into_iter()
-            .reduce(|acc, layer| quote! { #acc.or(#layer) });
-
-        quote! { #ident: #impls #layers .source_value().transpose()?#unwrapper }
+        quote! { #ident: #impls (#(#layers),*) .source_value().transpose()?#unwrapper }
     }
 }
 
