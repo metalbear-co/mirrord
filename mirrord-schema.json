@@ -56,6 +56,12 @@
         }
       ]
     },
+    "operator": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "skip_processes": {
       "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B.",
       "anyOf": [
