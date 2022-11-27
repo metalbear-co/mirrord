@@ -2,15 +2,12 @@
 #![feature(hash_drain_filter)]
 #![feature(once_cell)]
 
-use nix::unistd::Pid;
-use nix::sys::signal::{kill, Signal};
-
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    time::Duration,
 };
-use std::time::Duration;
 
 use actix_codec::Framed;
 use cli::parse_args;
@@ -26,15 +23,18 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
 };
+use nix::{
+    sys::signal::{kill, Signal},
+    unistd::Pid,
+};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, channel, Receiver, Sender},
+    time::interval,
 };
-use tokio::sync::mpsc::channel;
-use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -73,7 +73,12 @@ impl Pauser {
         let (on_sender, on_receiver) = channel(256);
         let (off_sender, off_receiver) = channel(256);
 
-        tokio::spawn(Self::container_stopper(pid, interval, on_receiver, off_receiver));
+        tokio::spawn(Self::container_stopper(
+            pid,
+            interval,
+            on_receiver,
+            off_receiver,
+        ));
         Pauser {
             on_sender,
             off_sender,
@@ -84,12 +89,17 @@ impl Pauser {
     /// First SIGSTOP will be sent after first message received on `on_receiver`.
     /// After that, will stop sending SIGSTOP when receiving a message in `off_receiver`, until
     /// another message arrives in `on_receiver`.
-    async fn container_stopper(pid: u64, dur: Duration, mut on_receiver: Receiver<()>, mut off_receiver: Receiver<()>) {
+    async fn container_stopper(
+        pid: u64,
+        dur: Duration,
+        mut on_receiver: Receiver<()>,
+        mut off_receiver: Receiver<()>,
+    ) {
         info!("Container stopper started - will be pausing pid {pid}");
         let mut ticker = interval(dur);
         let pid = pid as pid_t;
         // wait for first on to come.
-        if on_receiver.recv().await.is_none(){
+        if on_receiver.recv().await.is_none() {
             return; // Other side dropped channel, exit.
         }
         loop {
@@ -123,7 +133,10 @@ impl Pauser {
         info!("Pausing container");
         // Turning pauser on means pausing container.
         self.on_sender.send(()).await.unwrap_or_else(|err| {
-            error!("pause failed with {:?}. container stopper dropped channel before main thread?", err);
+            error!(
+                "pause failed with {:?}. container stopper dropped channel before main thread?",
+                err
+            );
             // TODO: should we stop the agent?
         });
     }
@@ -133,7 +146,10 @@ impl Pauser {
         info!("Resuming container (all clients disconnected).");
         // Turning pauser off means resuming container.
         self.off_sender.send(()).await.unwrap_or_else(|err| {
-            error!("pause failed with {:?}. container stopper dropped channel before main thread?", err);
+            error!(
+                "pause failed with {:?}. container stopper dropped channel before main thread?",
+                err
+            );
             // TODO: should we stop the agent?
         });
     }
@@ -166,7 +182,8 @@ impl State {
             None => None,
             Some(new_id) => {
                 self.clients.insert(new_id.to_owned());
-                if self.clients.len() == 1 { // First client after no clients.
+                if self.clients.len() == 1 {
+                    // First client after no clients.
                     // Start sending SIGSTOP to pause container.
                     if let Some(pauser) = self.pauser.as_ref() {
                         pauser.pause_container().await;
