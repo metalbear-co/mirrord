@@ -18,6 +18,7 @@ pub(super) enum Commands {
         path: String,
     },
     // Login(LoginArgs),
+    /// Operator commands eg. setup
     Operator(Box<OperatorArgs>),
 }
 
@@ -158,7 +159,9 @@ pub(super) struct OperatorArgs {
 
 #[derive(Subcommand, Debug)]
 pub(super) enum OperatorCommand {
-    /// Create deployment for operator
+    /// This will install the operator, which requires a seat based license to be used.
+    ///
+    /// NOTE: You don't need to install the operator to use open source mirrord features.
     #[clap(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
     Setup {
         /// Output to kubernetes specs to file instead of stdout and piping to kubectl

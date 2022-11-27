@@ -273,6 +273,10 @@ fn login(args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
+fn cli_progress() -> TaskProgress {
+    TaskProgress::new("mirrord cli starting")
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
@@ -281,15 +285,20 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let progress = TaskProgress::new("mirrord cli starting");
+
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &progress)?,
+        Commands::Exec(args) => exec(&args, &cli_progress())?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &progress)?;
+            extract_library(Some(path), &cli_progress())?;
         }
         // Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup { file, namespace } => {
+                eprintln!(
+                    "Intalling mirrord operator with namespace: {}",
+                    namespace.name()
+                );
+
                 let operator = Operator::new(namespace);
 
                 match file {

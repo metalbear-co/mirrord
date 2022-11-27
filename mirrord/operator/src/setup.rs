@@ -12,8 +12,13 @@ use k8s_openapi::{
 };
 use thiserror::Error;
 
+static OPERATOR_NAME: &'static str = "mirrord-operator";
+static OPERATOR_ROLE_NAME: &'static str = "mirrord-operator";
+static OPERATOR_ROLE_BINDING_NAME: &'static str = "mirrord-operator";
+static OPERATOR_SERVICE_ACCOUNT_NAME: &'static str = "mirrord-operator";
+
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
-    LazyLock::new(|| BTreeMap::from([("app".to_owned(), "operator".to_owned())]));
+    LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
 
 /// General Operator Error
 #[derive(Debug, Error)]
@@ -41,10 +46,12 @@ pub struct Operator {
 
 impl Operator {
     pub fn new(namespace: OperatorNamespace) -> Self {
-        let deployment = OperatorDeployment::new(&namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
+
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
+
+        let deployment = OperatorDeployment::new(&namespace, &service_account);
 
         Operator {
             namespace,
@@ -111,9 +118,9 @@ impl OperatorSetup for OperatorNamespace {
 pub struct OperatorDeployment(Deployment);
 
 impl OperatorDeployment {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
+    pub fn new(namespace: &OperatorNamespace, sa: &OperatorServiceAccount) -> Self {
         let container = Container {
-            name: "operator".to_owned(),
+            name: OPERATOR_NAME.to_owned(),
             image: Some("ghcr.io/metalbear-co/operator:latest".to_owned()),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(vec![EnvVar {
@@ -131,7 +138,7 @@ impl OperatorDeployment {
 
         let pod_spec = PodSpec {
             containers: vec![container],
-            service_account_name: Some("operator".to_owned()),
+            service_account_name: Some(sa.name().to_owned()),
             ..Default::default()
         };
 
@@ -152,7 +159,7 @@ impl OperatorDeployment {
 
         let deployment = Deployment {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
                 labels: Some(APP_LABELS.clone()),
                 ..Default::default()
@@ -175,10 +182,16 @@ impl OperatorSetup for OperatorDeployment {
 pub struct OperatorServiceAccount(ServiceAccount);
 
 impl OperatorServiceAccount {
+    pub fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
+    }
+}
+
+impl OperatorServiceAccount {
     pub fn new(namespace: &OperatorNamespace) -> Self {
         let sa = ServiceAccount {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_SERVICE_ACCOUNT_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
                 labels: Some(APP_LABELS.clone()),
                 ..Default::default()
@@ -212,7 +225,7 @@ impl OperatorRole {
     pub fn new() -> Self {
         let role = ClusterRole {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_ROLE_NAME.to_owned()),
                 ..Default::default()
             },
             rules: Some(vec![
@@ -267,7 +280,7 @@ impl OperatorRoleBinding {
     pub fn new(role: &OperatorRole, sa: &OperatorServiceAccount) -> Self {
         let role_binding = ClusterRoleBinding {
             metadata: ObjectMeta {
-                name: Some("operator".to_owned()),
+                name: Some(OPERATOR_ROLE_BINDING_NAME.to_owned()),
                 ..Default::default()
             },
             role_ref: role.as_role_ref(),
