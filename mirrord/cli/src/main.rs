@@ -93,6 +93,11 @@ fn add_to_preload(path: &str) -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
+
+    if config.operator.is_some() {
+        return Ok(());
+    }
+
     let kube_api = KubernetesAPI::create(&config).await?;
     let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
     // Set env var for children to re-use.
