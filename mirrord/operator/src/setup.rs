@@ -12,10 +12,10 @@ use k8s_openapi::{
 };
 use thiserror::Error;
 
-static OPERATOR_NAME: &'static str = "mirrord-operator";
-static OPERATOR_ROLE_NAME: &'static str = "mirrord-operator";
-static OPERATOR_ROLE_BINDING_NAME: &'static str = "mirrord-operator";
-static OPERATOR_SERVICE_ACCOUNT_NAME: &'static str = "mirrord-operator";
+static OPERATOR_NAME: &str = "mirrord-operator";
+static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
+static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
@@ -233,6 +233,7 @@ impl OperatorRole {
                     api_groups: Some(vec!["".to_owned(), "apps".to_owned(), "batch".to_owned()]),
                     resources: Some(vec![
                         "pods".to_owned(),
+                        "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "jobs".to_owned(),
                     ]),
@@ -243,6 +244,12 @@ impl OperatorRole {
                     api_groups: Some(vec!["batch".to_owned()]),
                     resources: Some(vec!["jobs".to_owned()]),
                     verbs: vec!["create".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["".to_owned()]),
+                    resources: Some(vec!["pods/ephemeralcontainers".to_owned()]),
+                    verbs: vec!["update".to_owned()],
                     ..Default::default()
                 },
             ]),
