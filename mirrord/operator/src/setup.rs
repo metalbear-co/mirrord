@@ -233,6 +233,7 @@ impl OperatorRole {
                     api_groups: Some(vec!["".to_owned(), "apps".to_owned(), "batch".to_owned()]),
                     resources: Some(vec![
                         "pods".to_owned(),
+                        "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "jobs".to_owned(),
                     ]),
@@ -243,6 +244,12 @@ impl OperatorRole {
                     api_groups: Some(vec!["batch".to_owned()]),
                     resources: Some(vec!["jobs".to_owned()]),
                     verbs: vec!["create".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["".to_owned()]),
+                    resources: Some(vec!["pods/ephemeralcontainers".to_owned()]),
+                    verbs: vec!["update".to_owned()],
                     ..Default::default()
                 },
             ]),
