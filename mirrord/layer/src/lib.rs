@@ -189,7 +189,7 @@ fn mirrord_layer_entry_point() {
             if let Err(fail) = layer_pre_initialization() {
                 match fail {
                     LayerError::NoProcessFound => (),
-                    _ => std::process::exit(-1),
+                    _ => panic!("mirrord layer setup failed with {:?}", fail),
                 }
             }
         });
