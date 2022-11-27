@@ -6,7 +6,6 @@ use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    time::Duration,
 };
 
 use actix_codec::Framed;
@@ -18,29 +17,24 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use libc::pid_t;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-};
-use nix::{
-    sys::signal::{kill, Signal},
-    unistd::Pid,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, channel, Receiver, Sender},
-    time::interval,
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    runtime::get_container_pid,
+    cli::Args,
+    runtime::{get_container, Container, ContainerRuntime},
     steal::steal_worker,
     util::{run_thread, ClientID, IndexAllocator},
 };
@@ -58,138 +52,63 @@ mod util;
 
 const CHANNEL_SIZE: usize = 1024;
 
-/// An instance of Pauser is used to pause a container by sending periodic SIGSTOPs to its pid.
-/// Once the Pauser is dropped the SIGSTOPs will stop and the container will resume.
-/// But the Pauser itself can also be stopped and continued using its public methods.
-#[derive(Debug)]
-struct Pauser {
-    on_sender: Sender<()>,
-    off_sender: Sender<()>,
-}
-
-impl Pauser {
-    /// After calling new the stopper thread is started, but is blocked, waiting to be "turned on."
-    pub fn new(pid: u64, interval: Duration) -> Pauser {
-        let (on_sender, on_receiver) = channel(256);
-        let (off_sender, off_receiver) = channel(256);
-
-        tokio::spawn(Self::container_stopper(
-            pid,
-            interval,
-            on_receiver,
-            off_receiver,
-        ));
-        Pauser {
-            on_sender,
-            off_sender,
-        }
-    }
-
-    /// Send SIGSTOP to `pid` every `dur`.
-    /// First SIGSTOP will be sent after first message received on `on_receiver`.
-    /// After that, will stop sending SIGSTOP when receiving a message in `off_receiver`, until
-    /// another message arrives in `on_receiver`.
-    async fn container_stopper(
-        pid: u64,
-        dur: Duration,
-        mut on_receiver: Receiver<()>,
-        mut off_receiver: Receiver<()>,
-    ) {
-        info!("Container stopper started - will be pausing pid {pid}");
-        let mut ticker = interval(dur);
-        let pid = pid as pid_t;
-        // wait for first on to come.
-        if on_receiver.recv().await.is_none() {
-            return; // Other side dropped channel, exit.
-        }
-        loop {
-            select! {
-                _ = ticker.tick() => {
-                    kill(Pid::from_raw(pid), Signal::SIGSTOP).unwrap();
-                    // TODO: do we also need to stop children?
-                },
-                res = off_receiver.recv() => {
-                    match res {
-                        Some(()) => {
-                            info!("Resuming pid {}", pid);
-                            // Resume original container when agent is done.
-                            kill(Pid::from_raw(pid), Signal::SIGCONT).unwrap();
-                            // block until Pauser turned on again.
-                            if on_receiver.recv().await.is_none(){
-                                // channel dropped by other side, so exit.
-                                break;
-                            }
-                            // unblocked by "on", send SIGSTOPs again.
-                        }
-                        None => break // channel dropped by other side, so exit.
-                    }
-                }
-            }
-        }
-    }
-
-    /// Start sending SIGSTOPs periodically so that the container pauses.
-    pub async fn pause_container(&self) {
-        info!("Pausing container");
-        // Turning pauser on means pausing container.
-        self.on_sender.send(()).await.unwrap_or_else(|err| {
-            error!(
-                "pause failed with {:?}. container stopper dropped channel before main thread?",
-                err
-            );
-            // TODO: should we stop the agent?
-        });
-    }
-
-    /// Stop sending SIGSTOPs, send SIGCONT so that the container resumes its run.
-    pub async fn resume_container(&self) {
-        info!("Resuming container (all clients disconnected).");
-        // Turning pauser off means resuming container.
-        self.off_sender.send(()).await.unwrap_or_else(|err| {
-            error!(
-                "pause failed with {:?}. container stopper dropped channel before main thread?",
-                err
-            );
-            // TODO: should we stop the agent?
-        });
-    }
-}
-
 /// Keeps track of connected clients.
 /// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
 struct State {
     clients: HashSet<ClientID>,
     index_allocator: IndexAllocator<ClientID>,
-    pauser: Option<Pauser>,
+    /// Was the pause argument passed? If true, will pause the container when no clients are
+    /// connected.
+    should_pause: bool,
+    /// This is an option because it is acceptable not to pass a container runtime and id if not
+    /// pausing. When those args are not passed, container is None.
+    container: Option<Container>,
 }
 
 impl State {
-    /// If `pid` is some, will create a Pauser and pause that pid as long as there are clients
-    /// connected.
-    pub fn new(pid: Option<u64>) -> State {
-        State {
+    /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
+    /// the container info (runtime and id) was not.
+    pub async fn new(args: &Args) -> Result<State> {
+        let container =
+            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+        if container.is_none() && args.pause {
+            return Err(AgentError::MissingContainerInfo);
+        }
+        Ok(State {
             clients: HashSet::new(),
             index_allocator: IndexAllocator::new(),
-            pauser: pid.map(|pid| Pauser::new(pid, Duration::from_secs(5))),
+            should_pause: args.pause,
+            container,
+        })
+    }
+
+    /// Get the external pid of the target container, if container info available.
+    pub async fn get_container_pid(&self) -> Result<Option<u64>> {
+        if self.container.is_some() {
+            let container = self.container.as_ref().unwrap();
+            let pid = container.get_pid().await?;
+            Ok(Some(pid))
+        } else {
+            Ok(None)
         }
     }
 
     /// If there are clientIDs left, insert new one and return it.
     /// If there were no clients before, and there is a Pauser, start pausing.
-    pub async fn new_client(&mut self) -> Option<ClientID> {
+    /// Propagate container runtime errors.
+    pub async fn new_client(&mut self) -> Result<ClientID> {
         match self.generate_id() {
-            None => None,
+            None => Err(AgentError::ConnectionLimitReached),
             Some(new_id) => {
                 self.clients.insert(new_id.to_owned());
                 if self.clients.len() == 1 {
                     // First client after no clients.
-                    // Start sending SIGSTOP to pause container.
-                    if let Some(pauser) = self.pauser.as_ref() {
-                        pauser.pause_container().await;
+                    if self.should_pause {
+                        self.container.as_ref().unwrap().pause().await?;
                     }
                 }
-                Some(new_id)
+                Ok(new_id)
             }
         }
     }
@@ -198,16 +117,18 @@ impl State {
         self.index_allocator.next_index()
     }
 
-    /// If that was the last client and we have a pauser, stop pausing.
-    pub async fn remove_client(&mut self, client_id: ClientID) {
+    /// If that was the last client and we are pausing, stop pausing.
+    /// Propagate container runtime errors.
+    pub async fn remove_client(&mut self, client_id: ClientID) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
         if self.clients.is_empty() {
             // resume container (stop stopping).
-            if let Some(pauser) = self.pauser.as_ref() {
-                pauser.resume_container().await;
+            if self.should_pause {
+                self.container.as_ref().unwrap().unpause().await?;
             }
         }
+        Ok(())
     }
 
     pub fn no_clients_left(&self) -> bool {
@@ -427,15 +348,8 @@ async fn start_agent() -> Result<()> {
     ))
     .await?;
 
-    let pid = match (args.container_id, args.container_runtime) {
-        (Some(container_id), Some(container_runtime)) => {
-            Some(get_container_pid(&container_id, &container_runtime).await?)
-        }
-        _ => None,
-    };
-
-    // Only pass pid if should pause it. otherwise None.
-    let mut state = State::new(args.pause.then_some(()).and(pid));
+    let mut state = State::new(&args).await?;
+    let pid = state.get_container_pid().await?;
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
     let cancel_guard = cancellation_token.clone().drop_guard();
@@ -460,47 +374,51 @@ async fn start_agent() -> Result<()> {
             Ok((stream, addr)) = listener.accept() => {
                 trace!("start -> Connection accepted from {:?}", addr);
 
-                if let Some(client_id) = state.new_client().await {
-                    let sniffer_command_tx = sniffer_command_tx.clone();
-                    let cancellation_token = cancellation_token.clone();
-                    let dns_sender = dns_sender.clone();
-                    let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::new(
-                                client_id,
-                                stream,
-                                pid,
-                                args.ephemeral_container,
-                                sniffer_command_tx,
-                                dns_sender,
-                            )
-                            .and_then(|client| client.start(cancellation_token))
-                            .await
-                            {
-                                Ok(_) => {
-                                    trace!(
-                                        "ClientConnectionHandler::start -> Client {} disconnected",
-                                        client_id
-                                    );
+                match state.new_client().await {
+                    Ok(client_id) => {
+                        let sniffer_command_tx = sniffer_command_tx.clone();
+                        let cancellation_token = cancellation_token.clone();
+                        let dns_sender = dns_sender.clone();
+                        let client = tokio::spawn(async move {
+                            match ClientConnectionHandler::new(
+                                    client_id,
+                                    stream,
+                                    pid,
+                                    args.ephemeral_container,
+                                    sniffer_command_tx,
+                                    dns_sender,
+                                )
+                                .and_then(|client| client.start(cancellation_token))
+                                .await
+                                {
+                                    Ok(_) => {
+                                        trace!(
+                                            "ClientConnectionHandler::start -> Client {} disconnected",
+                                            client_id
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
+                                            client_id, e
+                                        );
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(
-                                        "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
-                                        client_id, e
-                                    );
-                                }
-                            }
-                        client_id
+                            client_id
 
-                    });
-                    clients.push(client);
-                } else {
-                    error!("start_client -> Ran out of connections, dropping new connection");
+                        });
+                        clients.push(client);
+                    },
+                    Err(AgentError::ConnectionLimitReached) => {
+                        error!("start_client -> Ran out of connections, dropping new connection");
+                    },
+                    // Propagate all errors that are not ConnectionLimitReached.
+                    err => { err?; },
                 }
-
             },
             Some(client) = clients.next() => {
                 let client_id = client?;
-                state.remove_client(client_id).await;
+                state.remove_client(client_id).await?;
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
                 if state.no_clients_left() {
