@@ -110,6 +110,7 @@ where
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
@@ -197,6 +198,7 @@ pub struct StealWorker {
 }
 
 impl StealWorker {
+    #[tracing::instrument(level = "trace", skip(sender))]
     pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<Self> {
         Ok(Self {
             sender,
@@ -209,8 +211,9 @@ impl StealWorker {
         })
     }
 
-    pub async fn handle_loop(
-        &mut self,
+    #[tracing::instrument(level = "trace", skip(self, rx, listener))]
+    pub async fn start(
+        mut self,
         mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
     ) -> Result<()> {
@@ -246,6 +249,7 @@ impl StealWorker {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         use LayerTcpSteal::*;
         match message {
@@ -292,6 +296,7 @@ impl StealWorker {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self, stream))]
     pub async fn handle_incoming_connection(
         &mut self,
         stream: TcpStream,
@@ -336,6 +341,7 @@ impl StealWorker {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(rx, tx))]
 pub async fn steal_worker(
     rx: Receiver<LayerTcpSteal>,
     tx: Sender<DaemonTcp>,
@@ -348,15 +354,10 @@ pub async fn steal_worker(
 
         set_namespace(namespace)?;
     }
-    debug!("preparing steal");
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
-    let mut worker = StealWorker::new(tx, listen_port)?;
-    debug!("finished preparing steal");
-    worker.handle_loop(rx, listener).await?;
-    debug!("steal exiting");
 
-    Ok(())
+    StealWorker::new(tx, listen_port)?.start(rx, listener).await
 }
 
 // orig_dst borrowed from linkerd2-proxy
@@ -369,6 +370,7 @@ mod orig_dst {
 
     #[cfg(target_os = "linux")]
     #[allow(unsafe_code)]
+    #[tracing::instrument(level = "trace")]
     pub fn orig_dst_addr(sock: &TcpStream) -> io::Result<SocketAddr> {
         use std::os::unix::io::AsRawFd;
         let fd = sock.as_raw_fd();

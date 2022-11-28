@@ -7,15 +7,43 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- CI: cancel previous runs of same PR.
+- cli: set canonical path for config file to avoid possible issues when child processes change current working directory.
+- config: Refactor config proc macro and behavior - we now error if a config value is wrong instead of defaulting.
+- layer: panic on error instead of exiting without any message.
+- CI: don't run CI on draft PRs.
+- Update dependencies.
+- Update to clap v4 (cli parser crate).
+
+### Fixed
+
+- Typo in `--agent-startup-timeout` flag.
+
+## 3.11.2
+
+### Fixed
+
+- Agent dockerfile: fix build for cross arch
+
+### Changed
+
+- Added clippy on macOS and cleaned warnings.
+
+## 3.11.1
+
 ### Fixed
 
 - release.yaml: Linux AArch64 for real this time. (embedded so was x64)
 
 ### Changed
 
+- Create agent in the cli and pass environment variables to exec'd process to improve agent re-use.
 - IntelliJ: change default log level to warning (match cli/vscode).
 - IntelliJ: don't show progress (can make some tests/scenarios fail).
 - release.yaml: Build layer/cli with Centos 7 compatible glibc (AmazonLinux2 support).
+- Change CPU/memory values requested by the Job agent to the lowest values possible.
 
 ## 3.11.0
 

@@ -40,12 +40,12 @@ pub struct AgentConfig {
     /// seconds).
     ///
     /// Can be useful for collecting logs.
-    #[config(env = "MIRRORD_AGENT_TTL", default = "0")]
+    #[config(env = "MIRRORD_AGENT_TTL", default = 0)]
     pub ttl: u16,
 
     /// Runs the agent as an [ephemeral
     /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
-    #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = "false")]
+    #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]
     pub ephemeral: bool,
 
     /// Controls how long the agent lives when there are no connections.
@@ -58,7 +58,7 @@ pub struct AgentConfig {
     /// Controls how long to wait for the agent to finish initialization.
     ///
     /// If initialization takes longer than this value, mirrord exits.
-    #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = "60")]
+    #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
     /// Which network interface to use for mirroring.
