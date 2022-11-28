@@ -171,6 +171,7 @@ pub(super) enum OperatorCommand {
         #[clap(long, value_parser)]
         accept_tos: bool,
 
+        /// License key to be stored in mirrord-operator-license secret
         #[clap(long, value_parser)]
         license_key: Option<String>,
 
