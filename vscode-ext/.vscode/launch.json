@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Extension Tests",
+        "type": "extensionHost",
+        "request": "launch",
+        "runtimeExecutable": "${execPath}",
+        "args": [
+          "${workspaceFolder}/../tests/python-e2e",
+          "--extensionDevelopmentPath=${workspaceFolder}",
+          "--extensionTestsPath=${workspaceFolder}/out/test/suite/index",                                          
+        ],
+        "outFiles": ["${workspaceFolder}/out/test/**/*.js"]
+      }
+    ]
+  }

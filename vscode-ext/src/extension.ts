@@ -1,4 +1,4 @@
-import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
+import { CoreV1Api, V1PodList } from '@kubernetes/client-node';
 import { resolve } from 'path';
 import * as vscode from 'vscode';
 import YAML from 'yaml';

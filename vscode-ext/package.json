@@ -54,7 +54,8 @@
 		"esbuild": "npm run esbuild-base -- --sourcemap",
 		"esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
 		"test-compile": "tsc -p ./",
-		"package": "vsce package"
+		"package": "vsce package",
+		"test": "node ./out/test/runTest.js"
 	},
 	"devDependencies": {
 		"@types/glob": "^7.2.0",
@@ -75,6 +76,7 @@
 	},
 	"dependencies": {
 		"@kubernetes/client-node": "^0.16.3",
+		"axios": "^1.2.0",
 		"es5-ext": "<=0.10.53",
 		"ffi-napi": "^4.0.3",
 		"minipass": "^3.3.5",

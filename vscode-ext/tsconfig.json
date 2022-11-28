@@ -9,7 +9,8 @@
 		"sourceMap": true,
 		"rootDir": "src",
 		"esModuleInterop": true, // Without this, will report errors in k8s client node modules https://github.com/kubernetes-client/javascript/issues/751#issuecomment-986953203
-		"strict": true   /* enable all strict type-checking options */
+		"strict": true,   /* enable all strict type-checking options */
+		"skipLibCheck": true
 		/* Additional Checks */
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */
 		// "noFallthroughCasesInSwitch": true, /* Report errors for fallthrough cases in switch statement. */
