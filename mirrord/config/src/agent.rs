@@ -68,7 +68,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
-    /// Controls target pause feature.
+    /// Controls target pause feature. Unstable.
     ///
     /// With this feature enabled, the remote container is paused while clients are connected to
     /// the agent.
