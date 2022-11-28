@@ -261,7 +261,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
-#[allow(dead_code)]
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -296,19 +295,33 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
-        // Commands::Login(args) => login(args)?,
+        Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
-            OperatorCommand::Setup { file, namespace } => {
+            OperatorCommand::Setup {
+                accept_tos,
+                file,
+                namespace,
+                license_key,
+            } => {
+                if !accept_tos {
+                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
+
+                    return Ok(());
+                }
+
                 eprintln!(
                     "Intalling mirrord operator with namespace: {}",
                     namespace.name()
                 );
 
-                let operator = Operator::new(namespace);
-
-                match file {
-                    Some(path) => operator.to_writer(File::create(path)?)?,
-                    None => operator.to_writer(std::io::stdout())?,
+                if let Some(license_key) = license_key {
+                    let operator = Operator::new(license_key, namespace);
+                    match file {
+                        Some(path) => operator.to_writer(File::create(path)?)?,
+                        None => operator.to_writer(std::io::stdout())?,
+                    }
+                } else {
+                    eprintln!("--license-key is required to install on cluster");
                 }
             }
         },

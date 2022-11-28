@@ -1,33 +1,35 @@
+#![deny(missing_docs)]
+
 use clap::{
     error::{Error, ErrorKind},
     Parser,
 };
 
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Container id to get traffic from
-    #[clap(short, long, value_parser)]
+    #[arg(short, long)]
     pub container_id: Option<String>,
 
     /// Container runtime to use
-    #[clap(short = 'r', long, value_parser)]
+    #[arg(short = 'r', long)]
     pub container_runtime: Option<String>,
 
     /// Port to use for communication
-    #[clap(short = 'l', long, default_value_t = 61337, value_parser)]
+    #[arg(short = 'l', long, default_value_t = 61337)]
     pub communicate_port: u16,
 
     /// Communication timeout in seconds
-    #[clap(short = 't', long, default_value_t = 30, value_parser)]
+    #[arg(short = 't', long, default_value_t = 30)]
     pub communication_timeout: u16,
 
     /// Interface to use
-    #[clap(short = 'i', long, value_parser)]
+    #[arg(short = 'i', long)]
     pub network_interface: Option<String>,
 
     /// Inform the agent to use `proc/1/root` as the root directory.
-    #[clap(short = 'e', long, default_value_t = false, value_parser)]
+    #[arg(short = 'e', long, default_value_t = false)]
     pub ephemeral_container: bool,
 }
 
