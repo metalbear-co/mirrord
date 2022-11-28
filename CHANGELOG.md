@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - cli: set canonical path for config file to avoid possible issues when child processes change current working directory.
 - CI: don't run CI on draft PRs.
 - Update dependencies.
+- Update to clap v4 (cli parser crate).
 
 ### Fixed
 
