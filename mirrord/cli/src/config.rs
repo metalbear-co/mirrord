@@ -166,9 +166,12 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     #[clap(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
     Setup {
-        /// The service ToS can be read here https://metalbear.co/legal/terms
+        /// ToS can be read here https://metalbear.co/legal/terms
         #[clap(long, value_parser)]
         accept_tos: bool,
+
+        #[clap(long, value_parser)]
+        license_key: Option<String>,
 
         /// Output to kubernetes specs to file instead of stdout and piping to kubectl
         #[clap(short, long, value_parser)]

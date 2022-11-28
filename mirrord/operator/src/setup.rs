@@ -4,7 +4,8 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, Namespace, PodSpec, PodTemplateSpec, ServiceAccount,
+            Container, ContainerPort, EnvVar, Namespace, PodSpec, PodTemplateSpec, Secret,
+            ServiceAccount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
@@ -15,6 +16,7 @@ use thiserror::Error;
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
@@ -39,13 +41,15 @@ pub trait OperatorSetup {
 pub struct Operator {
     namespace: OperatorNamespace,
     deployment: OperatorDeployment,
-    service_account: OperatorServiceAccount,
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
+    secret: OperatorSecret,
+    service_account: OperatorServiceAccount,
 }
 
 impl Operator {
-    pub fn new(namespace: OperatorNamespace) -> Self {
+    pub fn new(license_key: String, namespace: OperatorNamespace) -> Self {
+        let secret = OperatorSecret::new(&license_key, &namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
 
         let role = OperatorRole::new();
@@ -56,9 +60,10 @@ impl Operator {
         Operator {
             namespace,
             deployment,
-            service_account,
             role,
             role_binding,
+            secret,
+            service_account,
         }
     }
 }
@@ -66,6 +71,9 @@ impl Operator {
 impl OperatorSetup for Operator {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         self.namespace.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.secret.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.service_account.to_writer(&mut writer)?;
@@ -299,6 +307,34 @@ impl OperatorRoleBinding {
 }
 
 impl OperatorSetup for OperatorRoleBinding {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorSecret(Secret);
+
+impl OperatorSecret {
+    pub fn new(license_key: &str, namespace: &OperatorNamespace) -> Self {
+        let secret = Secret {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_SECRET_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
+                ..Default::default()
+            },
+            string_data: Some(BTreeMap::from([(
+                "OPERATOR_LICENSE_KEY".to_owned(),
+                license_key.to_owned(),
+            )])),
+            ..Default::default()
+        };
+
+        OperatorSecret(secret)
+    }
+}
+
+impl OperatorSetup for OperatorSecret {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }

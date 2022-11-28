@@ -296,6 +296,7 @@ fn main() -> Result<()> {
                 accept_tos,
                 file,
                 namespace,
+                license_key,
             } => {
                 if !accept_tos {
                     eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -308,11 +309,14 @@ fn main() -> Result<()> {
                     namespace.name()
                 );
 
-                let operator = Operator::new(namespace);
-
-                match file {
-                    Some(path) => operator.to_writer(File::create(path)?)?,
-                    None => operator.to_writer(std::io::stdout())?,
+                if let Some(license_key) = license_key {
+                    let operator = Operator::new(license_key, namespace);
+                    match file {
+                        Some(path) => operator.to_writer(File::create(path)?)?,
+                        None => operator.to_writer(std::io::stdout())?,
+                    }
+                } else {
+                    eprintln!("--license-key is required to install on cluster");
                 }
             }
         },
