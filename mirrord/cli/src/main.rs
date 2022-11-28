@@ -107,7 +107,7 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
     if config.agent.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");
-            panic!("Mutually exclusive arguments `--pause` and `--ephemeral` passed together.");
+            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
         }
         if !config.feature.network.incoming.is_steal() {
             warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
