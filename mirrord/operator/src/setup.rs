@@ -133,7 +133,10 @@ impl OperatorDeployment {
     ) -> Self {
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
-            image: Some("ghcr.io/metalbear-co/operator:latest".to_owned()),
+            image: Some(format!(
+                "ghcr.io/metalbear-co/operator:{}",
+                env!("CARGO_PKG_VERSION")
+            )),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(vec![EnvVar {
                 name: "RUST_LOG".to_owned(),
