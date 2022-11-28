@@ -74,7 +74,7 @@ pub(super) struct ExecArgs {
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
 
-    /// Binary to execute and connect with the remote pod.
+    /// mirrord will not load into these processes, they will run completely locally.
     #[arg(long)]
     pub skip_processes: Option<String>,
 
