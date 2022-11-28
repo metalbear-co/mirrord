@@ -17,8 +17,10 @@ pub(super) enum Commands {
         #[clap(value_parser)]
         path: String,
     },
-    // Login(LoginArgs),
+    #[clap(skip)]
+    Login(LoginArgs),
     /// Operator commands eg. setup
+    #[clap(skip)]
     Operator(Box<OperatorArgs>),
 }
 

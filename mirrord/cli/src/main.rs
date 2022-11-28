@@ -256,7 +256,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
-#[allow(dead_code)]
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -291,7 +290,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
-        // Commands::Login(args) => login(args)?,
+        Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup { file, namespace } => {
                 eprintln!(
