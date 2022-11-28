@@ -49,27 +49,13 @@ pub(crate) async fn connect(
     let progress = TaskProgress::new("agent initializing...");
 
     let agent_api = if let Some(address) = &config.connect_tcp {
-        let connection = Connection(address);
-
-        let stream = connection
-            .create_agent(&progress)
-            .await
-            .unwrap_or_else(|_| panic!("Failed to connect to TCP socket {address:?}"));
-
-        connection
-            .create_connection(stream)
+        Connection(address)
+            .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
     } else if let Some(addr) = &config.operator {
-        let operator_api = OperatorApi::new(addr, config.target.clone());
-
-        let stream = operator_api
-            .create_agent(&progress)
-            .await
-            .unwrap_or_else(|err| handle_error(err.into(), config));
-
-        operator_api
-            .create_connection(stream)
+        OperatorApi::new(addr, config.target.clone())
+            .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err.into(), config))
     } else {
