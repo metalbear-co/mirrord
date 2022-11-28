@@ -105,7 +105,7 @@ pub(super) struct ExecArgs {
     #[arg(long = "steal")]
     pub tcp_steal: bool,
 
-    /// Pause target pod(?TODO) while running.
+    /// Pause target container while running.
     #[arg(short, long)]
     pub pause: bool,
 
@@ -129,7 +129,7 @@ pub(super) struct ExecArgs {
     #[arg(short = 'f', long)]
     pub config_file: Option<PathBuf>,
 
-    // Create a trace file of errors for debugging.
+    /// Create a trace file of errors for debugging.
     #[arg(long)]
     pub capture_error_trace: bool,
 }

@@ -33,7 +33,7 @@ pub struct Args {
     pub ephemeral_container: bool,
 
     /// Pause the target container while clients are connected.
-    #[clap(short = 'p', long, default_value_t = false, value_parser)]
+    #[arg(short = 'p', long, default_value_t = false)]
     pub pause: bool,
 }
 
