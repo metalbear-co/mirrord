@@ -292,7 +292,17 @@ fn main() -> Result<()> {
         }
         Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
-            OperatorCommand::Setup { file, namespace } => {
+            OperatorCommand::Setup {
+                accept_tos,
+                file,
+                namespace,
+            } => {
+                if !accept_tos {
+                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
+
+                    return Ok(());
+                }
+
                 eprintln!(
                     "Intalling mirrord operator with namespace: {}",
                     namespace.name()
