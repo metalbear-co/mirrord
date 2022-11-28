@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - CI: cancel previous runs of same PR.
 - cli: set canonical path for config file to avoid possible issues when child processes change current working directory.
+- CI: don't run CI on draft PRs.
 - Update dependencies.
 
 ### Fixed
