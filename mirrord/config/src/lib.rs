@@ -78,7 +78,7 @@ use crate::{
 pub struct LayerConfig {
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
-    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
     /// Allows mirrord to skip unwanted processes.

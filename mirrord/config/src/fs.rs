@@ -71,11 +71,11 @@ impl MirrordConfig for FsUserConfig {
         let config = match self {
             FsUserConfig::Simple(mode) => FsConfig {
                 mode: mode.generate_config()?,
-                include: FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value(),
-                exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value(),
-                read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value(),
-                read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value(),
-                local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value(),
+                include: FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value().transpose()?,
+                exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value().transpose()?,
+                read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value().transpose()?,
+                read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value().transpose()?,
+                local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value().transpose()?,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
         };
@@ -87,11 +87,11 @@ impl MirrordConfig for FsUserConfig {
 impl MirrordToggleableConfig for FsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
-        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
-        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
-        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value();
-        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value();
-        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value();
+        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value().transpose()?;
+        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value().transpose()?;
+        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value().transpose()?;
+        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value().transpose()?;
+        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value().transpose()?;
 
         Ok(FsConfig {
             mode,

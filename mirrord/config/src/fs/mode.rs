@@ -83,8 +83,12 @@ impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
     fn generate_config(self) -> Result<Self::Generated> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
+        let fs = FromEnv::new("MIRRORD_FILE_OPS")
+            .source_value()
+            .transpose()?;
+        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
+            .source_value()
+            .transpose()?;
 
         Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
     }
@@ -92,11 +96,15 @@ impl MirrordConfig for FsModeConfig {
 
 impl MirrordToggleableConfig for FsModeConfig {
     fn disabled_config() -> Result<Self::Generated> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value();
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value();
-        let mode = FromEnv::new("MIRRORD_FILE_MODE").source_value();
-
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
+        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value().transpose()?;
+        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value().transpose()?;
+        let mode = FromEnv::new("MIRRORD_FILE_MODE").source_value().transpose()?;
+        if let Some(mode) = mode {
+            return Ok(mode);
+        } else {
+            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
+        }
+        
     }
 }
 

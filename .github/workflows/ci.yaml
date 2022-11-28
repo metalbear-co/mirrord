@@ -6,6 +6,7 @@ on:
     branches-ignore: [staging-squash-merge.tmp]
   pull_request:
     branches: [main, staging, trying]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Cancel previous runs on the same PR.
 concurrency: 
@@ -15,6 +16,8 @@ concurrency:
 jobs:
   changed_files:
     runs-on: ubuntu-latest
+    # don't run CI on drafts
+    if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
       intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
@@ -485,6 +488,7 @@ jobs:
     name: ci
     needs:
       [
+        changed_files,
         build_mirrord,
         test_agent_image,
         integration_tests_macos,
@@ -504,6 +508,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       always() &&
+      (needs.changed_files.result == 'success') &&
       (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
       (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
       (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
