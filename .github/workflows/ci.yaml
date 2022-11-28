@@ -6,6 +6,7 @@ on:
     branches-ignore: [staging-squash-merge.tmp]
   pull_request:
     branches: [main, staging, trying]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Cancel previous runs on the same PR.
 concurrency: 
