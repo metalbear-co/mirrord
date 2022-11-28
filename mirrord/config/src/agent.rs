@@ -70,8 +70,8 @@ pub struct AgentConfig {
 
     /// Controls target pause feature.
     ///
-    /// With this feature enabled, the deployed app is paused while clients are connected to the
-    /// agent.
+    /// With this feature enabled, the remote container is paused while clients are connected to
+    /// the agent.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 }

@@ -177,7 +177,7 @@
           ]
         },
         "pause": {
-          "description": "Controls target pause feature.\n\nWith this feature enabled, the deployed app is paused while clients are connected to the agent.",
+          "description": "Controls target pause feature.\n\nWith this feature enabled, the remote container is paused while clients are connected to the agent.",
           "type": [
             "boolean",
             "null"
