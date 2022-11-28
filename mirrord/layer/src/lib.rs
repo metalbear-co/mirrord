@@ -192,7 +192,7 @@ fn mirrord_layer_entry_point() {
                     _ => {
                         eprintln!("mirrord layer setup failed with {:?}", fail);
                         std::process::exit(-1)
-                    },
+                    }
                 }
             }
         });
