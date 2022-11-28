@@ -4,8 +4,8 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, Namespace, PodSpec, PodTemplateSpec, Secret,
-            ServiceAccount,
+            Container, ContainerPort, EnvFromSource, EnvVar, Namespace, PodSpec, PodTemplateSpec,
+            Secret, SecretEnvSource, ServiceAccount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
@@ -55,7 +55,7 @@ impl Operator {
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
 
-        let deployment = OperatorDeployment::new(&namespace, &service_account);
+        let deployment = OperatorDeployment::new(&namespace, &service_account, &secret);
 
         Operator {
             namespace,
@@ -126,7 +126,11 @@ impl OperatorSetup for OperatorNamespace {
 pub struct OperatorDeployment(Deployment);
 
 impl OperatorDeployment {
-    pub fn new(namespace: &OperatorNamespace, sa: &OperatorServiceAccount) -> Self {
+    pub fn new(
+        namespace: &OperatorNamespace,
+        sa: &OperatorServiceAccount,
+        secret: &OperatorSecret,
+    ) -> Self {
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: Some("ghcr.io/metalbear-co/operator:latest".to_owned()),
@@ -135,6 +139,13 @@ impl OperatorDeployment {
                 name: "RUST_LOG".to_owned(),
                 value: Some("mirrord=info,operator=info".to_owned()),
                 value_from: None,
+            }]),
+            env_from: Some(vec![EnvFromSource {
+                secret_ref: Some(SecretEnvSource {
+                    name: Some(secret.name().to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
             }]),
             ports: Some(vec![ContainerPort {
                 name: Some("tcp".to_owned()),
@@ -190,12 +201,6 @@ impl OperatorSetup for OperatorDeployment {
 pub struct OperatorServiceAccount(ServiceAccount);
 
 impl OperatorServiceAccount {
-    pub fn name(&self) -> &str {
-        self.0.metadata.name.as_deref().unwrap_or_default()
-    }
-}
-
-impl OperatorServiceAccount {
     pub fn new(namespace: &OperatorNamespace) -> Self {
         let sa = ServiceAccount {
             metadata: ObjectMeta {
@@ -208,6 +213,10 @@ impl OperatorServiceAccount {
         };
 
         OperatorServiceAccount(sa)
+    }
+
+    fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
     }
 
     fn as_subject(&self) -> Subject {
@@ -331,6 +340,10 @@ impl OperatorSecret {
         };
 
         OperatorSecret(secret)
+    }
+
+    fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
     }
 }
 

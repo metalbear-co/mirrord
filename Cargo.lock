@@ -1836,7 +1836,6 @@ version = "3.11.2"
 dependencies = [
  "k8s-openapi",
  "kube",
- "rstest",
  "schemars",
  "serde",
  "serde_json",

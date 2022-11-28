@@ -177,7 +177,8 @@ pub(super) enum OperatorCommand {
         #[clap(short, long, value_parser)]
         file: Option<PathBuf>,
 
-        /// Set namespace to setup operator in
+        /// Set namespace to setup operator in (this doesn't limit the namespaces the operator will
+        /// be able to access)
         #[clap(short, long, value_parser, default_value = "mirrord")]
         namespace: OperatorNamespace,
     },

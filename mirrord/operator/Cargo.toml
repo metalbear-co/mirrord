@@ -22,6 +22,3 @@ serde_yaml = "0.9"
 schemars = { version = "0.8" }
 thiserror.workspace = true
 tokio.workspace = true
-
-[dev-dependencies]
-rstest = "0.15"
