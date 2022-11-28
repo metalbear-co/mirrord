@@ -19,10 +19,11 @@ pub(super) enum Commands {
         #[clap(value_parser)]
         path: String,
     },
-    #[clap(skip)]
+    #[allow(dead_code)]
+    #[command(skip)]
     Login(LoginArgs),
     /// Operator commands eg. setup
-    // #[clap(skip)]
+    #[command(hide = true)]
     Operator(Box<OperatorArgs>),
 }
 
@@ -156,7 +157,7 @@ pub(super) struct LoginArgs {
 
 #[derive(Args, Debug)]
 pub(super) struct OperatorArgs {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub command: OperatorCommand,
 }
 
@@ -165,23 +166,23 @@ pub(super) enum OperatorCommand {
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
-    #[clap(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
+    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
     Setup {
         /// ToS can be read here https://metalbear.co/legal/terms
-        #[clap(long, value_parser)]
+        #[arg(long, value_parser)]
         accept_tos: bool,
 
         /// License key to be stored in mirrord-operator-license secret
-        #[clap(long, value_parser)]
+        #[arg(long, value_parser)]
         license_key: Option<String>,
 
         /// Output to kubernetes specs to file instead of stdout and piping to kubectl
-        #[clap(short, long, value_parser)]
+        #[arg(short, long, value_parser)]
         file: Option<PathBuf>,
 
         /// Set namespace to setup operator in (this doesn't limit the namespaces the operator will
         /// be able to access)
-        #[clap(short, long, value_parser, default_value = "mirrord")]
+        #[arg(short, long, value_parser, default_value = "mirrord")]
         namespace: OperatorNamespace,
     },
 }
