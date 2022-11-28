@@ -27,6 +27,17 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 
 #[cfg(target_os = "macos")]
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+const PAUSE_WITHOUT_STEAL_WARNING: &str =
+    "--pause specified without --steal: Incoming requests to the application will
+not be handled. The target container running the deployed application is paused,
+and responses from the local application are dropped.
+
+Attention: if network based liveness/readiness probes are defined for the
+target, they will fail under this configuration.
+
+To have the local application handle incoming requests you can run again with
+`--steal`. To have the deployed application handle requests, run again without
+specifying `--pause`.";
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
@@ -92,6 +103,15 @@ fn add_to_preload(path: &str) -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
+    if config.agent.pause {
+        if config.agent.ephemeral {
+            error!("Pausing is not yet supported together with an ephemeral agent container.");
+            panic!("Mutually exclusive arguments `--pause` and `--ephemeral` passed together.");
+        }
+        if !config.feature.network.incoming.is_steal() {
+            warn!(PAUSE_WITHOUT_STEAL_WARNING);
+        }
+    }
     let kube_api = KubernetesAPI::create(&config).await?;
     let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
     // Set env var for children to re-use.
