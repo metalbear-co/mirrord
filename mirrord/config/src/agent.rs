@@ -72,7 +72,7 @@ pub struct AgentConfig {
     ///
     /// With this feature enabled, the deployed app is paused while clients are connected to the
     /// agent.
-    #[config(env = "MIRRORD_PAUSE", default = "false", unstable)]
+    #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 }
 
