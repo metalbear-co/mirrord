@@ -90,6 +90,9 @@ pub enum AgentError {
 
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
+
+    #[error("Http proxy failed with `{0}`!")]
+    Http(#[from] mirrord_http::HttpError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

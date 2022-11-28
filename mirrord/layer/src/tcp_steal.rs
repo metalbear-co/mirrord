@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use mirrord_config::network::NetworkConfig;
+use mirrord_http::HttpFilter;
 use mirrord_protocol::{
     tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId,
@@ -26,11 +28,21 @@ pub struct TcpStealHandler {
     ports: HashSet<Listen>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
+    http_filter: HttpFilter,
+}
+
+impl TcpStealHandler {
+    pub(super) fn new(config: NetworkConfig) -> Self {
+        Self {
+            http_filter: config.into(),
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn handle_new_connection(
         &mut self,
         tcp_connection: NewTcpConnection,
@@ -46,7 +58,7 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(data = data.connection_id))]
+    #[tracing::instrument(level = "debug", skip(self), fields(data = data.connection_id))]
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
@@ -55,11 +67,6 @@ impl TcpHandler for TcpStealHandler {
             .remove(&data.connection_id)
             .ok_or(LayerError::NoConnectionId(data.connection_id))?;
 
-        trace!(
-            "handle_new_data -> writing {:#?} bytes to id {:#?}",
-            data.bytes.len(),
-            data.connection_id
-        );
         // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be told
         // that we just removed it).
         connection.write_all(&data.bytes[..]).await?;
@@ -69,7 +76,7 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
         let TcpClose { connection_id } = close;
 
@@ -88,7 +95,7 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
-    #[tracing::instrument(level = "trace", skip(self, tx))]
+    #[tracing::instrument(level = "debug", skip(self, tx))]
     async fn handle_listen(
         &mut self,
         listen: Listen,
@@ -102,8 +109,14 @@ impl TcpHandler for TcpStealHandler {
             .ok_or(LayerError::ListenAlreadyExists)?;
 
         tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
-            .await
-            .map_err(From::from)
+            .await?;
+
+        // Send http filter as a separate message.
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::FilterTraffic(
+            self.http_filter.into(),
+        )))
+        .await
+        .map_err(From::from)
     }
 }
 

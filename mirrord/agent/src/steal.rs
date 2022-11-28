@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use mirrord_http::hyper_debug;
+use mirrord_http::{hyper_debug, HttpFilter, HttpProxy};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -12,7 +12,7 @@ use mirrord_protocol::{
 use rand::distributions::{Alphanumeric, DistString};
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{duplex, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{Receiver, Sender},
@@ -196,20 +196,26 @@ pub struct StealWorker {
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
     connection_index: u64,
+    http_proxy: HttpProxy,
 }
 
 impl StealWorker {
     #[tracing::instrument(level = "debug", skip(sender))]
-    pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<Self> {
-        Ok(Self {
+    pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<(Self, DuplexStream)> {
+        let (proxy_client, proxy_server) = duplex(12345);
+
+        let worker = Self {
             sender,
             iptables: SafeIpTables::new(iptables::new(false).unwrap())?,
             ports: HashSet::default(),
             listen_port,
+            http_proxy: HttpProxy::new(proxy_client),
             write_streams: HashMap::default(),
             read_streams: StreamMap::default(),
             connection_index: 0,
-        })
+        };
+
+        Ok((worker, proxy_server))
     }
 
     #[tracing::instrument(level = "debug", skip(self, rx, listener))]
@@ -217,7 +223,10 @@ impl StealWorker {
         mut self,
         mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
+        proxy_server: DuplexStream,
     ) -> Result<()> {
+        HttpProxy::start(proxy_server).await?;
+
         loop {
             select! {
                 msg = rx.recv() => {
@@ -266,6 +275,11 @@ impl StealWorker {
                     debug!("sent subscribed");
                     Ok(())
                 }
+            }
+            FilterTraffic(regex_filter) => {
+                self.http_proxy.filter(regex_filter.into());
+
+                Ok(())
             }
             ConnectionUnsubscribe(connection_id) => {
                 info!("Closing connection {connection_id:?}");
@@ -362,7 +376,8 @@ pub async fn steal_worker(
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
 
-    StealWorker::new(tx, listen_port)?.start(rx, listener).await
+    let (worker, proxy_server) = StealWorker::new(tx, listen_port)?;
+    Ok(worker.start(rx, listener, proxy_server).await?)
 }
 
 // orig_dst borrowed from linkerd2-proxy

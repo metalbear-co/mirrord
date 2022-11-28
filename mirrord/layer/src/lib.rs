@@ -25,7 +25,9 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use libc::c_int;
-use mirrord_config::{util::VecOrSingle, LayerConfig};
+use mirrord_config::{
+    feature::FeatureConfig, network::NetworkConfig, util::VecOrSingle, LayerConfig,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -284,7 +286,13 @@ struct Layer {
 }
 
 impl Layer {
-    fn new(tx: Sender<ClientMessage>, rx: Receiver<DaemonMessage>, steal: bool) -> Layer {
+    fn new(
+        tx: Sender<ClientMessage>,
+        rx: Receiver<DaemonMessage>,
+        network_config: NetworkConfig,
+    ) -> Layer {
+        let steal = network_config.incoming.is_steal();
+
         Self {
             tx,
             rx,
@@ -294,7 +302,7 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::default(),
+            tcp_steal_handler: TcpStealHandler::new(network_config),
             steal,
         }
     }
@@ -398,7 +406,13 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(tx, rx, config.feature.network.incoming.is_steal());
+    let LayerConfig {
+        feature: FeatureConfig { network, .. },
+        ..
+    };
+
+    let mut layer = Layer::new(tx, rx, network);
+
     loop {
         select! {
             hook_message = receiver.recv() => {

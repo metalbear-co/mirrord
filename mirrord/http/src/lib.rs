@@ -6,7 +6,7 @@ use fancy_regex::Regex;
 use hyper::{body, server::conn::http1, service::service_fn, Request, Response};
 use mirrord_protocol::tcp::RegexFilter;
 use thiserror::Error;
-use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 /// Holds the `Regex` that is used to either continue or bypass file path operations (such as
 /// [`file::ops::open`]), according to what the user specified.
@@ -30,12 +30,21 @@ pub enum HttpFilter {
     Exclude(Regex),
 }
 
+static INCLUDE_ALL: &str = ".*";
+
+impl Default for HttpFilter {
+    fn default() -> Self {
+        // TODO(alex): Not a good UX, this should be excluding everything by default (but it would
+        // be a breaking change).
+        Self::Include(Regex::new(INCLUDE_ALL).unwrap())
+    }
+}
+
 impl HttpFilter {
     #[tracing::instrument(level = "debug")]
     pub fn new(include: Vec<String>, exclude: Vec<String>) -> Self {
-        let default_include = ".*";
         let default_include_regex =
-            Regex::new(default_include).expect("Failed parsing default exclude file regex!");
+            Regex::new(INCLUDE_ALL).expect("Failed parsing default exclude file regex!");
 
         // Converts a list of `String` into one big regex-fied `String`.
         let reduce_to_string = |list: Vec<String>| {
@@ -87,6 +96,15 @@ impl From<RegexFilter> for HttpFilter {
     }
 }
 
+impl From<HttpFilter> for RegexFilter {
+    fn from(http_filter: HttpFilter) -> Self {
+        match http_filter {
+            HttpFilter::Include(regex) => Self::Include(regex.to_string()),
+            HttpFilter::Exclude(regex) => Self::Exclude(regex.to_string()),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum HttpError {
     #[error("Failed parsing HTTP with 0 bytes!")]
@@ -100,9 +118,62 @@ pub enum HttpError {
 
     #[error("Failed with Parse `{0}`!")]
     Parse(#[from] httparse::Error),
+
+    #[error("Failed with Hyper `{0}`!")]
+    Hyper(#[from] hyper::Error),
+
+    #[error("Failed with JoinError `{0}`!")]
+    Join(#[from] tokio::task::JoinError),
 }
 
-struct HttpProxy {}
+#[derive(Debug)]
+pub struct HttpProxy {
+    filter: HttpFilter,
+    client: DuplexStream,
+}
+
+// TODO(alex) [high] 2022-11-28: The packets we capture, can be sent to the layer as `TcpData` to
+// be handled by the mirror socket -> user socket, via `ConnectionId`.
+impl HttpProxy {
+    #[tracing::instrument(level = "debug")]
+    pub fn new(client: DuplexStream) -> Self {
+        Self {
+            client,
+            filter: HttpFilter::default(),
+        }
+    }
+
+    #[tracing::instrument(level = "debug")]
+    pub async fn start(server: DuplexStream) -> Result<(), HttpError> {
+        let proxy_task = tokio::task::spawn(async move {
+            let http1_connection = http1::Builder::new()
+                .serve_connection(
+                    server,
+                    service_fn(|request: Request<body::Incoming>| async move {
+                        // TODO(alex) [high] 2022-11-25: Inspect the request, if it should be
+                        // captured, then return it in some wrapper type
+                        // that indicates this. Otherwise, insert the
+                        // request into the response body, then extract it from
+                        // the `client.body` (valid for both, as we don't want responses, only
+                        // requests).
+                        //
+                        // ADD(alex) [high] 2022-11-28: Both will be inserted into the body of a
+                        // `Response`, so we need to differentiate between those somehow (maybe add
+                        // a special header to the "captured" request, and
+                        // check for it).
+                        Ok::<_, Infallible>(Response::new(request))
+                    }),
+                )
+                .await;
+
+            Ok::<_, HttpError>(http1_connection?)
+        });
+
+        proxy_task.await??;
+
+        todo!()
+    }
+}
 
 const MINIMAL_HTTP1_REQUEST: &str = "GET / HTTP/1.1";
 
@@ -138,6 +209,8 @@ fn valid_http1_request(bytes: &[u8]) -> Result<(), HttpError> {
 //
 // ADD(alex) [mid] 2022-11-25: There is also the trouble of user "X" includes "user: A",
 // but user "Y" is excluding as "user: !C", which would capture "A, B" (what "X" wants to capture).
+//
+// ADD(alex) [mid] 2022-11-28: Solvable by duplicating the traffic, but do we want that?
 #[tracing::instrument(level = "debug", fields(length = %bytes.len()))]
 pub async fn hyper_debug(bytes: &[u8]) -> Result<(), HttpError> {
     valid_http1_request(bytes)?;
@@ -156,6 +229,10 @@ pub async fn hyper_debug(bytes: &[u8]) -> Result<(), HttpError> {
                     // Otherwise, insert the request into the response body, then extract it from
                     // the `client.body` (valid for both, as we don't want responses, only
                     // requests).
+                    //
+                    // ADD(alex) [high] 2022-11-28: Both will be inserted into the body of a
+                    // `Response`, so we need to differentiate between those somehow (maybe add a
+                    // special header to the "captured" request, and check for it).
                     println!("foo");
                     Ok::<_, Infallible>(Response::new("hello".to_string()))
                 }),

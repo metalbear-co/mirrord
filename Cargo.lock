@@ -1842,6 +1842,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
+ "mirrord-http",
  "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-progress",
