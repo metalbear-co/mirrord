@@ -11,7 +11,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::protocol::{AgentInitialize, OperatorCodec, OperatorRequest, OperatorResponse};
+use crate::protocol::{Handshake, OperatorCodec, OperatorRequest, OperatorResponse};
 
 pub struct OperatorApi<T: ToSocketAddrs> {
     addr: T,
@@ -78,7 +78,7 @@ where
         let mut codec = actix_codec::Framed::new(connection, OperatorCodec::client());
 
         let _ = codec
-            .send(OperatorRequest::Initialize(AgentInitialize::new(
+            .send(OperatorRequest::Handshake(Handshake::new(
                 self.target.clone(),
             )))
             .await;

@@ -11,13 +11,13 @@ use mirrord_config::target::TargetConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AgentInitialize {
+pub struct Handshake {
     target: TargetConfig,
 }
 
-impl AgentInitialize {
+impl Handshake {
     pub fn new(target: TargetConfig) -> Self {
-        AgentInitialize { target }
+        Handshake { target }
     }
 
     pub fn target(&self) -> &TargetConfig {
@@ -25,7 +25,7 @@ impl AgentInitialize {
     }
 }
 
-impl Encode for AgentInitialize {
+impl Encode for Handshake {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         let target = serde_json::to_vec(&self.target).expect("target not json serializable");
         bincode::Encode::encode(&target, encoder)?;
@@ -33,17 +33,17 @@ impl Encode for AgentInitialize {
     }
 }
 
-impl Decode for AgentInitialize {
+impl Decode for Handshake {
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
         let target =
             serde_json::from_slice(&target_buffer).expect("target not json deserializable");
 
-        Ok(AgentInitialize { target })
+        Ok(Handshake { target })
     }
 }
 
-impl<'de> BorrowDecode<'de> for AgentInitialize {
+impl<'de> BorrowDecode<'de> for Handshake {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
@@ -51,13 +51,13 @@ impl<'de> BorrowDecode<'de> for AgentInitialize {
         let target =
             serde_json::from_slice(&target_buffer).expect("target not json deserializable");
 
-        Ok(AgentInitialize { target })
+        Ok(Handshake { target })
     }
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
 pub enum OperatorRequest {
-    Initialize(AgentInitialize),
+    Handshake(Handshake),
     Client(ClientMessage),
 }
 
