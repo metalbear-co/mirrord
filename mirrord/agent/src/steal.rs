@@ -15,7 +15,7 @@ use tokio::{
     io::{duplex, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -201,21 +201,25 @@ pub struct StealWorker {
 
 impl StealWorker {
     #[tracing::instrument(level = "debug", skip(sender))]
-    pub fn new(sender: Sender<DaemonTcp>, listen_port: Port) -> Result<(Self, DuplexStream)> {
+    pub fn new(
+        sender: Sender<DaemonTcp>,
+        listen_port: Port,
+    ) -> Result<(Self, (DuplexStream, Receiver<HttpFilter>))> {
         let (proxy_client, proxy_server) = duplex(12345);
+        let (filter_tx, filter_rx) = channel(12345);
 
         let worker = Self {
             sender,
             iptables: SafeIpTables::new(iptables::new(false).unwrap())?,
             ports: HashSet::default(),
             listen_port,
-            http_proxy: HttpProxy::new(proxy_client),
+            http_proxy: HttpProxy::new(proxy_client, filter_tx),
             write_streams: HashMap::default(),
             read_streams: StreamMap::default(),
             connection_index: 0,
         };
 
-        Ok((worker, proxy_server))
+        Ok((worker, (proxy_server, filter_rx)))
     }
 
     #[tracing::instrument(level = "debug", skip(self, rx, listener))]
@@ -223,9 +227,9 @@ impl StealWorker {
         mut self,
         mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
-        proxy_server: DuplexStream,
+        (proxy_server, filter_rx): (DuplexStream, Receiver<HttpFilter>),
     ) -> Result<()> {
-        HttpProxy::start(proxy_server).await?;
+        HttpProxy::start(proxy_server, filter_rx).await?;
 
         loop {
             select! {
@@ -277,7 +281,7 @@ impl StealWorker {
                 }
             }
             FilterTraffic(regex_filter) => {
-                self.http_proxy.filter(regex_filter.into());
+                self.http_proxy.filter(regex_filter.into()).await?;
 
                 Ok(())
             }
@@ -376,8 +380,8 @@ pub async fn steal_worker(
     let listener = TcpListener::bind("0.0.0.0:0").await?;
     let listen_port = listener.local_addr()?.port();
 
-    let (worker, proxy_server) = StealWorker::new(tx, listen_port)?;
-    Ok(worker.start(rx, listener, proxy_server).await?)
+    let (worker, proxy) = StealWorker::new(tx, listen_port)?;
+    Ok(worker.start(rx, listener, proxy).await?)
 }
 
 // orig_dst borrowed from linkerd2-proxy

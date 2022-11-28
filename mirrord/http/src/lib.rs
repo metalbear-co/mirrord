@@ -6,7 +6,10 @@ use fancy_regex::Regex;
 use hyper::{body, server::conn::http1, service::service_fn, Request, Response};
 use mirrord_protocol::tcp::RegexFilter;
 use thiserror::Error;
-use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream};
+use tokio::{
+    io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream},
+    sync::mpsc::{channel, Receiver, Sender},
+};
 
 /// Holds the `Regex` that is used to either continue or bypass file path operations (such as
 /// [`file::ops::open`]), according to what the user specified.
@@ -124,28 +127,43 @@ pub enum HttpError {
 
     #[error("Failed with JoinError `{0}`!")]
     Join(#[from] tokio::task::JoinError),
+
+    #[error("Failed with Sender `{0}`!")]
+    Sender(#[from] tokio::sync::mpsc::error::SendError<HttpFilter>),
 }
 
 #[derive(Debug)]
 pub struct HttpProxy {
     filter: HttpFilter,
     client: DuplexStream,
+    filter_tx: Sender<HttpFilter>,
 }
 
 // TODO(alex) [high] 2022-11-28: The packets we capture, can be sent to the layer as `TcpData` to
 // be handled by the mirror socket -> user socket, via `ConnectionId`.
 impl HttpProxy {
     #[tracing::instrument(level = "debug")]
-    pub fn new(client: DuplexStream) -> Self {
+    pub fn new(client: DuplexStream, filter_tx: Sender<HttpFilter>) -> Self {
         Self {
             client,
+            filter_tx,
             filter: HttpFilter::default(),
         }
     }
 
     #[tracing::instrument(level = "debug")]
-    pub async fn start(server: DuplexStream) -> Result<(), HttpError> {
+    pub async fn filter(&mut self, filter: HttpFilter) -> Result<(), HttpError> {
+        Ok(self.filter_tx.send(filter).await?)
+    }
+
+    #[tracing::instrument(level = "debug")]
+    pub async fn start(
+        server: DuplexStream,
+        filter_rx: Receiver<HttpFilter>,
+    ) -> Result<(), HttpError> {
         let proxy_task = tokio::task::spawn(async move {
+            // TODO(alex) [high] 2022-11-28: Use the filter we have from `filter_rx`.
+            // Do we need a `select!` here? We need a `loop`.
             let http1_connection = http1::Builder::new()
                 .serve_connection(
                     server,
