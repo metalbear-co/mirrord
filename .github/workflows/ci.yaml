@@ -488,6 +488,7 @@ jobs:
     name: ci
     needs:
       [
+        changed_files,
         build_mirrord,
         test_agent_image,
         integration_tests_macos,
@@ -507,6 +508,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       always() &&
+      (needs.changed_files.result == 'success') &&
       (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
       (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
       (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
