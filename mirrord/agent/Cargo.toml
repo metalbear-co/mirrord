@@ -44,7 +44,7 @@ socket2 = "0.4"
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 wildmatch = "2"
 enum_dispatch = "0.3.8"
-async-trait = "0.1"
+async-trait.workspace = true
 
 [dev-dependencies]
 mockall = "0.11"
