@@ -29,15 +29,16 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
     "--pause specified without --steal: Incoming requests to the application will
-not be handled. The target container running the deployed application is paused,
-and responses from the local application are dropped.
+                                           not be handled. The target container running the deployed application is paused,
+                                           and responses from the local application are dropped.
 
-Attention: if network based liveness/readiness probes are defined for the
-target, they will fail under this configuration.
+                                           Attention: if network based liveness/readiness probes are defined for the
+                                           target, they will fail under this configuration.
 
-To have the local application handle incoming requests you can run again with
-`--steal`. To have the deployed application handle requests, run again without
-specifying `--pause`.";
+                                           To have the local application handle incoming requests you can run again with
+                                           `--steal`. To have the deployed application handle requests, run again without
+                                           specifying `--pause`.
+    ";
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
@@ -109,7 +110,7 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
             panic!("Mutually exclusive arguments `--pause` and `--ephemeral` passed together.");
         }
         if !config.feature.network.incoming.is_steal() {
-            warn!(PAUSE_WITHOUT_STEAL_WARNING);
+            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
         }
     }
     let kube_api = KubernetesAPI::create(&config).await?;
