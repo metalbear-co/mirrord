@@ -26,10 +26,10 @@ pub(super) enum Commands {
     Operator(Box<OperatorArgs>),
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum FsMode {
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+pub enum FsMode {
     /// Read & Write from remote, apart from overrides (hardcoded and configured in file)
-    ReadWrite,
+    Write,
     /// Read from remote, Write local, apart from overrides (hardcoded and configured in file) -
     /// default
     Read,

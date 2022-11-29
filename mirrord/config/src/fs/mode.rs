@@ -106,7 +106,7 @@ impl MirrordConfig for FsModeConfig {
             .transpose()?;
 
         if let Some(mode) = mode {
-            return Ok(mode);
+            Ok(mode)
         } else {
             Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
         }
@@ -125,7 +125,7 @@ impl MirrordToggleableConfig for FsModeConfig {
             .source_value()
             .transpose()?;
         if let Some(mode) = mode {
-            return Ok(mode);
+            Ok(mode)
         } else {
             Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Local))
         }

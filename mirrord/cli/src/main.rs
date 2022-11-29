@@ -176,17 +176,17 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     if args.enable_rw_fs && args.no_fs {
-        warn!("use --fs-mode=readwrite or --fs-mode=readonly please");
+        warn!("use --fs-mode=write or --fs-mode=readonly please");
         warn!("fs was both enabled and disabled - disabling will take precedence.");
     }
 
     if !args.no_fs && args.enable_rw_fs {
-        warn!("--rw is deprecated, use --fs-mode=readwrite instead");
+        warn!("--rw is deprecated, use --fs-mode=write instead");
         std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
     if args.no_fs || args.enable_rw_fs {
-        warn!("--no-fs is deprecated, use --fs-mode=readwrite instead");
+        warn!("--no-fs is deprecated, use --fs-mode=write instead");
         std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
