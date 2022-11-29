@@ -123,7 +123,7 @@ impl AgentManagment for OperatorApiDiscover {
             .await?
             .items
             .pop()
-            .and_then(|pod| pod.metadata.name.clone())
+            .and_then(|pod| pod.metadata.name)
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::Other, "Operator Not Found".to_owned())
             })?;

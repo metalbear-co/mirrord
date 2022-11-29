@@ -59,7 +59,7 @@ pub(crate) async fn connect(
         operator_api
             .create_connection(operator_ref)
             .await
-            .unwrap_or_else(|err| handle_error(err.into(), config))
+            .unwrap_or_else(|err| handle_error(err, config))
     } else if let Some(addr) = &config.operator.addr {
         OperatorApi::new(addr, config.target.clone())
             .connect(&progress)
