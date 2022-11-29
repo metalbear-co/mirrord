@@ -43,20 +43,6 @@ fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
     }
 }
 
-async fn discover_operator(
-    config: &LayerConfig,
-    progress: &TaskProgress,
-) -> Option<(
-    OperatorApiDiscover,
-    <OperatorApiDiscover as AgentManagment>::AgentRef,
-)> {
-    let api = OperatorApiDiscover::create(config).await.ok()?;
-
-    let connection = api.create_agent(progress).await.ok()?;
-
-    Some((api, connection))
-}
-
 pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
@@ -67,7 +53,9 @@ pub(crate) async fn connect(
             .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if let Some((operator_api, operator_ref)) = discover_operator(config, &progress).await {
+    } else if let Some((operator_api, operator_ref)) =
+        OperatorApiDiscover::discover_operator(config, &progress).await
+    {
         operator_api
             .create_connection(operator_ref)
             .await

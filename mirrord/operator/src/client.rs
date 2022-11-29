@@ -76,6 +76,17 @@ impl OperatorApiDiscover {
             target: config.target.clone(),
         })
     }
+
+    pub async fn discover_operator(
+        config: &LayerConfig,
+        progress: &TaskProgress,
+    ) -> Option<(Self, <Self as AgentManagment>::AgentRef)> {
+        let api = OperatorApiDiscover::create(config).await.ok()?;
+
+        let connection = api.create_agent(progress).await.ok()?;
+
+        Some((api, connection))
+    }
 }
 
 #[async_trait]

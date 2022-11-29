@@ -14,6 +14,7 @@ use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::{
+    client::OperatorApiDiscover,
     license::License,
     setup::{Operator, OperatorSetup},
 };
@@ -110,6 +111,13 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
     if config.operator.is_some() {
+        return Ok(());
+    }
+
+    if OperatorApiDiscover::discover_operator(config, &progress)
+        .await
+        .is_some()
+    {
         return Ok(());
     }
 
