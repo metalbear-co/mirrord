@@ -13,6 +13,10 @@ use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_operator::{
+    license::License,
+    setup::{Operator, OperatorSetup},
+};
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -280,7 +284,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
-#[allow(dead_code)]
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -297,6 +300,10 @@ fn login(args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
+fn cli_progress() -> TaskProgress {
+    TaskProgress::new("mirrord cli starting")
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
@@ -305,13 +312,56 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let progress = TaskProgress::new("mirrord cli starting");
+
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &progress)?,
+        Commands::Exec(args) => exec(&args, &cli_progress())?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &progress)?;
-        } // Commands::Login(args) => login(args)?,
+            extract_library(Some(path), &cli_progress())?;
+        }
+        Commands::Login(args) => login(args)?,
+        Commands::Operator(operator) => match operator.command {
+            OperatorCommand::Setup {
+                accept_tos,
+                file,
+                namespace,
+                license_key,
+            } => {
+                if !accept_tos {
+                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
+
+                    return Ok(());
+                }
+
+                if let Some(license_key) = license_key {
+                    let license = License::fetch(license_key.clone())?;
+
+                    eprintln!(
+                        "Installing with license for {} ({})",
+                        license.name, license.organization
+                    );
+
+                    if license.is_expired() {
+                        eprintln!("Using an expired license for operator, deployment will not function when installed");
+                    }
+
+                    eprintln!(
+                        "Intalling mirrord operator with namespace: {}",
+                        namespace.name()
+                    );
+
+                    let operator = Operator::new(license_key, namespace);
+
+                    match file {
+                        Some(path) => operator.to_writer(File::create(path)?)?,
+                        None => operator.to_writer(std::io::stdout())?,
+                    }
+                } else {
+                    eprintln!("--license-key is required to install on cluster");
+                }
+            }
+        },
     }
+
     Ok(())
 }
 

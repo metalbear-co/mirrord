@@ -1442,7 +1442,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.76.0"
-source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
+source = "git+https://github.com/metalbear-co/kube?rev=e3eb17c3edb4c2ba58884d475e58d10c9f85b965#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -1454,7 +1454,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.76.0"
-source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
+source = "git+https://github.com/metalbear-co/kube?rev=e3eb17c3edb4c2ba58884d475e58d10c9f85b965#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
 dependencies = [
  "base64",
  "bytes",
@@ -1491,7 +1491,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.76.0"
-source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
+source = "git+https://github.com/metalbear-co/kube?rev=e3eb17c3edb4c2ba58884d475e58d10c9f85b965#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -1508,7 +1508,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.76.0"
-source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
+source = "git+https://github.com/metalbear-co/kube?rev=e3eb17c3edb4c2ba58884d475e58d10c9f85b965#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
 dependencies = [
  "darling 0.14.2",
  "proc-macro2",
@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.76.0"
-source = "git+https://github.com/metalbear-co/kube?branch=command_based_token_drop_env#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
+source = "git+https://github.com/metalbear-co/kube?rev=e3eb17c3edb4c2ba58884d475e58d10c9f85b965#e3eb17c3edb4c2ba58884d475e58d10c9f85b965"
 dependencies = [
  "ahash",
  "backoff",
@@ -1710,6 +1710,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-kube",
  "mirrord-layer",
+ "mirrord-operator",
  "mirrord-progress",
  "mirrord-sip",
  "rand 0.8.5",
@@ -1876,6 +1877,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "mirrord-operator"
+version = "3.11.2"
+dependencies = [
+ "chrono",
+ "k8s-openapi",
+ "reqwest",
+ "serde",
+ "serde_yaml 0.9.14",
+ "thiserror",
 ]
 
 [[package]]

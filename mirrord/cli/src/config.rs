@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
+use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -15,10 +16,14 @@ pub(super) struct Cli {
 pub(super) enum Commands {
     Exec(Box<ExecArgs>),
     Extract {
-        #[clap(value_parser)]
         path: String,
     },
-    // Login(LoginArgs),
+    #[allow(dead_code)]
+    #[command(skip)]
+    Login(LoginArgs),
+    /// Operator commands eg. setup
+    #[command(hide = true)]
+    Operator(Box<OperatorArgs>),
 }
 
 #[derive(Args, Debug)]
@@ -151,4 +156,36 @@ pub(super) struct LoginArgs {
     /// Don't open web browser automatically and just print url
     #[arg(long)]
     pub no_open: bool,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorArgs {
+    #[command(subcommand)]
+    pub command: OperatorCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum OperatorCommand {
+    /// This will install the operator, which requires a seat based license to be used.
+    ///
+    /// NOTE: You don't need to install the operator to use open source mirrord features.
+    #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
+    Setup {
+        /// ToS can be read here https://metalbear.co/legal/terms
+        #[arg(long)]
+        accept_tos: bool,
+
+        /// License key to be stored in mirrord-operator-license secret
+        #[arg(long)]
+        license_key: Option<String>,
+
+        /// Output to kubernetes specs to file instead of stdout and piping to kubectl
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+
+        /// Set namespace to setup operator in (this doesn't limit the namespaces the operator will
+        /// be able to access)
+        #[arg(short, long, default_value = "mirrord")]
+        namespace: OperatorNamespace,
+    },
 }
