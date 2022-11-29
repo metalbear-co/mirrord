@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingConfig {
     Mirror,
