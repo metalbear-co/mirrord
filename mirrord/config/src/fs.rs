@@ -162,6 +162,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: None,
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -191,6 +194,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: None,
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -220,6 +226,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -234,6 +243,9 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    read_only: None,
+                    read_write: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -263,6 +275,9 @@ mod tests {
                     mode: Some(FsModeConfig::Write),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    read_only: None,
+                    read_write: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();
