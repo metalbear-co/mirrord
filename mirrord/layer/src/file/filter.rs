@@ -442,6 +442,7 @@ mod tests {
     }
 
     #[rstest]
+    #[trace]
     #[case(FsModeConfig::Write, "/a/test.a", false, true)]
     #[case(FsModeConfig::Write, "/pain/read_write/test.a", false, false)]
     #[case(FsModeConfig::Write, "/pain/read_only/test.a", false, false)]
@@ -501,14 +502,18 @@ mod tests {
         true,
         true
     )]
-    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
-    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/Users/a/.aws/cli/cache/1241.json",
-        false,
-        false
-    )]
+    #[case(FsModeConfig::Local, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/read_write/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/read_only/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/write.a", false, true)]
+    #[case(FsModeConfig::Local, "/pain/local/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/opt/test.a", false, true)]
+    #[case(FsModeConfig::Local, "/a/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/read_write/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/read_only/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
     fn test_include_complex_configuration(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
