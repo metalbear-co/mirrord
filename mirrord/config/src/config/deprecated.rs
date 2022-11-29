@@ -1,4 +1,4 @@
-use crate::config::source::MirrordConfigSource;
+use crate::config::{source::MirrordConfigSource, Result};
 
 #[derive(Clone)]
 pub struct Deprecated<T>(String, T);
@@ -13,9 +13,9 @@ impl<T> MirrordConfigSource for Deprecated<T>
 where
     T: MirrordConfigSource,
 {
-    type Result = T::Result;
+    type Value = T::Value;
 
-    fn source_value(self) -> Option<T::Result> {
+    fn source_value(self) -> Option<Result<Self::Value>> {
         self.1.source_value().map(|result| {
             println!("{}", self.0);
             result

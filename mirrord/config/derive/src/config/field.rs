@@ -102,14 +102,14 @@ impl ConfigField {
             quote! { #ty }
         };
 
-        let reanme = flags
+        let rename = flags
             .rename
             .as_ref()
             .map(|rename| quote! { #[serde(rename = #rename)] });
 
         quote! {
             #(#docs)*
-            #reanme
+            #rename
             #vis #ident: Option<#target>
         }
     }
@@ -124,8 +124,8 @@ impl ConfigField {
     //* ```
     //* Will output
     //* ```rust
-    //* test: (crate::config::from_env::FromEnv::new("TEST"), self.test)
-    //*           .source_value()
+    //* test: crate::config::from_env::FromEnv::new("TEST").or(self.test)
+    //*           .source_value().transpose()?
     //*           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
     //* ```
     ///
@@ -137,21 +137,18 @@ impl ConfigField {
             ..
         } = &self;
 
+        // Rest of flow is irrelevant for nested config.
+        if flags.nested {
+            return quote! { #ident: self.#ident.unwrap_or_default().generate_config()? };
+        }
+
         let mut impls = Vec::new();
 
         if let Some(env) = flags.env.as_ref() {
             impls.push(env.to_token_stream());
         }
 
-        if flags.nested {
-            impls.push(quote! { Some(self.#ident.unwrap_or_default().generate_config()?) })
-        } else {
-            impls.push(quote! { self.#ident });
-        }
-
-        if let Some(default) = flags.default.as_ref() {
-            impls.push(default.to_token_stream());
-        }
+        impls.push(quote! { self.#ident });
 
         let mut layers = Vec::new();
 
@@ -173,10 +170,23 @@ impl ConfigField {
                 None => quote! { None }
             };
 
-            quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
+            // unwrap to default if exists
+            if let Some(default) = flags.default.as_ref() {
+                quote! {#default}
+            } else {
+                quote! { .ok_or(crate::config::ConfigError::ValueNotProvided(stringify!(#parent), stringify!(#ident), #env_override))? }
+            }
         });
 
-        quote! { #ident: (#(#impls),*) #(#layers)* .source_value()#unwrapper }
+        let impls = impls
+            .into_iter()
+            .reduce(|acc, impl_| quote! { #acc.or(#impl_) });
+
+        if layers.is_empty() {
+            quote! { #ident: #impls .source_value().transpose()?#unwrapper }
+        } else {
+            quote! { #ident: #impls #(#layers),* .source_value().transpose()?#unwrapper }
+        }
     }
 }
 

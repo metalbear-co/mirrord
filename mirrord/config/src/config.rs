@@ -1,4 +1,3 @@
-pub mod default_value;
 pub mod deprecated;
 pub mod from_env;
 pub mod source;
@@ -14,6 +13,9 @@ pub enum ConfigError {
 
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
+
+    #[error("value {0:?} for {1:?} is invalid.")]
+    InvalidValue(String, &'static str),
 
     #[error("mirrord-config: IO operation failed with `{0}`")]
     Io(#[from] std::io::Error),

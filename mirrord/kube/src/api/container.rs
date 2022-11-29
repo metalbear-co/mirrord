@@ -152,6 +152,9 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("-t".to_string());
             agent_command_line.push(timeout.to_string());
         }
+        if agent.pause {
+            agent_command_line.push("--pause".to_string());
+        }
 
         let agent_pod: Job =
             serde_json::from_value(json!({ // Only Jobs support self deletion after completion

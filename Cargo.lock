@@ -739,6 +739,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum_dispatch"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0eb359f1476bf611266ac1f5355bc14aeca37b299d0ebccc038ee7058891c9cb"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "errno"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1715,10 +1727,12 @@ name = "mirrord-agent"
 version = "3.11.2"
 dependencies = [
  "actix-codec",
+ "async-trait",
  "bollard",
  "bytes",
  "clap",
  "containerd-client",
+ "enum_dispatch",
  "faccess",
  "futures",
  "iptables",
