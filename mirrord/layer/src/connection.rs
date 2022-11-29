@@ -53,14 +53,14 @@ pub(crate) async fn connect(
             .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if let Some((operator_api, operator_ref)) =
+    } else if config.operator.enabeld && let Some((operator_api, operator_ref)) =
         OperatorApiDiscover::discover_operator(config, &progress).await
     {
         operator_api
             .create_connection(operator_ref)
             .await
             .unwrap_or_else(|err| handle_error(err.into(), config))
-    } else if let Some(addr) = &config.operator {
+    } else if let Some(addr) = &config.operator.addr {
         OperatorApi::new(addr, config.target.clone())
             .connect(&progress)
             .await

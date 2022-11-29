@@ -57,9 +57,13 @@
       ]
     },
     "operator": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ToggleableConfig_for_OperatorFileConfig"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "skip_processes": {
@@ -388,6 +392,26 @@
       },
       "additionalProperties": false
     },
+    "OperatorFileConfig": {
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
+      "type": "object",
+      "properties": {
+        "addr": {
+          "description": "Direct Connect to operator addr",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabeld": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "OutgoingFileConfig": {
       "type": "object",
       "properties": {
@@ -509,6 +533,16 @@
         },
         {
           "$ref": "#/definitions/NetworkFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_OperatorFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/OperatorFileConfig"
         }
       ]
     },

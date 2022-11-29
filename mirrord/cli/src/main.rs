@@ -110,15 +110,17 @@ fn add_to_preload(path: &str) -> Result<()> {
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
-    if config.operator.is_some() {
-        return Ok(());
-    }
+    if config.operator.enabeld {
+        if config.operator.addr.is_some() {
+            return Ok(());
+        }
 
-    if OperatorApiDiscover::discover_operator(&config, progress)
-        .await
-        .is_some()
-    {
-        return Ok(());
+        if OperatorApiDiscover::discover_operator(&config, progress)
+            .await
+            .is_some()
+        {
+            return Ok(());
+        }
     }
 
     if config.agent.pause {
