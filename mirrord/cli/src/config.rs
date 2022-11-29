@@ -74,7 +74,7 @@ pub(super) struct ExecArgs {
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
 
-    /// Binary to execute and connect with the remote pod.
+    /// mirrord will not load into these processes, they will run completely locally.
     #[arg(long)]
     pub skip_processes: Option<String>,
 
@@ -105,6 +105,10 @@ pub(super) struct ExecArgs {
     #[arg(long = "steal")]
     pub tcp_steal: bool,
 
+    /// Pause target container while running.
+    #[arg(short, long)]
+    pub pause: bool,
+
     /// Disable tcp/udp outgoing traffic
     #[arg(long)]
     pub no_outgoing: bool,
@@ -125,7 +129,7 @@ pub(super) struct ExecArgs {
     #[arg(short = 'f', long)]
     pub config_file: Option<PathBuf>,
 
-    // Create a trace file of errors for debugging.
+    /// Create a trace file of errors for debugging.
     #[arg(long)]
     pub capture_error_trace: bool,
 }

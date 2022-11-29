@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- `--pause` feature (unstable). See [#712](https://github.com/metalbear-co/mirrord/issues/712).
+
 ### Changed
 
 - CI: cancel previous runs of same PR.
