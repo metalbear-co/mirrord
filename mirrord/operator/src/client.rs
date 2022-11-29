@@ -77,9 +77,9 @@ impl OperatorApiDiscover {
         })
     }
 
-    pub async fn discover_operator(
+    pub async fn discover_operator<P: Progress>(
         config: &LayerConfig,
-        progress: &TaskProgress,
+        progress: &P,
     ) -> Option<(Self, <Self as AgentManagment>::AgentRef)> {
         let api = OperatorApiDiscover::create(config).await.ok()?;
 
