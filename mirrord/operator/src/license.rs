@@ -26,7 +26,7 @@ impl License {
             .post(LICENSE_SERVER)
             .json(&request)
             .send()?
-            .json()
+            .json::<LicenseCheckResponse>()
             .map(License::from)
     }
 
@@ -38,7 +38,7 @@ impl License {
             .json(&request)
             .send()
             .await?
-            .json()
+            .json::<LicenseCheckResponse>()
             .await
             .map(License::from)
     }
@@ -52,8 +52,8 @@ pub struct LicenseCheckRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LicenseCheckResponse(License);
 
-impl Into<License> for LicenseCheckResponse {
-    fn into(self) -> License {
-        self.0
+impl From<LicenseCheckResponse> for License {
+    fn from(val: LicenseCheckResponse) -> Self {
+        val.0
     }
 }
