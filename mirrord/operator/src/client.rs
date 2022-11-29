@@ -13,6 +13,8 @@ use tokio::{
 
 use crate::protocol::{Handshake, OperatorCodec, OperatorRequest, OperatorResponse};
 
+static CONNECTION_CHANNEL_SIZE: usize = 1000;
+
 pub struct OperatorApi<T: ToSocketAddrs> {
     addr: T,
     target: TargetConfig,
@@ -39,8 +41,8 @@ where
         &self,
         mut codec: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        let (client_tx, mut client_rx) = mpsc::channel(100);
-        let (daemon_tx, daemon_rx) = mpsc::channel(100);
+        let (client_tx, mut client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+        let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         tokio::spawn(async move {
             loop {
