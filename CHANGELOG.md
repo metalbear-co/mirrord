@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - `--pause` feature (unstable). See [#712](https://github.com/metalbear-co/mirrord/issues/712).
 - operator setup cli feature.
+- mirrord-layer: operator connection that can be used instad of using kubernetes api to access agents.
 
 ### Changed
 
