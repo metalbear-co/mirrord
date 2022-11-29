@@ -1869,14 +1869,12 @@ dependencies = [
 name = "mirrord-operator"
 version = "3.11.2"
 dependencies = [
+ "chrono",
  "k8s-openapi",
- "kube",
- "schemars",
+ "reqwest",
  "serde",
- "serde_json",
  "serde_yaml 0.9.14",
  "thiserror",
- "tokio",
 ]
 
 [[package]]

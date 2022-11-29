@@ -17,7 +17,7 @@ edition.workspace = true
 
 [dependencies]
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
-mirrord-operator = { path = "../operator" }
+mirrord-operator = { path = "../operator", features = ["license-fetch", "setup"] }
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
