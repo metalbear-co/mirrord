@@ -77,7 +77,7 @@ impl OperatorApiDiscover {
         })
     }
 
-    pub async fn discover_operator<P: Progress>(
+    pub async fn discover_operator<P: Progress + Send + Sync>(
         config: &LayerConfig,
         progress: &P,
     ) -> Option<(Self, <Self as AgentManagment>::AgentRef)> {
