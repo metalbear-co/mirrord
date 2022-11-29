@@ -13,12 +13,14 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
-
 [features]
 default = []
-server = ["protocol"]
-client = ["protocol", "dep:futures", "dep:mirrord-kube", "dep:mirrord-progress"]
+client = ["protocol", "dep:futures", "dep:serde_json", "dep:tokio", "dep:mirrord-kube", "dep:mirrord-progress"]
+license-fetch = ["dep:reqwest"]
 protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes",  "dep:mirrord-config", "dep:mirrord-protocol"]
+setup = ["dep:k8s-openapi", "dep:serde_yaml"]
+server = ["protocol"]
+
 
 [dependencies]
 mirrord-config = { path = "../config", optional = true }
@@ -30,12 +32,12 @@ async-trait = "0.1"
 actix-codec = { workspace = true, optional = true }
 bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
-k8s-openapi.workspace = true
-kube.workspace = true
+chrono = { version = "0.4", features = ["clock", "serde"] }
+k8s-openapi = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
-schemars = "0.8"
+reqwest = { workspace = true, features = ["blocking", "json"], optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json.workspace = true
-serde_yaml = "0.9"
+serde_json = { workspace = true, optional = true }
+serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, optional = true }
