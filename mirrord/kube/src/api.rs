@@ -91,6 +91,19 @@ pub trait AgentManagment {
     type AgentRef;
     type Err;
 
+    async fn connect<P>(
+        &self,
+        progress: &P,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>
+    where
+        P: Progress + Send + Sync,
+        Self::AgentRef: Send + Sync,
+        Self::Err: Send + Sync,
+    {
+        self.create_connection(self.create_agent(progress).await?)
+            .await
+    }
+
     async fn create_connection(
         &self,
         agent_ref: Self::AgentRef,

@@ -108,6 +108,11 @@ fn add_to_preload(path: &str) -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
+
+    if config.operator.is_some() {
+        return Ok(());
+    }
+
     if config.agent.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");

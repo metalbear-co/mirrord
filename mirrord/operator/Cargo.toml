@@ -15,13 +15,29 @@ edition.workspace = true
 
 [features]
 default = []
+client = ["protocol", "dep:futures", "dep:tokio", "dep:mirrord-kube", "dep:mirrord-progress"]
 license-fetch = ["dep:reqwest"]
+protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes", "dep:serde_json", "dep:mirrord-config", "dep:mirrord-protocol"]
 setup = ["dep:k8s-openapi", "dep:serde_yaml"]
+server = ["protocol", "license-fetch"]
+
 
 [dependencies]
+mirrord-config = { path = "../config", optional = true }
+mirrord-kube = { path = "../kube", optional = true }
+mirrord-progress = { path = "../progress", optional = true }
+mirrord-protocol = { path = "../protocol", optional = true }
+
+async-trait = "0.1"
+actix-codec = { workspace = true, optional = true }
+bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
+bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 k8s-openapi = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["blocking", "json"], optional = true }
 serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
+tokio = { workspace = true, optional = true }

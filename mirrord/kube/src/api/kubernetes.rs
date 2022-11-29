@@ -1,3 +1,6 @@
+#[cfg(feature = "incluster")]
+use std::time::Duration;
+
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client, Config};
@@ -5,8 +8,10 @@ use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
+#[cfg(feature = "incluster")]
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 #[cfg(feature = "env_guard")]
 use crate::api::env_guard::EnvVarGuard;
@@ -70,11 +75,41 @@ impl AgentManagment for KubernetesAPI {
     type AgentRef = (String, u16);
     type Err = KubeApiError;
 
+    #[cfg(feature = "incluster")]
     async fn create_connection(
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+
+        let pod_addr = pod_api
+            .get(&pod_agent_name)
+            .await?
+            .status
+            .and_then(|status| status.pod_ip.clone())
+            .unwrap_or(pod_agent_name);
+
+        let agent_addr = format!("{}:{}", pod_addr, agent_port);
+
+        trace!("connecting to pod {}", &agent_addr);
+
+        let conn = tokio::time::timeout(
+            Duration::from_secs(self.agent.startup_timeout),
+            TcpStream::connect(&agent_addr),
+        )
+        .await
+        .map_err(|_| KubeApiError::AgentReadyTimeout)??;
+
+        wrap_raw_connection(conn)
+    }
+
+    #[cfg(not(feature = "incluster"))]
+    async fn create_connection(
+        &self,
+        (pod_agent_name, agent_port): Self::AgentRef,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
         wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
