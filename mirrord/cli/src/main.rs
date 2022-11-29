@@ -114,7 +114,7 @@ async fn create_agent(progress: &TaskProgress) -> Result<()> {
         return Ok(());
     }
 
-    if OperatorApiDiscover::discover_operator(config, &progress)
+    if OperatorApiDiscover::discover_operator(&config, progress)
         .await
         .is_some()
     {
