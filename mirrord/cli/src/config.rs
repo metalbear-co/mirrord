@@ -21,6 +21,30 @@ pub(super) enum Commands {
     // Login(LoginArgs),
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum FsMode {
+    /// Read & Write from remote, apart from overrides (hardcoded and configured in file)
+    ReadWrite,
+    /// Read from remote, Write local, apart from overrides (hardcoded and configured in file) -
+    /// default
+    Read,
+    /// Read & Write from local (disabled)
+    Local,
+    /// Read & Write from local, apart from overrides (hardcoded and configured in file)
+    LocalWithOverrides,
+}
+
+impl ToString for FsMode {
+    fn to_string(&self) -> String {
+        match self {
+            FsMode::Local => "local".to_string(),
+            FsMode::LocalWithOverrides => "localwithoverrides".to_string(),
+            FsMode::Read => "read".to_string(),
+            FsMode::Write => "write".to_string(),
+        }
+    }
+}
+
 #[derive(Args, Debug)]
 #[command(group(
     ArgGroup::new("exec")
@@ -28,14 +52,6 @@ pub(super) enum Commands {
         .multiple(true)
         .args(&["target", "config_file"]),
 ))]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum FsMode {
-    ReadWrite,
-    Read,
-    Local,
-    Disabled,
-}
-
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
@@ -68,7 +84,6 @@ pub(super) struct ExecArgs {
     pub enable_rw_fs: bool,
 
     /// Default file system behavior: disabled, read, write, local
-    #[clap(value_parser)]
     pub fs_mode: Option<FsMode>,
 
     /// The env vars to filter out

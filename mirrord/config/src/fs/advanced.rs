@@ -107,9 +107,15 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             .source_value()
             .transpose()?;
 
-        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN").source_value().transpose()?;
-        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN").source_value().transpose()?;
-        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN").source_value().transpose()?;
+        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
+            .source_value()
+            .transpose()?;
+        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
+            .source_value()
+            .transpose()?;
+        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
+            .source_value()
+            .transpose()?;
 
         Ok(Self::Generated {
             mode,
