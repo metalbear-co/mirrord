@@ -5,11 +5,14 @@ use k8s_openapi::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             Container, ContainerPort, EnvFromSource, EnvVar, Namespace, PodSpec, PodTemplateSpec,
-            Secret, SecretEnvSource, ServiceAccount,
+            Secret, SecretEnvSource, Service, ServiceAccount, ServicePort, ServiceSpec,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
-    apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
+    apimachinery::pkg::{
+        apis::meta::v1::{LabelSelector, ObjectMeta},
+        util::intstr::IntOrString,
+    },
 };
 use thiserror::Error;
 
@@ -18,6 +21,7 @@ static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
+static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
@@ -44,6 +48,7 @@ pub struct Operator {
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
     secret: OperatorSecret,
+    service: OperatorService,
     service_account: OperatorServiceAccount,
 }
 
@@ -57,12 +62,15 @@ impl Operator {
 
         let deployment = OperatorDeployment::new(&namespace, &service_account, &secret);
 
+        let service = OperatorService::new(&namespace);
+
         Operator {
             namespace,
             deployment,
             role,
             role_binding,
             secret,
+            service,
             service_account,
         }
     }
@@ -86,6 +94,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.deployment.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.service.to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -351,6 +362,42 @@ impl OperatorSecret {
 }
 
 impl OperatorSetup for OperatorSecret {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorService(Service);
+
+impl OperatorService {
+    pub fn new(namespace: &OperatorNamespace) -> Self {
+        let service = Service {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_SERVICE_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
+                labels: Some(APP_LABELS.clone()),
+                ..Default::default()
+            },
+            spec: Some(ServiceSpec {
+                type_: Some("ClusterIP".to_owned()),
+                selector: Some(APP_LABELS.clone()),
+                ports: Some(vec![ServicePort {
+                    name: Some("tcp".to_owned()),
+                    port: 8080,
+                    target_port: Some(IntOrString::String("tcp".to_owned())),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        OperatorService(service)
+    }
+}
+
+impl OperatorSetup for OperatorService {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }
