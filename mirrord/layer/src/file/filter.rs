@@ -220,6 +220,9 @@ impl FileFilter {
     where
         F: FnOnce() -> Bypass,
     {
+        if matches!(&self.mode, FsModeConfig::Local | FsModeConfig::Disabled) {
+            return Detour::Bypass(op());
+        }
         // Order matters here, as we want to make `include` the most important pattern. If the user
         // specified `include`, then we never want to accidentally allow other paths to pass this
         // check (this is a corner case that is unlikely to happen, as initialization via
@@ -463,24 +466,49 @@ mod tests {
     #[case(FsModeConfig::Read, "/pain/write.a", true, true)]
     #[case(FsModeConfig::Read, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Read, "/opt/test.a", true, true)]
-    #[case(FsModeConfig::Local, "/a/test.a", false, true)]
-    #[case(FsModeConfig::Local, "/pain/read_write/test.a", false, false)]
-    #[case(FsModeConfig::Local, "/pain/read_only/test.a", false, false)]
-    #[case(FsModeConfig::Local, "/pain/write.a", false, true)]
-    #[case(FsModeConfig::Local, "/pain/local/test.a", false, true)]
-    #[case(FsModeConfig::Local, "/opt/test.a", false, true)]
-    #[case(FsModeConfig::Local, "/a/test.a", true, true)]
-    #[case(FsModeConfig::Local, "/pain/read_write/test.a", true, false)]
-    #[case(FsModeConfig::Local, "/pain/read_only/test.a", true, true)]
-    #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
-    #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
-    #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/a/test.a", false, true)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/pain/read_write/test.a",
+        false,
+        false
+    )]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/pain/read_only/test.a",
+        false,
+        false
+    )]
+    #[case(FsModeConfig::LocalWithOverrides, "/pain/write.a", false, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/pain/local/test.a", false, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/opt/test.a", false, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/a/test.a", true, true)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/pain/read_write/test.a",
+        true,
+        false
+    )]
+    #[case(FsModeConfig::LocalWithOverrides, "/pain/read_only/test.a", true, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/pain/write.a", true, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/pain/local/test.a", true, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/opt/test.a", true, true)]
     #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
     #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
-    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/Users/a/.aws/cli/cache/121.json",
+        true,
+        true
+    )]
     #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
     #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
-    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/1241.json", false, false)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/Users/a/.aws/cli/cache/1241.json",
+        false,
+        false
+    )]
     fn test_include_complex_configuration(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
@@ -517,10 +545,20 @@ mod tests {
     #[rstest]
     #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
     #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
-    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/Users/a/.aws/cli/cache/121.json",
+        true,
+        true
+    )]
     #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
     #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
-    #[case(FsModeConfig::Local, "/Users/a/.aws/cli/cache/1241.json", false, false)]
+    #[case(
+        FsModeConfig::LocalWithOverrides,
+        "/Users/a/.aws/cli/cache/1241.json",
+        false,
+        false
+    )]
     fn test_remote_read_only_set(
         #[case] mode: FsModeConfig,
         #[case] path: &str,

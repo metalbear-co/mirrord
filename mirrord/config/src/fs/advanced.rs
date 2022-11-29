@@ -23,12 +23,15 @@ use crate::{
 /// Besides the default behavior, user can specify behavior for specific regex patterns. Case
 /// insensitive. 1. read_write - List of patterns that should be read/write remotely.
 /// 2. read_only - List of patterns that should be read only remotely.
-/// 3. local_only - List of patterns that should be read locally.
+/// 3. local - List of patterns that should be read locally.
 ///
 /// The logic for choosing the behavior is as follows:
 /// 1. Check if one of the patterns match the file path, do the corresponding action. There's no
-/// specified order    if two lists match the same path, we will use the first one (and we do not
-/// guarantee what is first) 2. Check our "special list" - we have an internal at compile time list
+/// specified order if two lists match the same path, we will use the first one (and we do not
+/// guarantee what is first).
+/// Note: Specifying the same path in two lists is unsupported and can lead to
+///         undefined behaviour.
+/// 2. Check our "special list" - we have an internal at compile time list
 /// for different behavior based on patterns    to provide better UX.
 /// 3. If none of the above match, use the default behavior (mode).
 ///
@@ -43,7 +46,7 @@ use crate::{
 /// mode = read
 /// read_write = ["/var/run"]
 /// read_only = ["/etc"]
-/// local_only = ["/lib"]
+/// local = ["/lib"]
 /// ```
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug)]
 #[config(

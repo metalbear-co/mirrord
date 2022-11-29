@@ -5,14 +5,16 @@ use serde::Deserialize;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, FromMirrordConfig, MirrordConfig, Result, ConfigError,
+        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
+        MirrordConfig, Result,
     },
     util::MirrordToggleableConfig,
 };
 
 /// Configuration for enabling read-only and read-write file operations.
-///
-/// Default option for general file configuration.
+/// These options are overriden by user specified overrides and mirrord default overrides.
+/// If you set LocalWithOverrides then somefiles can be read/write remotely based on our
+/// default/user specified. Default option for general file configuration.
 ///
 /// ## Examples
 ///
@@ -34,11 +36,17 @@ use crate::{
 #[derive(Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
+    /// Deprecated, use local instead
     Disabled,
+    /// mirrord won't do anything fs-related, all operations will be local.
+    Local,
+    /// mirrord will run overrides on some file operations, but most will be local.
+    LocalWithOverrides,
+    /// mirrord will read files from the remote, but won't write to them.
     #[default]
     Read,
+    /// mirrord will read/write from the remote.
     Write,
-    Local,
 }
 
 impl FsModeConfig {
@@ -57,14 +65,14 @@ impl FromStr for FsModeConfig {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "disabled" => Ok(FsModeConfig::Disabled),
+            "local" => Ok(FsModeConfig::Local),
+            "localwithoverrides" => Ok(FsModeConfig::LocalWithOverrides),
             "read" => Ok(FsModeConfig::Read),
             "write" => Ok(FsModeConfig::Write),
-            "local" => Ok(FsModeConfig::Local),
             _ => Err(ConfigError::InvalidFsMode(s.to_string())),
         }
     }
 }
-
 
 impl FsModeConfig {
     fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
@@ -72,7 +80,7 @@ impl FsModeConfig {
             (Some(false), Some(true)) | (None, Some(true)) => Some(FsModeConfig::Read),
             (Some(true), _) => Some(FsModeConfig::Write),
             (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
-                Some(FsModeConfig::Disabled)
+                Some(FsModeConfig::Local)
             }
             (None, None) => None,
         }
@@ -83,28 +91,44 @@ impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
     fn generate_config(self) -> Result<Self::Generated> {
+        if matches!(self, FsModeConfig::Disabled) {
+            println!("The `disabled` option for `fs` is deprecated. Use `local` instead.");
+        }
+
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
             .source_value()
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
             .source_value()
             .transpose()?;
+        let mode = FromEnv::new("MIRRORD_FILE_MODE")
+            .source_value()
+            .transpose()?;
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        if let Some(mode) = mode {
+            return Ok(mode);
+        } else {
+            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        }
     }
 }
 
 impl MirrordToggleableConfig for FsModeConfig {
     fn disabled_config() -> Result<Self::Generated> {
-        let fs = FromEnv::new("MIRRORD_FILE_OPS").source_value().transpose()?;
-        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS").source_value().transpose()?;
-        let mode = FromEnv::new("MIRRORD_FILE_MODE").source_value().transpose()?;
+        let fs = FromEnv::new("MIRRORD_FILE_OPS")
+            .source_value()
+            .transpose()?;
+        let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
+            .source_value()
+            .transpose()?;
+        let mode = FromEnv::new("MIRRORD_FILE_MODE")
+            .source_value()
+            .transpose()?;
         if let Some(mode) = mode {
             return Ok(mode);
         } else {
-            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
+            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Local))
         }
-        
     }
 }
 
