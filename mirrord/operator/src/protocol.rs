@@ -27,7 +27,9 @@ impl Handshake {
 
 impl Encode for Handshake {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let target = serde_json::to_vec(&self.target).expect("target not json serializable");
+        let target = serde_json::to_vec(&self.target).map_err(|err| {
+            EncodeError::OtherString(format!("target could not be json serialized {:?}", err))
+        })?;
         bincode::Encode::encode(&target, encoder)?;
         Ok(())
     }
@@ -36,8 +38,9 @@ impl Encode for Handshake {
 impl Decode for Handshake {
     fn decode<D: bincode::de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
-        let target =
-            serde_json::from_slice(&target_buffer).expect("target not json deserializable");
+        let target = serde_json::from_slice(&target_buffer).map_err(|err| {
+            DecodeError::OtherString(format!("target could not be json deserialized {:?}", err))
+        })?;
 
         Ok(Handshake { target })
     }
@@ -48,8 +51,9 @@ impl<'de> BorrowDecode<'de> for Handshake {
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
         let target_buffer: Vec<u8> = bincode::Decode::decode(decoder)?;
-        let target =
-            serde_json::from_slice(&target_buffer).expect("target not json deserializable");
+        let target = serde_json::from_slice(&target_buffer).map_err(|err| {
+            DecodeError::OtherString(format!("target could not be json deserialized {:?}", err))
+        })?;
 
         Ok(Handshake { target })
     }
