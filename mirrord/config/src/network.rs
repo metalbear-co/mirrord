@@ -1,5 +1,5 @@
 use mirrord_config_derive::MirrordConfig;
-use mirrord_http::HttpFilter;
+use mirrord_http::HttpHeaderSelect;
 use schemars::JsonSchema;
 
 use crate::{
@@ -53,16 +53,11 @@ pub struct NetworkConfig {
     ///
     /// The regexes specified here will make mirrord operate only on requests that match it,
     /// otherwise the request will not be stolen.
-    #[config(env = "MIRRORD_HTTP_FILTER_INCLUDE")]
-    pub http_include: Option<VecOrSingle<String>>,
-
-    /// Allows the user to specify regexes that are used to match against HTTP headers when mirrord
-    /// network operations are enabled.
     ///
-    /// The opposite of `include`, requests that match the regexes specified here will bypass
-    /// mirrord (won't be stolen).
-    #[config(env = "MIRRORD_HTTP_FILTER_EXCLUDE")]
-    pub http_exclude: Option<VecOrSingle<String>>,
+    /// More specifically, the requests will try to match on both the header regex, and the header
+    /// value regex.
+    #[config(env = "MIRRORD_HTTP_HEADER_SELECT")]
+    pub http_header_select: Option<(String, String)>, // (HeaderName, HeaderValue)
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
@@ -71,21 +66,26 @@ impl MirrordToggleableConfig for NetworkFileConfig {
             .source_value()
             .transpose()?
             .unwrap_or(IncomingConfig::Mirror);
+
         let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
             .source_value()
             .transpose()?
             .unwrap_or(false);
+
+        let http_header_select = FromEnv::new("MIRRORD_HTTP_HEADER_SELECT")
+            .source_value()
+            .transpose()?;
+
         Ok(NetworkConfig {
             incoming,
             dns,
             outgoing: OutgoingFileConfig::disabled_config()?,
-            http_include: FromEnv::new("MIRRORD_HTTP_FILTER_INCLUDE").source_value(),
-            http_exclude: FromEnv::new("MIRRORD_HTTP_FILTER_EXCLUDE").source_value(),
+            http_header_select,
         })
     }
 }
 
-impl From<NetworkConfig> for HttpFilter {
+impl From<NetworkConfig> for Option<HttpHeaderSelect> {
     /// Initializes a `HttpFilter` based on the user configuration.
     ///
     /// - [`HttpFilter::Include`] is returned if the user specified any include path (thus erasing
@@ -95,15 +95,11 @@ impl From<NetworkConfig> for HttpFilter {
     #[tracing::instrument(level = "debug")]
     fn from(network_config: NetworkConfig) -> Self {
         let NetworkConfig {
-            http_include,
-            http_exclude,
-            ..
+            http_header_select, ..
         } = network_config;
 
-        let include = http_include.map(VecOrSingle::to_vec).unwrap_or_default();
-        let exclude = http_exclude.map(VecOrSingle::to_vec).unwrap_or_default();
-
-        Self::new(include, exclude)
+        http_header_select
+            .map(|(header_name, header_value)| HttpHeaderSelect::new(&header_name, &header_value))
     }
 }
 

@@ -62,7 +62,4 @@ pub enum LayerTcpSteal {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum RegexFilter {
-    Include(String),
-    Exclude(String),
-}
+pub struct RegexFilter(pub String, pub String);

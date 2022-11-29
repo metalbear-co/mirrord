@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use async_trait::async_trait;
 use mirrord_config::network::NetworkConfig;
-use mirrord_http::HttpFilter;
+use mirrord_http::HttpHeaderSelect;
 use mirrord_protocol::{
     tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId,
@@ -28,7 +28,10 @@ pub struct TcpStealHandler {
     ports: HashSet<Listen>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
-    http_filter: HttpFilter,
+
+    /// Only 1 filter can be active for this `layer` as, currently, there is no way for the user to
+    /// specify filters for different ports.
+    http_filter: Option<HttpHeaderSelect>,
 }
 
 impl TcpStealHandler {

@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use mirrord_http::{hyper_debug, HttpFilter, HttpProxy};
+use mirrord_http::{hyper_debug, HttpHeaderSelect, HttpProxy};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -204,7 +204,7 @@ impl StealWorker {
     pub fn new(
         sender: Sender<DaemonTcp>,
         listen_port: Port,
-    ) -> Result<(Self, (DuplexStream, Receiver<HttpFilter>))> {
+    ) -> Result<(Self, (DuplexStream, Receiver<HttpHeaderSelect>))> {
         let (proxy_client, proxy_server) = duplex(12345);
         let (filter_tx, filter_rx) = channel(12345);
 
@@ -227,7 +227,7 @@ impl StealWorker {
         mut self,
         mut rx: Receiver<LayerTcpSteal>,
         listener: TcpListener,
-        (proxy_server, filter_rx): (DuplexStream, Receiver<HttpFilter>),
+        (proxy_server, filter_rx): (DuplexStream, Receiver<HttpHeaderSelect>),
     ) -> Result<()> {
         HttpProxy::start(proxy_server, filter_rx).await?;
 

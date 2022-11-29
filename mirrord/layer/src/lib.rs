@@ -26,7 +26,10 @@ use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use libc::c_int;
 use mirrord_config::{
-    feature::FeatureConfig, network::NetworkConfig, util::VecOrSingle, LayerConfig,
+    feature::FeatureConfig,
+    network::{self, NetworkConfig},
+    util::VecOrSingle,
+    LayerConfig,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
@@ -412,7 +415,7 @@ async fn thread_loop(
     let LayerConfig {
         feature: FeatureConfig { network, .. },
         ..
-    };
+    } = config;
 
     let mut layer = Layer::new(tx, rx, network);
 

@@ -1,4 +1,6 @@
 #![feature(result_option_inspect)]
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_crate_level_docs)]
 
 use core::convert::Infallible;
 
@@ -11,100 +13,38 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-/// Holds the `Regex` that is used to either continue or bypass file path operations (such as
-/// [`file::ops::open`]), according to what the user specified.
-///
-/// The [`HttpFilter::Include`] variant takes precedence and erases whatever the user supplied as
-/// exclude, this means that if the user specifies both, `HttpFilter::Exclude` is never constructed.
-///
-/// Warning: Use [`HttpFilter::new`] (or equivalent) when initializing this, otherwise the above
-/// constraint might not be held.
+static SELECT_ALL: &str = ".*";
+
 #[derive(Debug, Clone)]
-pub enum HttpFilter {
-    /// User specified `Regex` containing the file paths that the user wants to include for file
-    /// operations.
-    ///
-    /// Overrides [`HttpFilter::Exclude`].
-    Include(Regex),
+pub struct HttpHeaderSelect {
+    /// Matches on header name.
+    name: Regex,
 
-    /// Combination of [`DEFAULT_EXCLUDE_LIST`] and the user's specified `Regex`.
-    ///
-    /// Anything not matched by this `Regex` is considered as included.
-    Exclude(Regex),
+    /// Matches on header value.
+    value: Regex,
 }
 
-static INCLUDE_ALL: &str = ".*";
-
-impl Default for HttpFilter {
-    fn default() -> Self {
-        // TODO(alex): Not a good UX, this should be excluding everything by default (but it would
-        // be a breaking change).
-        Self::Include(Regex::new(INCLUDE_ALL).unwrap())
-    }
-}
-
-impl HttpFilter {
+impl HttpHeaderSelect {
     #[tracing::instrument(level = "debug")]
-    pub fn new(include: Vec<String>, exclude: Vec<String>) -> Self {
-        let default_include_regex =
-            Regex::new(INCLUDE_ALL).expect("Failed parsing default exclude file regex!");
-
-        // Converts a list of `String` into one big regex-fied `String`.
-        let reduce_to_string = |list: Vec<String>| {
-            list.into_iter()
-                // Turn into capture group `(/folder/first.txt)`.
-                .map(|element| format!("({element})"))
-                // Put `or` operation between groups `(/folder/first.txt)|(/folder/second.txt)`.
-                .reduce(|acc, element| format!("{acc}|{element}"))
-        };
-
-        let exclude = reduce_to_string(exclude)
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing include http regex!")
-            .map(Self::Exclude);
-
-        // Try to generate the final `Regex` based on `include`.
-        reduce_to_string(include)
-            .as_deref()
-            .map(Regex::new)
-            .transpose()
-            .expect("Failed parsing include file regex!")
-            .map(Self::Include)
-            // `include` was empty, so we fallback to `exclude`.
-            .or(exclude)
-            // `exclude` was also empty, so we fallback to `default_include`.
-            .unwrap_or(Self::Include(default_include_regex))
-    }
-
-    #[tracing::instrument(level = "debug")]
-    fn matches(&self, text: &str) -> bool {
-        match self {
-            HttpFilter::Include(include) if include.is_match(text).unwrap() => true,
-            HttpFilter::Exclude(exclude) if !exclude.is_match(text).unwrap() => true,
-            _ => false,
+    pub fn new(header_name: &str, header_value: &str) -> Self {
+        Self {
+            name: Regex::new(header_name).unwrap(),
+            value: Regex::new(&header_value).unwrap(),
         }
     }
 }
 
 // TODO(alex) [low] 2022-11-25: Should be `TryFrom`, to prevent `unwrap` of invalid values. I can't
 // see a way of guaranteeing that we're always the ones creating these regexes from layer config.
-impl From<RegexFilter> for HttpFilter {
-    fn from(regex_filter: RegexFilter) -> Self {
-        match regex_filter {
-            RegexFilter::Include(regex_string) => Self::Include(Regex::new(&regex_string).unwrap()),
-            RegexFilter::Exclude(regex_string) => Self::Exclude(Regex::new(&regex_string).unwrap()),
-        }
+impl From<RegexFilter> for HttpHeaderSelect {
+    fn from(RegexFilter(name, value): RegexFilter) -> Self {
+        Self::new(&name, &value)
     }
 }
 
-impl From<HttpFilter> for RegexFilter {
-    fn from(http_filter: HttpFilter) -> Self {
-        match http_filter {
-            HttpFilter::Include(regex) => Self::Include(regex.to_string()),
-            HttpFilter::Exclude(regex) => Self::Exclude(regex.to_string()),
-        }
+impl From<HttpHeaderSelect> for RegexFilter {
+    fn from(HttpHeaderSelect { name, value }: HttpHeaderSelect) -> Self {
+        Self(name.to_string(), value.to_string())
     }
 }
 
@@ -129,37 +69,37 @@ pub enum HttpError {
     Join(#[from] tokio::task::JoinError),
 
     #[error("Failed with Sender `{0}`!")]
-    Sender(#[from] tokio::sync::mpsc::error::SendError<HttpFilter>),
+    Sender(#[from] tokio::sync::mpsc::error::SendError<HttpHeaderSelect>),
 }
 
 #[derive(Debug)]
 pub struct HttpProxy {
-    filter: HttpFilter,
+    filter: HttpHeaderSelect,
     client: DuplexStream,
-    filter_tx: Sender<HttpFilter>,
+    filter_tx: Sender<HttpHeaderSelect>,
 }
 
 // TODO(alex) [high] 2022-11-28: The packets we capture, can be sent to the layer as `TcpData` to
 // be handled by the mirror socket -> user socket, via `ConnectionId`.
 impl HttpProxy {
     #[tracing::instrument(level = "debug")]
-    pub fn new(client: DuplexStream, filter_tx: Sender<HttpFilter>) -> Self {
+    pub fn new(client: DuplexStream, filter_tx: Sender<HttpHeaderSelect>) -> Self {
         Self {
             client,
             filter_tx,
-            filter: HttpFilter::default(),
+            filter: HttpHeaderSelect::default(),
         }
     }
 
     #[tracing::instrument(level = "debug")]
-    pub async fn filter(&mut self, filter: HttpFilter) -> Result<(), HttpError> {
+    pub async fn filter(&mut self, filter: HttpHeaderSelect) -> Result<(), HttpError> {
         Ok(self.filter_tx.send(filter).await?)
     }
 
     #[tracing::instrument(level = "debug")]
     pub async fn start(
         server: DuplexStream,
-        filter_rx: Receiver<HttpFilter>,
+        filter_rx: Receiver<HttpHeaderSelect>,
     ) -> Result<(), HttpError> {
         let proxy_task = tokio::task::spawn(async move {
             // TODO(alex) [high] 2022-11-28: Use the filter we have from `filter_rx`.
@@ -251,6 +191,7 @@ pub async fn hyper_debug(bytes: &[u8]) -> Result<(), HttpError> {
                     // ADD(alex) [high] 2022-11-28: Both will be inserted into the body of a
                     // `Response`, so we need to differentiate between those somehow (maybe add a
                     // special header to the "captured" request, and check for it).
+                    request.headers().iter().map(|(x, y)| todo!());
                     println!("foo");
                     Ok::<_, Infallible>(Response::new("hello".to_string()))
                 }),
