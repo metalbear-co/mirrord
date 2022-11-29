@@ -176,6 +176,13 @@
             "null"
           ]
         },
+        "pause": {
+          "description": "Controls target pause feature. Unstable.\n\nWith this feature enabled, the remote container is paused while clients are connected to the agent.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "startup_timeout": {
           "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.",
           "type": [
