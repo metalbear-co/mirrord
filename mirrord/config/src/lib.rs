@@ -78,7 +78,7 @@ use crate::{
 pub struct LayerConfig {
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
-    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = "false")]
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
     /// Allows mirrord to skip unwanted processes.
@@ -199,7 +199,8 @@ mod tests {
                             "image": "",
                             "image_pull_policy": "",
                             "ttl": 60,
-                            "ephemeral": false
+                            "ephemeral": false,
+                            "pause": false
                         },
                         "feature": {
                             "env": true,
@@ -231,6 +232,7 @@ mod tests {
                     image_pull_policy = ""
                     ttl = 60
                     ephemeral = false
+                    pause = false
 
                     [feature]
                     env = true
@@ -259,6 +261,7 @@ mod tests {
                         image_pull_policy: ""
                         ttl: 60
                         ephemeral: false
+                        pause: false
 
                     feature:
                         env: true
@@ -328,6 +331,7 @@ mod tests {
                 communication_timeout: None,
                 startup_timeout: None,
                 network_interface: None,
+                pause: Some(false),
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

@@ -44,7 +44,7 @@ trust-dns-resolver.workspace = true
 rand = "0.8"
 fancy-regex = { version = "0.10" }
 errno = "0.2"
-async-trait = "0.1"
+async-trait.workspace = true
 socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true

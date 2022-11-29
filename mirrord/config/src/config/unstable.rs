@@ -1,4 +1,4 @@
-use crate::config::source::MirrordConfigSource;
+use crate::config::{source::MirrordConfigSource, Result};
 
 #[derive(Clone)]
 pub struct Unstable<T>(&'static str, &'static str, T);
@@ -13,9 +13,9 @@ impl<T> MirrordConfigSource for Unstable<T>
 where
     T: MirrordConfigSource,
 {
-    type Result = T::Result;
+    type Value = T::Value;
 
-    fn source_value(self) -> Option<T::Result> {
+    fn source_value(self) -> Option<Result<Self::Value>> {
         self.2.source_value().map(|result| {
             println!(
                 "Warning: field {}.{} is marked as unstable. Please note API may change",

@@ -90,6 +90,12 @@ pub enum AgentError {
 
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
+
+    #[error("Pause was set, but container id or runtime is missing.")]
+    MissingContainerInfo,
+
+    #[error("start_client -> Ran out of connections, dropping new connection")]
+    ConnectionLimitReached,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

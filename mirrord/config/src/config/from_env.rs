@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, str::FromStr};
 
-use crate::config::source::MirrordConfigSource;
+use crate::config::{source::MirrordConfigSource, ConfigError, Result};
 
 #[derive(Clone)]
 pub struct FromEnv<T>(&'static str, PhantomData<T>);
@@ -15,10 +15,13 @@ impl<T> MirrordConfigSource for FromEnv<T>
 where
     T: FromStr,
 {
-    type Result = T;
+    type Value = T;
 
-    fn source_value(self) -> Option<T> {
-        std::env::var(self.0).ok().and_then(|var| var.parse().ok())
+    fn source_value(self) -> Option<Result<Self::Value>> {
+        std::env::var(self.0).ok().map(|var| {
+            var.parse()
+                .map_err(|_| ConfigError::InvalidValue(var.to_string(), self.0))
+        })
     }
 }
 
@@ -30,13 +33,13 @@ mod tests {
     use crate::util::testing::with_env_vars;
 
     #[rstest]
-    #[case(None, None)]
-    #[case(Some("13"), Some(13))]
-    fn basic(#[case] env: Option<&str>, #[case] expect: Option<i32>) {
-        with_env_vars(vec![("TEST_VALUE", env)], || {
-            let value = FromEnv::new("TEST_VALUE");
+    fn basic() {
+        with_env_vars(vec![("TEST_VALUE", Some("13"))], || {
+            let value = FromEnv::<i32>::new("TEST_VALUE");
 
-            assert_eq!(value.source_value(), expect);
+            assert_eq!(value.source_value().unwrap().unwrap(), 13);
         });
+        let value = FromEnv::<i32>::new("TEST_VALUE");
+        assert!(value.source_value().is_none());
     }
 }

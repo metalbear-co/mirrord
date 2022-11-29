@@ -69,8 +69,12 @@ pub struct FsConfig {
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
-        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE").source_value();
-        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE").source_value();
+        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE")
+            .source_value()
+            .transpose()?;
+        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE")
+            .source_value()
+            .transpose()?;
 
         Ok(Self::Generated {
             mode,

@@ -75,6 +75,6 @@ pub struct FeatureConfig {
     /// Controls the crash reporting feature.
     ///
     /// With this feature enabled, mirrord generates a nice crash report log.
-    #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = "false")]
+    #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = false)]
     pub capture_error_trace: bool,
 }

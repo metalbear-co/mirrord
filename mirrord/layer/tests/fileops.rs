@@ -61,7 +61,7 @@ async fn test_self_open(dylib_path: &PathBuf) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    env.insert("MIRRORD_IMPERSONATED_TARGET", "mock-target"); // Just pass some value.
+    env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
