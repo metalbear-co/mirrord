@@ -33,7 +33,8 @@ use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    runtime::get_container_pid,
+    cli::Args,
+    runtime::{get_container, Container, ContainerRuntime},
     steal::steal_worker,
     util::{run_thread, ClientID, IndexAllocator},
 };
@@ -51,27 +52,87 @@ mod util;
 
 const CHANNEL_SIZE: usize = 1024;
 
+/// Keeps track of connected clients.
+/// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
 struct State {
-    pub clients: HashSet<ClientID>,
+    clients: HashSet<ClientID>,
     index_allocator: IndexAllocator<ClientID>,
+    /// Was the pause argument passed? If true, will pause the container when no clients are
+    /// connected.
+    should_pause: bool,
+    /// This is an option because it is acceptable not to pass a container runtime and id if not
+    /// pausing. When those args are not passed, container is None.
+    container: Option<Container>,
 }
 
 impl State {
-    pub fn new() -> State {
-        State {
+    /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
+    /// the container info (runtime and id) was not.
+    pub async fn new(args: &Args) -> Result<State> {
+        let container =
+            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+        if container.is_none() && args.pause {
+            return Err(AgentError::MissingContainerInfo);
+        }
+        Ok(State {
             clients: HashSet::new(),
             index_allocator: IndexAllocator::new(),
+            should_pause: args.pause,
+            container,
+        })
+    }
+
+    /// Get the external pid of the target container, if container info available.
+    pub async fn get_container_pid(&self) -> Result<Option<u64>> {
+        if self.container.is_some() {
+            let container = self.container.as_ref().unwrap();
+            let pid = container.get_pid().await?;
+            Ok(Some(pid))
+        } else {
+            Ok(None)
         }
     }
 
-    pub fn generate_id(&mut self) -> Option<ClientID> {
+    /// If there are clientIDs left, insert new one and return it.
+    /// If there were no clients before, and there is a Pauser, start pausing.
+    /// Propagate container runtime errors.
+    pub async fn new_client(&mut self) -> Result<ClientID> {
+        match self.generate_id() {
+            None => Err(AgentError::ConnectionLimitReached),
+            Some(new_id) => {
+                self.clients.insert(new_id.to_owned());
+                if self.clients.len() == 1 {
+                    // First client after no clients.
+                    if self.should_pause {
+                        self.container.as_ref().unwrap().pause().await?;
+                    }
+                }
+                Ok(new_id)
+            }
+        }
+    }
+
+    fn generate_id(&mut self) -> Option<ClientID> {
         self.index_allocator.next_index()
     }
 
-    pub fn remove_client(&mut self, client_id: ClientID) {
+    /// If that was the last client and we are pausing, stop pausing.
+    /// Propagate container runtime errors.
+    pub async fn remove_client(&mut self, client_id: ClientID) -> Result<()> {
         self.clients.remove(&client_id);
-        self.index_allocator.free_index(client_id)
+        self.index_allocator.free_index(client_id);
+        if self.clients.is_empty() {
+            // resume container (stop stopping).
+            if self.should_pause {
+                self.container.as_ref().unwrap().unpause().await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn no_clients_left(&self) -> bool {
+        self.clients.is_empty()
     }
 }
 
@@ -287,14 +348,8 @@ async fn start_agent() -> Result<()> {
     ))
     .await?;
 
-    let pid = match (args.container_id, args.container_runtime) {
-        (Some(container_id), Some(container_runtime)) => {
-            Some(get_container_pid(&container_id, &container_runtime).await?)
-        }
-        _ => None,
-    };
-
-    let mut state = State::new();
+    let mut state = State::new(&args).await?;
+    let pid = state.get_container_pid().await?;
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
     let cancel_guard = cancellation_token.clone().drop_guard();
@@ -319,52 +374,54 @@ async fn start_agent() -> Result<()> {
             Ok((stream, addr)) = listener.accept() => {
                 trace!("start -> Connection accepted from {:?}", addr);
 
-                if let Some(client_id) = state.generate_id() {
-
-                    state.clients.insert(client_id);
-                    let sniffer_command_tx = sniffer_command_tx.clone();
-                    let cancellation_token = cancellation_token.clone();
-                    let dns_sender = dns_sender.clone();
-                    let client = tokio::spawn(async move {
-                        match ClientConnectionHandler::new(
-                                client_id,
-                                stream,
-                                pid,
-                                args.ephemeral_container,
-                                sniffer_command_tx,
-                                dns_sender,
-                            )
-                            .and_then(|client| client.start(cancellation_token))
-                            .await
-                            {
-                                Ok(_) => {
-                                    trace!(
-                                        "ClientConnectionHandler::start -> Client {} disconnected",
-                                        client_id
-                                    );
+                match state.new_client().await {
+                    Ok(client_id) => {
+                        let sniffer_command_tx = sniffer_command_tx.clone();
+                        let cancellation_token = cancellation_token.clone();
+                        let dns_sender = dns_sender.clone();
+                        let client = tokio::spawn(async move {
+                            match ClientConnectionHandler::new(
+                                    client_id,
+                                    stream,
+                                    pid,
+                                    args.ephemeral_container,
+                                    sniffer_command_tx,
+                                    dns_sender,
+                                )
+                                .and_then(|client| client.start(cancellation_token))
+                                .await
+                                {
+                                    Ok(_) => {
+                                        trace!(
+                                            "ClientConnectionHandler::start -> Client {} disconnected",
+                                            client_id
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
+                                            client_id, e
+                                        );
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(
-                                        "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
-                                        client_id, e
-                                    );
-                                }
-                            }
-                        client_id
+                            client_id
 
-                    });
-                    clients.push(client);
-                } else {
-                    error!("start_client -> Ran out of connections, dropping new connection");
+                        });
+                        clients.push(client);
+                    },
+                    Err(AgentError::ConnectionLimitReached) => {
+                        error!("start_client -> Ran out of connections, dropping new connection");
+                    },
+                    // Propagate all errors that are not ConnectionLimitReached.
+                    err => { err?; },
                 }
-
             },
             Some(client) = clients.next() => {
                 let client_id = client?;
-                state.remove_client(client_id);
+                state.remove_client(client_id).await?;
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())) => {
-                if state.clients.is_empty() {
+                if state.no_clients_left() {
                     trace!("Main thread timeout, no clients connected.");
                     break;
                 }

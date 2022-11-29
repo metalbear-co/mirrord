@@ -185,7 +185,7 @@ impl ConfigField {
         if layers.is_empty() {
             quote! { #ident: #impls .source_value().transpose()?#unwrapper }
         } else {
-            quote! { #ident: #impls (#(#layers),*) .source_value().transpose()?#unwrapper }
+            quote! { #ident: #impls #(#layers),* .source_value().transpose()?#unwrapper }
         }
     }
 }

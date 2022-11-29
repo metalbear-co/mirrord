@@ -31,6 +31,10 @@ pub struct Args {
     /// Inform the agent to use `proc/1/root` as the root directory.
     #[arg(short = 'e', long, default_value_t = false)]
     pub ephemeral_container: bool,
+
+    /// Pause the target container while clients are connected.
+    #[arg(short = 'p', long, default_value_t = false)]
+    pub pause: bool,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";

@@ -13,6 +13,10 @@ use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_operator::{
+    license::License,
+    setup::{Operator, OperatorSetup},
+};
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -27,6 +31,18 @@ const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 
 #[cfg(target_os = "macos")]
 const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+const PAUSE_WITHOUT_STEAL_WARNING: &str =
+    "--pause specified without --steal: Incoming requests to the application will
+                                           not be handled. The target container running the deployed application is paused,
+                                           and responses from the local application are dropped.
+
+                                           Attention: if network based liveness/readiness probes are defined for the
+                                           target, they will fail under this configuration.
+
+                                           To have the local application handle incoming requests you can run again with
+                                           `--steal`. To have the deployed application handle requests, run again without
+                                           specifying `--pause`.
+    ";
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
@@ -92,6 +108,15 @@ fn add_to_preload(path: &str) -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
+    if config.agent.pause {
+        if config.agent.ephemeral {
+            error!("Pausing is not yet supported together with an ephemeral agent container.");
+            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
+        }
+        if !config.feature.network.incoming.is_steal() {
+            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+        }
+    }
     let kube_api = KubernetesAPI::create(&config).await?;
     let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
     // Set env var for children to re-use.
@@ -192,6 +217,10 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
+    if args.pause {
+        std::env::set_var("MIRRORD_PAUSE", "true");
+    }
+
     if args.no_outgoing || args.no_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
     }
@@ -255,7 +284,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
-#[allow(dead_code)]
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -272,6 +300,10 @@ fn login(args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
+fn cli_progress() -> TaskProgress {
+    TaskProgress::new("mirrord cli starting")
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<()> {
     registry()
@@ -280,13 +312,56 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let progress = TaskProgress::new("mirrord cli starting");
+
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &progress)?,
+        Commands::Exec(args) => exec(&args, &cli_progress())?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &progress)?;
-        } // Commands::Login(args) => login(args)?,
+            extract_library(Some(path), &cli_progress())?;
+        }
+        Commands::Login(args) => login(args)?,
+        Commands::Operator(operator) => match operator.command {
+            OperatorCommand::Setup {
+                accept_tos,
+                file,
+                namespace,
+                license_key,
+            } => {
+                if !accept_tos {
+                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
+
+                    return Ok(());
+                }
+
+                if let Some(license_key) = license_key {
+                    let license = License::fetch(license_key.clone())?;
+
+                    eprintln!(
+                        "Installing with license for {} ({})",
+                        license.name, license.organization
+                    );
+
+                    if license.is_expired() {
+                        eprintln!("Using an expired license for operator, deployment will not function when installed");
+                    }
+
+                    eprintln!(
+                        "Intalling mirrord operator with namespace: {}",
+                        namespace.name()
+                    );
+
+                    let operator = Operator::new(license_key, namespace);
+
+                    match file {
+                        Some(path) => operator.to_writer(File::create(path)?)?,
+                        None => operator.to_writer(std::io::stdout())?,
+                    }
+                } else {
+                    eprintln!("--license-key is required to install on cluster");
+                }
+            }
+        },
     }
+
     Ok(())
 }
 
