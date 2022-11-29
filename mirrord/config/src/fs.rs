@@ -179,6 +179,8 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: None,
+                    read_write: None,
+                    read_only: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -211,6 +213,9 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: None,
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    local: None,
+                    read_only: None,
+                    read_write: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -261,6 +266,9 @@ mod tests {
             mode: FsModeConfig::Write,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_only: None,
+            read_write: None,
+            local: None,
         };
 
         with_env_vars(
