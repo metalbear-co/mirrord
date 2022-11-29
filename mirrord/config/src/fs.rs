@@ -181,6 +181,7 @@ mod tests {
                     exclude: None,
                     read_write: None,
                     read_only: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();

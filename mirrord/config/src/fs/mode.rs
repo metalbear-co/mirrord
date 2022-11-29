@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(None, None, FsModeConfig::Disabled)]
+    #[case(None, None, FsModeConfig::Local)]
     #[case(Some("true"), None, FsModeConfig::Write)]
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]
