@@ -31,13 +31,13 @@ pub struct TcpStealHandler {
 
     /// Only 1 filter can be active for this `layer` as, currently, there is no way for the user to
     /// specify filters for different ports.
-    http_filter: Option<HttpHeaderSelect>,
+    http_header_select: Option<HttpHeaderSelect>,
 }
 
 impl TcpStealHandler {
     pub(super) fn new(config: NetworkConfig) -> Self {
         Self {
-            http_filter: config.into(),
+            http_header_select: config.into(),
             ..Default::default()
         }
     }
@@ -111,15 +111,13 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
-            .await?;
+        let layer_tcp_steal = self
+            .http_header_select
+            .map_or(LayerTcpSteal::PortSubscribe(port), |http_header_select| {
+                LayerTcpSteal::FilterTraffic(port, self.http_header_select.into())
+            });
 
-        // Send http filter as a separate message.
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::FilterTraffic(
-            self.http_filter.into(),
-        )))
-        .await
-        .map_err(From::from)
+        Ok(tx.send(ClientMessage::TcpSteal(layer_tcp_steal)).await?)
     }
 }
 

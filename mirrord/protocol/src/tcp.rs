@@ -55,7 +55,7 @@ pub enum DaemonTcp {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpSteal {
     PortSubscribe(Port),
-    FilterTraffic(RegexFilter),
+    FilterTraffic(Port, RegexFilter),
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),
