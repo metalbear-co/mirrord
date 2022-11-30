@@ -9,6 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- E2E test for pause feature with service that logs http requests and a service that makes requests.
 - mirrord-layer: automatic operator discovery and connection if deployed on cluster. (Discovery can be disabled with `MIRRORD_OPERATOR_ENABLE=false`).
 
 ## 3.12.0
