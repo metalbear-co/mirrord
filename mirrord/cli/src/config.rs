@@ -89,6 +89,7 @@ pub(super) struct ExecArgs {
     pub enable_rw_fs: bool,
 
     /// Default file system behavior: disabled, read, write, local
+    #[arg(long)]
     pub fs_mode: Option<FsMode>,
 
     /// The env vars to filter out
