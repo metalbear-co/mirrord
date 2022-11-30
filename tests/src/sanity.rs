@@ -464,7 +464,13 @@ mod tests {
             }
         }))
         .unwrap();
-        let pod_guard = ResourceGuard::create(&deployment_api, name.to_string(), &deployment, delete_after_fail).await;
+        let pod_guard = ResourceGuard::create(
+            &deployment_api,
+            name.to_string(),
+            &deployment,
+            delete_after_fail,
+        )
+        .await;
         watch_resource_exists(&deployment_api, &name).await;
 
         let service: Service = serde_json::from_value(json!({
@@ -499,7 +505,9 @@ mod tests {
         }))
         .unwrap();
 
-        let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail).await;
+        let service_guard =
+            ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail)
+                .await;
         watch_resource_exists(&service_api, "default").await;
 
         let target = get_pod_instance(&kube_client, &name, namespace)
