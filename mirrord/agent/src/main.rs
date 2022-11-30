@@ -106,7 +106,7 @@ impl State {
                     // First client after no clients.
                     if self.should_pause {
                         self.container.as_ref().unwrap().pause().await?;
-                        debug!("First client connected - pausing container!")
+                        trace!("First client connected - pausing container.")
                     }
                 }
                 Ok(new_id)
@@ -127,7 +127,7 @@ impl State {
             // resume container (stop stopping).
             if self.should_pause {
                 self.container.as_ref().unwrap().unpause().await?;
-                debug!("last client disconnected - resuming container!")
+                trace!("Last client disconnected - resuming container.")
             }
         }
         Ok(())
