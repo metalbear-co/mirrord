@@ -460,18 +460,25 @@
       "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
       "type": "object",
       "properties": {
-        "addr": {
-          "description": "Direct Connect to operator addr",
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "namespace": {
           "type": [
             "string",
             "null"
           ]
         },
-        "enabeld": {
+        "port": {
           "type": [
-            "boolean",
+            "integer",
             "null"
-          ]
+          ],
+          "format": "uint16",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false

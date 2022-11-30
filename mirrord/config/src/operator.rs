@@ -11,22 +11,29 @@ use crate::{
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OperatorConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
-    pub enabeld: bool,
+    pub enabled: bool,
 
-    /// Direct Connect to operator addr
-    #[config(env = "MIRRORD_OPERATOR")]
-    pub addr: Option<String>,
+    #[config(env = "MIRRORD_OPERATOR_NAMESPACE", default = "mirrord")]
+    pub namespace: String,
+
+    #[config(env = "MIRRORD_OPERATOR_PORT", default = 8080)]
+    pub port: u16,
 }
 
 impl MirrordToggleableConfig for OperatorFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         Ok(OperatorConfig {
-            enabeld: FromEnv::new("MIRRORD_OPERATOR")
+            enabled: FromEnv::new("MIRRORD_OPERATOR_ENABLE")
                 .source_value()
                 .unwrap_or(Ok(false))?,
-            addr: FromEnv::new("MIRRORD_OPERATOR")
+            namespace: FromEnv::new("MIRRORD_OPERATOR_NAMESPACE")
                 .source_value()
-                .transpose()?,
+                .transpose()?
+                .unwrap_or_else(|| "mirrord".to_owned()),
+            port: FromEnv::new("MIRRORD_OPERATOR_PORT")
+                .source_value()
+                .transpose()?
+                .unwrap_or(8080),
         })
     }
 }
@@ -40,22 +47,22 @@ mod tests {
 
     #[rstest]
     fn default(
-        #[values((None, true), (Some("false"), false))] enabeld: (Option<&str>, bool),
-        #[values((None, None), (Some("foobar"), Some("foobar")))] addr: (
-            Option<&str>,
-            Option<&str>,
-        ),
+        #[values((None, true), (Some("false"), false))] enabled: (Option<&str>, bool),
+        #[values((None, "mirrord"), (Some("foobar"), "foobar"))] namespace: (Option<&str>, &str),
+        #[values((None, 8080), (Some("3000"), 3000))] port: (Option<&str>, u16),
     ) {
         with_env_vars(
             vec![
-                ("MIRRORD_OPERATOR_ENABLE", enabeld.0),
-                ("MIRRORD_OPERATOR", addr.0),
+                ("MIRRORD_OPERATOR_ENABLE", enabled.0),
+                ("MIRRORD_OPERATOR_NAMESPACE", namespace.0),
+                ("MIRRORD_OPERATOR_PORT", port.0),
             ],
             || {
                 let operator = OperatorFileConfig::default().generate_config().unwrap();
 
-                assert_eq!(operator.enabeld, enabeld.1);
-                assert_eq!(operator.addr.as_deref(), addr.1);
+                assert_eq!(operator.enabled, enabled.1);
+                assert_eq!(operator.namespace, namespace.1);
+                assert_eq!(operator.port, port.1);
             },
         );
     }

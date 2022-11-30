@@ -5,7 +5,7 @@ use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, AgentManagment, Connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{OperatorApi, OperatorApiDiscover};
+use mirrord_operator::client::OperatorApiDiscover;
 use mirrord_progress::TaskProgress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -53,18 +53,13 @@ pub(crate) async fn connect(
             .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if config.operator.enabeld && let Some((operator_api, operator_ref)) =
+    } else if config.operator.enabled && let Some((operator_api, operator_ref)) =
         OperatorApiDiscover::discover_operator(config, &progress).await
     {
         operator_api
             .create_connection(operator_ref)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if let Some(addr) = &config.operator.addr {
-        OperatorApi::new(addr, config.target.clone())
-            .connect(&progress)
-            .await
-            .unwrap_or_else(|err| handle_error(err.into(), config))
     } else {
         let k8s_api = KubernetesAPI::create(config)
             .await
