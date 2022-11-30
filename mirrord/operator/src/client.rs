@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api, Client};
-use mirrord_config::{target::TargetConfig, LayerConfig};
+use mirrord_config::{operator::OperatorConfig, target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_api, kubernetes::create_kube_api, AgentManagment},
     error::KubeApiError,
@@ -62,7 +62,7 @@ where
 
 pub struct OperatorApiDiscover {
     client: Client,
-    namespace: String,
+    operator: OperatorConfig,
     target: TargetConfig,
 }
 
@@ -72,7 +72,7 @@ impl OperatorApiDiscover {
 
         Ok(OperatorApiDiscover {
             client,
-            namespace: "mirrord".to_owned(),
+            operator: config.operator.clone(),
             target: config.target.clone(),
         })
     }
@@ -98,12 +98,14 @@ impl AgentManagment for OperatorApiDiscover {
         &self,
         pod_name: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.namespace));
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.operator.namespace));
 
-        let mut portforwarder = pod_api.portforward(&pod_name, &[8080]).await?;
+        let mut portforwarder = pod_api
+            .portforward(&pod_name, &[self.operator.port])
+            .await?;
 
         let codec = connection(
-            portforwarder.take_stream(8080).unwrap(),
+            portforwarder.take_stream(self.operator.port).unwrap(),
             self.target.clone(),
         )
         .await;
@@ -115,7 +117,7 @@ impl AgentManagment for OperatorApiDiscover {
     where
         P: Progress + Send + Sync,
     {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.namespace));
+        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.operator.namespace));
         let lp = ListParams::default().labels("app=mirrord-operator");
 
         let pod_name = pod_api
