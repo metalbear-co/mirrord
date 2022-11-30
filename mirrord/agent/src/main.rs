@@ -106,6 +106,7 @@ impl State {
                     // First client after no clients.
                     if self.should_pause {
                         self.container.as_ref().unwrap().pause().await?;
+                        trace!("First client connected - pausing container.")
                     }
                 }
                 Ok(new_id)
@@ -122,10 +123,11 @@ impl State {
     pub async fn remove_client(&mut self, client_id: ClientID) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
-        if self.clients.is_empty() {
+        if self.no_clients_left() {
             // resume container (stop stopping).
             if self.should_pause {
                 self.container.as_ref().unwrap().unpause().await?;
+                trace!("Last client disconnected - resuming container.")
             }
         }
         Ok(())
