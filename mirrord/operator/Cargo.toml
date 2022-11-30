@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = []
-client = ["protocol", "dep:futures", "dep:tokio", "dep:mirrord-kube", "dep:mirrord-progress"]
+client = ["protocol", "dep:futures", "dep:kube", "dep:k8s-openapi", "dep:tokio", "dep:mirrord-kube", "dep:mirrord-progress"]
 license-fetch = ["dep:reqwest"]
 protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes", "dep:serde_json", "dep:mirrord-config", "dep:mirrord-protocol"]
 setup = ["dep:k8s-openapi", "dep:serde_yaml"]
@@ -34,6 +34,7 @@ bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 k8s-openapi = { workspace = true, optional = true }
+kube = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["blocking", "json"], optional = true }
 serde = { version = "1", features = ["derive"] }

@@ -8,6 +8,7 @@ pub mod feature;
 pub mod fs;
 pub mod incoming;
 pub mod network;
+pub mod operator;
 pub mod outgoing;
 pub mod target;
 pub mod util;
@@ -25,7 +26,7 @@ use schemars::JsonSchema;
 
 use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    target::TargetConfig, util::VecOrSingle,
+    operator::OperatorConfig, target::TargetConfig, util::VecOrSingle,
 };
 
 /// Main struct for mirrord-layer's configuration
@@ -117,8 +118,8 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    #[config(env = "MIRRORD_OPERATOR")]
-    pub operator: Option<String>,
+    #[config(nested, toggleable)]
+    pub operator: OperatorConfig,
 }
 
 impl LayerConfig {
