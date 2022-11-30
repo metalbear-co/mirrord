@@ -320,6 +320,7 @@ mod tests {
         guard: Option<DropGuard>,
         barrier: std::sync::Arc<std::sync::Barrier>,
         handle: JoinHandle<()>,
+        delete_on_fail: bool,
     }
 
     impl ResourceGuard {
@@ -329,6 +330,7 @@ mod tests {
             api: &Api<K>,
             name: String,
             data: &K,
+            delete_on_fail: bool,
         ) -> ResourceGuard {
             api.create(&PostParams::default(), data).await.unwrap();
             let cancel_token = CancellationToken::new();
@@ -351,13 +353,16 @@ mod tests {
                 guard: Some(resource_token.drop_guard()),
                 barrier: guard_barrier,
                 handle,
+                delete_on_fail,
             }
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            if std::thread::panicking() {
+            if !self.delete_on_fail && std::thread::panicking() {
+                // If we're panicking and we shouldn't delete the resources on fail (to allow for
+                // inspection) then abort the cleaning task.
                 self.handle.abort();
             } else {
                 let guard = self.guard.take();
@@ -375,6 +380,9 @@ mod tests {
         _service: ResourceGuard,
     }
 
+    /// randomize_name: should a random suffix be added to the end of resource names? e.g.
+    ///                 for `echo-service`, should we create as `echo-service-ybtdb`.
+    /// delete_after_fail: delete resources even if the test fails.
     #[fixture]
     async fn service(
         #[future] kube_client: Client,
@@ -383,6 +391,7 @@ mod tests {
         #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
         #[default("http-echo")] service_name: &str,
         #[default(true)] randomize_name: bool,
+        #[default(false)] delete_after_fail: bool,
     ) -> KubeService {
         let kube_client = kube_client.await;
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
@@ -429,7 +438,6 @@ mod tests {
                             {
                                 "name": &CONTAINER_NAME,
                                 "image": &image,
-                                "imagePullPolicy": "IfNotPresent", // TODO: is that ok?
                                 "ports": [
                                     {
                                         "containerPort": 80
@@ -456,7 +464,7 @@ mod tests {
             }
         }))
         .unwrap();
-        let pod_guard = ResourceGuard::create(&deployment_api, name.to_string(), &deployment).await;
+        let pod_guard = ResourceGuard::create(&deployment_api, name.to_string(), &deployment, delete_after_fail).await;
         watch_resource_exists(&deployment_api, &name).await;
 
         let service: Service = serde_json::from_value(json!({
@@ -491,7 +499,7 @@ mod tests {
         }))
         .unwrap();
 
-        let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service).await;
+        let service_guard = ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail).await;
         watch_resource_exists(&service_api, "default").await;
 
         let target = get_pod_instance(&kube_client, &name, namespace)
@@ -523,6 +531,7 @@ mod tests {
             "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
             "udp-logger",
             true,
+            false,
         )
         .await
     }
@@ -533,10 +542,10 @@ mod tests {
             kube_client,
             "default",
             "ClusterIP",
-            // "ghcr.io/metalbear-co/mirrord-http-logger:latest",
-            "mirrord-http-logger", // TODO: change to published image.
+            "ghcr.io/metalbear-co/mirrord-http-logger:latest",
             "mirrord-tests-http-logger",
             false, // So that requester can reach logger by name.
+            true,
         )
         .await
     }
@@ -547,10 +556,12 @@ mod tests {
             kube_client,
             "default",
             "ClusterIP",
-            // "ghcr.io/metalbear-co/mirrord-http-log-requester:latest",
-            "mirrord-http-log-requester", // TODO: change to published image.
+            "ghcr.io/metalbear-co/mirrord-http-log-requester:latest",
             "mirrord-http-log-requester",
-            true,
+            // Have a non-random name, so that there can only be one requester at any point in time
+            // so that another requester does not send requests while this one is paused.
+            false,
+            true, // Delete also on fail, cause this service constantly does work.
         )
         .await
     }
