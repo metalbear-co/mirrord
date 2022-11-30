@@ -60,6 +60,7 @@ fn generate_local_set() -> RegexSet {
         r"^/dev/.*$",
         r"^/opt/.*$",
         r"^/home/.*$",
+        r"^/tmp/.*$",
         // support for nixOS.
         r"^/nix/.*$",
         r"^/home/iojs/.*$",
