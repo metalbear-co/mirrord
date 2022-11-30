@@ -16,6 +16,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Added `/tmp/` to be excluded from file ops by default. Fixes [#800](https://github.com/metalbear-co/mirrord/issues/800).
 
+### Misc
+
+- Reformatted a bit the file stuff, to make it more readable. We now have `FILE_MODE` instead of `FILE_OPS_*` internally.
+- Changed fileops test to also test write override (mirrord mode is read and override specific path)
+
 ## 3.12.0
 
 ### Added
