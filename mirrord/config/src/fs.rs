@@ -35,25 +35,16 @@ pub mod mode;
 /// [feature]
 /// fs = "write"
 /// ```
+/// - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local
 ///
-/// - Read-only excluding `.foo` files:
+/// ```yaml
+/// # mirrord-config.yaml
 ///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.fs]
-/// mode = "read"
-/// exclude = "^.*\.foo$"
-/// ```
-///
-/// - Read-write including only `.baz` files:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.fs]
-/// mode = "write"
-/// include = "^.*\.baz$"
+/// [fs]
+/// mode = read
+/// read_write = ["/var/run"]
+/// read_only = ["/etc"]
+/// local = ["/lib"]
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
@@ -86,6 +77,15 @@ impl MirrordConfig for FsUserConfig {
                 exclude: FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE")
                     .source_value()
                     .transpose()?,
+                read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
+                    .source_value()
+                    .transpose()?,
+                read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
+                    .source_value()
+                    .transpose()?,
+                local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
+                    .source_value()
+                    .transpose()?,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
         };
@@ -103,11 +103,23 @@ impl MirrordToggleableConfig for FsUserConfig {
         let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE")
             .source_value()
             .transpose()?;
+        let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
+            .source_value()
+            .transpose()?;
+        let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
+            .source_value()
+            .transpose()?;
+        let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
+            .source_value()
+            .transpose()?;
 
         Ok(FsConfig {
             mode,
             include,
             exclude,
+            read_write,
+            read_only,
+            local,
         })
     }
 }
@@ -150,6 +162,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: None,
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -164,6 +179,9 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: None,
+                    read_write: None,
+                    read_only: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -179,6 +197,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: None,
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -193,6 +214,9 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: None,
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    local: None,
+                    read_only: None,
+                    read_write: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -208,6 +232,9 @@ mod tests {
             mode: FsModeConfig::Read,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_write: None,
+            read_only: None,
+            local: None,
         };
 
         with_env_vars(
@@ -222,6 +249,9 @@ mod tests {
                     mode: Some(FsModeConfig::Read),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    read_only: None,
+                    read_write: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();
@@ -237,6 +267,9 @@ mod tests {
             mode: FsModeConfig::Write,
             include: Some(VecOrSingle::Single(".*".to_string())),
             exclude: Some(VecOrSingle::Single(".*".to_string())),
+            read_only: None,
+            read_write: None,
+            local: None,
         };
 
         with_env_vars(
@@ -251,6 +284,9 @@ mod tests {
                     mode: Some(FsModeConfig::Write),
                     include: Some(VecOrSingle::Single(".*".to_string())),
                     exclude: Some(VecOrSingle::Single(".*".to_string())),
+                    read_only: None,
+                    read_write: None,
+                    local: None,
                 })
                 .generate_config()
                 .unwrap();

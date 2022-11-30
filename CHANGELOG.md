@@ -7,10 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.12.0
+
 ### Added
 
 - `--pause` feature (unstable). See [#712](https://github.com/metalbear-co/mirrord/issues/712).
 - operator setup cli feature.
+- mirrord-layer: operator connection that can be used instad of using kubernetes api to access agents.
 
 ### Changed
 
@@ -21,6 +24,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: don't run CI on draft PRs.
 - Update dependencies.
 - Update to clap v4 (cli parser crate).
+- Started deprecation of fsmode=disabled, use fsmode=local instead.
 
 ### Fixed
 

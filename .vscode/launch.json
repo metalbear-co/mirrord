@@ -5,6 +5,17 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "type": "lldb",
+      "request": "launch",
+      "name": "cargo test",
+      "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
+      "args": ["test_include_complex_configuration"],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": ["rust"],
+      
+    },
+    {
       "name": "Launch golang file",
       "type": "go",
       "request": "launch",

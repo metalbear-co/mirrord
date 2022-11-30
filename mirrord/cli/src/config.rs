@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -24,6 +24,30 @@ pub(super) enum Commands {
     /// Operator commands eg. setup
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+pub enum FsMode {
+    /// Read & Write from remote, apart from overrides (hardcoded and configured in file)
+    Write,
+    /// Read from remote, Write local, apart from overrides (hardcoded and configured in file) -
+    /// default
+    Read,
+    /// Read & Write from local (disabled)
+    Local,
+    /// Read & Write from local, apart from overrides (hardcoded and configured in file)
+    LocalWithOverrides,
+}
+
+impl ToString for FsMode {
+    fn to_string(&self) -> String {
+        match self {
+            FsMode::Local => "local".to_string(),
+            FsMode::LocalWithOverrides => "localwithoverrides".to_string(),
+            FsMode::Read => "read".to_string(),
+            FsMode::Write => "write".to_string(),
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -63,6 +87,10 @@ pub(super) struct ExecArgs {
     /// Enable file hooking (Both R/W)
     #[arg(long = "rw")]
     pub enable_rw_fs: bool,
+
+    /// Default file system behavior: disabled, read, write, local
+    #[arg(long)]
+    pub fs_mode: Option<FsMode>,
 
     /// The env vars to filter out
     #[arg(short = 'x', long)]

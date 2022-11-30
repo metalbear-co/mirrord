@@ -1,18 +1,20 @@
+use std::str::FromStr;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, FromMirrordConfig, MirrordConfig, Result,
+        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
+        MirrordConfig, Result,
     },
     util::MirrordToggleableConfig,
 };
 
 /// Configuration for enabling read-only and read-write file operations.
-///
-/// Default option for general file configuration. Allows the user to specify:
-///
-/// - `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;
+/// These options are overriden by user specified overrides and mirrord default overrides.
+/// If you set LocalWithOverrides then somefiles can be read/write remotely based on our
+/// default/user specified. Default option for general file configuration.
 ///
 /// ## Examples
 ///
@@ -34,9 +36,16 @@ use crate::{
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
+    /// Deprecated, use local instead
     Disabled,
+    /// mirrord won't do anything fs-related, all operations will be local.
+    Local,
+    /// mirrord will run overrides on some file operations, but most will be local.
+    LocalWithOverrides,
+    /// mirrord will read files from the remote, but won't write to them.
     #[default]
     Read,
+    /// mirrord will read/write from the remote.
     Write,
 }
 
@@ -50,13 +59,28 @@ impl FsModeConfig {
     }
 }
 
+impl FromStr for FsModeConfig {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "disabled" => Ok(FsModeConfig::Disabled),
+            "local" => Ok(FsModeConfig::Local),
+            "localwithoverrides" => Ok(FsModeConfig::LocalWithOverrides),
+            "read" => Ok(FsModeConfig::Read),
+            "write" => Ok(FsModeConfig::Write),
+            _ => Err(ConfigError::InvalidFsMode(s.to_string())),
+        }
+    }
+}
+
 impl FsModeConfig {
     fn from_env_logic(fs: Option<bool>, ro_fs: Option<bool>) -> Option<Self> {
         match (fs, ro_fs) {
             (Some(false), Some(true)) | (None, Some(true)) => Some(FsModeConfig::Read),
             (Some(true), _) => Some(FsModeConfig::Write),
             (Some(false), Some(false)) | (None, Some(false)) | (Some(false), None) => {
-                Some(FsModeConfig::Disabled)
+                Some(FsModeConfig::Local)
             }
             (None, None) => None,
         }
@@ -67,14 +91,25 @@ impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
     fn generate_config(self) -> Result<Self::Generated> {
+        if matches!(self, FsModeConfig::Disabled) {
+            println!("The `disabled` option for `fs` is deprecated. Use `local` instead.");
+        }
+
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
             .source_value()
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
             .source_value()
             .transpose()?;
+        let mode = FromEnv::new("MIRRORD_FILE_MODE")
+            .source_value()
+            .transpose()?;
 
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        if let Some(mode) = mode {
+            Ok(mode)
+        } else {
+            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(self))
+        }
     }
 }
 
@@ -86,8 +121,14 @@ impl MirrordToggleableConfig for FsModeConfig {
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
             .source_value()
             .transpose()?;
-
-        Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Disabled))
+        let mode = FromEnv::new("MIRRORD_FILE_MODE")
+            .source_value()
+            .transpose()?;
+        if let Some(mode) = mode {
+            Ok(mode)
+        } else {
+            Ok(Self::from_env_logic(fs, ro_fs).unwrap_or(FsModeConfig::Local))
+        }
     }
 }
 
@@ -122,7 +163,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(None, None, FsModeConfig::Disabled)]
+    #[case(None, None, FsModeConfig::Local)]
     #[case(Some("true"), None, FsModeConfig::Write)]
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]

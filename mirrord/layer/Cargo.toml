@@ -42,7 +42,8 @@ tokio-util.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 rand = "0.8"
-fancy-regex = { version = "0.10" }
+fancy-regex = "0.10"
+regex = "1"
 errno = "0.2"
 async-trait.workspace = true
 socket2 = "0.4"
