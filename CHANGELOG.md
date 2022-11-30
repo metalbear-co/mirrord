@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- E2E test for pause feature with service that logs http requests and a service that makes requests.
+
 ## 3.12.0
 
 ### Added
