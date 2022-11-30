@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- mirrord-layer: automatic operator discovery and connection if deployed on cluster. (Discovery can be disabled with `MIRRORD_OPERATOR_ENABLE=false`).
+
 ## 3.12.0
 
 ### Added
