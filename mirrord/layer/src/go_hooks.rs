@@ -4,9 +4,7 @@ use errno::errno;
 use frida_gum::interceptor::Interceptor;
 use tracing::trace;
 
-use crate::{
-    close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*, ENABLED_FILE_OPS,
-};
+use crate::{close_detour, file::hooks::*, macros::hook_symbol, socket::hooks::*, FILE_MODE};
 /*
  * Reference for which syscalls are managed by the handlers:
  * SYS_openat: Syscall6
@@ -326,7 +324,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
         libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_close => close_detour(param1 as _) as i64,
 
-        _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
+        _ if FILE_MODE.get().unwrap().is_active() => match syscall {
             libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
             libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
@@ -384,29 +382,35 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_close => close_detour(param1 as _) as i64,
 
-        _ if *ENABLED_FILE_OPS.get().unwrap() => match syscall {
-            libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-            // Note(syscall_linux.go)
-            // if flags == 0 {
-            // 	return faccessat(dirfd, path, mode)
-            // }
-            // The Linux kernel faccessat system call does not take any flags.
-            // The glibc faccessat implements the flags itself; see
-            // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-            // Because people naturally expect syscall.Faccessat to act
-            // like C faccessat, we do the same.
-            libc::SYS_faccessat => {
-                faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
+        _ if *FILE_MODE
+            .get()
+            .expect("FILE_MODE needs to be initialized")
+            .is_enabled() =>
+        {
+            match syscall {
+                libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
+                // Note(syscall_linux.go)
+                // if flags == 0 {
+                // 	return faccessat(dirfd, path, mode)
+                // }
+                // The Linux kernel faccessat system call does not take any flags.
+                // The glibc faccessat implements the flags itself; see
+                // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
+                // Because people naturally expect syscall.Faccessat to act
+                // like C faccessat, we do the same.
+                libc::SYS_faccessat => {
+                    faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
+                }
+                libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                _ => {
+                    let syscall_res =
+                        syscall_6(syscall, param1, param2, param3, param4, param5, param6);
+                    return syscall_res;
+                }
             }
-            libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
-            _ => {
-                let syscall_res =
-                    syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-                return syscall_res;
-            }
-        },
+        }
         _ => {
             let syscall_res = syscall_6(syscall, param1, param2, param3, param4, param5, param6);
             return syscall_res;

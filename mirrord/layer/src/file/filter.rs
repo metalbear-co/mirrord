@@ -253,6 +253,7 @@ impl FileFilter {
             match self.mode {
                 FsModeConfig::Write => Detour::Success(()),
                 FsModeConfig::Read if !write => Detour::Success(()),
+                FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
                 _ => Detour::Bypass(op()),
             }
         }

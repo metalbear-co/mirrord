@@ -25,7 +25,7 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
 use libc::c_int;
-use mirrord_config::{util::VecOrSingle, LayerConfig};
+use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -85,8 +85,7 @@ static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
-pub(crate) static ENABLED_FILE_OPS: OnceLock<bool> = OnceLock::new();
-pub(crate) static ENABLED_FILE_RO_OPS: OnceLock<bool> = OnceLock::new();
+pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
@@ -235,11 +234,7 @@ fn layer_start(config: LayerConfig) {
         HOOK_SENDER = Some(sender);
     };
 
-    let enabled_file_ops = ENABLED_FILE_OPS
-        .get_or_init(|| config.feature.fs.is_read() || config.feature.fs.is_write());
-    ENABLED_FILE_RO_OPS
-        .set(config.feature.fs.is_read())
-        .expect("Setting ENABLED_FILE_RO_OPS singleton");
+    let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
     ENABLED_TCP_OUTGOING
         .set(config.feature.network.outgoing.tcp)
         .expect("Setting ENABLED_TCP_OUTGOING singleton");
@@ -249,7 +244,7 @@ fn layer_start(config: LayerConfig) {
 
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
-    enable_hooks(*enabled_file_ops, config.feature.network.dns);
+    enable_hooks(file_mode.is_active(), config.feature.network.dns);
 
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
@@ -586,12 +581,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// so it tries to do the same for files.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    let enabled_file_ops = ENABLED_FILE_OPS
+    let file_mode_active = FILE_MODE
         .get()
-        .expect("Should be set during initialization!");
+        .expect("Should be set during initialization!")
+        .is_active();
 
     let res = FN_CLOSE(fd);
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && *enabled_file_ops
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active
         && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
         let close_file_result = file::ops::close(remote_fd);
 

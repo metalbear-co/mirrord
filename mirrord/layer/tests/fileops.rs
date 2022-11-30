@@ -104,8 +104,9 @@ async fn test_pwrite(
     println!("Listening for messages from the layer on {addr}");
     let mut env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
 
-    env.insert("MIRRORD_FILE_RO_OPS", "true");
-    *env.entry("MIRRORD_FILE_OPS").or_insert("false") = "true";
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
 
     let mut test_process =
         TestProcess::start_process(executable, application.get_args(), env).await;
