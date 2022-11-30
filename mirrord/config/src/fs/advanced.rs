@@ -136,6 +136,11 @@ impl FsConfig {
     pub fn is_write(&self) -> bool {
         self.mode.is_write()
     }
+
+    /// Checks if fs operations are active
+    pub fn is_active(&self) -> bool {
+        !matches!(self.mode, FsModeConfig::Disabled)
+    }
 }
 
 #[cfg(test)]

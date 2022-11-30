@@ -51,7 +51,7 @@ pub enum FsModeConfig {
 
 impl FsModeConfig {
     pub fn is_read(self) -> bool {
-        self == FsModeConfig::Read
+        matches!(self, FsModeConfig::Read | FsModeConfig::LocalWithOverrides)
     }
 
     pub fn is_write(self) -> bool {
