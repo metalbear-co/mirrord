@@ -795,7 +795,7 @@ mod tests {
             args.extend(ephemeral_flag);
         }
 
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")];
+        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run(
             command,
             &service.target,
