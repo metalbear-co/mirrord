@@ -22,6 +22,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: don't run CI on draft PRs.
 - Update dependencies.
 - Update to clap v4 (cli parser crate).
+- Started deprecation of fsmode=disabled, use fsmode=local instead.
 
 ### Fixed
 
