@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Changed
+
+- IntelliJ Plugin: downgrade Java to version 11.
+
 ## 3.12.1
 
 ### Added
