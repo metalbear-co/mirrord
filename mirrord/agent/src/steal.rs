@@ -4,6 +4,12 @@ use std::{
     path::PathBuf,
 };
 
+use futures::{
+    future::{FutureExt, OptionFuture},
+    stream,
+    stream::TryStreamExt,
+    StreamExt,
+};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -16,13 +22,13 @@ use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
 };
-use tokio_stream::StreamExt;
-use tokio_util::io::ReaderStream;
+use tokio_util::{io::ReaderStream, sync::CancellationToken};
 use tracing::{debug, error, info, log::warn};
 
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
+    util::{ClientID, IndexAllocator, Subscriptions},
 };
 
 #[cfg_attr(test, mockall::automock)]
@@ -184,6 +190,149 @@ impl IPTableFormatter {
                 format!("-o lo {}", redirect_rule)
             }
         }
+    }
+}
+
+#[derive(Debug)]
+enum StealerCommands {
+    NewAgent(Sender<DaemonTcp>),
+    Subscribe(Port),
+    UnsubscribePort(Port),
+    UnsubscribeConnection(ConnectionId),
+    AgentClosed,
+}
+
+#[derive(Debug)]
+pub struct StealerCommand {
+    client_id: ClientID,
+    command: StealerCommands,
+}
+
+#[derive(Debug)]
+pub(super) struct TcpStealerAPI {
+    /// Channel that allows the agent to communicate with the stealer task.
+    ///
+    /// The agent controls the stealer task through this.
+    command_tx: Sender<StealerCommand>,
+}
+
+/// Created once per agent during initialization.
+#[derive(Debug)]
+pub(super) struct TcpConnectionStealer {
+    port_subscriptions: Subscriptions<Port, ClientID>,
+
+    /// Communication between the agent and the stealer task.
+    ///
+    /// The agent controls the stealer task through [`TcpStealerAPI::command_tx`].
+    command_rx: Receiver<StealerCommand>,
+    client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
+    index_allocator: IndexAllocator<ConnectionId>,
+}
+
+impl TcpConnectionStealer {
+    #[tracing::instrument(level = "debug")]
+    pub(super) async fn new(
+        command_rx: Receiver<StealerCommand>,
+        pid: Option<u64>,
+    ) -> Result<Self, AgentError> {
+        if let Some(pid) = pid {
+            let namespace = PathBuf::from("/proc")
+                .join(PathBuf::from(pid.to_string()))
+                .join(PathBuf::from("ns/net"));
+
+            set_namespace(namespace).unwrap();
+        }
+
+        Ok(Self {
+            port_subscriptions: Subscriptions::new(),
+            command_rx,
+            client_senders: HashMap::with_capacity(8),
+            index_allocator: IndexAllocator::new(),
+        })
+    }
+
+    // TODO(alex) [low] 2022-12-01: Better docs.
+    /// Runs the stealer loop.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) async fn start(
+        self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), AgentError> {
+        loop {
+            select! {
+                command = self.command_rx.recv() => {
+                    if let Some(command) = command {
+                        self.handle_command(command).await?;
+                    } else { break; }
+                },
+                // TODO(alex) [mid] 2022-12-01: This should be global as well?
+                // Like steal everything or only steal what the users asked for?
+                packet = self.raw_capture.next() => {
+                    self.handle_packet(packet?).await?;
+                }
+                _ = cancellation_token.cancelled() => {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "debug", skip(self, sender))]
+    fn new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
+        self.client_senders.insert(client_id, sender);
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
+        self.port_subscriptions.subscribe(client_id, port);
+        // self.update_stealer()?;
+        self.send_message_to_client(&client_id, DaemonTcp::Subscribed)
+            .await
+    }
+
+    /// Removes the client with `client_id`, and also unsubscribes its port.
+    #[tracing::instrument(level = "trace", skip(self))]
+    fn close_client(&mut self, client_id: ClientID) -> Result<(), AgentError> {
+        self.client_senders.remove(&client_id);
+        self.port_subscriptions.remove_client(client_id);
+        // self.update_sniffer()
+        todo!()
+    }
+
+    /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
+    // #[tracing::instrument(level = "trace", skip(self))]
+    async fn send_message_to_client(
+        &mut self,
+        client_id: &ClientID,
+        message: DaemonTcp,
+    ) -> Result<(), AgentError> {
+        if let Some(sender) = self.client_senders.get(client_id) {
+            sender.send(message).await.map_err(|err| {
+                warn!(
+                    "Failed to send message to client {} with {:#?}!",
+                    client_id, err
+                );
+                let _ = self.close_client(*client_id);
+                err
+            })?;
+        }
+
+        Ok(())
+    }
+
+    // #[tracing::instrument(level = "trace", skip(self, clients))]
+    async fn broadcast_message(
+        &mut self,
+        clients: impl Iterator<Item = &ClientID>,
+        message: DaemonTcp,
+    ) -> Result<(), AgentError> {
+        for client_id in clients {
+            self.send_message_to_client(client_id, message.clone())
+                .await?;
+        }
+        Ok(())
     }
 }
 

@@ -35,7 +35,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
-    steal::steal_worker,
+    steal::{steal_worker, StealWorker},
     util::{run_thread, ClientID, IndexAllocator},
 };
 
@@ -336,6 +336,8 @@ impl ClientConnectionHandler {
     }
 }
 
+// TODO(alex) [high] 2022-11-29: Create a `steal_task` to act as a "global" for this agent
+// instance, similar to `sniffer_task`.
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace")]
 async fn start_agent() -> Result<()> {
@@ -355,6 +357,7 @@ async fn start_agent() -> Result<()> {
     let cancel_guard = cancellation_token.clone().drop_guard();
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
+
     let _ = run_thread(dns_worker(dns_receiver, pid));
 
     let sniffer_cancellation_token = cancellation_token.clone();
@@ -362,6 +365,12 @@ async fn start_agent() -> Result<()> {
         TcpConnectionSniffer::new(sniffer_command_rx, pid, args.network_interface)
             .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
     );
+
+    let stealer_cancellation_token = cancellation_token.clone();
+    // let steal_task = run_thread(
+    //     TcpConnectionStealer::new(stealer_command_rx, pid, args.network_interface)
+    //         .and_then(|stealer| stealer.start(stealer_cancellation_token)),
+    // );
 
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
     // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables

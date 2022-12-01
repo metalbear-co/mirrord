@@ -9,7 +9,8 @@ use std::{
 use num_traits::{zero, CheckedAdd, Num, NumCast};
 
 /// Struct that helps you manage topic -> subscribers
-/// When a topip has no subscribers, it is removed.
+///
+/// When a topic has no subscribers, it is removed.
 #[derive(Debug)]
 pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
@@ -22,6 +23,8 @@ where
     T: Eq + Hash + Clone + Copy,
     C: Eq + Hash + Clone + Copy,
 {
+    // TODO(alex) [low] 2022-11-30: Same as `IndexAllocator`, make a good `Default` impl, then
+    // delete this.
     pub fn new() -> Subscriptions<T, C> {
         Subscriptions {
             _inner: HashMap::new(),
@@ -126,6 +129,8 @@ where
     }
 }
 
+// TODO(alex) [low] 2022-11-30: Make this more generic, so we can use `default` everywhere, and
+// delete `new`.
 impl Default for IndexAllocator<usize> {
     fn default() -> Self {
         IndexAllocator::new()
