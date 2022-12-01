@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- `--fs-mode=local` didn't disable hooks as it was suppsoed to.
+
 ## 3.12.1
 
 ### Added
