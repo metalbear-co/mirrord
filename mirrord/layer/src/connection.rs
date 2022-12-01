@@ -6,7 +6,7 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_operator::client::OperatorApiDiscover;
-use mirrord_progress::TaskProgress;
+use mirrord_progress::NoProgress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log::info;
@@ -46,8 +46,7 @@ fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
 pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
-    let progress = TaskProgress::new("agent initializing...");
-
+    let progress = NoProgress;
     let agent_api = if let Some(address) = &config.connect_tcp {
         Connection(address)
             .connect(&progress)
@@ -96,9 +95,6 @@ pub(crate) async fn connect(
             .await
             .unwrap_or_else(|err| handle_error(err, config))
     };
-
-    // So children won't show progress as well as it might confuse users
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
     agent_api
 }
