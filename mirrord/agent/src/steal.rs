@@ -67,11 +67,41 @@ pub struct StealerCommand {
 }
 
 #[derive(Debug)]
-pub(super) struct TcpStealerAPI {
+pub(super) struct TcpStealerApi {
+    /// Identifies which layer instance is associated with this API.
+    client_id: ClientID,
+
     /// Channel that allows the agent to communicate with the stealer task.
     ///
     /// The agent controls the stealer task through this.
     command_tx: Sender<StealerCommand>,
+
+    /// Channel that receives [`DaemonTcp`] messages from the stealer worker thread.
+    ///
+    /// This is where we get the messages that should be passed back to agent or layer.
+    daemon_rx: Receiver<DaemonTcp>,
+}
+
+impl TcpStealerApi {
+    #[tracing::instrument(level = "debug")]
+    pub(super) async fn new(
+        client_id: ClientID,
+        command_tx: Sender<StealerCommand>,
+        (daemon_tx, daemon_rx): (Sender<DaemonTcp>, Receiver<DaemonTcp>),
+    ) -> Result<Self, AgentError> {
+        command_tx
+            .send(StealerCommand {
+                client_id,
+                command: Command::NewAgent(daemon_tx),
+            })
+            .await?;
+
+        Ok(Self {
+            client_id,
+            command_tx,
+            daemon_rx,
+        })
+    }
 }
 
 /// Created once per agent during initialization.

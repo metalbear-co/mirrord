@@ -9,7 +9,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-use crate::sniffer::SnifferCommand;
+use crate::{sniffer::SnifferCommand, steal::StealerCommand};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -18,6 +18,9 @@ pub enum AgentError {
 
     #[error("SnifferCommand sender failed with `{0}`")]
     SendSnifferCommand(#[from] tokio::sync::mpsc::error::SendError<SnifferCommand>),
+
+    #[error("StealerCommand sender failed with `{0}`")]
+    SendStealerCommand(#[from] tokio::sync::mpsc::error::SendError<StealerCommand>),
 
     #[error("FileRequest sender failed with `{0}`")]
     SendFileRequest(#[from] tokio::sync::mpsc::error::SendError<(u32, FileRequest)>),

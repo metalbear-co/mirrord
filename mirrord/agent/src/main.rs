@@ -23,6 +23,7 @@ use mirrord_protocol::{
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
+use steal::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -35,7 +36,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
-    steal::{steal_worker, StealWorker},
+    steal::{steal_worker, StealWorker, StealerCommand, TcpConnectionStealer},
     util::{run_thread, ClientID, IndexAllocator},
 };
 
@@ -146,8 +147,7 @@ struct ClientConnectionHandler {
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
     tcp_sniffer_api: TCPSnifferAPI,
-    tcp_stealer_sender: Sender<LayerTcpSteal>,
-    tcp_stealer_receiver: Receiver<DaemonTcp>,
+    tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_sender: Sender<DnsRequest>,
@@ -161,6 +161,7 @@ impl ClientConnectionHandler {
         pid: Option<u64>,
         ephemeral: bool,
         sniffer_command_sender: Sender<SnifferCommand>,
+        stealer_command_sender: Sender<StealerCommand>,
         dns_sender: Sender<DnsRequest>,
     ) -> Result<Self> {
         let file_manager = match pid {
@@ -171,18 +172,12 @@ impl ClientConnectionHandler {
         let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
+
         let tcp_sniffer_api =
             TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
-        let (tcp_steal_layer_sender, tcp_steal_layer_receiver) = mpsc::channel(CHANNEL_SIZE);
-        let (tcp_steal_daemon_sender, tcp_steal_daemon_receiver) = mpsc::channel(CHANNEL_SIZE);
 
-        let _ = run_thread(async move {
-            if let Err(err) =
-                steal_worker(tcp_steal_layer_receiver, tcp_steal_daemon_sender, pid).await
-            {
-                error!("mirrord-agent: `steal_worker` failed with {:?}", err)
-            }
-        });
+        let tcp_stealer_api =
+            TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await?;
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -193,8 +188,7 @@ impl ClientConnectionHandler {
             stream,
             pid,
             tcp_sniffer_api,
-            tcp_stealer_receiver: tcp_steal_daemon_receiver,
-            tcp_stealer_sender: tcp_steal_layer_sender,
+            tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_sender,
@@ -355,7 +349,10 @@ async fn start_agent() -> Result<()> {
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
     let cancel_guard = cancellation_token.clone().drop_guard();
+
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
+    let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
+
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
 
     let _ = run_thread(dns_worker(dns_receiver, pid));
@@ -367,10 +364,10 @@ async fn start_agent() -> Result<()> {
     );
 
     let stealer_cancellation_token = cancellation_token.clone();
-    // let steal_task = run_thread(
-    //     TcpConnectionStealer::new(stealer_command_rx, pid, args.network_interface)
-    //         .and_then(|stealer| stealer.start(stealer_cancellation_token)),
-    // );
+    let steal_task = run_thread(
+        TcpConnectionStealer::new(stealer_command_rx, pid)
+            .and_then(|stealer| stealer.start(stealer_cancellation_token)),
+    );
 
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
     // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables
@@ -386,8 +383,11 @@ async fn start_agent() -> Result<()> {
                 match state.new_client().await {
                     Ok(client_id) => {
                         let sniffer_command_tx = sniffer_command_tx.clone();
+                        let stealer_command_tx = stealer_command_tx.clone();
+
                         let cancellation_token = cancellation_token.clone();
                         let dns_sender = dns_sender.clone();
+
                         let client = tokio::spawn(async move {
                             match ClientConnectionHandler::new(
                                     client_id,
@@ -395,6 +395,7 @@ async fn start_agent() -> Result<()> {
                                     pid,
                                     args.ephemeral_container,
                                     sniffer_command_tx,
+                                    stealer_command_tx,
                                     dns_sender,
                                 )
                                 .and_then(|client| client.start(cancellation_token))
