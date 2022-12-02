@@ -18,16 +18,16 @@ use futures::{
     SinkExt, TryFutureExt,
 };
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
+    tcp::{LayerTcp, LayerTcpSteal},
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
-use steal::TcpStealerApi;
+use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
@@ -36,7 +36,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
-    steal::{steal_worker, StealWorker, StealerCommand, TcpConnectionStealer},
+    steal::{connection::TcpConnectionStealer, StealerCommand},
     util::{run_thread, ClientID, IndexAllocator},
 };
 
@@ -221,7 +221,7 @@ impl ClientConnectionHandler {
                         break;
                     }
                 },
-                message = self.tcp_stealer_receiver.recv() => {
+                message = self.tcp_stealer_api.recv() => {
                     if let Some(message) = message {
                         self.stream.send(DaemonMessage::TcpSteal(message)).await?;
                     } else {
@@ -309,7 +309,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
-            ClientMessage::TcpSteal(message) => self.tcp_stealer_sender.send(message).await?,
+            ClientMessage::TcpSteal(message) => self.handle_client_steal(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }
@@ -326,6 +326,21 @@ impl ClientConnectionHandler {
                     .await
             }
             LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.port_unsubscribe(port).await,
+        }
+    }
+
+    async fn handle_client_steal(&mut self, message: LayerTcpSteal) -> Result<()> {
+        match message {
+            LayerTcpSteal::PortSubscribe(port) => self.tcp_stealer_api.subscribe(port).await,
+            LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
+                self.tcp_stealer_api
+                    .connection_unsubscribe(connection_id)
+                    .await
+            }
+            LayerTcpSteal::PortUnsubscribe(port) => {
+                self.tcp_stealer_api.port_unsubscribe(port).await
+            }
+            LayerTcpSteal::Data(_) => todo!(),
         }
     }
 }
