@@ -33,7 +33,7 @@ impl TcpStealerApi {
         command_tx
             .send(StealerCommand {
                 client_id,
-                command: Command::NewAgent(daemon_tx),
+                command: Command::NewClient(daemon_tx),
             })
             .await?;
 

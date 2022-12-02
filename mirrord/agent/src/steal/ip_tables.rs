@@ -71,7 +71,7 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables,
 {
-    pub fn new(ipt: IPT) -> Result<Self> {
+    pub(super) fn new(ipt: IPT) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
         let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
@@ -88,8 +88,8 @@ where
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
             &self.formatter.redirect_rule(redirected_port, target_port),
@@ -97,7 +97,8 @@ where
         )
     }
 
-    pub fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.remove_rule(
             &self.chain_name,
             &self.formatter.redirect_rule(redirected_port, target_port),

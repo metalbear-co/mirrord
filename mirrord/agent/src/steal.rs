@@ -31,8 +31,9 @@ pub(super) mod worker;
 /// work.
 #[derive(Debug)]
 enum Command {
-    /// Passes the channel that's used by the worker to respond back to the (agent -> layer).
-    NewAgent(Sender<DaemonTcp>),
+    /// Contains the channel that's used by the stealer worker to respond back to the agent
+    /// (stealer -> agent -> layer).
+    NewClient(Sender<DaemonTcp>),
 
     /// A layer wants to subscribe to this [`Port`].
     ///
@@ -58,7 +59,7 @@ pub struct StealerCommand {
     /// Identifies which layer instance is sending the [`Command`].
     client_id: ClientID,
 
-    /// The command message sent from (layer -> agent) to be handled by the steal worker.
+    /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
 }
 

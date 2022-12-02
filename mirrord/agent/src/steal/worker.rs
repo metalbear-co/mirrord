@@ -92,16 +92,14 @@ impl StealWorker {
                     warn!("Port {port:?} is already subscribed");
                     Ok(())
                 } else {
-                    debug!("adding redirect rule");
                     self.iptables.add_redirect(port, self.listen_port)?;
                     self.ports.insert(port);
                     self.sender.send(DaemonTcp::Subscribed).await?;
-                    debug!("sent subscribed");
+
                     Ok(())
                 }
             }
             ConnectionUnsubscribe(connection_id) => {
-                info!("Closing connection {connection_id:?}");
                 self.write_streams.remove(&connection_id);
                 self.read_streams.remove(&connection_id);
                 Ok(())
