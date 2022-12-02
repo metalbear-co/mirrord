@@ -1,6 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr};
 
-use tracing::error;
+use tokio::net::TcpStream;
+use tracing::{debug, error};
 
 use super::*;
 
@@ -89,11 +90,11 @@ impl TcpConnectionStealer {
                 // a `Subscribe` message to stealer).
                 accept = self.stealer.accept() => {
                     match accept {
-                        Ok((stealer_stream, address)) => {
+                        Ok(accept) => {
                             // TODO(alex) [high] 2022-12-02: Now we need to implement this, but the
                             // question remains: do we need to keep the `self.stealer`, or do we
                             // want to keep the `stealer_stream`?
-                            self.incoming_connection(stealer_stream, address).await?;
+                            self.incoming_connection(accept).await?;
                         }
                         Err(fail) => {
                             error!("Something went wrong while accepting a connection {:#?}", fail);
@@ -108,6 +109,46 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
+    }
+
+    async fn incoming_connection(
+        &mut self,
+        (stream, address): (TcpStream, SocketAddr),
+    ) -> Result<(), AgentError> {
+        let real_address = orig_dst::orig_dst_addr(&stream)?;
+
+        // TODO(alex) [high] 2022-12-02: We're doing this for the first client we have, what if
+        // multiple clients are subscribed to this same port?
+        //
+        // We might need multiple streams? Think not, as now we have a global-ish `TcpStream`
+        // (listener is being held, but we could be holding the streams as well).
+        if let Some(client_id) = self
+            .port_subscriptions
+            .get_topic_subscribers(real_address.port())
+            .iter()
+            .next()
+        {
+            let connection_id = self.index_allocator.next_index();
+
+            let (read_half, write_half) = tokio::io::split(stream);
+            self.write_streams.insert(connection_id, write_half);
+            self.read_streams
+                .insert(connection_id, ReaderStream::new(read_half));
+
+            // TODO(alex) [high] 2022-12-02: Need to send this to the appropriate `client_id`, so we
+            // need a way of checking which `client_id` is subscribed to this port.
+            let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
+                connection_id,
+                destination_port: real_address.port(),
+                source_port: address.port(),
+                address: address.ip(),
+            });
+            self.sender.send(new_connection).await?;
+            debug!("sent new connection");
+            Ok(())
+        } else {
+            Err(AgentError::UnexpectedConnection(real_address.port()))
+        }
     }
 
     /// Registers a new layer instance that has the `steal` feature enabled.
