@@ -139,7 +139,7 @@ pub(super) struct ExecArgs {
     pub tcp_steal: bool,
 
     /// Pause target container while running.
-    #[arg(short, long)]
+    #[arg(short, long, alias = "paws")]
     pub pause: bool,
 
     /// Disable tcp/udp outgoing traffic
