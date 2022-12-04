@@ -225,7 +225,7 @@ fn layer_start(config: LayerConfig) {
             .init();
     };
 
-    info!("Initializing mirrord-layer! {:?}");
+    info!("Initializing mirrord-layer!");
 
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 

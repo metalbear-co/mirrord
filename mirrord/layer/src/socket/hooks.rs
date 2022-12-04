@@ -336,7 +336,7 @@ pub(crate) unsafe fn enable_socket_hooks(
         getsockname_detour,
         FnGetsockname,
         FN_GETSOCKNAME,
-        Some("libc-2.31.so")
+        module
     );
 
     #[cfg(target_os = "linux")]
