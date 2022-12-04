@@ -565,7 +565,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let module_ref = module.as_deref();
 
     unsafe {
-        let _ = replace!(
+        replace!(
             &mut interceptor,
             "close",
             close_detour,
@@ -573,7 +573,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
             FN_CLOSE,
             module_ref
         );
-        let _ = replace!(
+        replace!(
             &mut interceptor,
             "close$NOCANCEL",
             close_nocancel_detour,

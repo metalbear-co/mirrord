@@ -3,7 +3,7 @@ macro_rules! replace {
     ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr, $module_name:expr) => {{
         let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
                          symbol_name,
-                         module_name,
+                         module_name: Option<&str>,
                          detour: $detour_type|
          -> $crate::error::Result<$detour_type> {
             tracing::trace!("replace -> hooking {:#?}", $detour_name);
@@ -12,27 +12,35 @@ macro_rules! replace {
                 $crate::error::LayerError::NoExportName(symbol_name.to_string()),
             )?;
 
-            let addr = function.0;
             let replaced = interceptor.replace(
                 function,
                 frida_gum::NativePointer(detour as *mut libc::c_void),
                 frida_gum::NativePointer(std::ptr::null_mut()),
-            );
+            )?;
 
-            tracing::trace!(
-                "replace -> hooked {:#?} {:#?}, {:#?}",
-                $detour_name,
-                replaced.is_ok(),
-                addr
-            );
-
-            let original_fn: $detour_type = std::mem::transmute(replaced?);
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             Ok(original_fn)
         };
 
-        intercept($interceptor, $detour_name, $module_name, $detour_function)
-            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
+        match intercept($interceptor, $detour_name, $module_name, $detour_function) {
+            Ok(hooked) => {
+                $hook_fn.set(hooked).unwrap();
+                tracing::trace!(
+                    "replace -> hooked {:#?} at {:#?}",
+                    $detour_name,
+                    $module_name
+                );
+            }
+            Err(err) => {
+                tracing::trace!(
+                    "replace -> hooked {:#?} at {:#?} with err {:#?}",
+                    $detour_name,
+                    $module_name,
+                    err
+                );
+            }
+        }
     }};
 }
 

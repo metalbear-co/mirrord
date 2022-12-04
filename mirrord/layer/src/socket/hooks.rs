@@ -282,7 +282,7 @@ pub(crate) unsafe fn enable_socket_hooks(
     enabled_remote_dns: bool,
     module: Option<&str>,
 ) {
-    let _ = replace!(
+    replace!(
         interceptor,
         "socket",
         socket_detour,
@@ -291,8 +291,8 @@ pub(crate) unsafe fn enable_socket_hooks(
         module
     );
 
-    let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND, module);
-    let _ = replace!(
+    replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND, module);
+    replace!(
         interceptor,
         "listen",
         listen_detour,
@@ -301,7 +301,7 @@ pub(crate) unsafe fn enable_socket_hooks(
         module
     );
 
-    let _ = replace!(
+    replace!(
         interceptor,
         "connect",
         connect_detour,
@@ -310,7 +310,7 @@ pub(crate) unsafe fn enable_socket_hooks(
         module
     );
 
-    let _ = replace!(
+    replace!(
         interceptor,
         "fcntl",
         fcntl_detour,
@@ -318,10 +318,10 @@ pub(crate) unsafe fn enable_socket_hooks(
         FN_FCNTL,
         module
     );
-    let _ = replace!(interceptor, "dup", dup_detour, FnDup, FN_DUP, module);
-    let _ = replace!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2, module);
+    replace!(interceptor, "dup", dup_detour, FnDup, FN_DUP, module);
+    replace!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2, module);
 
-    let _ = replace!(
+    replace!(
         interceptor,
         "getpeername",
         getpeername_detour,
@@ -330,7 +330,7 @@ pub(crate) unsafe fn enable_socket_hooks(
         module
     );
 
-    let _ = replace!(
+    replace!(
         interceptor,
         "getsockname",
         getsockname_detour,
@@ -341,17 +341,19 @@ pub(crate) unsafe fn enable_socket_hooks(
 
     #[cfg(target_os = "linux")]
     {
+        // something weird happens here..
+        let none: Option<&str> = None;
         // Here we replace a function of libuv and not libc, so we pass None as the module.
-        let _ = replace!(
+        replace!(
             interceptor,
             "uv__accept4",
             uv__accept4_detour,
             FnUv__accept4,
             FN_UV__ACCEPT4,
-            None
+            none
         );
 
-        let _ = replace!(
+        replace!(
             interceptor,
             "accept4",
             accept4_detour,
@@ -360,10 +362,10 @@ pub(crate) unsafe fn enable_socket_hooks(
             module
         );
 
-        let _ = replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3, module);
+        replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3, module);
     }
 
-    let _ = replace!(
+    replace!(
         interceptor,
         "accept",
         accept_detour,
@@ -373,7 +375,7 @@ pub(crate) unsafe fn enable_socket_hooks(
     );
 
     if enabled_remote_dns {
-        let _ = replace!(
+        replace!(
             interceptor,
             "getaddrinfo",
             getaddrinfo_detour,
@@ -382,7 +384,7 @@ pub(crate) unsafe fn enable_socket_hooks(
             module
         );
 
-        let _ = replace!(
+        replace!(
             interceptor,
             "freeaddrinfo",
             freeaddrinfo_detour,

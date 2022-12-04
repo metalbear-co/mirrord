@@ -381,8 +381,8 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Option<&str>) {
-    let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN, module);
-    let _ = replace!(
+    replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN, module);
+    replace!(
         interceptor,
         "openat",
         openat_detour,
@@ -390,7 +390,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_OPENAT,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "fopen",
         fopen_detour,
@@ -398,7 +398,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FOPEN,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "fdopen",
         fdopen_detour,
@@ -406,8 +406,8 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FDOPEN,
         module
     );
-    let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ, module);
-    let _ = replace!(
+    replace!(interceptor, "read", read_detour, FnRead, FN_READ, module);
+    replace!(
         interceptor,
         "fread",
         fread_detour,
@@ -415,7 +415,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FREAD,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "fgets",
         fgets_detour,
@@ -423,7 +423,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FGETS,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "pread",
         pread_detour,
@@ -431,7 +431,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_PREAD,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "ferror",
         ferror_detour,
@@ -439,7 +439,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FERROR,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "fclose",
         fclose_detour,
@@ -447,7 +447,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FCLOSE,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "fileno",
         fileno_detour,
@@ -455,7 +455,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_FILENO,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "lseek",
         lseek_detour,
@@ -463,7 +463,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_LSEEK,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "write",
         write_detour,
@@ -471,7 +471,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_WRITE,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "pwrite",
         pwrite_detour,
@@ -479,7 +479,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_PWRITE,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "access",
         access_detour,
@@ -487,7 +487,7 @@ pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Op
         FN_ACCESS,
         module
     );
-    let _ = replace!(
+    replace!(
         interceptor,
         "faccessat",
         faccessat_detour,
