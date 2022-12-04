@@ -19,8 +19,9 @@ use crate::{
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
+/// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
@@ -31,7 +32,27 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     );
 
     let (Ok(result) | Err(result)) = open(rawish_path, open_options)
-        .bypass_with(|_| FN_OPEN(raw_path, open_flags))
+        .bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
+        .map_err(From::from);
+
+    result
+}
+
+/// Implementation of open_detour, used in open_detour and openat_detour
+/// We ignore mode in case we don't bypass the call.
+#[tracing::instrument(level = "trace")]
+unsafe fn open64_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+
+    trace!(
+        "rawish_path {:#?} | open_options {:#?}",
+        rawish_path,
+        open_options
+    );
+
+    let (Ok(result) | Err(result)) = open(rawish_path, open_options)
+        .bypass_with(|_| FN_OPEN64(raw_path, open_flags, mode))
         .map_err(From::from);
 
     result
@@ -41,8 +62,24 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    open_logic(raw_path, open_flags)
+pub(super) unsafe extern "C" fn open_detour(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    mode: c_int,
+) -> RawFd {
+    open_logic(raw_path, open_flags, mode)
+}
+
+/// Hook for `libc::open64`.
+///
+/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn open64_detour(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    mode: c_int,
+) -> RawFd {
+    open64_logic(raw_path, open_flags, mode)
 }
 
 /// Hook for `libc::fopen`.
@@ -382,6 +419,14 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Option<&str>) {
     replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN, module);
+    replace!(
+        interceptor,
+        "open64",
+        open64_detour,
+        FnOpen64,
+        FN_OPEN64,
+        module
+    );
     replace!(
         interceptor,
         "openat",
