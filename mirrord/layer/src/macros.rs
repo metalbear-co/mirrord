@@ -34,7 +34,7 @@ macro_rules! replace {
             }
             Err(err) => {
                 tracing::trace!(
-                    "replace -> hooked {:#?} at {:#?} with err {:#?}",
+                    "failed replace {:#?} at {:#?} with err {:#?}",
                     $detour_name,
                     $module_name,
                     err
@@ -64,7 +64,7 @@ macro_rules! replace_symbol {
                 frida_gum::NativePointer(std::ptr::null_mut()),
             );
 
-            tracing::info!(
+            tracing::trace!(
                 "replace -> hooked {:#?} {:#?}",
                 $detour_name,
                 replaced.is_ok()
