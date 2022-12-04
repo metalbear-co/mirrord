@@ -380,27 +380,119 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
-    let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
-    let _ = replace!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    let _ = replace!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
-    let _ = replace!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
-    let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
-    let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
-    let _ = replace!(interceptor, "fgets", fgets_detour, FnFgets, FN_FGETS);
-    let _ = replace!(interceptor, "pread", pread_detour, FnPread, FN_PREAD);
-    let _ = replace!(interceptor, "ferror", ferror_detour, FnFerror, FN_FERROR);
-    let _ = replace!(interceptor, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
-    let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
-    let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
-    let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
-    let _ = replace!(interceptor, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
-    let _ = replace!(interceptor, "access", access_detour, FnAccess, FN_ACCESS);
+pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Option<&str>) {
+    let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN, module);
+    let _ = replace!(
+        interceptor,
+        "openat",
+        openat_detour,
+        FnOpenat,
+        FN_OPENAT,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "fopen",
+        fopen_detour,
+        FnFopen,
+        FN_FOPEN,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "fdopen",
+        fdopen_detour,
+        FnFdopen,
+        FN_FDOPEN,
+        module
+    );
+    let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ, module);
+    let _ = replace!(
+        interceptor,
+        "fread",
+        fread_detour,
+        FnFread,
+        FN_FREAD,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "fgets",
+        fgets_detour,
+        FnFgets,
+        FN_FGETS,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "pread",
+        pread_detour,
+        FnPread,
+        FN_PREAD,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "ferror",
+        ferror_detour,
+        FnFerror,
+        FN_FERROR,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "fclose",
+        fclose_detour,
+        FnFclose,
+        FN_FCLOSE,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "fileno",
+        fileno_detour,
+        FnFileno,
+        FN_FILENO,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "lseek",
+        lseek_detour,
+        FnLseek,
+        FN_LSEEK,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "write",
+        write_detour,
+        FnWrite,
+        FN_WRITE,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "pwrite",
+        pwrite_detour,
+        FnPwrite,
+        FN_PWRITE,
+        module
+    );
+    let _ = replace!(
+        interceptor,
+        "access",
+        access_detour,
+        FnAccess,
+        FN_ACCESS,
+        module
+    );
     let _ = replace!(
         interceptor,
         "faccessat",
         faccessat_detour,
         FnFaccessat,
-        FN_FACCESSAT
+        FN_FACCESSAT,
+        module
     );
 }

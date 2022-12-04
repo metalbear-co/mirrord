@@ -27,8 +27,15 @@ use crate::{
 
 const MAX_ARGC: usize = 254;
 
-pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor) {
-    let _ = replace!(interceptor, "execve", execve_detour, FnExecve, FN_EXECVE);
+pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor, module: Option<&str>) {
+    let _ = replace!(
+        interceptor,
+        "execve",
+        execve_detour,
+        FnExecve,
+        FN_EXECVE,
+        module
+    );
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.

@@ -225,7 +225,7 @@ fn layer_start(config: LayerConfig) {
             .init();
     };
 
-    info!("Initializing mirrord-layer!");
+    info!("Initializing mirrord-layer! {:?}");
 
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
@@ -533,32 +533,65 @@ async fn start_layer_thread(
     tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
+#[cfg(not(target_os = "macos"))]
+const LIBC_NAME: &str = "libc";
+#[cfg(target_os = "macos")]
+const LIBC_NAME: &str = "libSystem";
+
+/// Finds the name of the libc library used by the current process.
+/// This works by enumerating loaded modules, checking if module name starts with `LIBC_NAME`
+/// and if it does it makes sure a basic function is present. (`socket`)
+/// Returns none if the name cannot be found.
+fn resolve_libc_module_name() -> Option<String> {
+    for module in frida_gum::Module::enumerate_modules() {
+        if module.name.starts_with(LIBC_NAME)
+            && frida_gum::Module::find_export_by_name(Some(&module.name), "socket").is_some()
+        {
+            return Some(module.name);
+        }
+    }
+    None
+}
+
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
 #[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut interceptor = Interceptor::obtain(&GUM);
     interceptor.begin_transaction();
 
+    let module = resolve_libc_module_name();
+    trace!("libc module name: {:?}", &module);
+
+    let module_ref = module.as_deref();
+
     unsafe {
-        let _ = replace!(&mut interceptor, "close", close_detour, FnClose, FN_CLOSE);
+        let _ = replace!(
+            &mut interceptor,
+            "close",
+            close_detour,
+            FnClose,
+            FN_CLOSE,
+            module_ref
+        );
         let _ = replace!(
             &mut interceptor,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
-            FN_CLOSE_NOCANCEL
+            FN_CLOSE_NOCANCEL,
+            module_ref
         );
     };
 
-    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns) };
+    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns, module_ref) };
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut interceptor)
+        exec::enable_execve_hook(&mut interceptor, module_ref)
     };
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut interceptor) };
+        unsafe { file::hooks::enable_file_hooks(&mut interceptor, module_ref) };
     }
     let modules = frida_gum::Module::enumerate_modules();
     let binary = &modules.first().unwrap().name;

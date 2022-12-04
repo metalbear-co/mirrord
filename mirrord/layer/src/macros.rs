@@ -1,16 +1,18 @@
 #[macro_export]
 macro_rules! replace {
-    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
+    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr, $module_name:expr) => {{
         let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
                          symbol_name,
+                         module_name,
                          detour: $detour_type|
          -> $crate::error::Result<$detour_type> {
             tracing::trace!("replace -> hooking {:#?}", $detour_name);
 
-            let function = frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(
+            let function = frida_gum::Module::find_export_by_name(module_name, symbol_name).ok_or(
                 $crate::error::LayerError::NoExportName(symbol_name.to_string()),
             )?;
 
+            let addr = function.0;
             let replaced = interceptor.replace(
                 function,
                 frida_gum::NativePointer(detour as *mut libc::c_void),
@@ -18,9 +20,10 @@ macro_rules! replace {
             );
 
             tracing::trace!(
-                "replace -> hooked {:#?} {:#?}",
+                "replace -> hooked {:#?} {:#?}, {:#?}",
                 $detour_name,
-                replaced.is_ok()
+                replaced.is_ok(),
+                addr
             );
 
             let original_fn: $detour_type = std::mem::transmute(replaced?);
@@ -28,7 +31,7 @@ macro_rules! replace {
             Ok(original_fn)
         };
 
-        intercept($interceptor, $detour_name, $detour_function)
+        intercept($interceptor, $detour_name, $module_name, $detour_function)
             .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
     }};
 }

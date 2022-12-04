@@ -61,8 +61,10 @@ fn generate_local_set() -> RegexSet {
         r"^/opt/.*$",
         r"^/home/.*$",
         r"^/tmp/.*$",
+        r"^/snap/.*$",
         // support for nixOS.
         r"^/nix/.*$",
+        r".+\.asdf/.+",
         r"^/home/iojs/.*$",
         r"^/home/runner/.*$",
         // dotnet: `/tmp/clr-debug-pipe-1`
