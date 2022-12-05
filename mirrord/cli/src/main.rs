@@ -14,6 +14,7 @@ use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::{
+    client::OperatorApiDiscover,
     license::License,
     setup::{Operator, OperatorSetup},
 };
@@ -109,7 +110,11 @@ fn add_to_preload(path: &str) -> Result<()> {
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
-    if config.operator.is_some() {
+    if config.operator.enabled
+        && OperatorApiDiscover::discover_operator(&config, progress)
+            .await
+            .is_some()
+    {
         return Ok(());
     }
 
@@ -181,15 +186,22 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     if args.enable_rw_fs && args.no_fs {
+        warn!("use --fs-mode=write or --fs-mode=readonly please");
         warn!("fs was both enabled and disabled - disabling will take precedence.");
     }
 
     if !args.no_fs && args.enable_rw_fs {
+        warn!("--rw is deprecated, use --fs-mode=write instead");
         std::env::set_var("MIRRORD_FILE_OPS", "true");
     }
 
     if args.no_fs || args.enable_rw_fs {
+        warn!("--no-fs is deprecated, use --fs-mode=write instead");
         std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
+    }
+
+    if let Some(fs_mode) = args.fs_mode {
+        std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
     }
 
     if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {

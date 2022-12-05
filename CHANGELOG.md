@@ -7,6 +7,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- IntelliJ Plugin: downgrade Java to version 11.
+- Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
+  that agent is created by cli (and soon to be created by IDE plugin via cli).
+
+### Fixed
+
+- Fix `--fs-mode=local` didn't disable hooks as it was supposed to.
+
+## 3.12.1
+
+### Added
+
+- E2E test for pause feature with service that logs http requests and a service that makes requests.
+- mirrord-layer: automatic operator discovery and connection if deployed on cluster. (Discovery can be disabled with `MIRRORD_OPERATOR_ENABLE=false`).
+
+### Changed
+
+- Added `/tmp/` to be excluded from file ops by default. Fixes [#800](https://github.com/metalbear-co/mirrord/issues/800).
+
+### Misc
+
+- Reformatted a bit the file stuff, to make it more readable. We now have `FILE_MODE` instead of `FILE_OPS_*` internally.
+- Changed fileops test to also test write override (mirrord mode is read and override specific path)
+
+## 3.12.0
+
 ### Added
 
 - `--pause` feature (unstable). See [#712](https://github.com/metalbear-co/mirrord/issues/712).
@@ -22,6 +50,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - CI: don't run CI on draft PRs.
 - Update dependencies.
 - Update to clap v4 (cli parser crate).
+- Started deprecation of fsmode=disabled, use fsmode=local instead.
 
 ### Fixed
 

@@ -57,9 +57,13 @@
       ]
     },
     "operator": {
-      "type": [
-        "string",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ToggleableConfig_for_OperatorFileConfig"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "skip_processes": {
@@ -88,11 +92,11 @@
   "additionalProperties": false,
   "definitions": {
     "AdvancedFsUserConfig": {
-      "description": "Advanced user configuration for file operations.\n\nAllows the user to specify:\n\n- `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`; - `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE`;\n\n## Examples\n\n- Read-only excluding `.foo` files:\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = write include = \"^.*\\.baz$\" ```",
+      "description": "Advanced user configuration for file operations.\n\nAllows the user to specify:\n\nWhat is the default behavior for file operations: 1. read - Read from the remote file system (default) 2. write - Read/Write from the remote file system. 3. local - Read from the local file system. 4. disabled - Disable file operations.\n\nBesides the default behavior, user can specify behavior for specific regex patterns. Case insensitive. 1. read_write - List of patterns that should be read/write remotely. 2. read_only - List of patterns that should be read only remotely. 3. local - List of patterns that should be read locally.\n\nThe logic for choosing the behavior is as follows: 1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first). Note: Specifying the same path in two lists is unsupported and can lead to undefined behaviour. 2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns    to provide better UX. 3. If none of the above match, use the default behavior (mode).\n\n## Examples\n\n- Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read read_write = [\"/var/run\"] read_only = [\"/etc\"] local = [\"/lib\"] ```",
       "type": "object",
       "properties": {
         "exclude": {
-          "description": "Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe opposite of `include`, files that match the regexes specified here will bypass mirrord and are accessed locally.",
+          "description": "DEPRECATED Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe opposite of `include`, files that match the regexes specified here will bypass mirrord and are accessed locally.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -103,7 +107,18 @@
           ]
         },
         "include": {
-          "description": "Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe regexes specified here will make mirrord operate only on files that match it, otherwise the file will be accessed locally (bypassing mirrord).",
+          "description": "DEPRECATED Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe regexes specified here will make mirrord operate only on files that match it, otherwise the file will be accessed locally (bypassing mirrord).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "local": {
+          "description": "Specify file path patterns that if matched will be opened locally.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -118,6 +133,28 @@
           "anyOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "read_only": {
+          "description": "Specify file path patterns that if matched will be read from the remote. if file matching the pattern is opened for writing or read/write it will be opened locally.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "read_write": {
+          "description": "Specify file path patterns that if matched will be read and written to the remote.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
             },
             {
               "type": "null"
@@ -316,16 +353,47 @@
       "additionalProperties": false
     },
     "FsModeConfig": {
-      "description": "Configuration for enabling read-only and read-write file operations.\n\nDefault option for general file configuration. Allows the user to specify:\n\n- `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`;\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = disabled ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
-      "type": "string",
-      "enum": [
-        "disabled",
-        "read",
-        "write"
+      "description": "Configuration for enabling read-only and read-write file operations. These options are overriden by user specified overrides and mirrord default overrides. If you set LocalWithOverrides then somefiles can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = disabled ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
+      "oneOf": [
+        {
+          "description": "Deprecated, use local instead",
+          "type": "string",
+          "enum": [
+            "disabled"
+          ]
+        },
+        {
+          "description": "mirrord won't do anything fs-related, all operations will be local.",
+          "type": "string",
+          "enum": [
+            "local"
+          ]
+        },
+        {
+          "description": "mirrord will run overrides on some file operations, but most will be local.",
+          "type": "string",
+          "enum": [
+            "localwithoverrides"
+          ]
+        },
+        {
+          "description": "mirrord will read files from the remote, but won't write to them.",
+          "type": "string",
+          "enum": [
+            "read"
+          ]
+        },
+        {
+          "description": "mirrord will read/write from the remote.",
+          "type": "string",
+          "enum": [
+            "write"
+          ]
+        }
       ]
     },
     "FsUserConfig": {
-      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details.\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" ```\n\n- Read-only excluding `.foo` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"read\" exclude = \"^.*\\.foo$\" ```\n\n- Read-write including only `.baz` files:\n\n```toml # mirrord-config.toml\n\n[feature.fs] mode = \"write\" include = \"^.*\\.baz$\" ```",
+      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details.\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" ``` - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read read_write = [\"/var/run\"] read_only = [\"/etc\"] local = [\"/lib\"] ```",
       "anyOf": [
         {
           "description": "Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
@@ -384,6 +452,33 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorFileConfig": {
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false
@@ -509,6 +604,16 @@
         },
         {
           "$ref": "#/definitions/NetworkFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_OperatorFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/OperatorFileConfig"
         }
       ]
     },
