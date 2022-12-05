@@ -22,6 +22,7 @@ use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use semver::Version;
+use serde_json::json;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
@@ -301,10 +302,11 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
-fn ls(args: &LsArgs) -> Result<()> {
-    if args.pods {
-        todo!()
-    }
+#[tokio::main(flavor = "current_thread")]
+async fn ls(args: &LsArgs) -> Result<()> {
+    let pods = mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref()).await?;
+    let json_obj = json!(pods);
+    println!("{}", json_obj);
     Ok(())
 }
 
@@ -342,7 +344,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
-        Commands::Ls(args) => ls(&args)?,
+        Commands::ListTargets(args) => ls(&args)?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup {

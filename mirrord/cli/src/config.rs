@@ -25,9 +25,9 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
 
-    /// List targets/resources like pods/namespaces in json format
-    #[command(hide = true)]
-    Ls(Box<LsArgs>),
+    /// List targets/resources like pods/namespaces in json format    
+    #[command(hide = true, name = "ls")]
+    ListTargets(Box<LsArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -222,22 +222,28 @@ pub(super) enum OperatorCommand {
     },
 }
 
+#[derive(ValueEnum, Debug, Clone)]
+pub enum Format {
+    Json,
+}
+
 #[derive(Args, Debug)]
 pub(super) struct LsArgs {
     /// Specify the format of the output.
-    #[arg(short = 'o', long = "output", num_args = 1, value_name = "FORMAT", value_parser = clap::builder::PossibleValuesParser::new(["json"]), requires_all = &["namespaces", "pods"])]
-    pub output: Option<String>,
+    #[arg(
+        short = 'o',
+        long = "output",
+        num_args = 1,
+        value_name = "FORMAT",
+        value_enum
+    )]
+    pub output: Option<Format>,
 
-    /// List pods, to be used with --namespace, by default lists all namespaces in the "default"
-    /// namespace.
-    #[arg(short = 'p', long = "pods", conflicts_with = "namespaces")]
-    pub pods: bool,
-
-    /// Argument used with --pods to list pods in a specific namespace.
-    #[arg(short = 'n', long = "namespace", num_args = 1, requires = "pods")]
+    /// Specify the namespace to list pods in.
+    #[arg(
+        short = 'n',
+        long = "namespace",
+        num_args = 1,        
+    )]
     pub namespace: Option<String>,
-
-    /// List all namespaces in the cluster.
-    #[arg(short = 's', long = "namespaces", conflicts_with = "pods")]
-    pub namespaces: bool,
 }

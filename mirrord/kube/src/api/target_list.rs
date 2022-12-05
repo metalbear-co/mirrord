@@ -1,14 +1,13 @@
-use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::{api::ListParams, Api, Client};
-use serde_json::json;
+use k8s_openapi::api::core::v1::Pod;
+use kube::{api::ListParams, Api};
 
+use super::{get_k8s_api, kubernetes::create_kube_api};
 use crate::error::Result;
 
-async fn get_kube_namespaced_pods(namespace: &Option<&str>) -> Result<Vec<(String, Vec<String>)>> {
-    let client = Client::try_default().await?;
-    let namespace = namespace.unwrap_or("default");
-    let pods: Api<Pod> = Api::namespaced(client, namespace);
-    let pods = pods.list(&ListParams::default()).await?;
+pub async fn get_kube_pods(namespace: Option<&str>) -> Result<Vec<(String, Vec<String>)>> {
+    let client = create_kube_api(&None).await?;
+    let api: Api<Pod> = get_k8s_api(&client, namespace);
+    let pods = api.list(&ListParams::default()).await?;
 
     // convert pods to (name, container names) pairs
 
@@ -29,25 +28,4 @@ async fn get_kube_namespaced_pods(namespace: &Option<&str>) -> Result<Vec<(Strin
         .collect();
 
     Ok(pod_containers)
-}
-
-async fn get_kube_namespaces() -> Result<Vec<String>> {
-    let client = Client::try_default().await?;
-    let namespaces: Api<Namespace> = Api::all(client);
-    let namespaces = namespaces.list(&ListParams::default()).await?;
-
-    // convert namespaces to a list of names
-
-    let namespace_names: Vec<String> = namespaces
-        .items
-        .iter()
-        .filter_map(|namespace| namespace.metadata.name.clone())
-        .collect();
-
-    Ok(namespace_names)
-}
-
-async fn create_json(kube_objectlist: Vec<(String, Vec<String>)>) -> Result<String> {
-    let json_obj = json!(kube_objectlist);
-    Ok(json_obj.to_string())
 }

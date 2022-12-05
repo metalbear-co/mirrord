@@ -1717,6 +1717,7 @@ dependencies = [
  "regex",
  "reqwest",
  "semver 1.0.14",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

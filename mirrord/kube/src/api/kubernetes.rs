@@ -33,7 +33,7 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(config).await?;
+        let client = create_kube_api(&Some(config.clone())).await?;
 
         Ok(KubernetesAPI::new(
             client,
@@ -136,22 +136,22 @@ impl AgentManagment for KubernetesAPI {
     }
 }
 
-pub async fn create_kube_api(config: &LayerConfig) -> Result<Client> {
+pub async fn create_kube_api(config: &Option<LayerConfig>) -> Result<Client> {
     #[cfg(feature = "env_guard")]
     let _guard = EnvVarGuard::new();
 
-    #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
-    let mut kube_config = if config.accept_invalid_certificates {
-        let mut kube_config = Config::infer().await?;
-        kube_config.accept_invalid_certs = true;
-        // Only warn the first time connecting to the agent, not on child processes.
-        if config.connect_agent_name.is_none() {
-            warn!("Accepting invalid certificates");
+    let mut kube_config = Config::infer().await?;
+
+    if let Some(config) = config {
+        #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
+        if config.accept_invalid_certificates {
+            kube_config.accept_invalid_certs = true;
+            // Only warn the first time connecting to the agent, not on child processes.
+            if config.connect_agent_name.is_none() {
+                warn!("Accepting invalid certificates");
+            }
         }
-        kube_config
-    } else {
-        Config::infer().await?
-    };
+    }
 
     #[cfg(feature = "env_guard")]
     _guard.prepare_config(&mut kube_config);
