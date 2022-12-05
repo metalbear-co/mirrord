@@ -48,7 +48,7 @@ enum Command {
     /// Part of the [`Drop`] implementation of [`TcpStealerAPI`].
     ///
     /// Closes a layer connection, and unsubscribe its ports.
-    AgentClosed,
+    ClientClose,
 
     /// A connection here is a pair of ([`ReadHalf`], [`WriteHalf`]) streams that are used to
     /// capture a remote connection (the connection we're stealing data from).

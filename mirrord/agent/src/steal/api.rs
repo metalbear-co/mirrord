@@ -44,9 +44,13 @@ impl TcpStealerApi {
         })
     }
 
+    /// Helper function that passes the [`DaemonTcp`] messages we generated in the
+    /// [`TcpConnectionStealer`] task, back to the agent.
+    ///
+    /// Called in the [`ClientConnectionHandler`].
     #[tracing::instrument(level = "debug", skip(self))]
     pub(crate) async fn recv(&mut self) -> Option<DaemonTcp> {
-        todo!()
+        self.daemon_rx.recv().await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortSubscribe`], that is passed from the
@@ -98,5 +102,27 @@ impl TcpStealerApi {
             })
             .await
             .map_err(From::from)
+    }
+
+    /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
+    /// agent, to an internal stealer command [`Command::ClientClose`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
+    ///
+    /// Called by the [`Drop`] implementation of [`TcpStealerApi`].
+    pub(crate) fn close_client(&mut self) -> Result<(), AgentError> {
+        self.command_tx
+            .try_send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::ClientClose,
+            })
+            .map_err(From::from)
+    }
+}
+
+impl Drop for TcpStealerApi {
+    fn drop(&mut self) {
+        self.close_client()
+            .expect("Failed while dropping TcpStealerApi!")
     }
 }

@@ -1,13 +1,13 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
 use futures::Stream;
-use mirrord_protocol::tcp::NewTcpConnection;
+use mirrord_protocol::tcp::{NewTcpConnection, TcpClose};
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{ReadHalf, WriteHalf},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
 };
-use tokio::io::AsyncWriteExt;
+use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error};
 
@@ -41,6 +41,7 @@ pub(crate) struct TcpConnectionStealer {
     iptables: SafeIpTables<iptables::IPTables>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
+    client_connections: HashMap<ConnectionId, ClientID>,
 }
 
 impl TcpConnectionStealer {
@@ -66,6 +67,7 @@ impl TcpConnectionStealer {
             iptables: SafeIpTables::new(iptables::new(false).unwrap())?,
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
+            client_connections: HashMap::with_capacity(8),
         })
     }
 
@@ -114,6 +116,11 @@ impl TcpConnectionStealer {
                         }
                     }
                 }
+                read_something = self.read_incoming_tcp_data() => {
+                    if let Err(fail) = read_something {
+                        error!("Failed reading incoming tcp data!");
+                    }
+                }
                 _ = cancellation_token.cancelled() => {
                     break;
                 }
@@ -121,6 +128,37 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
+    }
+
+    async fn read_incoming_tcp_data(&mut self) -> Result<(), AgentError> {
+        if let Some((connection_id, bytes)) = self.read_streams.next().await {
+            let daemon_tx = self
+                .client_connections
+                .get(&connection_id)
+                .and_then(|client_id| self.clients.get(client_id));
+
+            if let Some(daemon_tx) = daemon_tx {
+                match bytes {
+                    Some(Ok(bytes)) => Ok(daemon_tx
+                        .send(DaemonTcp::Data(TcpData {
+                            connection_id,
+                            bytes: bytes.to_vec(),
+                        }))
+                        .await?),
+                    None => Ok(daemon_tx
+                        .send(DaemonTcp::Close(TcpClose { connection_id }))
+                        .await?),
+                    Some(Err(fail)) => {
+                        error!("connection id {connection_id:?} read error: {fail:?}");
+                        Err(AgentError::IO(fail.into()))
+                    }
+                }
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
     }
 
     async fn incoming_connection(
@@ -143,6 +181,7 @@ impl TcpConnectionStealer {
             self.write_streams.insert(connection_id, write_half);
             self.read_streams
                 .insert(connection_id, ReaderStream::new(read_half));
+            self.client_connections.insert(connection_id, client_id);
 
             let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id,
@@ -275,11 +314,14 @@ impl TcpConnectionStealer {
 
     /// Write the data received from local app via layer to the stream with end client.
     async fn forward_data(&mut self, tcp_data: TcpData) -> std::result::Result<(), AgentError> {
-        if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
-            stream.write_all(&data.bytes[..]).await?;
+        if let Some(stream) = self.write_streams.get_mut(&tcp_data.connection_id) {
+            stream.write_all(&tcp_data.bytes[..]).await?;
             Ok(())
         } else {
-            warn!("Trying to send data to closed connection {:?}", data.connection_id);
+            warn!(
+                "Trying to send data to closed connection {:?}",
+                tcp_data.connection_id
+            );
             Ok(())
         }
     }
@@ -304,8 +346,8 @@ impl TcpConnectionStealer {
             }
             Command::PortSubscribe(port) => self.port_subscribe(client_id, port).await?,
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
-            Command::AgentClosed => todo!(),
-            Command::ResponseData(tcp_data) => self.forward_data(tcp_data)?,
+            Command::ClientClose => self.close_client(client_id)?,
+            Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
         }
 
         Ok(())

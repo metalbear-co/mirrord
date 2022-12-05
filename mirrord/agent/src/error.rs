@@ -31,6 +31,9 @@ pub enum AgentError {
     #[error("DaemonTcp sender failed with `{0}`")]
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
 
+    #[error("StealerCommand sender failed with `{0}`")]
+    TrySendStealerCommand(#[from] tokio::sync::mpsc::error::TrySendError<StealerCommand>),
+
     #[error("ConnectRequest sender failed with `{0}`")]
     SendConnectRequest(#[from] tokio::sync::mpsc::error::SendError<LayerConnect>),
 

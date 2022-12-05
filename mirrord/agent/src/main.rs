@@ -379,7 +379,7 @@ async fn start_agent() -> Result<()> {
     );
 
     let stealer_cancellation_token = cancellation_token.clone();
-    let steal_task = run_thread(
+    let stealer_task = run_thread(
         TcpConnectionStealer::new(stealer_command_rx, pid)
             .and_then(|stealer| stealer.start(stealer_cancellation_token)),
     );
@@ -458,6 +458,10 @@ async fn start_agent() -> Result<()> {
     drop(cancel_guard);
     if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
         error!("start_agent -> sniffer task failed with error: {}", err);
+    }
+
+    if let Err(err) = stealer_task.join().map_err(|_| AgentError::JoinTask)? {
+        error!("start_agent -> stealer task failed with error: {}", err);
     }
 
     trace!("Agent shutdown.");
