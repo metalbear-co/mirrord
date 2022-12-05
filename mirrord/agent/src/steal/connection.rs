@@ -149,7 +149,7 @@ impl TcpConnectionStealer {
                 })),
                 Err(fail) => {
                     error!("connection id {connection_id:?} read error: {fail:?}");
-                    Err(AgentError::IO(fail.into()))
+                    Err(AgentError::IO(fail))
                 }
             })
             .unwrap_or(Ok(DaemonTcp::Close(TcpClose { connection_id })))?;
@@ -180,8 +180,7 @@ impl TcpConnectionStealer {
         if let Some(client_id) = self
             .port_subscriptions
             .get_topic_subscribers(real_address.port())
-            .iter()
-            .next()
+            .first()
             .cloned()
         {
             let connection_id = self.index_allocator.next_index().unwrap();
