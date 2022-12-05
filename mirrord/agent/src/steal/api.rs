@@ -73,6 +73,12 @@ impl TcpStealerApi {
     }
 
     pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {
-        todo!()
+        self.command_tx
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::ResponseData(tcp_data),
+            })
+            .await
+            .map_err(From::from)
     }
 }
