@@ -1,6 +1,13 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
-use tokio::net::TcpStream;
+use futures::Stream;
+use mirrord_protocol::tcp::NewTcpConnection;
+use streammap_ext::StreamMap;
+use tokio::{
+    io::{ReadHalf, WriteHalf},
+    net::TcpStream,
+};
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error};
 
 use super::*;
@@ -31,6 +38,8 @@ pub(crate) struct TcpConnectionStealer {
     // 1 per layer? 1 per port???
     stealer: TcpListener,
     iptables: SafeIpTables<iptables::IPTables>,
+    write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+    read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
 }
 
 impl TcpConnectionStealer {
@@ -54,6 +63,8 @@ impl TcpConnectionStealer {
             index_allocator: IndexAllocator::new(),
             stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?,
             iptables: SafeIpTables::new(iptables::new(false).unwrap())?,
+            write_streams: HashMap::with_capacity(8),
+            read_streams: StreamMap::with_capacity(8),
         })
     }
 
@@ -117,35 +128,38 @@ impl TcpConnectionStealer {
     ) -> Result<(), AgentError> {
         let real_address = orig_dst::orig_dst_addr(&stream)?;
 
-        // TODO(alex) [high] 2022-12-02: We're doing this for the first client we have, what if
-        // multiple clients are subscribed to this same port?
-        //
-        // We might need multiple streams? Think not, as now we have a global-ish `TcpStream`
-        // (listener is being held, but we could be holding the streams as well).
+        // Get the first client that is subscribed to this port and give it the new connection.
         if let Some(client_id) = self
             .port_subscriptions
             .get_topic_subscribers(real_address.port())
             .iter()
             .next()
+            .cloned()
         {
-            let connection_id = self.index_allocator.next_index();
+            let connection_id = self.index_allocator.next_index().unwrap();
 
             let (read_half, write_half) = tokio::io::split(stream);
             self.write_streams.insert(connection_id, write_half);
             self.read_streams
                 .insert(connection_id, ReaderStream::new(read_half));
 
-            // TODO(alex) [high] 2022-12-02: Need to send this to the appropriate `client_id`, so we
-            // need a way of checking which `client_id` is subscribed to this port.
             let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id,
                 destination_port: real_address.port(),
                 source_port: address.port(),
                 address: address.ip(),
             });
-            self.sender.send(new_connection).await?;
-            debug!("sent new connection");
-            Ok(())
+
+            // Send new connection to subscribed layer.
+            debug_assert!(self.clients.get(&client_id).is_some());
+            match self.clients.get(&client_id) {
+                Some(daemon_tx) => Ok(daemon_tx.send(new_connection).await?),
+                None => {
+                    // Should not happen.
+                    error!("Internal error: subscriptions of closed client still present.");
+                    Ok(self.close_client(client_id)?)
+                }
+            }
         } else {
             Err(AgentError::UnexpectedConnection(real_address.port()))
         }
@@ -202,12 +216,10 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    /// Removes the client with `client_id`, and also removes their redirection rules from
-    /// [`TcpConnectionStealer::iptables`].
+    /// Removes the client with `client_id` from our list of clients (layers), and also removes
+    /// their redirection rules from [`TcpConnectionStealer::iptables`].
     #[tracing::instrument(level = "debug", skip(self))]
     fn close_client(&mut self, client_id: ClientID) -> Result<(), AgentError> {
-        self.clients.remove(&client_id);
-
         let stealer_port = self.stealer.local_addr()?.port();
         let ports = self.port_subscriptions.get_client_topics(client_id);
         ports
@@ -216,6 +228,7 @@ impl TcpConnectionStealer {
 
         self.port_subscriptions.remove_client(client_id);
 
+        self.clients.remove(&client_id);
         Ok(())
     }
 
@@ -267,7 +280,7 @@ impl TcpConnectionStealer {
         match command {
             Command::NewClient(daemon_tx) => self.new_client(client_id, daemon_tx),
             Command::Subscribe(port) => self.port_subscribe(client_id, port).await?,
-            Command::UnsubscribePort(port) => self.port_unsubscribe(client_id, port)?,
+            Command::Unsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::AgentClosed => todo!(),
         }
 

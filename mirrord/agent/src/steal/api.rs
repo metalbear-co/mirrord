@@ -1,4 +1,4 @@
-use mirrord_protocol::tcp::DaemonTcp;
+use mirrord_protocol::tcp::{DaemonTcp, TcpData};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::*;
@@ -49,8 +49,16 @@ impl TcpStealerApi {
         todo!()
     }
 
+    /// Handles the converion of [`LayerTcpSteal::PortSubscribe`] that is passed from the
+    /// agent, to an internal stealer command [`Command::Subscribe`].
     pub(crate) async fn subscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        todo!()
+        self.command_tx
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::Subscribe(port),
+            })
+            .await
+            .map_err(From::from)
     }
 
     pub(crate) async fn connection_unsubscribe(
@@ -61,6 +69,10 @@ impl TcpStealerApi {
     }
 
     pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
+        todo!()
+    }
+
+    pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {
         todo!()
     }
 }

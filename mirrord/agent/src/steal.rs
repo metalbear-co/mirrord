@@ -43,7 +43,7 @@ enum Command {
     /// A layer wants to unsubscribe from this [`Port`].
     ///
     /// The agent stops stealing traffic from this [`Port`].
-    UnsubscribePort(Port),
+    Unsubscribe(Port),
 
     /// Part of the [`Drop`] implementation of [`TcpStealerAPI`].
     ///

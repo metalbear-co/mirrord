@@ -340,7 +340,7 @@ impl ClientConnectionHandler {
             LayerTcpSteal::PortUnsubscribe(port) => {
                 self.tcp_stealer_api.port_unsubscribe(port).await
             }
-            LayerTcpSteal::Data(_) => todo!(),
+            LayerTcpSteal::Data(tcp_data) => self.tcp_stealer_api.client_data(tcp_data).await,
         }
     }
 }
