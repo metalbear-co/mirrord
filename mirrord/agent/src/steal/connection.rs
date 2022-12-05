@@ -7,6 +7,7 @@ use tokio::{
     io::{ReadHalf, WriteHalf},
     net::TcpStream,
 };
+use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error};
 
@@ -272,6 +273,17 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
+    /// Write the data received from local app via layer to the stream with end client.
+    async fn forward_data(&mut self, tcp_data: TcpData) -> std::result::Result<(), AgentError> {
+        if let Some(stream) = self.write_streams.get_mut(&data.connection_id) {
+            stream.write_all(&data.bytes[..]).await?;
+            Ok(())
+        } else {
+            warn!("Trying to send data to closed connection {:?}", data.connection_id);
+            Ok(())
+        }
+    }
+
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote
     /// connection.
     #[tracing::instrument(level = "debug", skip(self))]
@@ -293,7 +305,7 @@ impl TcpConnectionStealer {
             Command::PortSubscribe(port) => self.port_subscribe(client_id, port).await?,
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::AgentClosed => todo!(),
-            Command::ResponseData(tcp_data) => todo!(),
+            Command::ResponseData(tcp_data) => self.forward_data(tcp_data)?,
         }
 
         Ok(())
