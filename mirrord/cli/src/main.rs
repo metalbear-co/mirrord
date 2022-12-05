@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::Write,
     path::{Path, PathBuf},
@@ -304,9 +305,14 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn ls(args: &LsArgs) -> Result<()> {
-    let pods = mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref()).await?;
-    let json_obj = json!(pods);
-    println!("{}", json_obj);
+    let pod_map: HashMap<_, _> =
+        mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref())
+            .await?
+            .into_iter()
+            .collect();
+    let json_obj = json!(pod_map);
+    let json_string = serde_json::to_string_pretty(&json_obj).unwrap();
+    println!("{}", json_string);
     Ok(())
 }
 
