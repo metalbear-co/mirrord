@@ -140,6 +140,7 @@ impl TcpConnectionStealer {
         connection_id: ConnectionId,
         incoming_data: Option<Result<Bytes, io::Error>>,
     ) -> Result<(), AgentError> {
+        // Create a message to send to the client, or propagate an error.
         let daemon_tcp_message = incoming_data
             .map(|incoming_data_result| match incoming_data_result {
                 Ok(bytes) => Ok(DaemonTcp::Data(TcpData {
