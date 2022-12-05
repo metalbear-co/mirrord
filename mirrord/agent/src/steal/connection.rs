@@ -38,8 +38,6 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Intercepts the connections, instead of letting them go through their normal pathways, this
     /// is used to steal the traffic.
-    // TODO(alex) [mid] 2022-12-02: Is 1 listener enough? Do we need to create 1 per connection?
-    // 1 per layer? 1 per port???
     stealer: TcpListener,
     iptables: SafeIpTables<iptables::IPTables>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
@@ -225,8 +223,8 @@ impl TcpConnectionStealer {
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn port_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
-        // TODO(alex) [mid] 2022-12-02: We only check if this `client_id` is already subscribed to
-        // this port, but other clients might be subscribed to it.
+        // TODO(alex): We only check if this `client_id` is already subscribed to this port, but
+        // other clients might be subscribed to it.
         let ports = self.port_subscriptions.get_client_topics(client_id);
 
         if ports.contains(&port) {

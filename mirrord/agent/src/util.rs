@@ -23,8 +23,7 @@ where
     T: Eq + Hash + Clone + Copy,
     C: Eq + Hash + Clone + Copy,
 {
-    // TODO(alex) [low] 2022-11-30: Same as `IndexAllocator`, make a good `Default` impl, then
-    // delete this.
+    // TODO(alex): Same as `IndexAllocator`, make a good `Default` impl, then delete this.
     pub fn new() -> Subscriptions<T, C> {
         Subscriptions {
             _inner: HashMap::new(),
