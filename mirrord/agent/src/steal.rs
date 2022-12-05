@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcpSteal},
+    tcp::{DaemonTcp, LayerTcpSteal, TcpData},
     ConnectionId, Port,
 };
 use tokio::{
@@ -53,6 +53,12 @@ enum Command {
     /// A connection here is a pair of ([`ReadHalf`], [`WriteHalf`]) streams that are used to
     /// capture a remote connection (the connection we're stealing data from).
     ConnectionUnsubscribe(ConnectionId),
+
+    /// There is new data in the direction going from the local process to the end-user (Going
+    /// via the layer and the agent  local-process -> layer --> agent --> end-user).
+    ///
+    /// Agent forwards this data to the other side of original connection.
+    ResponseData(TcpData),
 }
 
 /// Association between a client (identified by the `client_id`) and a [`Command`].
