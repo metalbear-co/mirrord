@@ -38,17 +38,21 @@ enum Command {
     /// A layer wants to subscribe to this [`Port`].
     ///
     /// The agent starts stealing traffic on this [`Port`].
-    Subscribe(Port),
+    PortSubscribe(Port),
 
     /// A layer wants to unsubscribe from this [`Port`].
     ///
     /// The agent stops stealing traffic from this [`Port`].
-    Unsubscribe(Port),
+    PortUnsubscribe(Port),
 
     /// Part of the [`Drop`] implementation of [`TcpStealerAPI`].
     ///
     /// Closes a layer connection, and unsubscribe its ports.
     AgentClosed,
+
+    /// A connection here is a pair of ([`ReadHalf`], [`WriteHalf`]) streams that are used to
+    /// capture a remote connection (the connection we're stealing data from).
+    ConnectionUnsubscribe(ConnectionId),
 }
 
 /// Association between a client (identified by the `client_id`) and a [`Command`].

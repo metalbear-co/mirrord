@@ -171,7 +171,7 @@ impl TcpConnectionStealer {
         self.clients.insert(client_id, sender);
     }
 
-    /// Helper function to handle [`LayerTcpSteal::PortSubscribe`] messages.
+    /// Helper function to handle [`Command::PortSubscribe`] messages.
     ///
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
@@ -194,7 +194,7 @@ impl TcpConnectionStealer {
         }
     }
 
-    /// Helper function to handle [`LayerTcpSteal::PortUnsubscribe`] messages.
+    /// Helper function to handle [`Command::PortUnsubscribe`] messages.
     ///
     /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
     /// with `client_id`.
@@ -279,8 +279,9 @@ impl TcpConnectionStealer {
 
         match command {
             Command::NewClient(daemon_tx) => self.new_client(client_id, daemon_tx),
-            Command::Subscribe(port) => self.port_subscribe(client_id, port).await?,
-            Command::Unsubscribe(port) => self.port_unsubscribe(client_id, port)?,
+            Command::ConnectionUnsubscribe(connection_id) => todo!()
+            Command::PortSubscribe(port) => self.port_subscribe(client_id, port).await?,
+            Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::AgentClosed => todo!(),
         }
 

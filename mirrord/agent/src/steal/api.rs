@@ -49,13 +49,29 @@ impl TcpStealerApi {
         todo!()
     }
 
-    /// Handles the converion of [`LayerTcpSteal::PortSubscribe`] that is passed from the
-    /// agent, to an internal stealer command [`Command::Subscribe`].
-    pub(crate) async fn subscribe(&mut self, port: Port) -> Result<(), AgentError> {
+    /// Handles the conversion of [`LayerTcpSteal::PortSubscribe`], that is passed from the
+    /// agent, to an internal stealer command [`Command::PortSubscribe`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
+    pub(crate) async fn port_subscribe(&mut self, port: Port) -> Result<(), AgentError> {
         self.command_tx
             .send(StealerCommand {
                 client_id: self.client_id,
-                command: Command::Subscribe(port),
+                command: Command::PortSubscribe(port),
+            })
+            .await
+            .map_err(From::from)
+    }
+
+    /// Handles the conversion of [`LayerTcpSteal::PortUnsubscribe`], that is passed from the
+    /// agent, to an internal stealer command [`Command::PortUnsubscribe`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
+    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
+        self.command_tx
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::PortUnsubscribe(port),
             })
             .await
             .map_err(From::from)
@@ -65,11 +81,13 @@ impl TcpStealerApi {
         &mut self,
         connection_id: ConnectionId,
     ) -> Result<(), AgentError> {
-        todo!()
-    }
-
-    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        todo!()
+        self.command_tx
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::ConnectionUnsubscribe(connection_id),
+            })
+            .await
+            .map_err(From::from)
     }
 
     pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {

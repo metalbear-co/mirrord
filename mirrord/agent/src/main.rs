@@ -331,7 +331,7 @@ impl ClientConnectionHandler {
 
     async fn handle_client_steal(&mut self, message: LayerTcpSteal) -> Result<()> {
         match message {
-            LayerTcpSteal::PortSubscribe(port) => self.tcp_stealer_api.subscribe(port).await,
+            LayerTcpSteal::PortSubscribe(port) => self.tcp_stealer_api.port_subscribe(port).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.tcp_stealer_api
                     .connection_unsubscribe(connection_id)
