@@ -7,6 +7,7 @@ use crate::{
     util::ClientID,
 };
 
+/// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
 #[derive(Debug)]
 pub(crate) struct TcpStealerApi {
     /// Identifies which layer instance is associated with this API.
@@ -24,6 +25,8 @@ pub(crate) struct TcpStealerApi {
 }
 
 impl TcpStealerApi {
+    /// Initializes a [`TcpStealerApi`] and sends a message to [`TcpConnectionStealer`] signaling
+    /// that we have a new client.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(
         client_id: ClientID,
@@ -81,6 +84,10 @@ impl TcpStealerApi {
             .map_err(From::from)
     }
 
+    /// Handles the conversion of [`LayerTcpSteal::ConnectionUnsubscribe`], that is passed from the
+    /// agent, to an internal stealer command [`Command::ConnectionUnsubscribe`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
     pub(crate) async fn connection_unsubscribe(
         &mut self,
         connection_id: ConnectionId,
@@ -94,6 +101,10 @@ impl TcpStealerApi {
             .map_err(From::from)
     }
 
+    /// Handles the conversion of [`LayerTcpSteal::TcpData`], that is passed from the
+    /// agent, to an internal stealer command [`Command::ResponseData`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
     pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {
         self.command_tx
             .send(StealerCommand {
