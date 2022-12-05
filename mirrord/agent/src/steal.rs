@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcpSteal, TcpData},
+    tcp::{DaemonTcp, TcpData},
     ConnectionId, Port,
 };
 use tokio::{
@@ -12,7 +12,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::log::warn;
 
-use self::{ip_tables::SafeIpTables, worker::StealWorker};
+use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
@@ -23,7 +23,6 @@ pub(super) mod api;
 pub(super) mod connection;
 mod ip_tables;
 mod orig_dst;
-pub(super) mod worker;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerAPI`].
 ///
@@ -71,23 +70,4 @@ pub struct StealerCommand {
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
-}
-
-#[tracing::instrument(level = "trace", skip(rx, tx))]
-pub async fn steal_worker(
-    rx: Receiver<LayerTcpSteal>,
-    tx: Sender<DaemonTcp>,
-    pid: Option<u64>,
-) -> Result<()> {
-    if let Some(pid) = pid {
-        let namespace = PathBuf::from("/proc")
-            .join(PathBuf::from(pid.to_string()))
-            .join(PathBuf::from("ns/net"));
-
-        set_namespace(namespace)?;
-    }
-    let listener = TcpListener::bind("0.0.0.0:0").await?;
-    let listen_port = listener.local_addr()?.port();
-
-    StealWorker::new(tx, listen_port)?.start(rx, listener).await
 }

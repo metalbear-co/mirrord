@@ -1,6 +1,9 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddr},
+};
 
-use futures::Stream;
+use bytes::Bytes;
 use mirrord_protocol::tcp::{NewTcpConnection, TcpClose};
 use streammap_ext::StreamMap;
 use tokio::{
@@ -9,7 +12,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error};
+use tracing::error;
 
 use super::*;
 
@@ -116,9 +119,10 @@ impl TcpConnectionStealer {
                         }
                     }
                 }
-                read_something = self.read_incoming_tcp_data() => {
-                    if let Err(fail) = read_something {
-                        error!("Failed reading incoming tcp data!");
+                Some((connection_id, incoming_data)) = self.read_streams.next() => {
+                    // TODO: Should we spawn a task to forward the data?
+                    if let Err(fail) = self.forward_incoming_tcp_data(connection_id, incoming_data).await {
+                        error!("Failed reading incoming tcp data with {fail:#?}!");
                     }
                 }
                 _ = cancellation_token.cancelled() => {
@@ -130,33 +134,37 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    async fn read_incoming_tcp_data(&mut self) -> Result<(), AgentError> {
-        if let Some((connection_id, bytes)) = self.read_streams.next().await {
-            let daemon_tx = self
-                .client_connections
-                .get(&connection_id)
-                .and_then(|client_id| self.clients.get(client_id));
-
-            if let Some(daemon_tx) = daemon_tx {
-                match bytes {
-                    Some(Ok(bytes)) => Ok(daemon_tx
-                        .send(DaemonTcp::Data(TcpData {
-                            connection_id,
-                            bytes: bytes.to_vec(),
-                        }))
-                        .await?),
-                    None => Ok(daemon_tx
-                        .send(DaemonTcp::Close(TcpClose { connection_id }))
-                        .await?),
-                    Some(Err(fail)) => {
-                        error!("connection id {connection_id:?} read error: {fail:?}");
-                        Err(AgentError::IO(fail.into()))
-                    }
+    /// Forwards data from a remote stream to the client with `connection_id`.
+    async fn forward_incoming_tcp_data(
+        &mut self,
+        connection_id: ConnectionId,
+        incoming_data: Option<Result<Bytes, io::Error>>,
+    ) -> Result<(), AgentError> {
+        let daemon_tcp_message = incoming_data
+            .map(|incoming_data_result| match incoming_data_result {
+                Ok(bytes) => Ok(DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes: bytes.to_vec(),
+                })),
+                Err(fail) => {
+                    error!("connection id {connection_id:?} read error: {fail:?}");
+                    Err(AgentError::IO(fail.into()))
                 }
-            } else {
-                Ok(())
-            }
+            })
+            .unwrap_or(Ok(DaemonTcp::Close(TcpClose { connection_id })))?;
+
+        if let Some(daemon_tx) = self
+            .client_connections
+            .get(&connection_id)
+            .and_then(|client_id| self.clients.get(client_id))
+        {
+            Ok(daemon_tx.send(daemon_tcp_message).await?)
         } else {
+            // Either connection_id or client_id does not exist. This would be a bug.
+            error!(
+                "mirrord error: An invariant is not being held between connection_id and client_id for stealer!"
+            );
+            debug_assert!(false);
             Ok(())
         }
     }
