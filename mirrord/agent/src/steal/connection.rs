@@ -272,6 +272,14 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
+    /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote
+    /// connection.
+    #[tracing::instrument(level = "debug", skip(self))]
+    fn connection_unsubscribe(&mut self, connection_id: ConnectionId) {
+        self.write_streams.remove(&connection_id);
+        self.read_streams.remove(&connection_id);
+    }
+
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
     #[tracing::instrument(level = "debug", skip(self))]
     async fn handle_command(&mut self, command: StealerCommand) -> Result<(), AgentError> {
@@ -280,8 +288,7 @@ impl TcpConnectionStealer {
         match command {
             Command::NewClient(daemon_tx) => self.new_client(client_id, daemon_tx),
             Command::ConnectionUnsubscribe(connection_id) => {
-                // self.connection_unsubscribe(connection_id)
-                todo!()
+                self.connection_unsubscribe(connection_id)
             }
             Command::PortSubscribe(port) => self.port_subscribe(client_id, port).await?,
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
