@@ -11,6 +11,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::log::warn;
+use mirrord_protocol::tcp::TcpData;
 
 use self::{ip_tables::SafeIpTables, worker::StealWorker};
 use crate::{
@@ -49,6 +50,12 @@ enum Command {
     ///
     /// Closes a layer connection, and unsubscribe its ports.
     AgentClosed,
+
+    /// There is new data in the direction going from the local process to the end-user (Going
+    /// via the layer and the agent  local-process -> layer --> agent --> end-user).
+    ///
+    /// Agent forwards this data to the other side of original connection.
+    ResponseData(TcpData),
 }
 
 /// Association between a client (identified by the `client_id`) and a [`Command`].
