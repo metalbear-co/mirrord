@@ -12,6 +12,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - IntelliJ Plugin: downgrade Java to version 11.
 - Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
   that agent is created by cli (and soon to be created by IDE plugin via cli).
+- mirrord-agent: Stealer feature changed from working per connection to now starting with
+  the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
+  we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
+  `TcpStealerApi` which bridges the communication between the agent and the stealer task).
 
 ### Fixed
 
