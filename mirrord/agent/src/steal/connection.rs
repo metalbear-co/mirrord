@@ -48,7 +48,7 @@ pub(crate) struct TcpConnectionStealer {
 }
 
 impl TcpConnectionStealer {
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(
         command_rx: Receiver<StealerCommand>,
         pid: Option<u64>,
@@ -74,17 +74,17 @@ impl TcpConnectionStealer {
         })
     }
 
-    // TODO(alex) [low] 2022-12-01: Better docs.
     /// Runs the stealer loop.
     ///
     /// The loop deals with 3 different paths:
     ///
     /// 1. Receiving [`StealerCommand`]s and calling [`TcpConnectionStealer::handle_command`];
     ///
-    /// 2. Controlling a listener? Stream? The "socket" that stealer users to take the traffic;
+    /// 2. Accepting remote connections through the [`TcpConnectionStealer::stealer`]
+    /// [`TcpListener`]. We steal traffic from the created streams.
     ///
     /// 3. Handling the cancellation of the whole stealer thread.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn start(
         mut self,
         cancellation_token: CancellationToken,
@@ -96,21 +96,10 @@ impl TcpConnectionStealer {
                         self.handle_command(command).await?;
                     } else { break; }
                 },
-                // TODO(alex) [mid] 2022-12-01: This should be global as well?
-                //
-                // Like steal everything or only steal what the users asked for?
-                //
-                // If we do this, then we break stuff, as this would mean we take every `TcpStream`.
-                //
-                // ADD(alex) [mid] 2022-12-02: This will only steal if we have added a
-                // redirection rule, so I think it's safe (only starts capturing after someone sends
-                // a `Subscribe` message to stealer).
+                // Accepts a connection that we're going to be stealing traffic from.
                 accept = self.stealer.accept() => {
                     match accept {
                         Ok(accept) => {
-                            // TODO(alex) [high] 2022-12-02: Now we need to implement this, but the
-                            // question remains: do we need to keep the `self.stealer`, or do we
-                            // want to keep the `stealer_stream`?
                             self.incoming_connection(accept).await?;
                         }
                         Err(fail) => {
@@ -135,6 +124,7 @@ impl TcpConnectionStealer {
     }
 
     /// Forwards data from a remote stream to the client with `connection_id`.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn forward_incoming_tcp_data(
         &mut self,
         connection_id: ConnectionId,
@@ -163,13 +153,22 @@ impl TcpConnectionStealer {
         } else {
             // Either connection_id or client_id does not exist. This would be a bug.
             error!(
-                "mirrord error: An invariant is not being held between connection_id and client_id for stealer!"
+                "Internal error: An invariant is not being held between connection_id and client_id for stealer!"
             );
             debug_assert!(false);
             Ok(())
         }
     }
 
+    /// Handles a new remote connection that was accepted on the [`TcpConnectionStealer::stealer`]
+    /// listener.
+    ///
+    /// We separate the stream created by accepting the connection into [`ReadHalf`] and
+    /// [`WriteHalf`] to handle reading and sending separately.
+    ///
+    /// Also creates an association between `connection_id` and `client_id` to be used by
+    /// [`forward_incoming_tcp_data`].
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn incoming_connection(
         &mut self,
         (stream, address): (TcpStream, SocketAddr),
@@ -189,6 +188,7 @@ impl TcpConnectionStealer {
             self.write_streams.insert(connection_id, write_half);
             self.read_streams
                 .insert(connection_id, ReaderStream::new(read_half));
+
             self.client_connections.insert(connection_id, client_id);
 
             let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
@@ -214,7 +214,7 @@ impl TcpConnectionStealer {
     }
 
     /// Registers a new layer instance that has the `steal` feature enabled.
-    #[tracing::instrument(level = "debug", skip(self, sender))]
+    #[tracing::instrument(level = "trace", skip(self, sender))]
     fn new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
         self.clients.insert(client_id, sender);
     }
@@ -223,7 +223,7 @@ impl TcpConnectionStealer {
     ///
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn port_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
         // TODO(alex) [mid] 2022-12-02: We only check if this `client_id` is already subscribed to
         // this port, but other clients might be subscribed to it.
@@ -246,7 +246,7 @@ impl TcpConnectionStealer {
     ///
     /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
     /// with `client_id`.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn port_unsubscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
         self.port_subscriptions
             .get_client_topics(client_id)
@@ -266,7 +266,7 @@ impl TcpConnectionStealer {
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
     /// their redirection rules from [`TcpConnectionStealer::iptables`].
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn close_client(&mut self, client_id: ClientID) -> Result<(), AgentError> {
         let stealer_port = self.stealer.local_addr()?.port();
         let ports = self.port_subscriptions.get_client_topics(client_id);
@@ -281,7 +281,7 @@ impl TcpConnectionStealer {
     }
 
     /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_message_to_single_client(
         &mut self,
         client_id: &ClientID,
@@ -301,7 +301,7 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    #[tracing::instrument(level = "debug", skip(self, clients))]
+    #[tracing::instrument(level = "trace", skip(self, clients))]
     async fn send_message_to_subscribed_clients(
         &mut self,
         clients: impl Iterator<Item = &(ClientID, Sender<DaemonTcp>)>,
@@ -336,14 +336,14 @@ impl TcpConnectionStealer {
 
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote
     /// connection.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn connection_unsubscribe(&mut self, connection_id: ConnectionId) {
         self.write_streams.remove(&connection_id);
         self.read_streams.remove(&connection_id);
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_command(&mut self, command: StealerCommand) -> Result<(), AgentError> {
         let StealerCommand { client_id, command } = command;
 

@@ -88,7 +88,7 @@ where
         })
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
@@ -97,7 +97,7 @@ where
         )
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.remove_rule(
             &self.chain_name,

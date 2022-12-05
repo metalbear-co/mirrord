@@ -24,7 +24,7 @@ pub(crate) struct TcpStealerApi {
 }
 
 impl TcpStealerApi {
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(
         client_id: ClientID,
         command_tx: Sender<StealerCommand>,
@@ -48,7 +48,7 @@ impl TcpStealerApi {
     /// [`TcpConnectionStealer`] task, back to the agent.
     ///
     /// Called in the [`ClientConnectionHandler`].
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn recv(&mut self) -> Option<DaemonTcp> {
         self.daemon_rx.recv().await
     }

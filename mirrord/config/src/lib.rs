@@ -42,7 +42,7 @@ use crate::{
 /// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
 ///
 /// [agent]
-/// log_level = "debug"
+/// log_level = "trace"
 /// ttl = 1024 # seconds
 ///
 /// [feature]
@@ -62,7 +62,7 @@ use crate::{
 /// accept_invalid_certificates = true
 ///
 /// [agent]
-/// log_level = "debug"
+/// log_level = "trace"
 /// ttl = 1024 # seconds
 /// image = "registry/mirrord-agent-custom:latest"
 /// image_pull_policy = "Always"
