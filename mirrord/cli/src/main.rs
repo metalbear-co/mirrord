@@ -304,14 +304,27 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn ls(args: &LsArgs) -> Result<()> {
-    let pod_map: HashMap<_, _> =
-        mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref())
-            .await?
-            .into_iter()
-            .collect();
-    let json_obj = json!(pod_map);
-    let json_string = serde_json::to_string_pretty(&json_obj).unwrap();
+async fn list_targets(args: &LsArgs) -> Result<()> {
+    let pods = mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref()).await?;
+    let json_obj = if args.prettify {
+        let target_vector =
+            mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref())
+                .await?
+                .into_iter()
+                .collect::<HashMap<_, _>>();
+        json!(target_vector)
+    } else {
+        let target_vector = pods
+            .iter()
+            .flat_map(|(pod, containers)| {
+                containers
+                    .iter()
+                    .map(move |container| format!("pod/{}/container/{}", pod, container))
+            })
+            .collect::<Vec<String>>();
+        json!(target_vector)
+    };
+    let json_string = serde_json::to_string_pretty(&json_obj)?;
     println!("{}", json_string);
     Ok(())
 }
@@ -350,7 +363,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
-        Commands::ListTargets(args) => ls(&args)?,
+        Commands::ListTargets(args) => list_targets(&args)?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup {

@@ -239,6 +239,10 @@ pub(super) struct LsArgs {
     )]
     pub output: Option<Format>,
 
+    /// Prettify the output.
+    #[arg(short = 'p', long)]
+    pub prettify: bool,
+
     /// Specify the namespace to list pods in.
     #[arg(short = 'n', long = "namespace", num_args = 1)]
     pub namespace: Option<String>,
