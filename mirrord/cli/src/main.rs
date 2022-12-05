@@ -313,9 +313,14 @@ async fn list_targets(args: &LsArgs) -> Result<()> {
         let target_vector = pods
             .iter()
             .flat_map(|(pod, containers)| {
-                containers
-                    .iter()
-                    .map(move |container| format!("pod/{}/container/{}", pod, container))
+                if containers.len() == 1 {
+                    vec![format!("pod/{}", pod)]
+                } else {
+                    containers
+                        .iter()
+                        .map(move |container| format!("pod/{}/container/{}", pod, container))
+                        .collect::<Vec<String>>()
+                }
             })
             .collect::<Vec<String>>();
         json!(target_vector)

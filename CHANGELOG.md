@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Add `mirrord ls` which allows listing target paths for use by extensions.
+
 ### Changed
 
 - IntelliJ Plugin: downgrade Java to version 11.
