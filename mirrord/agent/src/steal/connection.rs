@@ -39,13 +39,25 @@ pub(crate) struct TcpConnectionStealer {
     /// Intercepts the connections, instead of letting them go through their normal pathways, this
     /// is used to steal the traffic.
     stealer: TcpListener,
+
+    /// Set of rules the agent uses to steal traffic from through the
+    /// [`TcpConnectionStealer::stealer`] listener.
     iptables: SafeIpTables<iptables::IPTables>,
+
+    /// Used to send data back to the original remote connection.
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+
+    /// Used to read data from the remote connections.
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
+
+    /// Associates a `ConnectionId` with a `ClientID`, so we can send the data we read from
+    /// [`TcpConnectionStealer::read_streams`] to the appropriate client (layer).
     client_connections: HashMap<ConnectionId, ClientID>,
 }
 
 impl TcpConnectionStealer {
+    /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
+    /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(
         command_rx: Receiver<StealerCommand>,
@@ -72,7 +84,7 @@ impl TcpConnectionStealer {
         })
     }
 
-    /// Runs the stealer loop.
+    /// Runs the tcp traffic stealer loop.
     ///
     /// The loop deals with 3 different paths:
     ///
@@ -296,25 +308,6 @@ impl TcpConnectionStealer {
             })?;
         }
 
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self, clients))]
-    async fn send_message_to_subscribed_clients(
-        &mut self,
-        clients: impl Iterator<Item = &(ClientID, Sender<DaemonTcp>)>,
-        message: DaemonTcp,
-    ) -> Result<(), AgentError> {
-        for (client_id, sender) in clients {
-            sender.send(message.clone()).await.map_err(|fail| {
-                warn!(
-                    "Failed to send message to client {} with {:#?}!",
-                    client_id, fail
-                );
-                let _ = self.close_client(*client_id);
-                fail
-            })?;
-        }
         Ok(())
     }
 
