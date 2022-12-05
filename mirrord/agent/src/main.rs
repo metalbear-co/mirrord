@@ -347,8 +347,6 @@ impl ClientConnectionHandler {
     }
 }
 
-// TODO(alex) [high] 2022-11-29: Create a `steal_task` to act as a "global" for this agent
-// instance, similar to `sniffer_task`.
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace")]
 async fn start_agent() -> Result<()> {

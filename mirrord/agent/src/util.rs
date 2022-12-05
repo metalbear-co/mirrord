@@ -128,7 +128,7 @@ where
     }
 }
 
-// TODO(alex) [low] 2022-11-30: Make this more generic, so we can use `default` everywhere, and
+// TODO(alex): Make this more generic, so we can use `default` everywhere, and
 // delete `new`.
 impl Default for IndexAllocator<usize> {
     fn default() -> Self {
