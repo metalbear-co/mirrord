@@ -13,7 +13,7 @@ use const_random::const_random;
 use exec::execvp;
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_kube::api::{kubernetes::KubernetesAPI, target_list, AgentManagment};
 use mirrord_operator::{
     client::OperatorApiDiscover,
     license::License,
@@ -305,13 +305,9 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn list_targets(args: &LsArgs) -> Result<()> {
-    let pods = mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref()).await?;
+    let pods = target_list::get_kube_pods(args.namespace.as_deref()).await?;
     let json_obj = if args.prettify {
-        let target_vector =
-            mirrord_kube::api::target_list::get_kube_pods(args.namespace.as_deref())
-                .await?
-                .into_iter()
-                .collect::<HashMap<_, _>>();
+        let target_vector = pods.into_iter().collect::<HashMap<_, _>>();
         json!(target_vector)
     } else {
         let target_vector = pods
