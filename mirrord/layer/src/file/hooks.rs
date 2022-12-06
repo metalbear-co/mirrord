@@ -5,7 +5,6 @@
 /// that is not being hooked (`strace` the program to check).
 use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
-use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
@@ -16,6 +15,7 @@ use crate::{
     close_detour,
     detour::DetourGuard,
     file::ops::{access, lseek, open, read, write},
+    hooks::HookManager,
     replace,
 };
 
@@ -392,119 +392,27 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor, module: Option<&str>) {
-    replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN, module);
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+    replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
+    replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
+    replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
+    replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
+    replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
+    replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
+    replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
+    replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
+    replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
+    replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
+    replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+    replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
+    replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
+    replace!(hook_manager, "access", access_detour, FnAccess, FN_ACCESS);
     replace!(
-        interceptor,
-        "openat",
-        openat_detour,
-        FnOpenat,
-        FN_OPENAT,
-        module
-    );
-    replace!(
-        interceptor,
-        "fopen",
-        fopen_detour,
-        FnFopen,
-        FN_FOPEN,
-        module
-    );
-    replace!(
-        interceptor,
-        "fdopen",
-        fdopen_detour,
-        FnFdopen,
-        FN_FDOPEN,
-        module
-    );
-    replace!(interceptor, "read", read_detour, FnRead, FN_READ, module);
-    replace!(
-        interceptor,
-        "fread",
-        fread_detour,
-        FnFread,
-        FN_FREAD,
-        module
-    );
-    replace!(
-        interceptor,
-        "fgets",
-        fgets_detour,
-        FnFgets,
-        FN_FGETS,
-        module
-    );
-    replace!(
-        interceptor,
-        "pread",
-        pread_detour,
-        FnPread,
-        FN_PREAD,
-        module
-    );
-    replace!(
-        interceptor,
-        "ferror",
-        ferror_detour,
-        FnFerror,
-        FN_FERROR,
-        module
-    );
-    replace!(
-        interceptor,
-        "fclose",
-        fclose_detour,
-        FnFclose,
-        FN_FCLOSE,
-        module
-    );
-    replace!(
-        interceptor,
-        "fileno",
-        fileno_detour,
-        FnFileno,
-        FN_FILENO,
-        module
-    );
-    replace!(
-        interceptor,
-        "lseek",
-        lseek_detour,
-        FnLseek,
-        FN_LSEEK,
-        module
-    );
-    replace!(
-        interceptor,
-        "write",
-        write_detour,
-        FnWrite,
-        FN_WRITE,
-        module
-    );
-    replace!(
-        interceptor,
-        "pwrite",
-        pwrite_detour,
-        FnPwrite,
-        FN_PWRITE,
-        module
-    );
-    replace!(
-        interceptor,
-        "access",
-        access_detour,
-        FnAccess,
-        FN_ACCESS,
-        module
-    );
-    replace!(
-        interceptor,
+        hook_manager,
         "faccessat",
         faccessat_detour,
         FnFaccessat,
-        FN_FACCESSAT,
-        module
+        FN_FACCESSAT
     );
 }

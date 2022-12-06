@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! replace {
-    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr, $module_name:expr) => {{
+    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
         let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
@@ -12,7 +12,7 @@ macro_rules! replace {
             Ok(original_fn)
         };
 
-        intercept($hook_manager, $func, $detour_function)
+        let _ = intercept($hook_manager, $func, $detour_function)
             .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
     }};
 }
@@ -24,21 +24,29 @@ macro_rules! replace_symbol {
                          symbol_name,
                          detour: $detour_type|
          -> $crate::error::Result<$detour_type> {
-            let replaced = hook_manager.hook_symbol_main_module(symbol_name, detour as *mut libc::c_void)
-            let original_fn: $detour_type = std::mem::transmute(replaced?);
+            let replaced =
+                hook_manager.hook_symbol_main_module(symbol_name, detour as *mut libc::c_void)?;
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             Ok(original_fn)
         };
 
-        intercept($hook_manager, $func, $detour_function)
-            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
+        let _ = intercept($hook_manager, $func, $detour_function)
+            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
     }};
 }
 
 #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
 macro_rules! hook_symbol {
     ($hook_manager:expr, $func:expr, $detour_name:expr) => {
-        hook_manager.hook_symbol_main_module($func, $detour_name)
+        match hook_manager.hook_symbol_main_module($func, $detour_name) {
+            Ok(_) => {
+                trace!("hooked {func:?} in main module");
+            }
+            Err(err) => {
+                trace!("hook {func:?} in main module failed with err {err:?}");
+            }
+        }
     };
 }
 

@@ -2,13 +2,12 @@ use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::os::unix::io::RawFd;
 
-use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use tracing::{error, info, trace};
 
 use super::ops::*;
-use crate::{detour::DetourGuard, replace};
+use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -277,120 +276,81 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     }
 }
 
-pub(crate) unsafe fn enable_socket_hooks(
-    interceptor: &mut Interceptor,
-    enabled_remote_dns: bool,
-    module: Option<&str>,
-) {
-    replace!(
-        interceptor,
-        "socket",
-        socket_detour,
-        FnSocket,
-        FN_SOCKET,
-        module
-    );
+pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
+    replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
-    replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND, module);
-    replace!(
-        interceptor,
-        "listen",
-        listen_detour,
-        FnListen,
-        FN_LISTEN,
-        module
-    );
+    replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
+    replace!(hook_manager, "listen", listen_detour, FnListen, FN_LISTEN);
 
     replace!(
-        interceptor,
+        hook_manager,
         "connect",
         connect_detour,
         FnConnect,
-        FN_CONNECT,
-        module
+        FN_CONNECT
     );
 
-    replace!(
-        interceptor,
-        "fcntl",
-        fcntl_detour,
-        FnFcntl,
-        FN_FCNTL,
-        module
-    );
-    replace!(interceptor, "dup", dup_detour, FnDup, FN_DUP, module);
-    replace!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2, module);
+    replace!(hook_manager, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
+    replace!(hook_manager, "dup", dup_detour, FnDup, FN_DUP);
+    replace!(hook_manager, "dup2", dup2_detour, FnDup2, FN_DUP2);
 
     replace!(
-        interceptor,
+        hook_manager,
         "getpeername",
         getpeername_detour,
         FnGetpeername,
-        FN_GETPEERNAME,
-        module
+        FN_GETPEERNAME
     );
 
     replace!(
-        interceptor,
+        hook_manager,
         "getsockname",
         getsockname_detour,
         FnGetsockname,
-        FN_GETSOCKNAME,
-        module
+        FN_GETSOCKNAME
     );
 
     #[cfg(target_os = "linux")]
     {
         // something weird happens here..
         let none: Option<&str> = None;
-        // Here we replace a function of libuv and not libc, so we pass None as the module.
+        // Here we replace a function of libuv and not libc, so we pass None as the .
         replace!(
-            interceptor,
+            hook_manager,
             "uv__accept4",
             uv__accept4_detour,
             FnUv__accept4,
-            FN_UV__ACCEPT4,
-            none
+            FN_UV__ACCEPT4
         );
 
         replace!(
-            interceptor,
+            hook_manager,
             "accept4",
             accept4_detour,
             FnAccept4,
-            FN_ACCEPT4,
-            module
+            FN_ACCEPT4
         );
 
-        replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3, module);
+        replace!(hook_manager, "dup3", dup3_detour, FnDup3, FN_DUP3);
     }
 
-    replace!(
-        interceptor,
-        "accept",
-        accept_detour,
-        FnAccept,
-        FN_ACCEPT,
-        module
-    );
+    replace!(hook_manager, "accept", accept_detour, FnAccept, FN_ACCEPT);
 
     if enabled_remote_dns {
         replace!(
-            interceptor,
+            hook_manager,
             "getaddrinfo",
             getaddrinfo_detour,
             FnGetaddrinfo,
-            FN_GETADDRINFO,
-            module
+            FN_GETADDRINFO
         );
 
         replace!(
-            interceptor,
+            hook_manager,
             "freeaddrinfo",
             freeaddrinfo_detour,
             FnFreeaddrinfo,
-            FN_FREEADDRINFO,
-            module
+            FN_FREEADDRINFO
         );
     }
 }

@@ -23,7 +23,6 @@ use common::{GetAddrInfoHook, ResponseChannel};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
-use frida_gum::{interceptor::Interceptor, Gum};
 use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
@@ -61,6 +60,7 @@ mod error;
 mod exec;
 mod file;
 mod go_env;
+mod hooks;
 mod macros;
 mod outgoing;
 mod socket;
@@ -68,7 +68,6 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 mod tracing_util;
-mod hooks;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -533,64 +532,38 @@ async fn start_layer_thread(
     tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
-#[cfg(not(target_os = "macos"))]
-const LIBC_NAME: &str = "libc";
-#[cfg(target_os = "macos")]
-const LIBC_NAME: &str = "libSystem";
-
-/// Finds the name of the libc library used by the current process.
-/// This works by enumerating loaded modules, checking if module name starts with `LIBC_NAME`
-/// and if it does it makes sure a basic function is present. (`socket`)
-/// Returns none if the name cannot be found.
-fn resolve_libc_module_name() -> Option<String> {
-    for module in frida_gum::Module::enumerate_modules() {
-        if module.name.starts_with(LIBC_NAME)
-            && frida_gum::Module::find_export_by_name(Some(&module.name), "socket").is_some()
-        {
-            return Some(module.name);
-        }
-    }
-    None
-}
-
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
 #[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
-    let mut hook_manager = HookManager::new();
+    let mut hook_manager = HookManager::default();
 
     unsafe {
-        replace!(
-            &mut hook_manager,
-            "close",
-            close_detour,
-            FnClose,
-            FN_CLOSE,
-        );
+        replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
         replace!(
             &mut hook_manager,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
-            FN_CLOSE_NOCANCEL,
+            FN_CLOSE_NOCANCEL
         );
     };
 
-    unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns, ) };
+    unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut hook_manager, )
+        exec::enable_execve_hook(&mut hook_manager)
     };
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, ) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    go_env::enable_go_env(&mut hook_manager, binary);
+    go_env::enable_go_env(&mut hook_manager);
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::enable_hooks(&mut hook_manager, binary);
+        go_hooks::enable_hooks(&mut hook_manager);
     }
 }
 
