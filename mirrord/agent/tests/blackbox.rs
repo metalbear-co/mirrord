@@ -63,9 +63,12 @@ mod tests {
         });
 
         let mut codec = Framed::new(stream, ClientCodec::new());
+        let subscription_port = 1337;
 
         codec
-            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(1337)))
+            .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(
+                subscription_port,
+            )))
             .await
             .expect("port subscribe failed");
         assert!(matches!(
@@ -74,7 +77,7 @@ mod tests {
                 .await
                 .expect("couldn't get next message")
                 .expect("got invalid message"),
-            DaemonMessage::Tcp(DaemonTcp::Subscribed)
+            DaemonMessage::Tcp(DaemonTcp::Subscribed(Ok(subscription_port)))
         ));
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await

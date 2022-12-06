@@ -2,7 +2,7 @@ use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 
-use crate::{ConnectionId, Port};
+use crate::{ConnectionId, Port, RemoteResult};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -48,7 +48,7 @@ pub enum DaemonTcp {
     Close(TcpClose),
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
     /// flakiness.
-    Subscribed,
+    Subscribed(RemoteResult<Port>),
 }
 
 /// Messages related to Steal Tcp handler from client.

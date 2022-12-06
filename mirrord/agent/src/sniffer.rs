@@ -352,7 +352,7 @@ impl TcpConnectionSniffer {
     ) -> Result<(), AgentError> {
         self.port_subscriptions.subscribe(client_id, port);
         self.update_sniffer()?;
-        self.send_message_to_client(&client_id, DaemonTcp::Subscribed)
+        self.send_message_to_client(&client_id, DaemonTcp::Subscribed(Ok(port)))
             .await
     }
 

@@ -11,15 +11,16 @@ use std::{
 use async_trait::async_trait;
 use mirrord_protocol::{
     tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, Port,
+    ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::{
     detour::DetourGuard,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
+    LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 
 #[derive(Debug)]
@@ -82,10 +83,18 @@ pub(crate) trait TcpHandler {
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
-            DaemonTcp::Subscribed => {
+            DaemonTcp::Subscribed(Ok(port)) => {
                 // Added this so tests can know when traffic can be sent
-                debug!("daemon subscribed");
+                debug!("daemon subscribed to port {port}.");
                 Ok(())
+            }
+            DaemonTcp::Subscribed(Err(ResponseError::PortAlreadyStolen(port))) => {
+                error!("Port subscription failed with for port {port}.");
+                Err(PortAlreadyStolen(port))
+            }
+            DaemonTcp::Subscribed(Err(other_error)) => {
+                error!("Port subscription failed with unexpected error: {other_error}.");
+                Err(UnexpectedResponseError(other_error))
             }
         };
 
