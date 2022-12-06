@@ -27,14 +27,13 @@ use crate::{
 
 const MAX_ARGC: usize = 254;
 
-pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor, module: Option<&str>) {
+pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
     replace!(
-        interceptor,
+        hook_manager,
         "execve",
         execve_detour,
         FnExecve,
         FN_EXECVE,
-        module
     );
 }
 

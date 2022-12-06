@@ -24,6 +24,7 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use frida_gum::{interceptor::Interceptor, Gum};
+use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -67,6 +68,7 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 mod tracing_util;
+mod hooks;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -80,8 +82,6 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .build()
         .unwrap()
 });
-
-static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
 
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
@@ -556,54 +556,42 @@ fn resolve_libc_module_name() -> Option<String> {
 /// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
 #[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
-    let mut interceptor = Interceptor::obtain(&GUM);
-    interceptor.begin_transaction();
-
-    let module = resolve_libc_module_name();
-    trace!("libc module name: {:?}", &module);
-
-    let module_ref = module.as_deref();
+    let mut hook_manager = HookManager::new();
 
     unsafe {
         replace!(
-            &mut interceptor,
+            &mut hook_manager,
             "close",
             close_detour,
             FnClose,
             FN_CLOSE,
-            module_ref
         );
         replace!(
-            &mut interceptor,
+            &mut hook_manager,
             "close$NOCANCEL",
             close_nocancel_detour,
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL,
-            module_ref
         );
     };
 
-    unsafe { socket::hooks::enable_socket_hooks(&mut interceptor, enabled_remote_dns, module_ref) };
+    unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns, ) };
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut interceptor, module_ref)
+        exec::enable_execve_hook(&mut hook_manager, )
     };
 
     if enabled_file_ops {
-        unsafe { file::hooks::enable_file_hooks(&mut interceptor, module_ref) };
+        unsafe { file::hooks::enable_file_hooks(&mut hook_manager, ) };
     }
-    let modules = frida_gum::Module::enumerate_modules();
-    let binary = &modules.first().unwrap().name;
 
-    go_env::enable_go_env(&mut interceptor, binary);
+    go_env::enable_go_env(&mut hook_manager, binary);
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
-        go_hooks::enable_hooks(&mut interceptor, binary);
+        go_hooks::enable_hooks(&mut hook_manager, binary);
     }
-
-    interceptor.end_transaction();
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
