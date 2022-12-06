@@ -83,16 +83,16 @@ pub(crate) trait TcpHandler {
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
-            DaemonTcp::Subscribed(Ok(port)) => {
+            DaemonTcp::SubscribeResult(Ok(port)) => {
                 // Added this so tests can know when traffic can be sent
                 debug!("daemon subscribed to port {port}.");
                 Ok(())
             }
-            DaemonTcp::Subscribed(Err(ResponseError::PortAlreadyStolen(port))) => {
+            DaemonTcp::SubscribeResult(Err(ResponseError::PortAlreadyStolen(port))) => {
                 error!("Port subscription failed with for port {port}.");
                 Err(PortAlreadyStolen(port))
             }
-            DaemonTcp::Subscribed(Err(other_error)) => {
+            DaemonTcp::SubscribeResult(Err(other_error)) => {
                 error!("Port subscription failed with unexpected error: {other_error}.");
                 Err(UnexpectedResponseError(other_error))
             }

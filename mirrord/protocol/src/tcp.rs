@@ -48,7 +48,7 @@ pub enum DaemonTcp {
     Close(TcpClose),
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
     /// flakiness.
-    Subscribed(RemoteResult<Port>),
+    SubscribeResult(RemoteResult<Port>),
 }
 
 /// Messages related to Steal Tcp handler from client.

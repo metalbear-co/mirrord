@@ -248,7 +248,7 @@ impl TcpConnectionStealer {
                     .add_redirect(port, self.stealer.local_addr()?.port())?;
                 Ok(port)
             };
-        self.send_message_to_single_client(&client_id, DaemonTcp::Subscribed(res))
+        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
             .await
     }
 
