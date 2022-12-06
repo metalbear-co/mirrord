@@ -30,9 +30,10 @@ where
         }
     }
 
-    /// Are there no subscription at all.
-    /// This is guaranteed to be true iff there are no subscribers, as [`unsubscribe`] provides
-    /// the invariant that there are no empty topics (topics with 0 subscribers).
+    /// Are there no subscriptions at all.
+    ///
+    /// This is guaranteed to be true if and only if there are no subscribers, as [`unsubscribe`]
+    /// provides the invariant that there are no empty topics (topics with 0 subscribers).
     pub fn is_empty(&self) -> bool {
         self._inner.is_empty()
     }
