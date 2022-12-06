@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use mirrord_operator::setup::OperatorNamespace;
@@ -222,9 +222,21 @@ pub(super) enum OperatorCommand {
     },
 }
 
-#[derive(ValueEnum, Debug, Clone)]
+#[derive(ValueEnum, Clone, Default, Debug)]
 pub enum Format {
+    #[default]
     Json,
+}
+
+impl FromStr for Format {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(Format::Json),
+            _ => Err(format!("invalid format: {}", s)),
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -233,17 +245,13 @@ pub(super) struct LsArgs {
     #[arg(
         short = 'o',
         long = "output",
-        num_args = 1,
         value_name = "FORMAT",
-        value_enum
+        value_enum,
+        default_value = "json"
     )]
-    pub output: Option<Format>,
-
-    /// Prettify the output.
-    #[arg(short = 'p', long)]
-    pub prettify: bool,
+    pub output: Format,
 
     /// Specify the namespace to list pods in.
-    #[arg(short = 'n', long = "namespace", num_args = 1)]
+    #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 }

@@ -35,6 +35,8 @@ reqwest.workspace = true
 semver = "1"
 const-random = "0.1.15"
 tokio.workspace = true
+kube.workspace = true
+k8s-openapi.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

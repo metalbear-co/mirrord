@@ -33,7 +33,7 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(&Some(config.clone())).await?;
+        let client = create_kube_api(Some(config.clone())).await?;
 
         Ok(KubernetesAPI::new(
             client,
@@ -136,7 +136,7 @@ impl AgentManagment for KubernetesAPI {
     }
 }
 
-pub async fn create_kube_api(config: &Option<LayerConfig>) -> Result<Client> {
+pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
     #[cfg(feature = "env_guard")]
     let _guard = EnvVarGuard::new();
 

@@ -18,7 +18,6 @@ mod container;
 mod env_guard;
 pub mod kubernetes;
 mod runtime;
-pub mod target_list;
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 

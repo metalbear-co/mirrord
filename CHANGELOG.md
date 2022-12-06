@@ -9,7 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- Add `mirrord ls` which allows listing target paths for use by extensions.
+- Add `mirrord ls` which allows listing target path. Hidden from user since it's meant for extension use only.
 
 ### Changed
 

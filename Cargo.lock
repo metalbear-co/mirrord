@@ -1706,6 +1706,8 @@ dependencies = [
  "const-random",
  "errno",
  "exec",
+ "k8s-openapi",
+ "kube",
  "mirrord-auth",
  "mirrord-config",
  "mirrord-kube",

@@ -68,7 +68,7 @@ pub struct OperatorApiDiscover {
 
 impl OperatorApiDiscover {
     pub async fn create(config: &LayerConfig) -> Result<Self, KubeApiError> {
-        let client = create_kube_api(&Some(config.clone())).await?;
+        let client = create_kube_api(Some(config.clone())).await?;
 
         Ok(OperatorApiDiscover {
             client,
