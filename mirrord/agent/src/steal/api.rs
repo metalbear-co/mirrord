@@ -8,6 +8,8 @@ use crate::{
 };
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
+/// There is an API instance for each connected layer ("client"). All API instances send commands
+/// On the same stealer command channel, where the layer-independent stealer listens to them.
 #[derive(Debug)]
 pub(crate) struct TcpStealerApi {
     /// Identifies which layer instance is associated with this API.
@@ -47,6 +49,28 @@ impl TcpStealerApi {
         })
     }
 
+    /// Send `command` to stealer, with the client id of the client that is using this API instance.
+    async fn send_command(&self, command: Command) -> Result<()> {
+        self.command_tx
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command,
+            })
+            .await
+            .map_err(From::from)
+    }
+
+    /// Send `command` synchronously to stealer with `try_send`, with the client id of the client
+    /// that is using this API instance.
+    async fn try_send_command(&self, command: Command) -> Result<()> {
+        self.command_tx
+            .try_send(StealerCommand {
+                client_id: self.client_id,
+                command
+            })
+            .map_err(From::from)
+    }
+
     /// Helper function that passes the [`DaemonTcp`] messages we generated in the
     /// [`TcpConnectionStealer`] task, back to the agent.
     ///
@@ -61,13 +85,7 @@ impl TcpStealerApi {
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
     pub(crate) async fn port_subscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        self.command_tx
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::PortSubscribe(port),
-            })
-            .await
-            .map_err(From::from)
+        self.send_command(Command::PortSubscribe(port)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortUnsubscribe`], that is passed from the
@@ -75,13 +93,7 @@ impl TcpStealerApi {
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
     pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        self.command_tx
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::PortUnsubscribe(port),
-            })
-            .await
-            .map_err(From::from)
+        self.send_command(Command::PortUnsubscribe(port)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::ConnectionUnsubscribe`], that is passed from the
@@ -92,13 +104,7 @@ impl TcpStealerApi {
         &mut self,
         connection_id: ConnectionId,
     ) -> Result<(), AgentError> {
-        self.command_tx
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::ConnectionUnsubscribe(connection_id),
-            })
-            .await
-            .map_err(From::from)
+        self.send_command(Command::ConnectionUnsubscribe(connection_id)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::TcpData`], that is passed from the
@@ -106,13 +112,7 @@ impl TcpStealerApi {
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
     pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {
-        self.command_tx
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::ResponseData(tcp_data),
-            })
-            .await
-            .map_err(From::from)
+        self.send_command(Command::ResponseData(tcp_data)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
@@ -122,12 +122,7 @@ impl TcpStealerApi {
     ///
     /// Called by the [`Drop`] implementation of [`TcpStealerApi`].
     pub(crate) fn close_client(&mut self) -> Result<(), AgentError> {
-        self.command_tx
-            .try_send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::ClientClose,
-            })
-            .map_err(From::from)
+        self.try_send_command(Command::ClientClose)
     }
 }
 
