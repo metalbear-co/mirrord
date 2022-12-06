@@ -4,7 +4,10 @@ use std::{
 };
 
 use bytes::Bytes;
-use mirrord_protocol::tcp::{NewTcpConnection, TcpClose};
+use mirrord_protocol::{
+    tcp::{NewTcpConnection, TcpClose},
+    ResponseError::PortAlreadyStolen,
+};
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
@@ -235,21 +238,18 @@ impl TcpConnectionStealer {
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn port_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
-        // TODO(alex): We only check if this `client_id` is already subscribed to this port, but
-        // other clients might be subscribed to it.
-        let ports = self.port_subscriptions.get_client_topics(client_id);
-
-        if ports.contains(&port) {
-            warn!("Port {port:?} is already subscribed for client {client_id:?}!");
-            Ok(())
-        } else {
-            self.port_subscriptions.subscribe(client_id, port);
-            self.iptables
-                .add_redirect(port, self.stealer.local_addr()?.port())?;
-
-            self.send_message_to_single_client(&client_id, DaemonTcp::Subscribed)
-                .await
-        }
+        let res =
+            if let Some(client_id) = self.port_subscriptions.get_topic_subscribers(port).first() {
+                error!("Port {port:?} is already being stolen by client {client_id:?}!");
+                Err(PortAlreadyStolen(port))
+            } else {
+                self.port_subscriptions.subscribe(client_id, port);
+                self.iptables
+                    .add_redirect(port, self.stealer.local_addr()?.port())?;
+                Ok(port)
+            };
+        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
+            .await
     }
 
     /// Helper function to handle [`Command::PortUnsubscribe`] messages.
