@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use mirrord_operator::setup::OperatorNamespace;

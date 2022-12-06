@@ -358,7 +358,7 @@ async fn list_target_pods(args: &ListTargetArgs) -> Result<()> {
         })
         .collect::<Vec<String>>();
     let json_obj = json!(target_vector);
-    println!("{}", json_obj.to_string());
+    println!("{}", json_obj);
     Ok(())
 }
 
