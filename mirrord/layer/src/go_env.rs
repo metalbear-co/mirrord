@@ -9,11 +9,10 @@
 /// P.S - environment variables at the end of argv, specifically `argv[argc+1]`.
 use std::{ffi::CString, mem::ManuallyDrop};
 
-use frida_gum::interceptor::Interceptor;
 use libc::c_char;
 use mirrord_layer_macro::hook_fn;
 
-use crate::replace_symbol;
+use crate::{hooks::HookManager, replace_symbol};
 
 /// Formats an argv as Go (and system) expects it to be which is an array of pointers
 /// to C null terminated strings. The array contains null pointer at the end and as a marker
@@ -51,15 +50,14 @@ unsafe extern "C" fn goenvs_unix_detour() {
     FN_GOENVS_UNIX();
 }
 
-pub(crate) fn enable_go_env(interceptor: &mut Interceptor, binary: &str) {
+pub(crate) fn enable_go_env(hook_manager: &mut HookManager) {
     unsafe {
-        let _ = replace_symbol!(
-            interceptor,
+        replace_symbol!(
+            hook_manager,
             "runtime.goenvs_unix",
             goenvs_unix_detour,
             FnGoenvs_unix,
-            FN_GOENVS_UNIX,
-            binary
+            FN_GOENVS_UNIX
         );
     }
 }

@@ -2,13 +2,12 @@ use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::os::unix::io::RawFd;
 
-use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use tracing::{error, info, trace};
 
 use super::ops::*;
-use crate::{detour::DetourGuard, replace};
+use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -277,34 +276,34 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     }
 }
 
-pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_remote_dns: bool) {
-    let _ = replace!(interceptor, "socket", socket_detour, FnSocket, FN_SOCKET);
+pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
+    replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
-    let _ = replace!(interceptor, "bind", bind_detour, FnBind, FN_BIND);
-    let _ = replace!(interceptor, "listen", listen_detour, FnListen, FN_LISTEN);
+    replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
+    replace!(hook_manager, "listen", listen_detour, FnListen, FN_LISTEN);
 
-    let _ = replace!(
-        interceptor,
+    replace!(
+        hook_manager,
         "connect",
         connect_detour,
         FnConnect,
         FN_CONNECT
     );
 
-    let _ = replace!(interceptor, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
-    let _ = replace!(interceptor, "dup", dup_detour, FnDup, FN_DUP);
-    let _ = replace!(interceptor, "dup2", dup2_detour, FnDup2, FN_DUP2);
+    replace!(hook_manager, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
+    replace!(hook_manager, "dup", dup_detour, FnDup, FN_DUP);
+    replace!(hook_manager, "dup2", dup2_detour, FnDup2, FN_DUP2);
 
-    let _ = replace!(
-        interceptor,
+    replace!(
+        hook_manager,
         "getpeername",
         getpeername_detour,
         FnGetpeername,
         FN_GETPEERNAME
     );
 
-    let _ = replace!(
-        interceptor,
+    replace!(
+        hook_manager,
         "getsockname",
         getsockname_detour,
         FnGetsockname,
@@ -313,38 +312,39 @@ pub(crate) unsafe fn enable_socket_hooks(interceptor: &mut Interceptor, enabled_
 
     #[cfg(target_os = "linux")]
     {
-        let _ = replace!(
-            interceptor,
+        // Here we replace a function of libuv and not libc, so we pass None as the .
+        replace!(
+            hook_manager,
             "uv__accept4",
             uv__accept4_detour,
             FnUv__accept4,
             FN_UV__ACCEPT4
         );
 
-        let _ = replace!(
-            interceptor,
+        replace!(
+            hook_manager,
             "accept4",
             accept4_detour,
             FnAccept4,
             FN_ACCEPT4
         );
 
-        let _ = replace!(interceptor, "dup3", dup3_detour, FnDup3, FN_DUP3);
+        replace!(hook_manager, "dup3", dup3_detour, FnDup3, FN_DUP3);
     }
 
-    let _ = replace!(interceptor, "accept", accept_detour, FnAccept, FN_ACCEPT);
+    replace!(hook_manager, "accept", accept_detour, FnAccept, FN_ACCEPT);
 
     if enabled_remote_dns {
-        let _ = replace!(
-            interceptor,
+        replace!(
+            hook_manager,
             "getaddrinfo",
             getaddrinfo_detour,
             FnGetaddrinfo,
             FN_GETADDRINFO
         );
 
-        let _ = replace!(
-            interceptor,
+        replace!(
+            hook_manager,
             "freeaddrinfo",
             freeaddrinfo_detour,
             FnFreeaddrinfo,
