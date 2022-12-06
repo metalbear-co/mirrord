@@ -30,6 +30,13 @@ where
         }
     }
 
+    /// Are there no subscription at all.
+    /// This is guaranteed to be true iff there are no subscribers, as [`unsubscribe`] provides
+    /// the invariant that there are no empty topics (topics with 0 subscribers).
+    pub fn is_empty(&self) -> bool {
+        self._inner.is_empty()
+    }
+
     /// Add a new subscription to a topic for a given client.
     pub fn subscribe(&mut self, client: C, topic: T) {
         self._inner

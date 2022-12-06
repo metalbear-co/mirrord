@@ -102,6 +102,9 @@ pub enum AgentError {
 
     #[error("start_client -> Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
+
+    #[error("An internal invariant of the agent was violated, this should not happen.")]
+    AgentInvariantViolated,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
