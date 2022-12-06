@@ -619,7 +619,7 @@ fn pre_go1_19(hook_manager: &mut HookManager) {
 }
 
 /// Hooks for when hooking a post go 1.19 binary
-fn post_go1_19(hook_manager: &mut hook_manager) {
+fn post_go1_19(hook_manager: &mut HookManager) {
     hook_symbol!(
         hook_manager,
         "runtime/internal/syscall.Syscall6",
@@ -632,9 +632,9 @@ fn post_go1_19(hook_manager: &mut hook_manager) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-pub(crate) fn enable_hooks(hook_manager: &mut hook_manager) {
+pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
     if let Some(version_symbol) =
-        frida_gum::Module::find_symbol_by_name(binary, "runtime.buildVersion.str")
+        hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")
     {
         // Version str is `go1.xx` - take only last 4 characters.
         let version = unsafe {

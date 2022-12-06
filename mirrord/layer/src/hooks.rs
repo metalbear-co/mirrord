@@ -100,6 +100,15 @@ impl<'a> HookManager<'a> {
         let module = self.modules.first().unwrap().clone();
         self.hook_symbol(&module, symbol, detour)
     }
+
+    /// Resolve symbol in main module
+    #[cfg(target_os = "linux")]
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
+        // This can't fail
+        let module = self.modules.first().unwrap().clone();
+        Module::find_symbol_by_name(&module, symbol)
+    }
 }
 
 impl<'a> Default for HookManager<'a> {
