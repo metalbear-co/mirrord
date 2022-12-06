@@ -342,7 +342,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<Vec<(String, Vec<Strin
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 #[tokio::main(flavor = "current_thread")]
-async fn list_target_pods(args: &LsArgs) -> Result<()> {
+async fn list_target_pods(args: &ListTargetArgs) -> Result<()> {
     let pods = get_kube_pods(args.namespace.as_deref()).await?;
     let target_vector = pods
         .iter()
@@ -358,8 +358,7 @@ async fn list_target_pods(args: &LsArgs) -> Result<()> {
         })
         .collect::<Vec<String>>();
     let json_obj = json!(target_vector);
-    let json_string = serde_json::to_string_pretty(&json_obj)?;
-    println!("{}", json_string);
+    println!("{}", json_obj.to_string());
     Ok(())
 }
 

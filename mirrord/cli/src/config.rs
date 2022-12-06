@@ -27,7 +27,7 @@ pub(super) enum Commands {
 
     /// List targets/resources like pods/namespaces in json format    
     #[command(hide = true, name = "ls")]
-    ListTargets(Box<LsArgs>),
+    ListTargets(Box<ListTargetArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -222,32 +222,20 @@ pub(super) enum OperatorCommand {
     },
 }
 
-#[derive(ValueEnum, Clone, Default, Debug)]
+#[derive(ValueEnum, Clone, Debug)]
 pub enum Format {
-    #[default]
     Json,
 }
 
-impl FromStr for Format {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "json" => Ok(Format::Json),
-            _ => Err(format!("invalid format: {}", s)),
-        }
-    }
-}
-
 #[derive(Args, Debug)]
-pub(super) struct LsArgs {
+pub(super) struct ListTargetArgs {
     /// Specify the format of the output.
     #[arg(
         short = 'o',
         long = "output",
         value_name = "FORMAT",
         value_enum,
-        default_value = "json"
+        default_value_t = Format::Json
     )]
     pub output: Format,
 
