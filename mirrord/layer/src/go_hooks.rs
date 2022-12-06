@@ -613,29 +613,17 @@ fn pre_go1_19(hook_manager: &mut HookManager) {
         hook_manager,
         "syscall.RawSyscall.abi0",
         go_rawsyscall_detour,
-        binary
     );
-    hook_symbol!(
-        hook_manager,
-        "syscall.Syscall6.abi0",
-        go_syscall6_detour,
-        binary
-    );
-    hook_symbol!(
-        hook_manager,
-        "syscall.Syscall.abi0",
-        go_syscall_detour,
-        binary
-    );
+    hook_symbol!(hook_manager, "syscall.Syscall6.abi0", go_syscall6_detour);
+    hook_symbol!(hook_manager, "syscall.Syscall.abi0", go_syscall_detour);
 }
 
 /// Hooks for when hooking a post go 1.19 binary
-fn post_go1_19(hook_manager: &mut hook_manager, binary: &str) {
+fn post_go1_19(hook_manager: &mut hook_manager) {
     hook_symbol!(
         hook_manager,
         "runtime/internal/syscall.Syscall6",
-        go_syscall_new_detour,
-        binary
+        go_syscall_new_detour
     );
 }
 
@@ -644,7 +632,7 @@ fn post_go1_19(hook_manager: &mut hook_manager, binary: &str) {
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
-pub(crate) fn enable_hooks(hook_manager: &mut hook_manager, binary: &str) {
+pub(crate) fn enable_hooks(hook_manager: &mut hook_manager) {
     if let Some(version_symbol) =
         frida_gum::Module::find_symbol_by_name(binary, "runtime.buildVersion.str")
     {
@@ -658,10 +646,10 @@ pub(crate) fn enable_hooks(hook_manager: &mut hook_manager, binary: &str) {
         let version_parsed: f32 = version.parse().unwrap();
         if version_parsed >= 1.19 {
             trace!("found version >= 1.19");
-            post_go1_19(hook_manager, binary);
+            post_go1_19(hook_manager);
         } else {
             trace!("found version < 1.19");
-            pre_go1_19(hook_manager, binary);
+            pre_go1_19(hook_manager);
         }
     }
 }
