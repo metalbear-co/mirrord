@@ -1,7 +1,6 @@
 use std::arch::asm;
 
 use errno::errno;
-use frida_gum::interceptor::Interceptor;
 use tracing::trace;
 
 use crate::{
@@ -612,7 +611,7 @@ fn pre_go1_19(hook_manager: &mut HookManager) {
     hook_symbol!(
         hook_manager,
         "syscall.RawSyscall.abi0",
-        go_rawsyscall_detour,
+        go_rawsyscall_detour
     );
     hook_symbol!(hook_manager, "syscall.Syscall6.abi0", go_syscall6_detour);
     hook_symbol!(hook_manager, "syscall.Syscall.abi0", go_syscall_detour);

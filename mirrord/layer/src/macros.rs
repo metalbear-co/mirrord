@@ -39,12 +39,12 @@ macro_rules! replace_symbol {
 #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
 macro_rules! hook_symbol {
     ($hook_manager:expr, $func:expr, $detour_name:expr) => {
-        match $hook_manager.hook_symbol_main_module($func, $detour_name) {
+        match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
             Ok(_) => {
-                trace!("hooked {func:?} in main module");
+                trace!("hooked {:?} in main module", $func);
             }
             Err(err) => {
-                trace!("hook {func:?} in main module failed with err {err:?}");
+                trace!("hook {:?} in main module failed with err {err:?}", $func);
             }
         }
     };
