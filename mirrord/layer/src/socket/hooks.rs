@@ -312,8 +312,6 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
 
     #[cfg(target_os = "linux")]
     {
-        // something weird happens here..
-        let none: Option<&str> = None;
         // Here we replace a function of libuv and not libc, so we pass None as the .
         replace!(
             hook_manager,
