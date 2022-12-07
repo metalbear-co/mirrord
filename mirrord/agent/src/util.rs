@@ -16,7 +16,7 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
-pub type ClientID = u32;
+pub type ClientId = u32;
 
 impl<T, C> Subscriptions<T, C>
 where

@@ -4,7 +4,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use super::*;
 use crate::{
     error::{AgentError, Result},
-    util::ClientID,
+    util::ClientId,
 };
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct TcpStealerApi {
     /// Identifies which layer instance is associated with this API.
-    client_id: ClientID,
+    client_id: ClientId,
 
     /// Channel that allows the agent to communicate with the stealer task.
     ///
@@ -31,7 +31,7 @@ impl TcpStealerApi {
     /// that we have a new client.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(
-        client_id: ClientID,
+        client_id: ClientId,
         command_tx: Sender<StealerCommand>,
         (daemon_tx, daemon_rx): (Sender<DaemonTcp>, Receiver<DaemonTcp>),
     ) -> Result<Self, AgentError> {

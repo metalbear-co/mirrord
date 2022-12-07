@@ -16,7 +16,7 @@ use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
-    util::{ClientID, IndexAllocator, Subscriptions},
+    util::{ClientId, IndexAllocator, Subscriptions},
 };
 
 pub(super) mod api;
@@ -66,7 +66,7 @@ enum Command {
 #[derive(Debug)]
 pub struct StealerCommand {
     /// Identifies which layer instance is sending the [`Command`].
-    client_id: ClientID,
+    client_id: ClientId,
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,

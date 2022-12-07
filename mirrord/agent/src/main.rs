@@ -37,7 +37,7 @@ use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
     steal::{connection::TcpConnectionStealer, StealerCommand},
-    util::{run_thread, ClientID, IndexAllocator},
+    util::{run_thread, ClientId, IndexAllocator},
 };
 
 mod cli;
@@ -57,8 +57,8 @@ const CHANNEL_SIZE: usize = 1024;
 /// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
 struct State {
-    clients: HashSet<ClientID>,
-    index_allocator: IndexAllocator<ClientID>,
+    clients: HashSet<ClientId>,
+    index_allocator: IndexAllocator<ClientId>,
     /// Was the pause argument passed? If true, will pause the container when no clients are
     /// connected.
     should_pause: bool,
@@ -98,7 +98,7 @@ impl State {
     /// If there are clientIDs left, insert new one and return it.
     /// If there were no clients before, and there is a Pauser, start pausing.
     /// Propagate container runtime errors.
-    pub async fn new_client(&mut self) -> Result<ClientID> {
+    pub async fn new_client(&mut self) -> Result<ClientId> {
         match self.generate_id() {
             None => Err(AgentError::ConnectionLimitReached),
             Some(new_id) => {
@@ -115,13 +115,13 @@ impl State {
         }
     }
 
-    fn generate_id(&mut self) -> Option<ClientID> {
+    fn generate_id(&mut self) -> Option<ClientId> {
         self.index_allocator.next_index()
     }
 
     /// If that was the last client and we are pausing, stop pausing.
     /// Propagate container runtime errors.
-    pub async fn remove_client(&mut self, client_id: ClientID) -> Result<()> {
+    pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
         if self.no_clients_left() {
@@ -143,7 +143,7 @@ struct ClientConnectionHandler {
     /// Used to prevent closing the main loop [`ClientConnectionHandler::start`] when any
     /// request is done (tcp outgoing feature). Stays `true` until `agent` receives an
     /// `ExitRequest`.
-    id: ClientID,
+    id: ClientId,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
@@ -158,7 +158,7 @@ struct ClientConnectionHandler {
 impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
-        id: ClientID,
+        id: ClientId,
         stream: TcpStream,
         pid: Option<u64>,
         ephemeral: bool,

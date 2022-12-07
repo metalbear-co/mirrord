@@ -29,7 +29,7 @@ use crate::AgentError::AgentInvariantViolated;
 /// - (stealer -> agent) communication is handled by [`client_senders`], and the [`Sender`] channels
 ///   come inside [`StealerCommand`]s through  [`command_rx`];
 pub(crate) struct TcpConnectionStealer {
-    port_subscriptions: Subscriptions<Port, ClientID>,
+    port_subscriptions: Subscriptions<Port, ClientId>,
 
     /// Communication between (agent -> stealer) task.
     ///
@@ -38,7 +38,7 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Connected clients (layer instances) and the channels which the stealer task uses to send
     /// back messages (stealer -> agent -> layer).
-    clients: HashMap<ClientID, Sender<DaemonTcp>>,
+    clients: HashMap<ClientId, Sender<DaemonTcp>>,
     index_allocator: IndexAllocator<ConnectionId>,
 
     /// Intercepts the connections, instead of letting them go through their normal pathways, this
@@ -58,7 +58,7 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Associates a `ConnectionId` with a `ClientID`, so we can send the data we read from
     /// [`TcpConnectionStealer::read_streams`] to the appropriate client (layer).
-    client_connections: HashMap<ConnectionId, ClientID>,
+    client_connections: HashMap<ConnectionId, ClientId>,
 }
 
 impl TcpConnectionStealer {
@@ -238,7 +238,7 @@ impl TcpConnectionStealer {
 
     /// Registers a new layer instance that has the `steal` feature enabled.
     #[tracing::instrument(level = "trace", skip(self, sender))]
-    fn new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
+    fn new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
         self.clients.insert(client_id, sender);
     }
 
@@ -247,7 +247,7 @@ impl TcpConnectionStealer {
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn port_subscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
+    async fn port_subscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
         let res =
             if let Some(client_id) = self.port_subscriptions.get_topic_subscribers(port).first() {
                 error!("Port {port:?} is already being stolen by client {client_id:?}!");
@@ -272,7 +272,7 @@ impl TcpConnectionStealer {
     /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
     /// with `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn port_unsubscribe(&mut self, client_id: ClientID, port: Port) -> Result<(), AgentError> {
+    fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
         self.port_subscriptions
             .get_client_topics(client_id)
             .iter()
@@ -296,7 +296,7 @@ impl TcpConnectionStealer {
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
     /// their redirection rules from [`TcpConnectionStealer::iptables`].
     #[tracing::instrument(level = "trace", skip(self))]
-    fn close_client(&mut self, client_id: ClientID) -> Result<(), AgentError> {
+    fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let stealer_port = self.stealer.local_addr()?.port();
         let ports = self.port_subscriptions.get_client_topics(client_id);
         debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
@@ -314,7 +314,7 @@ impl TcpConnectionStealer {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn send_message_to_single_client(
         &mut self,
-        client_id: &ClientID,
+        client_id: &ClientId,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.clients.get(client_id) {
