@@ -166,6 +166,12 @@ impl OperatorDeployment {
                 container_port: 8080,
                 ..Default::default()
             }]),
+            security_context: Some(SecurityContext {
+                allow_privilege_escalation: Some(false),
+                privileged: Some(false),
+                run_as_user: Some(1001),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
