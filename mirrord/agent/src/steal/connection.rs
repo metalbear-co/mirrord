@@ -259,7 +259,7 @@ impl TcpConnectionStealer {
                     self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
                 }
                 self.port_subscriptions.subscribe(client_id, port);
-                self.iptables
+                self.iptables()?
                     .add_redirect(port, self.stealer.local_addr()?.port())?;
                 Ok(port)
             };
