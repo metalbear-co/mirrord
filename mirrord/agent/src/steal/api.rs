@@ -62,7 +62,7 @@ impl TcpStealerApi {
 
     /// Send `command` synchronously to stealer with `try_send`, with the client id of the client
     /// that is using this API instance.
-    async fn try_send_command(&self, command: Command) -> Result<()> {
+    fn try_send_command(&self, command: Command) -> Result<()> {
         self.command_tx
             .try_send(StealerCommand {
                 client_id: self.client_id,
