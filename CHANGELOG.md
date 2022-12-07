@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Update to Frida 16.0.7
 - Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
 - Use our new cache action backed by sscache!
+- Add `/bin/` to default ignore list - asdf should be okay now!
 
 ### Fixed
 
