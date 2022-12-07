@@ -25,6 +25,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
+use mirrord_protocol::tcp::LayerTcp;
 
 use crate::{
     error::AgentError,
@@ -259,6 +260,17 @@ impl TcpSnifferApi {
     pub async fn recv(&mut self) -> Option<DaemonTcp> {
         self.receiver.recv().await
     }
+
+    pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+        match message {
+            LayerTcp::PortSubscribe(port) => self.subscribe(port).await,
+            LayerTcp::ConnectionUnsubscribe(connection_id) => {
+                self.connection_unsubscribe(connection_id).await
+            }
+            LayerTcp::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
+        }
+    }
+
 }
 
 impl Drop for TcpSnifferApi {

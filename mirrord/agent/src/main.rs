@@ -17,10 +17,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{
-    tcp::{LayerTcp, LayerTcpSteal},
-    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TcpSnifferApi, TcpConnectionSniffer};
 use steal::api::TcpStealerApi;
@@ -310,8 +307,8 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
-            ClientMessage::Tcp(message) => self.handle_client_tcp(message).await?,
-            ClientMessage::TcpSteal(message) => self.handle_client_steal(message).await?,
+            ClientMessage::Tcp(message) => self.tcp_sniffer_api.handle_client_message(message).await?,
+            ClientMessage::TcpSteal(message) => self.tcp_stealer_api.handle_client_message(message).await?,
             ClientMessage::Close => {
                 return Ok(false);
             }
@@ -319,32 +316,7 @@ impl ClientConnectionHandler {
         Ok(true)
     }
 
-    async fn handle_client_tcp(&mut self, message: LayerTcp) -> Result<()> {
-        match message {
-            LayerTcp::PortSubscribe(port) => self.tcp_sniffer_api.subscribe(port).await,
-            LayerTcp::ConnectionUnsubscribe(connection_id) => {
-                self.tcp_sniffer_api
-                    .connection_unsubscribe(connection_id)
-                    .await
-            }
-            LayerTcp::PortUnsubscribe(port) => self.tcp_sniffer_api.port_unsubscribe(port).await,
-        }
-    }
 
-    async fn handle_client_steal(&mut self, message: LayerTcpSteal) -> Result<()> {
-        match message {
-            LayerTcpSteal::PortSubscribe(port) => self.tcp_stealer_api.port_subscribe(port).await,
-            LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
-                self.tcp_stealer_api
-                    .connection_unsubscribe(connection_id)
-                    .await
-            }
-            LayerTcpSteal::PortUnsubscribe(port) => {
-                self.tcp_stealer_api.port_unsubscribe(port).await
-            }
-            LayerTcpSteal::Data(tcp_data) => self.tcp_stealer_api.client_data(tcp_data).await,
-        }
-    }
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
