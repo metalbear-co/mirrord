@@ -16,7 +16,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
 - Add `/bin/` to default ignore list - asdf should be okay now!
 - Update GitHub action to use latest `rust-cache`
-- mirrord-agent: Stealer feature changed from working per connection to now starting with
+- internal refactor in mirrord-agent: Stealer feature changed from working per connection to now starting with
   the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
   we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
   `TcpStealerApi` which bridges the communication between the agent and the stealer task).
