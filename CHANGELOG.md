@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - IntelliJ Plugin: downgrade Java to version 11.
+- IntelliJ Plugin: update platform version to 2022.3.
 - Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
   that agent is created by cli (and soon to be created by IDE plugin via cli).
 - Update to Frida 16.0.7
