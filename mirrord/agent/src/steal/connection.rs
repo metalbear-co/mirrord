@@ -8,6 +8,7 @@ use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
     ResponseError::PortAlreadyStolen,
 };
+use iptables::IPTables;
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
@@ -18,6 +19,7 @@ use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::*;
+use crate::AgentError::AgentInvariantViolated;
 
 /// Created once per agent during initialization.
 ///
@@ -45,7 +47,8 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Set of rules the agent uses to steal traffic from through the
     /// [`TcpConnectionStealer::stealer`] listener.
-    iptables: SafeIpTables<iptables::IPTables>,
+    /// None when there are no subscribers.
+    iptables: Option<SafeIpTables<IPTables>>,
 
     /// Used to send data back to the original remote connection.
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
@@ -80,11 +83,18 @@ impl TcpConnectionStealer {
             clients: HashMap::with_capacity(8),
             index_allocator: IndexAllocator::new(),
             stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?,
-            iptables: SafeIpTables::new(iptables::new(false).unwrap())?,
+            iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
             client_connections: HashMap::with_capacity(8),
         })
+    }
+
+    /// Get a result with a reference to the iptables.
+    /// Should only be called while there are subscribers (otherwise self.iptables is None).
+    fn iptables(&self) -> Result<&SafeIpTables<IPTables>> {
+        debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
+        self.iptables.as_ref().ok_or(AgentInvariantViolated)
     }
 
     /// Runs the tcp traffic stealer loop.
@@ -243,6 +253,11 @@ impl TcpConnectionStealer {
                 error!("Port {port:?} is already being stolen by client {client_id:?}!");
                 Err(PortAlreadyStolen(port))
             } else {
+                if self.port_subscriptions.is_empty() {
+                    // Is this the first client?
+                    // Initialize IP table only when a client is subscribed.
+                    self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
+                }
                 self.port_subscriptions.subscribe(client_id, port);
                 self.iptables
                     .add_redirect(port, self.stealer.local_addr()?.port())?;
@@ -263,13 +278,17 @@ impl TcpConnectionStealer {
             .iter()
             .find_map(|subscribed_port| {
                 (*subscribed_port == port).then(|| {
-                    self.iptables
+                    self.iptables()?
                         .remove_redirect(port, self.stealer.local_addr()?.port())
                 })
             })
             .transpose()?;
 
         self.port_subscriptions.unsubscribe(client_id, port);
+        if self.port_subscriptions.is_empty() {
+            // Was this the last client?
+            self.iptables = None; // The Drop impl of iptables cleans up.
+        }
 
         Ok(())
     }
@@ -280,9 +299,10 @@ impl TcpConnectionStealer {
     fn close_client(&mut self, client_id: ClientID) -> Result<(), AgentError> {
         let stealer_port = self.stealer.local_addr()?.port();
         let ports = self.port_subscriptions.get_client_topics(client_id);
+        debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
         ports
             .into_iter()
-            .try_for_each(|port| self.iptables.remove_redirect(port, stealer_port))?;
+            .try_for_each(|port| self.iptables()?.remove_redirect(port, stealer_port))?;
 
         self.port_subscriptions.remove_client(client_id);
 
