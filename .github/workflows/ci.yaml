@@ -74,7 +74,7 @@ jobs:
           toolchain: nightly
           components: rustfmt, clippy
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
@@ -92,7 +92,7 @@ jobs:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
@@ -112,7 +112,7 @@ jobs:
           toolchain: nightly
           target: ${{matrix.target}}
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: |
           cargo test -p mirrord-protocol
 
@@ -131,7 +131,7 @@ jobs:
           toolchain: nightly
           target: ${{matrix.target}}
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: |
           cargo test -p mirrord-config
 
@@ -150,7 +150,7 @@ jobs:
           toolchain: nightly
           target: ${{matrix.target}}
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: |
           cargo test -p mirrord-kube --all-features -- --skip env_guard
 
@@ -165,7 +165,7 @@ jobs:
           profile: minimal
           toolchain: nightly
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: |
           cargo test -p mirrord-sip
 
@@ -184,7 +184,7 @@ jobs:
           toolchain: nightly
           target: ${{matrix.target}}
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: |
           cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
 
@@ -200,7 +200,7 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
@@ -253,7 +253,7 @@ jobs:
           toolchain: nightly
           target: ${{matrix.target}}
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -270,7 +270,7 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -293,7 +293,7 @@ jobs:
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -372,7 +372,7 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - name: Rust sccache
-        uses: metalbear-co/sccache-action@v1.0.0
+        uses: metalbear-co/sccache-action@v1.0.1
       - uses: actions/setup-node@v3
         with:
           node-version: 14
