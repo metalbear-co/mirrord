@@ -109,11 +109,21 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ${{matrix.os}}
-      - run: |
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: |
           cargo test -p mirrord-protocol
+      - run: sccache --show-stats
 
   test_mirrord_config:
     strategy:
@@ -129,11 +139,21 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ${{matrix.os}}
-      - run: |
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: |
           cargo test -p mirrord-config
+      - run: sccache --show-stats
 
   test_mirrord_kube:
     strategy:
@@ -149,11 +169,21 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ${{matrix.os}}
-      - run: |
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: |
           cargo test -p mirrord-kube --all-features -- --skip env_guard
+      - run: sccache --show-stats
 
   test_mirrord_sip:
     runs-on: macos-latest
@@ -165,9 +195,22 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
-      - uses: Swatinem/rust-cache@v1
-      - run: |
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: |
           cargo test -p mirrord-sip
+      - run: sccache --show-stats
+
 
   test_mirrord_layer:
     strategy:
@@ -183,11 +226,22 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ${{matrix.os}}
-      - run: |
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: |
           cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
+      - run: sccache --show-stats
+
 
   test_agent:
     runs-on: ubuntu-latest
@@ -200,8 +254,21 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - run: sccache --show-stats
+
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -252,11 +319,20 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ${{matrix.os}}-${{matrix.target}}
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       # For now, just verify it compiles.
-      - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
   build_mirrord:
     runs-on: ubuntu-latest
@@ -270,10 +346,19 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ubuntu-latest
-      - run: cargo build --manifest-path=./Cargo.toml
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
         with:
@@ -294,9 +379,14 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          cache-on-failure: true
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -319,8 +409,17 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo test -p mirrord-kube --features env_guard api::env_guard
-      - run: cargo test -p mirrord-layer
+          
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo test -p mirrord-kube --features env_guard api::env_guard
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo test -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
@@ -335,9 +434,14 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          cache-on-failure: true
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19.0"
@@ -357,8 +461,16 @@ jobs:
       - run: pip3 install flask # For http mirroring test with Flask.
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
-      - run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - run: cargo test -p mirrord-layer
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
+      - env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
+        run: cargo test -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
@@ -374,10 +486,14 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Configure sccache
+        uses: actions/github-script@v6
         with:
-          key: ubuntu-latest
-          cache-on-failure: true
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -437,6 +553,10 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
+        env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
         run: cargo test -p tests
       - name: switch minikube runtime
         run: |
@@ -444,6 +564,10 @@ jobs:
           minikube start --container-runtime=docker
           minikube image load /tmp/test.tar
       - name: test with docker runtime
+        env:
+          SCCACHE_GHA_CACHE_TO: sccache
+          SCCACHE_GHA_CACHE_FROM: sccache
+          RUSTC_WRAPPER: ~/.cargo/bin/sccache
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
