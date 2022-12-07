@@ -16,6 +16,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
 - Add `/bin/` to default ignore list - asdf should be okay now!
 
+### Added
+
+- mirrord-operator: Add securityContext section for deployment in operator setup
+
 ### Fixed
 
 - Fix `--fs-mode=local` didn't disable hooks as it was supposed to.
