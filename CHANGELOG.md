@@ -17,6 +17,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Add `/bin/` to default ignore list - asdf should be okay now!
 - Update GitHub action to use latest `rust-cache`
 
+### Added
+
+- mirrord-operator: Add securityContext section for deployment in operator setup
+
 ### Fixed
 
 - Fix `--fs-mode=local` didn't disable hooks as it was supposed to.
