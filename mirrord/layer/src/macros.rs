@@ -1,91 +1,52 @@
 #[macro_export]
 macro_rules! replace {
-    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
-        let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
+    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
+        let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
                          detour: $detour_type|
          -> $crate::error::Result<$detour_type> {
-            tracing::trace!("replace -> hooking {:#?}", $detour_name);
-
-            let function = frida_gum::Module::find_export_by_name(None, symbol_name).ok_or(
-                $crate::error::LayerError::NoExportName(symbol_name.to_string()),
-            )?;
-
-            let replaced = interceptor.replace(
-                function,
-                frida_gum::NativePointer(detour as *mut libc::c_void),
-                frida_gum::NativePointer(std::ptr::null_mut()),
-            );
-
-            tracing::trace!(
-                "replace -> hooked {:#?} {:#?}",
-                $detour_name,
-                replaced.is_ok()
-            );
-
-            let original_fn: $detour_type = std::mem::transmute(replaced?);
+            let replaced =
+                hook_manager.hook_export_or_any(symbol_name, detour as *mut libc::c_void)?;
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             Ok(original_fn)
         };
 
-        intercept($interceptor, $detour_name, $detour_function)
-            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
+        let _ = intercept($hook_manager, $func, $detour_function)
+            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
     }};
 }
 
 #[macro_export]
 macro_rules! replace_symbol {
-    ($interceptor:expr, $detour_name:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr, $binary:expr) => {{
-        let intercept = |interceptor: &mut frida_gum::interceptor::Interceptor,
+    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
+        let intercept = |hook_manager: &mut $crate::hooks::HookManager,
                          symbol_name,
-                         detour: $detour_type,
-                         binary: &str|
+                         detour: $detour_type|
          -> $crate::error::Result<$detour_type> {
-            tracing::info!("replace -> hooking {:#?}", $detour_name);
-
-            let function = frida_gum::Module::find_symbol_by_name(binary, symbol_name).ok_or(
-                $crate::error::LayerError::NoExportName(symbol_name.to_string()),
-            )?;
-
-            let replaced = interceptor.replace(
-                function,
-                frida_gum::NativePointer(detour as *mut libc::c_void),
-                frida_gum::NativePointer(std::ptr::null_mut()),
-            );
-
-            tracing::info!(
-                "replace -> hooked {:#?} {:#?}",
-                $detour_name,
-                replaced.is_ok()
-            );
-
-            let original_fn: $detour_type = std::mem::transmute(replaced?);
+            let replaced =
+                hook_manager.hook_symbol_main_module(symbol_name, detour as *mut libc::c_void)?;
+            let original_fn: $detour_type = std::mem::transmute(replaced);
 
             Ok(original_fn)
         };
 
-        intercept($interceptor, $detour_name, $detour_function, $binary)
-            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()))
+        let _ = intercept($hook_manager, $func, $detour_function)
+            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
     }};
 }
 
 #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
 macro_rules! hook_symbol {
-    ($interceptor:expr, $func:expr, $detour_name:expr, $binary:expr) => {
-        if let Some(symbol) = frida_gum::Module::find_symbol_by_name($binary, $func) {
-            match $interceptor.replace(
-                symbol,
-                frida_gum::NativePointer($detour_name as *mut libc::c_void),
-                frida_gum::NativePointer(std::ptr::null_mut::<libc::c_void>()),
-            ) {
-                Err(e) => {
-                    tracing::warn!("{} error: {:?}", $func, e);
-                }
-                Ok(_) => {
-                    tracing::trace!("{} hooked", $func);
-                }
+    ($hook_manager:expr, $func:expr, $detour_name:expr) => {
+        match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
+            Ok(_) => {
+                trace!("hooked {:?} in main module", $func);
             }
-        };
+            Err(err) => {
+                trace!("hook {:?} in main module failed with err {err:?}", $func);
+            }
+        }
     };
 }
 

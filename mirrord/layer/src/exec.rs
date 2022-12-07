@@ -5,7 +5,6 @@ use std::{
     ffi::{CStr, CString},
 };
 
-use frida_gum::interceptor::Interceptor;
 use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError, TMP_DIR_ENV_VAR_NAME};
@@ -22,13 +21,14 @@ use crate::{
     },
     error::{HookError, HookError::Null},
     file::ops::str_from_rawish,
+    hooks::HookManager,
     replace,
 };
 
 const MAX_ARGC: usize = 254;
 
-pub(crate) unsafe fn enable_execve_hook(interceptor: &mut Interceptor) {
-    let _ = replace!(interceptor, "execve", execve_detour, FnExecve, FN_EXECVE);
+pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
+    replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.

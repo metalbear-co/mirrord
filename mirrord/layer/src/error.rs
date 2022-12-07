@@ -77,6 +77,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find export for name `{0}`!")]
     NoExportName(String),
 
+    #[error("mirrord-layer: Failed to find symbol for name `{0}`!")]
+    NoSymbolName(String),
+
     #[error("mirrord-layer: Environment variable interaction failed with `{0}`!")]
     VarError(#[from] VarError),
 
