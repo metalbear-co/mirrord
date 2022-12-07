@@ -197,19 +197,19 @@ pub struct SnifferCommand {
     command: SnifferCommands,
 }
 
-pub struct TCPSnifferAPI {
+pub struct TcpSnifferApi {
     client_id: ClientID,
     sender: Sender<SnifferCommand>,
     pub receiver: Receiver<DaemonTcp>,
 }
 
-impl TCPSnifferAPI {
+impl TcpSnifferApi {
     pub async fn new(
         client_id: ClientID,
         sniffer_sender: Sender<SnifferCommand>,
         receiver: Receiver<DaemonTcp>,
         tcp_sender: Sender<DaemonTcp>,
-    ) -> Result<TCPSnifferAPI, AgentError> {
+    ) -> Result<TcpSnifferApi, AgentError> {
         sniffer_sender
             .send(SnifferCommand {
                 client_id,
@@ -261,7 +261,7 @@ impl TCPSnifferAPI {
     }
 }
 
-impl Drop for TCPSnifferAPI {
+impl Drop for TcpSnifferApi {
     fn drop(&mut self) {
         self.sender
             .try_send(SnifferCommand {

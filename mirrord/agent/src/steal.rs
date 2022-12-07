@@ -24,7 +24,7 @@ pub(super) mod connection;
 mod ip_tables;
 mod orig_dst;
 
-/// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerAPI`].
+/// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///
 /// These are the operations that the agent receives from the layer to make the _steal_ feature
 /// work.
@@ -44,7 +44,7 @@ enum Command {
     /// The agent stops stealing traffic from this [`Port`].
     PortUnsubscribe(Port),
 
-    /// Part of the [`Drop`] implementation of [`TcpStealerAPI`].
+    /// Part of the [`Drop`] implementation of [`TcpStealerApi`].
     ///
     /// Closes a layer connection, and unsubscribe its ports.
     ClientClose,

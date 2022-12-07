@@ -22,7 +22,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use sniffer::{SnifferCommand, TCPSnifferAPI, TcpConnectionSniffer};
+use sniffer::{SnifferCommand, TcpSnifferApi, TcpConnectionSniffer};
 use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -148,7 +148,7 @@ struct ClientConnectionHandler {
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
-    tcp_sniffer_api: TCPSnifferAPI,
+    tcp_sniffer_api: TcpSnifferApi,
     tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
@@ -176,7 +176,7 @@ impl ClientConnectionHandler {
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
 
         let tcp_sniffer_api =
-            TCPSnifferAPI::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
+            TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
 
         let tcp_stealer_api =
             TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await?;
