@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   that agent is created by cli (and soon to be created by IDE plugin via cli).
 - Update to Frida 16.0.7
 - Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
+- Use our new cache action backed by sscache!
 
 ### Fixed
 

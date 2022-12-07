@@ -73,7 +73,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v1
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
@@ -90,7 +91,8 @@ jobs:
           toolchain: nightly
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v1
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
@@ -109,9 +111,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: |
           cargo test -p mirrord-protocol
 
@@ -129,9 +130,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: |
           cargo test -p mirrord-config
 
@@ -149,9 +149,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: |
           cargo test -p mirrord-kube --all-features -- --skip env_guard
 
@@ -165,7 +164,8 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly
-      - uses: Swatinem/rust-cache@v1
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: |
           cargo test -p mirrord-sip
 
@@ -183,9 +183,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: |
           cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
 
@@ -200,7 +199,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
 
   test_agent_image:
@@ -252,9 +252,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ${{matrix.os}}-${{matrix.target}}
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -270,9 +269,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ubuntu-latest
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -294,9 +292,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-        with:
-          cache-on-failure: true
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -374,10 +371,8 @@ jobs:
           profile: minimal
           toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-        with:
-          key: ubuntu-latest
-          cache-on-failure: true
+      - name: Rust sccache
+        uses: metalbear-co/sccache-action@v1.0.0
       - uses: actions/setup-node@v3
         with:
           node-version: 14
