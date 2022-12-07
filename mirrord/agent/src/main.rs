@@ -19,7 +19,7 @@ use futures::{
 };
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use sniffer::{SnifferCommand, TcpSnifferApi, TcpConnectionSniffer};
+use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
 use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -307,16 +307,18 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
-            ClientMessage::Tcp(message) => self.tcp_sniffer_api.handle_client_message(message).await?,
-            ClientMessage::TcpSteal(message) => self.tcp_stealer_api.handle_client_message(message).await?,
+            ClientMessage::Tcp(message) => {
+                self.tcp_sniffer_api.handle_client_message(message).await?
+            }
+            ClientMessage::TcpSteal(message) => {
+                self.tcp_stealer_api.handle_client_message(message).await?
+            }
             ClientMessage::Close => {
                 return Ok(false);
             }
         }
         Ok(true)
     }
-
-
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.

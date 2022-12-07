@@ -6,7 +6,7 @@ use std::{
 };
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
 use nix::sys::socket::SockaddrStorage;
@@ -25,7 +25,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
-use mirrord_protocol::tcp::LayerTcp;
 
 use crate::{
     error::AgentError,
@@ -270,7 +269,6 @@ impl TcpSnifferApi {
             LayerTcp::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
         }
     }
-
 }
 
 impl Drop for TcpSnifferApi {

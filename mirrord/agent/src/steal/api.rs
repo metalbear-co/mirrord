@@ -66,7 +66,7 @@ impl TcpStealerApi {
         self.command_tx
             .try_send(StealerCommand {
                 client_id: self.client_id,
-                command
+                command,
             })
             .map_err(From::from)
     }
@@ -104,7 +104,8 @@ impl TcpStealerApi {
         &mut self,
         connection_id: ConnectionId,
     ) -> Result<(), AgentError> {
-        self.send_command(Command::ConnectionUnsubscribe(connection_id)).await
+        self.send_command(Command::ConnectionUnsubscribe(connection_id))
+            .await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::TcpData`], that is passed from the
@@ -131,9 +132,7 @@ impl TcpStealerApi {
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.connection_unsubscribe(connection_id).await
             }
-            LayerTcpSteal::PortUnsubscribe(port) => {
-                self.port_unsubscribe(port).await
-            }
+            LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
             LayerTcpSteal::Data(tcp_data) => self.client_data(tcp_data).await,
         }
     }

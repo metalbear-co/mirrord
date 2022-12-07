@@ -4,11 +4,11 @@ use std::{
 };
 
 use bytes::Bytes;
+use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
     ResponseError::PortAlreadyStolen,
 };
-use iptables::IPTables;
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
