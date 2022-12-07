@@ -42,7 +42,7 @@ use crate::{
 /// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
 ///
 /// [agent]
-/// log_level = "trace"
+/// log_level = "debug"
 /// ttl = 1024 # seconds
 ///
 /// [feature]
