@@ -5,7 +5,8 @@ use k8s_openapi::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             Container, ContainerPort, EnvFromSource, EnvVar, Namespace, PodSpec, PodTemplateSpec,
-            Secret, SecretEnvSource, Service, ServiceAccount, ServicePort, ServiceSpec,
+            Secret, SecretEnvSource, SecurityContext, Service, ServiceAccount, ServicePort,
+            ServiceSpec,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
@@ -166,6 +167,12 @@ impl OperatorDeployment {
                 container_port: 8080,
                 ..Default::default()
             }]),
+            security_context: Some(SecurityContext {
+                allow_privilege_escalation: Some(false),
+                privileged: Some(false),
+                run_as_user: Some(1001),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
