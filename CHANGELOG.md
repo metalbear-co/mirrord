@@ -7,6 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix asdf:
+  - Add `/tmp` not just `/tmp/` to exclusion.
+  - Add `.tool-version` to exclusion.
+  - `fclose` was calling close which doesn't flush.
+
 ## 3.13.0
 
 ### Changed
