@@ -7,7 +7,7 @@ mod list_targets {
     use rstest::rstest;
     use tokio::process::Command;
 
-    use crate::tests::{service, KubeService, TestProcess};
+    use crate::{service, KubeService, TestProcess};
 
     /// Runs `mirrord ls` command and asserts if the json matches the expected format
     async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {

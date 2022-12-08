@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "sanity"
-path = "src/sanity.rs"
+path = "src/utils.rs"
 doctest = false
 
 [dependencies]
