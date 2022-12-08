@@ -5,7 +5,7 @@
 /// that is not being hooked (`strace` the program to check).
 use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
 use tracing::trace;
@@ -393,6 +393,19 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
     }
 }
 
+/// Hook for `libc::lstat`.
+#[hook_guard_fn]
+unsafe extern "C" fn lstat_detour(raw_path: *const c_char, buf: *mut stat) -> c_int {
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+
+    // todo, write output to buf
+    let (Ok(result) | Err(result)) = lstat(path)
+        .bypass_with(|_| FN_LSTAT(raw_path, buf))
+        .map_err(From::from);
+
+    result
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -417,4 +430,5 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnFaccessat,
         FN_FACCESSAT
     );
+    replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
 }
