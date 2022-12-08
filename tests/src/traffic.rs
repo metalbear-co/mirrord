@@ -12,6 +12,8 @@ mod traffic {
     use crate::utils::{
         kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
     };
+    #[cfg(target_os = "linux")]
+    use crate::utils::{Agent, Application};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

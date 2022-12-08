@@ -62,7 +62,7 @@ mod env {
     pub async fn test_bash_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
-        let mut process = run(bash_command, &service.target, None, None, None).await;
+        let mut process = run_exec(bash_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -77,7 +77,7 @@ mod env {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(
+        let mut process = run_exec(
             bash_command,
             &service.target,
             None,
@@ -99,7 +99,7 @@ mod env {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(
+        let mut process = run_exec(
             bash_command,
             &service.target,
             None,
