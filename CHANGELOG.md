@@ -11,15 +11,28 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
 
+## 3.13.0
+
 ### Changed
 
 - IntelliJ Plugin: downgrade Java to version 11.
+- IntelliJ Plugin: update platform version to 2022.3.
 - Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
   that agent is created by cli (and soon to be created by IDE plugin via cli).
+- Update to Frida 16.0.7
+- Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
+- Add `/bin/` to default ignore list - asdf should be okay now!
+- Update GitHub action to use latest `rust-cache`
+
+### Added
+
+- mirrord-operator: Add securityContext section for deployment in operator setup
 
 ### Fixed
 
 - Fix `--fs-mode=local` didn't disable hooks as it was supposed to.
+- Fix hooking wrong libc functions because of lack of module specification - add function to resolve
+  module name to hook from (libc on Unix,libsystem on macOS). Partially fixes asdf issue.
 
 ## 3.12.1
 

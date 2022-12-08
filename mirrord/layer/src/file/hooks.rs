@@ -5,22 +5,24 @@
 /// that is not being hooked (`strace` the program to check).
 use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
 
-use frida_gum::interceptor::Interceptor;
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
-use mirrord_layer_macro::hook_guard_fn;
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
 use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_detour,
+    detour::DetourGuard,
     file::ops::{access, lseek, open, read, write},
+    hooks::HookManager,
     replace,
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
+/// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
@@ -31,7 +33,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
     );
 
     let (Ok(result) | Err(result)) = open(rawish_path, open_options)
-        .bypass_with(|_| FN_OPEN(raw_path, open_flags))
+        .bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
         .map_err(From::from);
 
     result
@@ -40,9 +42,19 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int) -> RawFd {
 /// Hook for `libc::open`.
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn open_detour(raw_path: *const c_char, open_flags: c_int) -> RawFd {
-    open_logic(raw_path, open_flags)
+#[hook_fn]
+pub(super) unsafe extern "C" fn open_detour(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    mut args: ...
+) -> RawFd {
+    let mode: c_int = args.arg();
+    let guard = DetourGuard::new();
+    if guard.is_none() {
+        FN_OPEN(raw_path, open_flags, mode)
+    } else {
+        open_logic(raw_path, open_flags, mode)
+    }
 }
 
 /// Hook for `libc::fopen`.
@@ -380,24 +392,24 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
-pub(crate) unsafe fn enable_file_hooks(interceptor: &mut Interceptor) {
-    let _ = replace!(interceptor, "open", open_detour, FnOpen, FN_OPEN);
-    let _ = replace!(interceptor, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    let _ = replace!(interceptor, "fopen", fopen_detour, FnFopen, FN_FOPEN);
-    let _ = replace!(interceptor, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
-    let _ = replace!(interceptor, "read", read_detour, FnRead, FN_READ);
-    let _ = replace!(interceptor, "fread", fread_detour, FnFread, FN_FREAD);
-    let _ = replace!(interceptor, "fgets", fgets_detour, FnFgets, FN_FGETS);
-    let _ = replace!(interceptor, "pread", pread_detour, FnPread, FN_PREAD);
-    let _ = replace!(interceptor, "ferror", ferror_detour, FnFerror, FN_FERROR);
-    let _ = replace!(interceptor, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
-    let _ = replace!(interceptor, "fileno", fileno_detour, FnFileno, FN_FILENO);
-    let _ = replace!(interceptor, "lseek", lseek_detour, FnLseek, FN_LSEEK);
-    let _ = replace!(interceptor, "write", write_detour, FnWrite, FN_WRITE);
-    let _ = replace!(interceptor, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
-    let _ = replace!(interceptor, "access", access_detour, FnAccess, FN_ACCESS);
-    let _ = replace!(
-        interceptor,
+pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+    replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
+    replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
+    replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
+    replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
+    replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
+    replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
+    replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
+    replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
+    replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
+    replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
+    replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+    replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
+    replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
+    replace!(hook_manager, "access", access_detour, FnAccess, FN_ACCESS);
+    replace!(
+        hook_manager,
         "faccessat",
         faccessat_detour,
         FnFaccessat,

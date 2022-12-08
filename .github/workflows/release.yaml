@@ -17,7 +17,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: aarch64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           key: aarch64-unknown-linux-gnu-ubuntu-latest
       - name: setup cross
@@ -45,7 +45,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           key: x86_64-unknown-linux-gnu-ubuntu-latest
       - name: setup cross
@@ -68,7 +68,7 @@ jobs:
           profile: minimal
           toolchain: nightly
           target: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@v1
         with:
