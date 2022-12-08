@@ -9,8 +9,8 @@ mod pause {
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
 
-    use crate::{
-        get_next_log, http_log_requester_service, http_logger_service, kube_client, run,
+    use crate::utils::{
+        get_next_log, http_log_requester_service, http_logger_service, kube_client, run_exec,
         KubeService,
     };
 
@@ -85,7 +85,7 @@ mod pause {
         assert_eq!(first_log, hi_from_deployed_app);
 
         println!("Running local app with mirrord.");
-        let mut process = run(
+        let mut process = run_exec(
             command.clone(),
             &requester_service.target,
             Some(&requester_service.namespace),

@@ -5,7 +5,7 @@ mod file_ops {
 
     use rstest::*;
 
-    use crate::{run, service, Agent, KubeService};
+    use crate::utils::{run_exec, service, Agent, KubeService};
 
     #[cfg(target_os = "linux")]
     #[rstest]
@@ -60,7 +60,7 @@ mod file_ops {
         let args = vec!["--fs-mode", "read"];
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/fs/**")];
 
-        let mut process = run(
+        let mut process = run_exec(
             python_command,
             &service.target,
             Some(&service.namespace),
@@ -93,7 +93,7 @@ mod file_ops {
             "python-e2e/files_ro.py",
         ];
 
-        let mut process = run(
+        let mut process = run_exec(
             python_command,
             &service.target,
             Some(&service.namespace),

@@ -5,7 +5,7 @@ mod env {
 
     use rstest::*;
 
-    use crate::{run, service, KubeService};
+    use crate::utils::{run_exec, service, KubeService};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -17,7 +17,7 @@ mod env {
             "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
         ];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(
+        let mut process = run_exec(
             node_command,
             &service.target,
             None,
@@ -41,7 +41,7 @@ mod env {
             "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
         ];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
-        let mut process = run(
+        let mut process = run_exec(
             node_command,
             &service.target,
             None,
@@ -118,7 +118,7 @@ mod env {
     pub async fn test_go18_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/18"];
-        let mut process = run(command, &service.target, None, None, None).await;
+        let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -129,7 +129,7 @@ mod env {
     pub async fn test_go19_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/19"];
-        let mut process = run(command, &service.target, None, None, None).await;
+        let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();

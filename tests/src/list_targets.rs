@@ -5,7 +5,7 @@ mod list_targets {
     use regex::Regex;
     use rstest::rstest;
 
-    use crate::{run_ls, service, KubeService};
+    use crate::utils::{run_ls, service, KubeService};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

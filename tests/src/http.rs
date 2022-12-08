@@ -7,7 +7,7 @@ mod http {
     use rstest::*;
     use tokio::time::timeout;
 
-    use crate::{
+    use crate::utils::{
         get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
     };
 
