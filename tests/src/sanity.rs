@@ -1084,7 +1084,7 @@ mod tests {
     pub async fn test_bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process = run(None, bash_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(bash_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
