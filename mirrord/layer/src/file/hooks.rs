@@ -410,7 +410,7 @@ fn nano_to_secs(nano: i64) -> i64 {
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-
+    trace!("lstat({:?}, {:?})", path, out_stat);
     let (Ok(result) | Err(result)) = lstat(path)
         .map(|res| {
             let res = res.metadata;
