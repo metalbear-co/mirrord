@@ -1,8 +1,10 @@
 #![feature(stmt_expr_attributes)]
+#[cfg(test)]
 mod env;
 mod file_ops;
 mod http;
 mod list_targets;
+mod pause;
 mod traffic;
 
 use std::{
@@ -16,6 +18,7 @@ use std::{
 
 use bytes::Bytes;
 use chrono::Utc;
+use futures::Stream;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::Deployment,
@@ -703,4 +706,10 @@ pub async fn send_requests(url: &str, expect_response: bool) {
     if expect_response {
         assert_eq!(resp, "DELETE".as_bytes());
     }
+}
+
+async fn get_next_log<T: Stream<Item = Result<Bytes, kube::Error>> + Unpin>(
+    stream: &mut T,
+) -> String {
+    String::from_utf8_lossy(&stream.try_next().await.unwrap().unwrap()).to_string()
 }
