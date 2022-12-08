@@ -395,7 +395,7 @@ mod tests {
     ///                 for `echo-service`, should we create as `echo-service-ybtdb`.
     /// delete_after_fail: delete resources even if the test fails.
     #[fixture]
-    async fn service(
+    pub async fn service(
         #[future] kube_client: Client,
         #[default("default")] namespace: &str,
         #[default("NodePort")] service_type: &str,

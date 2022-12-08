@@ -7,9 +7,9 @@ mod list_targets {
     use rstest::rstest;
     use tokio::process::Command;
 
-    use crate::tests::TestProcess;
+    use crate::tests::{service, KubeService, TestProcess};
 
-    /// Runs `mirrord ls` command and asserts if the the rendered json matches the expected format
+    /// Runs `mirrord ls` command and asserts if the json matches the expected format
     async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
         let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
@@ -40,7 +40,8 @@ mod list_targets {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_mirrord_ls() {
+    pub async fn test_mirrord_ls(#[future] service: KubeService) {
+        service.await;
         let mut process = run_ls(None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
