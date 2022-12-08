@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "sanity"
-path = "src/utils.rs"
 doctest = false
 
 [dependencies]
