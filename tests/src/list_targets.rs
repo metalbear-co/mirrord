@@ -35,7 +35,6 @@ mod list_targets {
             "executed mirrord with args {mirrord_args:?} pid {}",
             process.id().unwrap()
         );
-        // We need to hold temp dir until the process is finished
         TestProcess::from_child(process, temp_dir)
     }
 
