@@ -44,31 +44,6 @@ pub struct ReadLimitedFileRequest {
     pub start_from: u64,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct LstatRequest {
-    pub path: PathBuf
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct LstatResponse {
-    pub metadata: MetadataInternal
-}
-
-/// Internal version of Metadata across operating system (macOS, Linux)
-/// Only mutual attributes
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
-
-struct MetadataInternal {
-    device_id: 
-}
-
-impl From<Metadata> for MetadataInternal {
-    fn from(metadata: Metadata) -> Self {
-        Self {
-            
-        }
-    }
-}
 // TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
 // specific thing).
 //

@@ -24,7 +24,7 @@ use mirrord_protocol::{
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
     ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, WriteLimitedFileRequest,
+    WriteFileResponse, WriteLimitedFileRequest, file::LstatResponse,
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
@@ -526,6 +526,12 @@ pub struct Access {
 }
 
 #[derive(Debug)]
+pub struct Lstat {
+    pub(crate) path: PathBuf,
+    pub(crate) file_channel_tx: ResponseChannel<LstatResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -537,4 +543,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Close(Close),
     Access(Access),
+    Lstat(Lstat)
 }

@@ -4,7 +4,7 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    WriteFileResponse, LstatResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -413,6 +413,35 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
     };
 
     blocking_send_file_message(HookMessageFile::Access(access))?;
+
+    file_channel_rx.blocking_recv()??;
+
+    Detour::Success(0)
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn lstat(path: Option<&CStr>) -> Detour<LstatResponse> {
+    let path = path_from_rawish(rawish_path)?;
+
+    FILE_FILTER
+        .get()?
+        .continue_or_bypass_with(path.to_str().unwrap_or_default(), false, || {
+            Bypass::IgnoredFile(path.clone())
+        })?;
+
+    if path.is_relative() {
+        // Calls with non absolute paths are sent to libc::open.
+        Detour::Bypass(Bypass::RelativePath(path.clone()))?
+    };
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let lstat = Lstat {
+        path,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::Lstat(lstat))?;
 
     file_channel_rx.blocking_recv()??;
 
