@@ -647,9 +647,9 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.3.2"
+version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
+checksum = "23d8666cb01533c39dde32bcbab8e227b4ed6679b2c925eba05feabea39508fb"
 
 [[package]]
 name = "derivative"
@@ -813,16 +813,16 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "filetime"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b9663d381d07ae25dc88dbdf27df458faa83a9b25336bcac83d5e452b5fc9d3"
+checksum = "4e884668cd0c7480504233e951174ddc3b382f7c2666e3b7310b5c4e7b0c37f9"
 dependencies = [
  "cfg-if",
  "libc",
@@ -878,8 +878,8 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "frida-build"
-version = "0.2.1"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear3#5d05394a293230e4dc4f31acafb81bace7cc7638"
+version = "0.2.0"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear2#9f9e31b88aeb06af83ffd6b0a0418883c2d9cd65"
 dependencies = [
  "reqwest",
  "tar",
@@ -888,8 +888,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum"
-version = "0.9.0"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear3#5d05394a293230e4dc4f31acafb81bace7cc7638"
+version = "0.8.1"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear2#9f9e31b88aeb06af83ffd6b0a0418883c2d9cd65"
 dependencies = [
  "capstone",
  "capstone-sys",
@@ -903,8 +903,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum-sys"
-version = "0.5.0"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear3#5d05394a293230e4dc4f31acafb81bace7cc7638"
+version = "0.4.1"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=metalbear2#9f9e31b88aeb06af83ffd6b0a0418883c2d9cd65"
 dependencies = [
  "bindgen",
  "frida-build",
@@ -1179,9 +1179,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.23.1"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59df7c4e19c950e6e0e868dcc0a300b09a9b88e9ec55bd879ca819087a77355d"
+checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
@@ -1311,9 +1311,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.5.1"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f88c5561171189e69df9d98bcf18fd5f9558300f7ea7b801eb8a0fd748bd8745"
+checksum = "ec947b7a4ce12e3b87e353abae7ce124d025b6c7d6c5aea5cc0bcf92e9510ded"
 
 [[package]]
 name = "ipnetwork"
@@ -1402,9 +1402,9 @@ dependencies = [
 
 [[package]]
 name = "json-patch"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f995a3c8f2bc3dd52a18a583e90f9ec109c047fa1603a853e46bcda14d2e279d"
+checksum = "eb3fa5a61630976fc4c353c70297f2e93f1930e3ccee574d59d618ccbd5154ce"
 dependencies = [
  "serde",
  "serde_json",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1800,7 +1800,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -1814,7 +1814,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.8.5",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "thiserror",
  "tokio",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -1855,7 +1855,7 @@ dependencies = [
  "os_info",
  "rand 0.8.5",
  "regex",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "socket2",
  "stacker",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -1908,7 +1908,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "atty",
  "termspin",
@@ -1916,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "memchr",
  "object",
@@ -2897,7 +2897,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.13.1"
+version = "3.13.2"
 dependencies = [
  "libc",
 ]
@@ -2919,9 +2919,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.36.4"
+version = "0.36.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb93e85278e08bb5788653183213d3a60fc242b10cb9be96586f5a73dcb67c23"
+checksum = "a3807b5d10909833d3e9acd1eb5fb988f79376ff10fce42937de71a449c4c588"
 dependencies = [
  "bitflags",
  "errno",
@@ -3099,9 +3099,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.148"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53f64bb4ba0191d6d0676e1b141ca55047d83b74f5607e6d8eb88126c52c2dc"
+checksum = "256b9932320c590e707b94576e3cc1f7c9024d0ee6612dfbcf1cb106cbe8e055"
 dependencies = [
  "serde_derive",
 ]
@@ -3118,9 +3118,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.148"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a55492425aa53521babf6137309e7d34c20bbfbbfcfe2c7f3a047fd1f6b92c0c"
+checksum = "b4eae9b04cbffdfd550eb462ed33bc6a1b68c935127d008b27444d08380f94e4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3506,9 +3506,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.22.0"
+version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d76ce4a75fb488c605c54bf610f221cea8b0dafb53333c1a67e8ee199dcd2ae3"
+checksum = "eab6d665857cc6ca78d6e80303a02cea7a7851e85dfbd77cbdc09bd129f1ef46"
 dependencies = [
  "autocfg",
  "bytes",
@@ -3520,7 +3520,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "winapi",
+ "windows-sys 0.42.0",
 ]
 
 [[package]]
@@ -3885,9 +3885,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
+checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 
 [[package]]
 name = "unicode-bidi"
