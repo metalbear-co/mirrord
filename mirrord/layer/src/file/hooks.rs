@@ -12,7 +12,7 @@ use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
-    close_detour,
+    close_layer_fd,
     detour::DetourGuard,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
@@ -366,10 +366,12 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
+    let res = FN_FCLOSE(file_stream);
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
 
-    close_detour(fd)
+    close_layer_fd(fd);
+    res
 }
 
 /// Hook for `libc::fileno`.

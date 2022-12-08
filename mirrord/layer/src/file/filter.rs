@@ -61,7 +61,7 @@ fn generate_local_set() -> RegexSet {
         r"^/dev/.*$",
         r"^/opt/.*$",
         r"^/home/.*$",
-        r"^/tmp/.*$",
+        r"^/tmp.*$",
         r"^/snap/.*$",
         // support for nixOS.
         r"^/nix/.*$",
@@ -79,6 +79,8 @@ fn generate_local_set() -> RegexSet {
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
         r"^.*/package.json$",
+        // asdf
+        r".*/\.tool-versions$",
         // macOS
         r"^/Users/.*$",
         r"^/Library/.*$",
