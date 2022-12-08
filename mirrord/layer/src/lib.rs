@@ -569,7 +569,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
 /// Shared code for closing fd in our data structures
 /// Callers should call their respective close before calling this.
-pub(crate) fn close_logic(fd: c_int) {
+pub(crate) fn close_layer_fd(fd: c_int) {
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
@@ -594,7 +594,7 @@ pub(crate) fn close_logic(fd: c_int) {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
-    close_logic(fd);
+    close_layer_fd(fd);
     res
 }
 
