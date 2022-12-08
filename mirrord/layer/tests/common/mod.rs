@@ -482,7 +482,6 @@ pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
-    env.insert("MIRRORD_FILE_OPS", "true");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
     env
@@ -494,7 +493,7 @@ pub fn get_env_no_fs<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a 
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", &addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
-    env.insert("MIRRORD_FILE_OPS", "false");
+    env.insert("MIRRORD_FILE_MODE", "local");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
     env

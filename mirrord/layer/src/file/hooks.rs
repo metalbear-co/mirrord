@@ -433,7 +433,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
             out.st_ino = best_effort_cast(res.inode);
             out.st_rdev = best_effort_cast(res.rdevice_id);
             out.st_blksize = best_effort_cast(res.block_size);
-            out.st_blocks = best_effort_cast(res.block_size);
+            out.st_blocks = best_effort_cast(res.blocks);
             0
         })
         .bypass_with(|_| FN_LSTAT(raw_path, out_stat))

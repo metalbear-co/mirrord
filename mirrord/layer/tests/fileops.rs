@@ -102,7 +102,7 @@ async fn test_pwrite(
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
 
     env.insert("MIRRORD_FILE_MODE", "read");
     // add rw override for the specific path
