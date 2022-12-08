@@ -1,21 +1,15 @@
-
-use std::{
-    path::PathBuf, fs::{Metadata},
-    os::unix::prelude::{MetadataExt},
-};
+use std::{fs::Metadata, os::unix::prelude::MetadataExt, path::PathBuf};
 
 use bincode::{Decode, Encode};
 
-
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LstatRequest {
-    pub path: PathBuf
+    pub path: PathBuf,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LstatResponse {
-    pub metadata: MetadataInternal
+    pub metadata: MetadataInternal,
 }
 
 /// Internal version of Metadata across operating system (macOS, Linux)
@@ -51,7 +45,6 @@ pub struct MetadataInternal {
     /// number of blocks, st_blocks
     pub blocks: u64,
 }
-
 
 impl From<Metadata> for MetadataInternal {
     fn from(metadata: Metadata) -> Self {

@@ -20,11 +20,12 @@ use std::{
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
+    file::{LstatRequest, LstatResponse},
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
     ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, WriteLimitedFileRequest, file::{LstatResponse, LstatRequest},
+    WriteFileResponse, WriteLimitedFileRequest,
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
@@ -212,7 +213,7 @@ impl FileHandler {
                         fail,
                     )
                 })
-            },
+            }
             Lstat(lstat) => {
                 debug!("DaemonMessage::LstatResponse {:#?}!", lstat);
                 pop_send(&mut self.lstat_queue, lstat)
@@ -478,11 +479,7 @@ impl FileHandler {
     }
 
     #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_hook_lstat(
-        &mut self,
-        lstat: Lstat,
-        tx: &Sender<ClientMessage>,
-    ) -> Result<()> {
+    async fn handle_hook_lstat(&mut self, lstat: Lstat, tx: &Sender<ClientMessage>) -> Result<()> {
         let Lstat {
             path,
             file_channel_tx,
@@ -567,5 +564,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Close(Close),
     Access(Access),
-    Lstat(Lstat)
+    Lstat(Lstat),
 }
