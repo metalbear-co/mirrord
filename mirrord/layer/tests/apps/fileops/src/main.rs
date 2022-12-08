@@ -36,10 +36,7 @@ fn test_ffunctions() {
         let file_ptr = libc::fopen(filepath.as_ptr(), file_mode.as_ptr());
         let data = CString::new("Hello, I am the file you're writing!").expect("valid C string");
         let (buffer, length, _capacity) = data.into_bytes_with_nul().into_raw_parts();
-        assert_eq!(
-            libc::fwrite(buffer.cast(), 1, length, file_ptr),
-            length
-        );
+        assert_eq!(libc::fwrite(buffer.cast(), 1, length, file_ptr), length);
         libc::fclose(file_ptr);
     };
 }

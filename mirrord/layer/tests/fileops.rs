@@ -184,7 +184,7 @@ async fn test_pwrite(
     // Assert that fwrite flushed correclty
     let data = std::fs::read("/tmp/test_file2.txt").unwrap();
     assert_eq!(
-        "Hello, I am the file you're writing!",
+        "Hello, I am the file you're writing!\0",
         &String::from_utf8_lossy(&data)
     );
 }
