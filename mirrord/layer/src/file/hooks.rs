@@ -3,11 +3,12 @@
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
+use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
+use num_traits::Bounded;
 use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
@@ -393,13 +394,49 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
     }
 }
 
+/// Tries to convert input to type O, if it fails it returns the max value of O.
+/// For example, if you put u32::MAX into a u8, it will return u8::MAX.
+fn best_effort_cast<I: Bounded, O: TryFrom<I> + Bounded>(input: I) -> O {
+    input.try_into().unwrap_or(O::max_value())
+}
+
+/// Converts time in nano seconds to seconds, to match the `stat` struct
+/// which has very weird types used
+fn nano_to_secs(nano: i64) -> i64 {
+    best_effort_cast(Duration::from_nanos(best_effort_cast(nano)).as_secs())
+}
+
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
-unsafe extern "C" fn lstat_detour(raw_path: *const c_char, buf: *mut stat) -> c_int {
+unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
 
     // todo, write output to buf
     let (Ok(result) | Err(result)) = lstat(path)
+        .map(|res| {
+            let res = res.metadata;
+            // zero it in case it's not filled
+            out_stat.write_bytes(0, 1);
+            let out = &mut *out_stat;
+            out.st_mode = best_effort_cast(res.mode);
+            out.st_size = best_effort_cast(res.size);
+            out.st_atime_nsec = res.access_time;
+            out.st_mtime_nsec = res.modification_time;
+            out.st_ctime_nsec = res.creation_time;
+            out.st_atime = nano_to_secs(res.access_time);
+            out.st_mtime = nano_to_secs(res.modification_time);
+            out.st_ctime = nano_to_secs(res.creation_time);
+            out.st_nlink = best_effort_cast(res.hard_links);
+            out.st_uid = res.user_id;
+            out.st_gid = res.group_id;
+            out.st_dev = res.device_id.try_into();
+            out.st_ino = res.ino;
+            out.st_rdev = res.rdev;
+            out.st_blksize = res.blksize;
+            out.st_blocks = res.blocks;
+            out.st_flags = res.flags;
+            0
+        })
         .bypass_with(|_| FN_LSTAT(raw_path, buf))
         .map_err(From::from);
 

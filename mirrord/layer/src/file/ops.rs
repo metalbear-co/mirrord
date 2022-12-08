@@ -4,7 +4,7 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
     CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse, LstatResponse,
+    WriteFileResponse, file::{LstatResponse}
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -420,7 +420,7 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lstat(path: Option<&CStr>) -> Detour<LstatResponse> {
+pub(crate) fn lstat(rawish_path: Option<&CStr>) -> Detour<LstatResponse> {
     let path = path_from_rawish(rawish_path)?;
 
     FILE_FILTER
@@ -443,7 +443,5 @@ pub(crate) fn lstat(path: Option<&CStr>) -> Detour<LstatResponse> {
 
     blocking_send_file_message(HookMessageFile::Lstat(lstat))?;
 
-    file_channel_rx.blocking_recv()??;
-
-    Detour::Success(0)
+    Detour::Success(file_channel_rx.blocking_recv()??)
 }

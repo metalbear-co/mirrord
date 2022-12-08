@@ -1851,6 +1851,7 @@ dependencies = [
  "mirrord-sip",
  "nix 0.24.3",
  "null-terminated",
+ "num-traits",
  "os_info",
  "rand 0.8.5",
  "regex",
