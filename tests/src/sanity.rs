@@ -1,4 +1,6 @@
 #![feature(stmt_expr_attributes)]
+mod list_targets;
+
 #[cfg(test)]
 
 mod tests {
@@ -26,7 +28,6 @@ mod tests {
         Api, Client, Config,
     };
     use rand::{distributions::Alphanumeric, Rng};
-    use regex::Regex;
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -97,7 +98,7 @@ mod tests {
         Rust,
     }
 
-    struct TestProcess {
+    pub struct TestProcess {
         pub child: Child,
         stderr: Arc<Mutex<String>>,
         stdout: Arc<Mutex<String>>,
@@ -106,11 +107,11 @@ mod tests {
     }
 
     impl TestProcess {
-        fn get_stdout(&self) -> String {
+        pub fn get_stdout(&self) -> String {
             self.stdout.lock().unwrap().clone()
         }
 
-        fn assert_stderr(&self) {
+        pub fn assert_stderr(&self) {
             assert!(self.stderr.lock().unwrap().is_empty());
         }
 
@@ -137,7 +138,7 @@ mod tests {
             panic!("Timeout waiting for line: {}", line);
         }
 
-        fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
+        pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
             let stderr_data = Arc::new(Mutex::new(String::new()));
             let stdout_data = Arc::new(Mutex::new(String::new()));
             let child_stderr = child.stderr.take().unwrap();
@@ -257,34 +258,6 @@ mod tests {
         }
     }
 
-    async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
-        let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-            None => env!("CARGO_BIN_FILE_MIRRORD"),
-            Some(binary_path) => binary_path,
-        };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
-        let mut mirrord_args = vec!["ls"];
-        if let Some(args) = args {
-            mirrord_args.extend(args);
-        }
-        if let Some(namespace) = namespace {
-            mirrord_args.extend(vec!["--namespace", namespace]);
-        }
-
-        let process = Command::new(path)
-            .args(mirrord_args.clone())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-
-        println!(
-            "executed mirrord with args {mirrord_args:?} pid {}",
-            process.id().unwrap()
-        );
-        // We need to hold temp dir until the process is finished
-        TestProcess::from_child(process, temp_dir)
-    }
     async fn run(
         process_cmd: Vec<&str>,
         target: &str,
@@ -1540,20 +1513,5 @@ mod tests {
         // Verify that the deployed app resumes after the local app is done.
         let log_from_deployed_after_resume = get_next_log(&mut log_stream).await;
         assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn test_mirrord_ls() {
-        let mut process = run_ls(None, None).await;
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        let stdout = process.get_stdout();
-        let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
-        let re = Regex::new(r"^pod/.+(/container/.+)?$").unwrap();
-        targets
-            .iter()
-            .for_each(|output| assert!(re.is_match(output)));
-        process.assert_stderr();
     }
 }
