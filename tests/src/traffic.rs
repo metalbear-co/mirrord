@@ -9,11 +9,11 @@ mod traffic {
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
 
+    #[cfg(target_os = "linux")]
+    use crate::utils::{get_service_url, send_requests, Agent, Application};
     use crate::utils::{
         kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
     };
-    #[cfg(target_os = "linux")]
-    use crate::utils::{Agent, Application};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -68,12 +68,12 @@ mod traffic {
         let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
         let mut process = application
-            .run_exec(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
         send_requests(&url, true).await;
-        timeout(Duration::from_secs(40), process.child.wait())
+        tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
             .unwrap();
