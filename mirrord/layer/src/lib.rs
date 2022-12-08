@@ -567,6 +567,24 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     }
 }
 
+/// Shared code for closing fd in our data structures
+/// Callers should call their respective close before calling this.
+pub(crate) fn close_logic(fd: c_int) {
+    let file_mode_active = FILE_MODE
+        .get()
+        .expect("Should be set during initialization!")
+        .is_active();
+
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active
+    && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
+    let close_file_result = file::ops::close(remote_fd);
+
+    if let Err(fail) = close_file_result {
+        error!("Failed closing file with {fail:#?}");
+    };
+}
+}
+
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
 // just bypass). Everything works, so, should we intervene?
 //
@@ -575,20 +593,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// so it tries to do the same for files.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    let file_mode_active = FILE_MODE
-        .get()
-        .expect("Should be set during initialization!")
-        .is_active();
-
     let res = FN_CLOSE(fd);
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active
-        && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
-        let close_file_result = file::ops::close(remote_fd);
-
-        if let Err(fail) = close_file_result {
-            error!("Failed closing file with {fail:#?}");
-        };
-    }
+    close_logic(fd);
     res
 }
 
