@@ -11,6 +11,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
 
+## 3.13.1
+
+### Fixed
+
+- Fix asdf:
+  - Add `/tmp` not just `/tmp/` to exclusion.
+  - Add `.tool-version` to exclusion.
+  - `fclose` was calling close which doesn't flush.
+
 ## 3.13.0
 
 ### Changed
