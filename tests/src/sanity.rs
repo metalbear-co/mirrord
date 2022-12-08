@@ -26,6 +26,7 @@ mod tests {
         Api, Client, Config,
     };
     use rand::{distributions::Alphanumeric, Rng};
+    use regex::Regex;
     use reqwest::StatusCode;
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
@@ -210,7 +211,7 @@ mod tests {
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
             };
-            run(process_cmd, target, namespace, args, env).await
+            run(None, Some(process_cmd), target, namespace, args, env).await
         }
 
         fn assert(&self, process: &TestProcess) {
@@ -257,7 +258,8 @@ mod tests {
     }
 
     async fn run(
-        process_cmd: Vec<&str>,
+        ls: Option<&str>,
+        process_cmd: Option<Vec<&str>>,
         target: &str,
         namespace: Option<&str>,
         args: Option<Vec<&str>>,
@@ -268,14 +270,18 @@ mod tests {
             Some(binary_path) => binary_path,
         };
         let temp_dir = tempdir::TempDir::new("test").unwrap();
-        let mut mirrord_args = vec![
-            "exec",
-            "--target",
-            target,
-            "-c",
-            "--extract-path",
-            temp_dir.path().to_str().unwrap(),
-        ];
+        let mut mirrord_args = if let Some(ls) = ls {
+            vec![ls]
+        } else {
+            vec![
+                "exec",
+                "--target",
+                target,
+                "-c",
+                "--extract-path",
+                temp_dir.path().to_str().unwrap(),
+            ]
+        };
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
@@ -283,10 +289,9 @@ mod tests {
             mirrord_args.extend(args.into_iter());
         }
         mirrord_args.push("--");
-        let args: Vec<&str> = mirrord_args
-            .into_iter()
-            .chain(process_cmd.into_iter())
-            .collect();
+        if let Some(process_cmd) = process_cmd {
+            mirrord_args.extend(process_cmd.into_iter());
+        }
         // used by the CI, to load the image locally:
         // docker build -t test . -f mirrord/agent/Dockerfile
         // minikube load image test:latest
@@ -304,14 +309,14 @@ mod tests {
         }
 
         let server = Command::new(path)
-            .args(args.clone())
+            .args(mirrord_args.clone())
             .envs(base_env)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         println!(
-            "executed mirrord with args {args:?} pid {}",
+            "executed mirrord with args {mirrord_args:?} pid {}",
             server.id().unwrap()
         );
         // We need to hold temp dir until the process is finished
@@ -827,7 +832,8 @@ mod tests {
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/fs/**")];
 
         let mut process = run(
-            python_command,
+            None,
+            Some(python_command),
             &service.target,
             Some(&service.namespace),
             Some(args),
@@ -860,7 +866,8 @@ mod tests {
         ];
 
         let mut process = run(
-            python_command,
+            None,
+            Some(python_command),
             &service.target,
             Some(&service.namespace),
             None,
@@ -883,7 +890,8 @@ mod tests {
         ];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -907,7 +915,8 @@ mod tests {
         ];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -929,7 +938,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -945,7 +954,7 @@ mod tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1031,6 +1040,7 @@ mod tests {
         let bash_command = vec!["bash", "bash-e2e/env.sh", "include"];
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
         let mut process = run(
+            None,
             bash_command,
             &service.target,
             None,
@@ -1054,7 +1064,7 @@ mod tests {
     pub async fn test_bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mut process = run(bash_command, &service.target, None, None, None).await;
+        let mut process = run(None, bash_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1072,7 +1082,7 @@ mod tests {
     pub async fn test_bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process = run(bash_command, &service.target, None, None, None).await;
+        let mut process = run(None, bash_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1088,7 +1098,7 @@ mod tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process = run(bash_command, &service.target, None, Some(args), None).await;
+        let mut process = run(None, bash_command, &service.target, None, Some(args), None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1100,7 +1110,7 @@ mod tests {
     pub async fn test_go18_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/18"];
-        let mut process = run(command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1111,7 +1121,7 @@ mod tests {
     pub async fn test_go19_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let command = vec!["go-e2e-env/19"];
-        let mut process = run(command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1128,7 +1138,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1144,7 +1154,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1161,7 +1171,8 @@ mod tests {
         ];
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -1182,7 +1193,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1199,7 +1210,8 @@ mod tests {
         ];
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -1220,7 +1232,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1234,7 +1246,7 @@ mod tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
         ];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1279,7 +1291,8 @@ mod tests {
         // If this verification fails, the test itself is invalid.
         let mirrord_no_outgoing = vec!["--no-outgoing"];
         let mut process = run(
-            node_command.clone(),
+            None,
+            Some(node_command.clone()),
             &target_service.target,
             Some(&target_service.namespace),
             Some(mirrord_no_outgoing),
@@ -1294,7 +1307,8 @@ mod tests {
 
         // Run mirrord with outgoing enabled.
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &target_service.target,
             Some(&target_service.namespace),
             None,
@@ -1338,7 +1352,8 @@ mod tests {
         ];
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run(
-            node_command,
+            None,
+            Some(node_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -1359,7 +1374,7 @@ mod tests {
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
         let service = service.await;
-        let mut process = run(command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1398,7 +1413,7 @@ mod tests {
     pub async fn test_listen_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
-        let mut process = run(node_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(node_command), &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
@@ -1482,7 +1497,8 @@ mod tests {
 
         println!("Running local app with mirrord.");
         let mut process = run(
-            command.clone(),
+            None,
+            Some(command),
             &requester_service.target,
             Some(&requester_service.namespace),
             Some(mirrord_pause_arg),
@@ -1516,10 +1532,16 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_mirrord_ls() {
-        let command = vec!["ls"];
-        let mut process = run(command, "", None, None, None).await;        
+        let command = Some("ls");
+        let mut process = run(command, None, "", None, None, None).await;
         let res = process.child.wait().await.unwrap();
-        assert!(!res.success());
+        assert!(res.success());
+        let stdout = process.get_stdout();
+        let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
+        let re = Regex::new(r"^pod/.+(/container/.+)?$").unwrap();
+        targets
+            .iter()
+            .for_each(|output| assert!(re.is_match(output)));
         process.assert_stderr();
     }
 }

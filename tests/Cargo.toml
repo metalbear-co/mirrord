@@ -12,6 +12,7 @@ doctest = false
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
+regex.workspace = true
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
