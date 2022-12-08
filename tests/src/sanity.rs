@@ -802,7 +802,8 @@ mod tests {
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run(
-            command,
+            None,
+            Some(command),
             &service.target,
             Some(&service.namespace),
             Some(args),
@@ -1002,7 +1003,7 @@ mod tests {
     pub async fn test_bash_remote_env_vars_works(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/env.sh"];
-        let mut process = run(bash_command, &service.target, None, None, None).await;
+        let mut process = run(None, Some(bash_command), &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -1018,7 +1019,8 @@ mod tests {
         let bash_command = vec!["bash", "bash-e2e/env.sh", "exclude"];
         let mirrord_args = vec!["-x", "MIRRORD_FAKE_VAR_FIRST"];
         let mut process = run(
-            bash_command,
+            None,
+            Some(bash_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -1041,7 +1043,7 @@ mod tests {
         let mirrord_args = vec!["-s", "MIRRORD_FAKE_VAR_FIRST"];
         let mut process = run(
             None,
-            bash_command,
+            Some(bash_command),
             &service.target,
             None,
             Some(mirrord_args),
@@ -1098,7 +1100,15 @@ mod tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process = run(None, bash_command, &service.target, None, Some(args), None).await;
+        let mut process = run(
+            None,
+            Some(bash_command),
+            &service.target,
+            None,
+            Some(args),
+            None,
+        )
+        .await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
