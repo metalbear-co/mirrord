@@ -1,48 +1,17 @@
 #[cfg(test)]
 /// Tests for the `mirrord ls` command
 mod list_targets {
-    use std::process::Stdio;
 
     use regex::Regex;
     use rstest::rstest;
-    use tokio::process::Command;
 
-    use crate::{service, KubeService, TestProcess};
-
-    /// Runs `mirrord ls` command and asserts if the json matches the expected format
-    async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
-        let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-            None => env!("CARGO_BIN_FILE_MIRRORD"),
-            Some(binary_path) => binary_path,
-        };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
-        let mut mirrord_args = vec!["ls"];
-        if let Some(args) = args {
-            mirrord_args.extend(args);
-        }
-        if let Some(namespace) = namespace {
-            mirrord_args.extend(vec!["--namespace", namespace]);
-        }
-
-        let process = Command::new(path)
-            .args(mirrord_args.clone())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-
-        println!(
-            "executed mirrord with args {mirrord_args:?} pid {}",
-            process.id().unwrap()
-        );
-        TestProcess::from_child(process, temp_dir)
-    }
+    use crate::{run_ls, service, KubeService};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_mirrord_ls(#[future] service: KubeService) {
         let service = service.await;
-        let mut process = run_ls(None, None).await;
+        let mut process = run_ls(None, None);
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         let stdout = process.get_stdout();

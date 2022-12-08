@@ -34,7 +34,6 @@ use tokio::{
     io::{AsyncReadExt, BufReader},
     process::{Child, Command},
     task::JoinHandle,
-    time::timeout,
 };
 // 0.8
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -312,6 +311,35 @@ async fn run(
     );
     // We need to hold temp dir until the process is finished
     TestProcess::from_child(server, temp_dir)
+}
+
+/// Runs `mirrord ls` command and asserts if the json matches the expected format
+fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
+    let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
+        None => env!("CARGO_BIN_FILE_MIRRORD"),
+        Some(binary_path) => binary_path,
+    };
+    let temp_dir = tempdir::TempDir::new("test").unwrap();
+    let mut mirrord_args = vec!["ls"];
+    if let Some(args) = args {
+        mirrord_args.extend(args);
+    }
+    if let Some(namespace) = namespace {
+        mirrord_args.extend(vec!["--namespace", namespace]);
+    }
+
+    let process = Command::new(path)
+        .args(mirrord_args.clone())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    println!(
+        "executed mirrord with args {mirrord_args:?} pid {}",
+        process.id().unwrap()
+    );
+    TestProcess::from_child(process, temp_dir)
 }
 
 #[fixture]
