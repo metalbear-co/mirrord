@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::Write,
     path::{Path, PathBuf},
@@ -309,14 +310,14 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 }
 
 /// Returns a list of (pod name, [container names]) pairs.
-async fn get_kube_pods(namespace: Option<&str>) -> Result<Vec<(String, Vec<String>)>> {
+async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
     let client = create_kube_api(None).await?;
     let api: Api<Pod> = get_k8s_api(&client, namespace);
     let pods = api.list(&ListParams::default()).await?;
 
     // convert pods to (name, container names) pairs
 
-    let pod_containers: Vec<(String, Vec<String>)> = pods
+    let pod_containers_map: HashMap<String, Vec<String>> = pods
         .items
         .iter()
         .filter_map(|pod| {
@@ -332,7 +333,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<Vec<(String, Vec<Strin
         })
         .collect();
 
-    Ok(pod_containers)
+    Ok(pod_containers_map)
 }
 
 /// Lists all possible target paths for pods.

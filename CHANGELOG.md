@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
 
+### Changed
+
+- Refactor e2e tests: split into modules based on functionality they test.
+
 ## 3.13.2
 
 ### Fixed
