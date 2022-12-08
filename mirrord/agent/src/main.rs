@@ -1,6 +1,7 @@
 #![feature(result_option_inspect)]
 #![feature(hash_drain_filter)]
 #![feature(once_cell)]
+#![feature(is_some_and)]
 
 use std::{
     collections::HashSet,

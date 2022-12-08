@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io,
     net::{Ipv4Addr, SocketAddr},
 };
@@ -58,7 +59,11 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Associates a `ConnectionId` with a `ClientID`, so we can send the data we read from
     /// [`TcpConnectionStealer::read_streams`] to the appropriate client (layer).
-    client_connections: HashMap<ConnectionId, ClientId>,
+    connection_client: HashMap<ConnectionId, ClientId>,
+
+    /// Map a `ClientId` to a set of its `ConnectionId`s. Used to close all connections when
+    /// client closes.
+    client_connections: HashMap<ClientId, HashSet<ConnectionId>>,
 }
 
 impl TcpConnectionStealer {
@@ -86,6 +91,7 @@ impl TcpConnectionStealer {
             iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
+            connection_client: HashMap::with_capacity(8),
             client_connections: HashMap::with_capacity(8),
         })
     }
@@ -168,7 +174,7 @@ impl TcpConnectionStealer {
             .unwrap_or(Ok(DaemonTcp::Close(TcpClose { connection_id })))?;
 
         if let Some(daemon_tx) = self
-            .client_connections
+            .connection_client
             .get(&connection_id)
             .and_then(|client_id| self.clients.get(client_id))
         {
@@ -176,7 +182,8 @@ impl TcpConnectionStealer {
         } else {
             // Either connection_id or client_id does not exist. This would be a bug.
             error!(
-                "Internal error: An invariant is not being held between connection_id and client_id for stealer!"
+                "Internal mirrord error: stealer received data on a connection that was already \
+                removed."
             );
             debug_assert!(false);
             Ok(())
@@ -212,7 +219,11 @@ impl TcpConnectionStealer {
             self.read_streams
                 .insert(connection_id, ReaderStream::new(read_half));
 
-            self.client_connections.insert(connection_id, client_id);
+            self.connection_client.insert(connection_id, client_id);
+            self.client_connections
+                .entry(client_id)
+                .or_insert_with(HashSet::new)
+                .insert(connection_id);
 
             let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id,
@@ -222,11 +233,11 @@ impl TcpConnectionStealer {
             });
 
             // Send new connection to subscribed layer.
-            debug_assert!(self.clients.get(&client_id).is_some());
             match self.clients.get(&client_id) {
                 Some(daemon_tx) => Ok(daemon_tx.send(new_connection).await?),
                 None => {
                     // Should not happen.
+                    debug_assert!(false);
                     error!("Internal error: subscriptions of closed client still present.");
                     Ok(self.close_client(client_id)?)
                 }
@@ -294,7 +305,8 @@ impl TcpConnectionStealer {
     }
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
-    /// their redirection rules from [`TcpConnectionStealer::iptables`].
+    /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
+    /// connecitons.
     #[tracing::instrument(level = "trace", skip(self))]
     fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let stealer_port = self.stealer.local_addr()?.port();
@@ -305,6 +317,13 @@ impl TcpConnectionStealer {
             .try_for_each(|port| self.iptables()?.remove_redirect(port, stealer_port))?;
 
         self.port_subscriptions.remove_client(client_id);
+
+        // Close and remove all remaining connections of the closed client.
+        if let Some(remaining_connections) = self.client_connections.remove(&client_id) {
+            for connection_id in remaining_connections.into_iter() {
+                self.remove_connection(connection_id);
+            }
+        }
 
         self.clients.remove(&client_id);
         Ok(())
@@ -347,10 +366,35 @@ impl TcpConnectionStealer {
 
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote
     /// connection.
+    /// Also remove connection from connection mappings and free the connection index.
+    /// This method does not remove from client_connections so that it can be called while
     #[tracing::instrument(level = "trace", skip(self))]
-    fn connection_unsubscribe(&mut self, connection_id: ConnectionId) {
+    fn remove_connection(&mut self, connection_id: ConnectionId) -> Option<ClientId> {
         self.write_streams.remove(&connection_id);
         self.read_streams.remove(&connection_id);
+        self.index_allocator.free_index(connection_id);
+        self.connection_client.remove(&connection_id)
+    }
+
+    /// Close the connection, remove the id from all maps and free the id.
+    #[tracing::instrument(level = "trace", skip(self))]
+    fn connection_unsubscribe(&mut self, connection_id: ConnectionId) {
+        if let Some(client_id) = self.remove_connection(connection_id) {
+            // Remove the connection from the set of the connections that belong to its client.
+            self.client_connections
+                .entry(client_id)
+                .and_modify(|connections| {
+                    connections.remove(&connection_id);
+                });
+            // If we removed the last connection of this client, remove client from map.
+            if self
+                .client_connections
+                .get(&client_id)
+                .is_some_and(|connections| connections.is_empty())
+            {
+                self.client_connections.remove(&client_id);
+            }
+        }
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
