@@ -181,4 +181,10 @@ async fn test_pwrite(
 
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
+    // Assert that fwrite flushed correclty
+    let data = std::fs::read("/tmp/test_file2.txt").unwrap();
+    assert_eq!(
+        "Hello, I am the file you're writing!",
+        &String::from_utf8_lossy(&data)
+    );
 }
