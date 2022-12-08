@@ -9,11 +9,12 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    file::LstatRequest, AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse,
-    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-    ReadLineFileRequest, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
-    WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+    file::{LstatRequest, LstatResponse},
+    AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
+    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    WriteLimitedFileRequest,
 };
 use tracing::{debug, error, trace};
 

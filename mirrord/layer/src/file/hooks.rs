@@ -397,7 +397,7 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
 /// Tries to convert input to type O, if it fails it returns the max value of O.
 /// For example, if you put u32::MAX into a u8, it will return u8::MAX.
 fn best_effort_cast<I: Bounded, O: TryFrom<I> + Bounded>(input: I) -> O {
-    input.try_into().unwrap_or(O::max_value())
+    input.try_into().unwrap_or_else(|_| O::max_value())
 }
 
 /// Converts time in nano seconds to seconds, to match the `stat` struct
