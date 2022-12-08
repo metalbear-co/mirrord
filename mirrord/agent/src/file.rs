@@ -9,11 +9,11 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
-    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-    WriteLimitedFileRequest,
+    file::LstatRequest, AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse,
+    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+    ReadLineFileRequest, RemoteResult, ResponseError, SeekFileRequest, SeekFileResponse,
+    WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
 };
 use tracing::{debug, error, trace};
 
@@ -158,6 +158,14 @@ impl FileManager {
 
                 let access_result = self.access(pathname.into(), mode);
                 Ok(FileResponse::Access(access_result))
+            }
+            FileRequest::Lstat(LstatRequest { path }) => {
+                let pathname = path
+                    .strip_prefix("/")
+                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+                let lstat_result = self.lstat(path.into());
+                Ok(FileResponse::Lstat(lstat_result))
             }
         }
     }
@@ -455,6 +463,18 @@ impl FileManager {
         pathname
             .access(mode)
             .map(|_| AccessFileResponse)
+            .map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn lstat(&mut self, pathname: PathBuf) -> RemoteResult<LstatResponse> {
+        let pathname = resolve_path(pathname, &self.root_path)?;
+
+        pathname
+            .symlink_metadata()
+            .map(|metadata| LstatResponse {
+                metadata: metadata.into(),
+            })
             .map_err(ResponseError::from)
     }
 }

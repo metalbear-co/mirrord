@@ -2,8 +2,7 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     io::{self, SeekFrom},
-    path::PathBuf, fs::{Metadata},
-    os::unix::prelude::{MetadataExt},
+    path::PathBuf,
 };
 
 use actix_codec::{Decoder, Encoder};
@@ -17,7 +16,7 @@ use crate::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
-    ResponseError,
+    ResponseError, file::{LstatRequest, LstatResponse},
 };
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -187,6 +186,7 @@ pub enum FileRequest {
     WriteLimited(WriteLimitedFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
+    Lstat(LstatRequest)
 }
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -252,6 +252,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
+    Lstat(RemoteResult<LstatResponse>)
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

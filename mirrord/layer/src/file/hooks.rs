@@ -411,13 +411,13 @@ fn nano_to_secs(nano: i64) -> i64 {
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
 
-    // todo, write output to buf
     let (Ok(result) | Err(result)) = lstat(path)
         .map(|res| {
             let res = res.metadata;
             // zero it in case it's not filled
             out_stat.write_bytes(0, 1);
             let out = &mut *out_stat;
+            // on macOS the types might be different, so we try to cast and do our best..
             out.st_mode = best_effort_cast(res.mode);
             out.st_size = best_effort_cast(res.size);
             out.st_atime_nsec = res.access_time;
@@ -429,15 +429,14 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
             out.st_nlink = best_effort_cast(res.hard_links);
             out.st_uid = res.user_id;
             out.st_gid = res.group_id;
-            out.st_dev = res.device_id.try_into();
-            out.st_ino = res.ino;
-            out.st_rdev = res.rdev;
-            out.st_blksize = res.blksize;
-            out.st_blocks = res.blocks;
-            out.st_flags = res.flags;
+            out.st_dev = best_effort_cast(res.device_id);
+            out.st_ino = best_effort_cast(res.inode);
+            out.st_rdev = best_effort_cast(res.rdevice_id);
+            out.st_blksize = best_effort_cast(res.block_size);
+            out.st_blocks = best_effort_cast(res.block_size);
             0
         })
-        .bypass_with(|_| FN_LSTAT(raw_path, buf))
+        .bypass_with(|_| FN_LSTAT(raw_path, out_stat))
         .map_err(From::from);
 
     result

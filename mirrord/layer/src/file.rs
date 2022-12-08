@@ -24,7 +24,7 @@ use mirrord_protocol::{
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
     ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, WriteLimitedFileRequest, file::LstatResponse,
+    WriteFileResponse, WriteLimitedFileRequest, file::{LstatResponse, LstatRequest},
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
@@ -115,6 +115,7 @@ pub struct FileHandler {
     write_limited_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
+    lstat_queue: ResponseDeque<LstatResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -211,6 +212,10 @@ impl FileHandler {
                         fail,
                     )
                 })
+            },
+            Lstat(lstat) => {
+                debug!("DaemonMessage::LstatResponse {:#?}!", lstat);
+                pop_send(&mut self.lstat_queue, lstat)
             }
         }
     }
@@ -234,6 +239,7 @@ impl FileHandler {
             WriteLimited(write) => self.handle_hook_write_limited(write, tx).await,
             Close(close) => self.handle_hook_close(close, tx).await,
             Access(access) => self.handle_hook_access(access, tx).await,
+            Lstat(lstat) => self.handle_hook_lstat(lstat, tx).await,
         }
     }
 
@@ -468,6 +474,24 @@ impl FileHandler {
         let access_file_request = AccessFileRequest { pathname, mode };
 
         let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_lstat(
+        &mut self,
+        lstat: Lstat,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let Lstat {
+            path,
+            file_channel_tx,
+        } = lstat;
+        self.lstat_queue.push_back(file_channel_tx);
+
+        let lstat_request = LstatRequest { path };
+
+        let request = ClientMessage::FileRequest(FileRequest::Lstat(lstat_request));
         tx.send(request).await.map_err(From::from)
     }
 }
