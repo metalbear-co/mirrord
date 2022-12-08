@@ -41,7 +41,20 @@ fn test_ffunctions() {
     };
 }
 
+// Test that lstat works remotely
+fn test_lstat() {
+    println!(">> test_lstat");
+
+    let metadata = std::fs::symlink_metadata("/tmp/test_file.txt").unwrap();
+
+    assert_eq!(metadata.dev(), 0);
+    assert_eq!(metadata.size(), 1);
+    assert_eq!(metadata.uid(), 2);
+    assert_eq!(metadata.blocks(), 3);
+}
+
 fn main() {
     test_pwrite();
     test_ffunctions();
+    test_lstat();
 }

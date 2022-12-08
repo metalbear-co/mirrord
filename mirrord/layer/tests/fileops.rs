@@ -1,8 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
+use std::{collections::HashMap, default, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_protocol::{file::*, *};
 use rstest::rstest;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -113,74 +113,92 @@ async fn test_pwrite(
 
     let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     println!("Got connection from layer.");
+    // pwrite test
     // reply to open
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
-            mirrord_protocol::OpenFileRequest {
-                path: "/tmp/test_file.txt".to_string().into(),
-                open_options: mirrord_protocol::OpenOptionsInternal {
-                    read: false,
-                    write: true,
-                    append: false,
-                    truncate: false,
-                    create: true,
-                    create_new: false,
-                },
-            }
-        ))
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/test_file.txt".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: false,
+                write: true,
+                append: false,
+                truncate: false,
+                create: true,
+                create_new: false,
+            },
+        }))
     );
     layer_connection
         .codec
-        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
-            Ok(mirrord_protocol::OpenFileResponse { fd: 1 }),
-        )))
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
         .await
         .unwrap();
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::WriteLimited(
-            mirrord_protocol::WriteLimitedFileRequest {
-                remote_fd: 1,
-                start_from: 0,
-                write_bytes: vec![
-                    72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102,
-                    105, 108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 119, 114, 105, 116, 105,
-                    110, 103, 33, 0
-                ]
-            }
-        ))
+        ClientMessage::FileRequest(FileRequest::WriteLimited(WriteLimitedFileRequest {
+            remote_fd: 1,
+            start_from: 0,
+            write_bytes: vec![
+                72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102, 105,
+                108, 101, 32, 121, 111, 117, 39, 114, 101, 32, 119, 114, 105, 116, 105, 110, 103,
+                33, 0
+            ]
+        }))
     );
 
     // reply to pwrite
     layer_connection
         .codec
-        .send(DaemonMessage::File(
-            mirrord_protocol::FileResponse::WriteLimited(Ok(mirrord_protocol::WriteFileResponse {
-                written_amount: 37,
-            })),
-        ))
+        .send(DaemonMessage::File(FileResponse::WriteLimited(Ok(
+            WriteFileResponse { written_amount: 37 },
+        ))))
         .await
         .unwrap();
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
-            mirrord_protocol::CloseFileRequest { fd: 1 }
-        ))
+        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
     layer_connection
         .codec
-        .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
-            Ok(mirrord_protocol::CloseFileResponse {}),
-        )))
+        .send(DaemonMessage::File(FileResponse::Close(Ok(
+            CloseFileResponse {},
+        ))))
         .await
         .unwrap();
 
+    // lstat test
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Lstat(LstatRequest {
+            path: "/tmp/test_file.txt".to_string().into(),
+        }))
+    );
+
+    let metadata = MetadataInternal {
+        device_id: 0,
+        size: 1,
+        user_id: 2,
+        blocks: 3,
+        ..Default::default()
+    };
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Lstat(Ok(
+            LstatResponse { metadata: metadata },
+        ))))
+        .await
+        .unwrap();
+
+    // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
+
     // Assert that fwrite flushed correclty
     let data = std::fs::read("/tmp/test_file2.txt").unwrap();
     assert_eq!(
