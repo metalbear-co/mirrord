@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.13.2
+
 ### Fixed
 
 - Weird crash that started happening after Frida upgrade on macOS M1.
