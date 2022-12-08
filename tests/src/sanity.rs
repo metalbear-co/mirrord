@@ -1512,4 +1512,14 @@ mod tests {
         let log_from_deployed_after_resume = get_next_log(&mut log_stream).await;
         assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_mirrord_ls() {
+        let command = vec!["ls"];
+        let mut process = run(command, "", None, None, None).await;        
+        let res = process.child.wait().await.unwrap();
+        assert!(!res.success());
+        process.assert_stderr();
+    }
 }
