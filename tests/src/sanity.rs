@@ -384,7 +384,7 @@ mod tests {
     }
 
     pub struct KubeService {
-        name: String,
+        pub name: String,
         namespace: String,
         target: String,
         _pod: ResourceGuard,
