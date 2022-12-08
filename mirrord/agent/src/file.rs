@@ -165,7 +165,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let lstat_result = self.lstat(path.into());
+                let lstat_result = self.lstat(pathname.into());
                 Ok(FileResponse::Lstat(lstat_result))
             }
         }
