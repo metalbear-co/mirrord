@@ -62,7 +62,7 @@ use crate::{
 /// accept_invalid_certificates = true
 ///
 /// [agent]
-/// log_level = "debug"
+/// log_level = "trace"
 /// ttl = 1024 # seconds
 /// image = "registry/mirrord-agent-custom:latest"
 /// image_pull_policy = "Always"

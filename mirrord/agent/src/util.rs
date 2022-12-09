@@ -9,23 +9,33 @@ use std::{
 use num_traits::{zero, CheckedAdd, Num, NumCast};
 
 /// Struct that helps you manage topic -> subscribers
-/// When a topip has no subscribers, it is removed.
+///
+/// When a topic has no subscribers, it is removed.
 #[derive(Debug)]
 pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
-pub type ClientID = u32;
+pub type ClientId = u32;
 
 impl<T, C> Subscriptions<T, C>
 where
     T: Eq + Hash + Clone + Copy,
     C: Eq + Hash + Clone + Copy,
 {
+    // TODO(alex): Same as `IndexAllocator`, make a good `Default` impl, then delete this.
     pub fn new() -> Subscriptions<T, C> {
         Subscriptions {
             _inner: HashMap::new(),
         }
+    }
+
+    /// Are there no subscriptions at all.
+    ///
+    /// This is guaranteed to be true if and only if there are no subscribers, as [`unsubscribe`]
+    /// provides the invariant that there are no empty topics (topics with 0 subscribers).
+    pub fn is_empty(&self) -> bool {
+        self._inner.is_empty()
     }
 
     /// Add a new subscription to a topic for a given client.
@@ -126,6 +136,8 @@ where
     }
 }
 
+// TODO(alex): Make this more generic, so we can use `default` everywhere, and
+// delete `new`.
 impl Default for IndexAllocator<usize> {
     fn default() -> Self {
         IndexAllocator::new()
