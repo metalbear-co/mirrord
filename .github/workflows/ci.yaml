@@ -363,7 +363,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     name: e2e
-    needs: [build_mirrord, test_agent_image, integration_tests, changed_files]
+    needs: [build_mirrord, test_agent_image, changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
