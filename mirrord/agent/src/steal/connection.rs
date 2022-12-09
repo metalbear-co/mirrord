@@ -59,7 +59,7 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Associates a `ConnectionId` with a `ClientID`, so we can send the data we read from
     /// [`TcpConnectionStealer::read_streams`] to the appropriate client (layer).
-    connection_client: HashMap<ConnectionId, ClientId>,
+    connection_clients: HashMap<ConnectionId, ClientId>,
 
     /// Map a `ClientId` to a set of its `ConnectionId`s. Used to close all connections when
     /// client closes.
@@ -91,7 +91,7 @@ impl TcpConnectionStealer {
             iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
-            connection_client: HashMap::with_capacity(8),
+            connection_clients: HashMap::with_capacity(8),
             client_connections: HashMap::with_capacity(8),
         })
     }
@@ -174,7 +174,7 @@ impl TcpConnectionStealer {
             .unwrap_or(Ok(DaemonTcp::Close(TcpClose { connection_id })))?;
 
         if let Some(daemon_tx) = self
-            .connection_client
+            .connection_clients
             .get(&connection_id)
             .and_then(|client_id| self.clients.get(client_id))
         {
@@ -219,7 +219,7 @@ impl TcpConnectionStealer {
             self.read_streams
                 .insert(connection_id, ReaderStream::new(read_half));
 
-            self.connection_client.insert(connection_id, client_id);
+            self.connection_clients.insert(connection_id, client_id);
             self.client_connections
                 .entry(client_id)
                 .or_insert_with(HashSet::new)
@@ -373,7 +373,7 @@ impl TcpConnectionStealer {
         self.write_streams.remove(&connection_id);
         self.read_streams.remove(&connection_id);
         self.index_allocator.free_index(connection_id);
-        self.connection_client.remove(&connection_id)
+        self.connection_clients.remove(&connection_id)
     }
 
     /// Close the connection, remove the id from all maps and free the id.
