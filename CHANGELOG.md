@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
   we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
   `TcpStealerApi` which bridges the communication between the agent and the stealer task).
+- Tests CI: don't wait for integration tests to start testing E2E tests.
 
 ## 3.13.2
 
