@@ -381,17 +381,15 @@ impl TcpConnectionStealer {
     fn connection_unsubscribe(&mut self, connection_id: ConnectionId) {
         if let Some(client_id) = self.remove_connection(connection_id) {
             // Remove the connection from the set of the connections that belong to its client.
+            let mut no_connections_left = false;
             self.client_connections
                 .entry(client_id)
                 .and_modify(|connections| {
                     connections.remove(&connection_id);
+                    no_connections_left = connections.is_empty();
                 });
             // If we removed the last connection of this client, remove client from map.
-            if self
-                .client_connections
-                .get(&client_id)
-                .is_some_and(|connections| connections.is_empty())
-            {
+            if no_connections_left {
                 self.client_connections.remove(&client_id);
             }
         }
