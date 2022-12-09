@@ -18,7 +18,7 @@ use crate::api::env_guard::EnvVarGuard;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
-        get_k8s_api,
+        get_k8s_resource_api,
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -61,7 +61,7 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
 
         let pod_addr = pod_api
             .get(&pod_agent_name)
@@ -89,7 +89,7 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 

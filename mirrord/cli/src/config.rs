@@ -239,7 +239,7 @@ pub(super) struct ListTargetArgs {
     )]
     pub output: Format,
 
-    /// Specify the namespace to list pods in.
+    /// Specify the namespace to list targets in.
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 }

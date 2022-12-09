@@ -16,7 +16,7 @@ use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{
-    get_k8s_api,
+    get_k8s_resource_api,
     kubernetes::{create_kube_api, KubernetesAPI},
     AgentManagment,
 };
@@ -312,7 +312,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 /// Returns a list of (pod name, [container names]) pairs.
 async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
     let client = create_kube_api(None).await?;
-    let api: Api<Pod> = get_k8s_api(&client, namespace);
+    let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
     let pods = api.list(&ListParams::default()).await?;
 
     // convert pods to (name, container names) pairs
@@ -343,7 +343,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 #[tokio::main(flavor = "current_thread")]
-async fn list_target_pods(args: &ListTargetArgs) -> Result<()> {
+async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let pods = get_kube_pods(args.namespace.as_deref()).await?;
     let target_vector = pods
         .iter()
@@ -397,7 +397,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
-        Commands::ListTargets(args) => list_target_pods(&args)?,
+        Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup {

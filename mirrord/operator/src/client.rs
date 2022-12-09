@@ -7,7 +7,7 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::{operator::OperatorConfig, target::TargetConfig, LayerConfig};
 use mirrord_kube::{
-    api::{get_k8s_api, kubernetes::create_kube_api, AgentManagment},
+    api::{get_k8s_resource_api, kubernetes::create_kube_api, AgentManagment},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -98,7 +98,7 @@ impl AgentManagment for OperatorApiDiscover {
         &self,
         pod_name: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.operator.namespace));
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, Some(&self.operator.namespace));
 
         let mut portforwarder = pod_api
             .portforward(&pod_name, &[self.operator.port])
@@ -117,7 +117,7 @@ impl AgentManagment for OperatorApiDiscover {
     where
         P: Progress + Send + Sync,
     {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, Some(&self.operator.namespace));
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, Some(&self.operator.namespace));
         let lp = ListParams::default().labels("app=mirrord-operator");
 
         let pod_name = pod_api
