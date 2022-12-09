@@ -1835,6 +1835,7 @@ name = "mirrord-http"
 version = "0.1.0"
 dependencies = [
  "fancy-regex",
+ "futures",
  "httparse",
  "hyper 1.0.0-rc.1",
  "rstest 0.16.0",

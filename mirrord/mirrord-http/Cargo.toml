@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+futures.workspace = true
 
 hyper = { version = "1.0.0-rc.1", features = ["full"] }
 tokio = { version = "*", features = ["full"] }
