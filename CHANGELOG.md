@@ -7,9 +7,27 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.13.2
+
+### Fixed
+
+- Weird crash that started happening after Frida upgrade on macOS M1.
+
+## 3.13.1
+
+### Fixed
+
+- Fix asdf:
+  - Add `/tmp` not just `/tmp/` to exclusion.
+  - Add `.tool-version` to exclusion.
+  - `fclose` was calling close which doesn't flush.
+
+## 3.13.0
+
 ### Changed
 
 - IntelliJ Plugin: downgrade Java to version 11.
+- IntelliJ Plugin: update platform version to 2022.3.
 - Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
   that agent is created by cli (and soon to be created by IDE plugin via cli).
 - Update to Frida 16.0.7
@@ -20,6 +38,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
   we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
   `TcpStealerApi` which bridges the communication between the agent and the stealer task).
+
+### Added
+
+- mirrord-operator: Add securityContext section for deployment in operator setup
 
 ### Fixed
 
