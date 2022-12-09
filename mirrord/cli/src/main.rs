@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::Write,
     path::{Path, PathBuf},
@@ -10,9 +11,15 @@ use clap::Parser;
 use config::*;
 use const_random::const_random;
 use exec::execvp;
+use k8s_openapi::api::core::v1::Pod;
+use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_kube::api::{
+    get_k8s_resource_api,
+    kubernetes::{create_kube_api, KubernetesAPI},
+    AgentManagment,
+};
 use mirrord_operator::{
     client::OperatorApiDiscover,
     license::License,
@@ -22,6 +29,7 @@ use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use semver::Version;
+use serde_json::json;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
@@ -301,6 +309,60 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+/// Returns a list of (pod name, [container names]) pairs.
+async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
+    let client = create_kube_api(None).await?;
+    let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
+    let pods = api.list(&ListParams::default()).await?;
+
+    // convert pods to (name, container names) pairs
+
+    let pod_containers_map: HashMap<String, Vec<String>> = pods
+        .items
+        .iter()
+        .filter_map(|pod| {
+            let name = pod.metadata.name.clone()?;
+            let containers = pod
+                .spec
+                .as_ref()?
+                .containers
+                .iter()
+                .map(|container| container.name.clone())
+                .collect();
+            Some((name, containers))
+        })
+        .collect();
+
+    Ok(pod_containers_map)
+}
+
+/// Lists all possible target paths for pods.
+/// Example: ```[
+///  "pod/metalbear-deployment-85c754c75f-982p5",
+///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
+///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
+/// ]```
+#[tokio::main(flavor = "current_thread")]
+async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
+    let pods = get_kube_pods(args.namespace.as_deref()).await?;
+    let target_vector = pods
+        .iter()
+        .flat_map(|(pod, containers)| {
+            if containers.len() == 1 {
+                vec![format!("pod/{}", pod)]
+            } else {
+                containers
+                    .iter()
+                    .map(move |container| format!("pod/{}/container/{}", pod, container))
+                    .collect::<Vec<String>>()
+            }
+        })
+        .collect::<Vec<String>>();
+    let json_obj = json!(target_vector);
+    println!("{}", json_obj);
+    Ok(())
+}
+
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -335,6 +397,7 @@ fn main() -> Result<()> {
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress())?;
         }
+        Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(operator) => match operator.command {
             OperatorCommand::Setup {

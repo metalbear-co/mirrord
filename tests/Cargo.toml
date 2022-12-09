@@ -4,14 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "sanity"
-path = "src/sanity.rs"
 doctest = false
 
 [dependencies]
 k8s-openapi.workspace = true
 kube.workspace = true
 reqwest.workspace = true
+regex.workspace = true
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
