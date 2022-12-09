@@ -1,6 +1,6 @@
 #[cfg(test)]
 /// Tests for the `mirrord ls` command
-mod list_targets {
+mod target {
 
     use regex::Regex;
     use rstest::rstest;

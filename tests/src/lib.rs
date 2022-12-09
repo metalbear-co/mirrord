@@ -2,8 +2,8 @@
 mod env;
 mod file_ops;
 mod http;
-mod list_targets;
 mod pause;
+mod target;
 mod traffic;
 
 #[cfg(test)]
