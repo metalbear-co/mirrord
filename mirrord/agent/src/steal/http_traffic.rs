@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use fancy_regex::Regex;
 use futures::TryFutureExt;
 use hyper::{body, server::conn::http1, service::service_fn, Request, Response};
+use mirrord_protocol::ConnectionId;
 use thiserror::Error;
 use tokio::{
     io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf},
@@ -14,6 +15,8 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tracing::{debug, error};
+
+use crate::util::ClientID;
 
 // TODO(alex) [high] 2022-12-06: Serve 1 hyper per connection? If we don't do 1 to 1, then there is
 // no easy way of knowing to whom we want to respond, or if these bytes are part of read A or read
@@ -46,7 +49,7 @@ use tracing::{debug, error};
 // abstraction?
 
 struct FilterA {
-    filters: HashMap<ClientId, Regex>,
+    filters: HashMap<ClientID, Regex>,
     response_tx: Sender<String>, // this is where we send data back to the agent.
 }
 
@@ -59,15 +62,13 @@ struct TrafficFilter {}
 
 // TODO(alex) [low] 2022-12-08: We need to unify some of these types in a common crate, something
 // like a `types` crate.
-type ClientId = u64;
-type ConnectionId = u64;
 
 // TODO(alex) [high] 2022-12-07: This is created by the stealer (during its creation phase).
 //
 // ADD(alex) [high] 2022-12-09: We don't generate any of these `id`s here, we get them from the
 // stealer, to have a single global source for them.
 pub struct EnterpriseTrafficManager {
-    client_filters: HashMap<ClientId, Regex>,
+    client_filters: HashMap<ClientID, Regex>,
 }
 
 struct TrafficClient {
@@ -93,7 +94,7 @@ impl EnterpriseTrafficManager {
     //
     // It's less about adding/changing filters, and more about we keep this here instead of keeping
     // the client/filter map in the agent.
-    pub fn new_client(&mut self, client_id: ClientId, filter: Regex) {
+    pub fn new_client(&mut self, client_id: ClientID, filter: Regex) {
         self.client_filters.insert(client_id, filter);
     }
 
@@ -106,7 +107,7 @@ impl EnterpriseTrafficManager {
     // The `Receiver` part of this channel does a `blocking_recv` in the hyper handler.
     pub async fn new_connection<ResponseFromStolenLayer>(
         &mut self,
-        client_id: ClientId,
+        client_id: ClientID,
         connection_id: ConnectionId,
         // TODO(alex) [high] 2022-12-08: We need to return this `tcp_stream` for our error cases,
         // otherwise the agent would not steal from it?
@@ -157,7 +158,7 @@ pub enum HttpError {
     Empty,
 
     #[error("Failed client not found `{0}`!")]
-    ClientNotFound(ClientId),
+    ClientNotFound(ClientID),
 
     #[error("Failed parsing HTTP smaller than minimal!")]
     TooSmall,
@@ -178,13 +179,13 @@ pub enum HttpError {
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
 struct HttpFilterBuilder {
-    client_id: ClientId,
+    client_id: ClientID,
     connection_id: ConnectionId,
     filter: Regex,
 }
 
 struct HttpFilter {
-    client_id: ClientId,
+    client_id: ClientID,
     connection_id: ConnectionId,
     filter: Regex,
 }
@@ -196,7 +197,7 @@ impl HttpFilter {
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     async fn new(
-        client_id: ClientId,
+        client_id: ClientID,
         connection_id: ConnectionId,
         filter: Regex,
         tcp_stream: TcpStream,

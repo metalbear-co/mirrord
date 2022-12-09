@@ -1766,7 +1766,10 @@ dependencies = [
  "containerd-client",
  "enum_dispatch",
  "faccess",
+ "fancy-regex",
  "futures",
+ "httparse",
+ "hyper 1.0.0-rc.1",
  "iptables",
  "libc",
  "mirrord-protocol",
@@ -1828,20 +1831,6 @@ dependencies = [
  "proc-macro2-diagnostics",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "mirrord-http"
-version = "0.1.0"
-dependencies = [
- "fancy-regex",
- "futures",
- "httparse",
- "hyper 1.0.0-rc.1",
- "rstest 0.16.0",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3561,7 +3550,6 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

@@ -25,6 +25,8 @@ use crate::{
     runtime::set_namespace,
 };
 
+mod http_traffic;
+
 #[cfg_attr(test, mockall::automock)]
 trait IPTables {
     fn create_chain(&self, name: &str) -> Result<()>;
