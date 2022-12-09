@@ -20,9 +20,9 @@ mod target {
         targets
             .iter()
             .for_each(|output| assert!(re.is_match(output)));
-        targets
+        assert!(targets
             .iter()
-            .any(|output| output.starts_with(&format!("pod/{}", service.name)));
+            .any(|output| output.starts_with(&format!("pod/{}", service.name))));
         process.assert_stderr();
     }
 }
