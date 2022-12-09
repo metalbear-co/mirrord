@@ -1,4 +1,3 @@
-#![feature(result_option_inspect)]
 // #![warn(missing_docs)]
 // #![warn(rustdoc::missing_crate_level_docs)]
 
@@ -6,7 +5,12 @@ use std::collections::{HashMap, HashSet};
 
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use hyper::{body, server::conn::http1, service::service_fn, Request, Response};
+use hyper::{
+    body,
+    server::conn::{http1, http2},
+    service::service_fn,
+    Request, Response,
+};
 use mirrord_protocol::ConnectionId;
 use thiserror::Error;
 use tokio::{
@@ -48,18 +52,6 @@ use crate::util::ClientID;
 // Not in the `Filter` itself, I think this should be done in the agent? Or in some higher
 // abstraction?
 
-struct FilterA {
-    filters: HashMap<ClientID, Regex>,
-    response_tx: Sender<String>, // this is where we send data back to the agent.
-}
-
-struct FilterB {
-    regexes: HashMap<u64, Regex>,
-    // we need an association of connection_id to response_tx (meh).
-}
-
-struct TrafficFilter {}
-
 // TODO(alex) [low] 2022-12-08: We need to unify some of these types in a common crate, something
 // like a `types` crate.
 
@@ -98,6 +90,15 @@ impl EnterpriseTrafficManager {
         self.client_filters.insert(client_id, filter);
     }
 
+    // TODO(alex) [mid] 2022-12-09: Should this be more similar to how stealer port subscription
+    // works? If so, we need some sort of `filter_unsubscribe` message, where we remove only 1
+    // filter from a client.
+    pub fn stop_client(&mut self, client_id: ClientID) {
+        self.client_filters.remove(&client_id);
+
+        // TODO(alex) [mid] 2022-12-09: We need to kill the http filter task here as well.
+    }
+
     // TODO(alex) [high] 2022-12-08: agent got a new connection in `listener.accept`, so now we
     // create the hyper connection and filter on it.
     //
@@ -109,22 +110,6 @@ impl EnterpriseTrafficManager {
         &mut self,
         client_id: ClientID,
         connection_id: ConnectionId,
-        // TODO(alex) [high] 2022-12-08: We need to return this `tcp_stream` for our error cases,
-        // otherwise the agent would not steal from it?
-        //
-        // Or should something different happen when we detect this traffic as "not-HTTP"? Do we
-        // fallback to regular "ports stealer"?
-        //
-        // If we can just error out and drop the connection, then we can just take the stream, and
-        // drop it on error.
-        //
-        // Otherwise we need to send the stream back with the error (or take a reference, check
-        // HTTP, then take the stream, blargh).
-        //
-        // I'll start with the assumption that we just drop the connection if this is not HTTP.
-        //
-        // So we take the stream, check for HTTP, then return an `Error` if it's not HTTP, dropping
-        // the connection, by dropping the stream.
         tcp_stream: TcpStream,
     ) -> Result<(), HttpError> {
         let filter = self
@@ -132,14 +117,6 @@ impl EnterpriseTrafficManager {
             .get(&client_id)
             .ok_or(HttpError::ClientNotFound(client_id))
             .cloned()?;
-
-        match validate_http_stream(&tcp_stream).await {
-            Ok(_) => todo!(),
-            Err(HttpError::NotHttp) => {}
-            Err(fail) => {
-                error!("fail {fail:#?}");
-            }
-        }
 
         // TODO(alex) [high] 2022-12-09: We check if this is HTTP in the building process.
         // - If we get some IO error, then this whole `tcp_stream` is doomed;
@@ -188,6 +165,38 @@ struct HttpFilter {
     client_id: ClientID,
     connection_id: ConnectionId,
     filter: Regex,
+    http_version: HttpVersion,
+    // TODO(alex) [high] 2022-12-09: We can't associate a stream with a client, because this stream
+    // might contain multiple requests. So we need this to be in an outer abstraction layer.
+    //
+    // We need a `(ClientId, Regex)` association.
+    tcp_stream: TcpStream,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum HttpVersion {
+    #[default]
+    V1,
+    V2,
+}
+
+impl HttpVersion {
+    /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
+    /// comparing it with a slice of [`H2_PREFACE`].
+    fn new(buffer: &[u8], h2_preface: &[u8]) -> Result<Self, HttpError> {
+        let mut empty_headers = [httparse::EMPTY_HEADER; 0];
+
+        if buffer == h2_preface {
+            Ok(Self::V2)
+        } else if matches!(
+            httparse::Request::new(&mut empty_headers).parse(buffer),
+            Ok(_) | Err(httparse::Error::TooManyHeaders)
+        ) {
+            Ok(Self::V1)
+        } else {
+            Err(HttpError::NotHttp)
+        }
+    }
 }
 
 impl HttpFilter {
@@ -203,6 +212,8 @@ impl HttpFilter {
         tcp_stream: TcpStream,
     ) -> Result<Self, HttpError> {
         let mut buffer = [0u8; 64];
+        // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
+        // might return 0 bytes peeked.
         match tcp_stream
             .peek(&mut buffer)
             .await
@@ -215,13 +226,16 @@ impl HttpFilter {
                 }
             })
             .and_then(|peeked_amount| {
-                check_http(&buffer[1..peeked_amount], &H2_PREFACE[1..peeked_amount])
+                HttpVersion::new(&buffer[1..peeked_amount], &H2_PREFACE[1..peeked_amount])
             }) {
-            Ok(()) => Ok(Self {
+            Ok(http_version) => Ok(Self {
                 client_id,
                 connection_id,
                 filter,
+                http_version,
+                tcp_stream,
             }),
+            // TODO(alex) [mid] 2022-12-09: This whole filter is a passthrough case.
             Err(HttpError::NotHttp) => todo!(),
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
@@ -233,41 +247,20 @@ impl HttpFilter {
     // TODO(alex) [high] 2022-12-08: Creates the hyper task, should return the channels we need to
     // communicate with the hyper task.
     async fn start(self) -> Result<HttpFilter, HttpError> {
+        match self.http_version {
+            HttpVersion::V1 => {
+                http1::Builder::new();
+                todo!()
+            }
+            // TODO(alex) [mid] 2022-12-09: http2 builder wants an executor?
+            // need to
+            HttpVersion::V2 => {
+                http2::Builder::new(todo!());
+
+                todo!()
+            }
+        }
+
         todo!()
-    }
-}
-
-/// Does not consume bytes from the stream.
-///
-/// Checks if the first available bytes in a stream could be of an http request.
-///
-/// This is a best effort classification, not a guarantee that the stream is HTTP.
-async fn validate_http_stream(tcp_stream: &TcpStream) -> Result<(), HttpError> {
-    let mut buffer = [0u8; 64];
-    let peeked_amount = tcp_stream.peek(&mut buffer).await?;
-
-    if peeked_amount == 0 {
-        Err(HttpError::Empty)
-    } else {
-        Ok(check_http(
-            &buffer[1..peeked_amount],
-            &H2_PREFACE[1..peeked_amount],
-        )?)
-    }
-}
-
-/// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
-/// comparing it with a slice of [`H2_PREFACE`].
-fn check_http(buffer: &[u8], h2_preface: &[u8]) -> Result<(), HttpError> {
-    let mut empty_headers = [httparse::EMPTY_HEADER; 0];
-    if buffer == h2_preface
-        || matches!(
-            httparse::Request::new(&mut empty_headers).parse(buffer),
-            Ok(_) | Err(httparse::Error::TooManyHeaders)
-        )
-    {
-        Ok(())
-    } else {
-        Err(HttpError::NotHttp)
     }
 }
