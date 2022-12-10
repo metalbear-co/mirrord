@@ -6,7 +6,7 @@ use std::{
 };
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
 };
 use nix::sys::socket::SockaddrStorage;
@@ -29,7 +29,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     error::AgentError,
     runtime::set_namespace,
-    util::{ClientID, IndexAllocator, Subscriptions},
+    util::{ClientId, IndexAllocator, Subscriptions},
 };
 
 #[derive(Debug, Eq, Copy, Clone)]
@@ -76,7 +76,7 @@ impl Hash for TcpSessionIdentifier {
 #[derive(Debug)]
 struct TCPSession {
     id: ConnectionId,
-    clients: HashSet<ClientID>,
+    clients: HashSet<ClientId>,
 }
 
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
@@ -193,23 +193,23 @@ enum SnifferCommands {
 
 #[derive(Debug)]
 pub struct SnifferCommand {
-    client_id: ClientID,
+    client_id: ClientId,
     command: SnifferCommands,
 }
 
-pub struct TCPSnifferAPI {
-    client_id: ClientID,
+pub struct TcpSnifferApi {
+    client_id: ClientId,
     sender: Sender<SnifferCommand>,
     pub receiver: Receiver<DaemonTcp>,
 }
 
-impl TCPSnifferAPI {
+impl TcpSnifferApi {
     pub async fn new(
-        client_id: ClientID,
+        client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
         receiver: Receiver<DaemonTcp>,
         tcp_sender: Sender<DaemonTcp>,
-    ) -> Result<TCPSnifferAPI, AgentError> {
+    ) -> Result<TcpSnifferApi, AgentError> {
         sniffer_sender
             .send(SnifferCommand {
                 client_id,
@@ -259,9 +259,19 @@ impl TCPSnifferAPI {
     pub async fn recv(&mut self) -> Option<DaemonTcp> {
         self.receiver.recv().await
     }
+
+    pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+        match message {
+            LayerTcp::PortSubscribe(port) => self.subscribe(port).await,
+            LayerTcp::ConnectionUnsubscribe(connection_id) => {
+                self.connection_unsubscribe(connection_id).await
+            }
+            LayerTcp::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
+        }
+    }
 }
 
-impl Drop for TCPSnifferAPI {
+impl Drop for TcpSnifferApi {
     fn drop(&mut self) {
         self.sender
             .try_send(SnifferCommand {
@@ -273,9 +283,9 @@ impl Drop for TCPSnifferAPI {
 }
 
 pub struct TcpConnectionSniffer {
-    port_subscriptions: Subscriptions<Port, ClientID>,
+    port_subscriptions: Subscriptions<Port, ClientId>,
     receiver: Receiver<SnifferCommand>,
-    client_senders: HashMap<ClientID, Sender<DaemonTcp>>,
+    client_senders: HashMap<ClientId, Sender<DaemonTcp>>,
     raw_capture: RawCapture,
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
@@ -341,24 +351,24 @@ impl TcpConnectionSniffer {
     }
 
     #[tracing::instrument(level = "trace", skip(self, sender))]
-    fn handle_new_client(&mut self, client_id: ClientID, sender: Sender<DaemonTcp>) {
+    fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
         self.client_senders.insert(client_id, sender);
     }
 
     async fn handle_subscribe(
         &mut self,
-        client_id: ClientID,
+        client_id: ClientId,
         port: Port,
     ) -> Result<(), AgentError> {
         self.port_subscriptions.subscribe(client_id, port);
         self.update_sniffer()?;
-        self.send_message_to_client(&client_id, DaemonTcp::Subscribed)
+        self.send_message_to_client(&client_id, DaemonTcp::SubscribeResult(Ok(port)))
             .await
     }
 
     /// Removes the client with `client_id`, and also unsubscribes its port.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn handle_client_closed(&mut self, client_id: ClientID) -> Result<(), AgentError> {
+    fn handle_client_closed(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         self.client_senders.remove(&client_id);
         self.port_subscriptions.remove_client(client_id);
         self.update_sniffer()
@@ -431,7 +441,7 @@ impl TcpConnectionSniffer {
 
     async fn send_message_to_clients(
         &mut self,
-        clients: impl Iterator<Item = &ClientID>,
+        clients: impl Iterator<Item = &ClientId>,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         trace!(
@@ -450,7 +460,7 @@ impl TcpConnectionSniffer {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn send_message_to_client(
         &mut self,
-        client_id: &ClientID,
+        client_id: &ClientId,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.client_senders.get(client_id) {
