@@ -7,7 +7,9 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
+use mirrord_protocol::{
+    file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+};
 use num_traits::Bounded;
 use tracing::trace;
 
@@ -406,37 +408,93 @@ fn nano_to_secs(nano: i64) -> i64 {
     best_effort_cast(Duration::from_nanos(best_effort_cast(nano)).as_secs())
 }
 
+/// Fills the `stat` struct with the metadata
+unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal) {
+    out_stat.write_bytes(0, 1);
+    let out = &mut *out_stat;
+    // on macOS the types might be different, so we try to cast and do our best..
+    out.st_mode = best_effort_cast(metadata.mode);
+    out.st_size = best_effort_cast(metadata.size);
+    out.st_atime_nsec = metadata.access_time;
+    out.st_mtime_nsec = metadata.modification_time;
+    out.st_ctime_nsec = metadata.creation_time;
+    out.st_atime = nano_to_secs(metadata.access_time);
+    out.st_mtime = nano_to_secs(metadata.modification_time);
+    out.st_ctime = nano_to_secs(metadata.creation_time);
+    out.st_nlink = best_effort_cast(metadata.hard_links);
+    out.st_uid = metadata.user_id;
+    out.st_gid = metadata.group_id;
+    out.st_dev = best_effort_cast(metadata.device_id);
+    out.st_ino = best_effort_cast(metadata.inode);
+    out.st_rdev = best_effort_cast(metadata.rdevice_id);
+    out.st_blksize = best_effort_cast(metadata.block_size);
+    out.st_blocks = best_effort_cast(metadata.blocks);
+}
+
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    trace!("lstat({:?}, {:?})", path, out_stat);
-    let (Ok(result) | Err(result)) = lstat(path)
+    let (Ok(result) | Err(result)) = xstat(path, None, true)
         .map(|res| {
             let res = res.metadata;
-            // zero it in case it's not filled
-            out_stat.write_bytes(0, 1);
-            let out = &mut *out_stat;
-            // on macOS the types might be different, so we try to cast and do our best..
-            out.st_mode = best_effort_cast(res.mode);
-            out.st_size = best_effort_cast(res.size);
-            out.st_atime_nsec = res.access_time;
-            out.st_mtime_nsec = res.modification_time;
-            out.st_ctime_nsec = res.creation_time;
-            out.st_atime = nano_to_secs(res.access_time);
-            out.st_mtime = nano_to_secs(res.modification_time);
-            out.st_ctime = nano_to_secs(res.creation_time);
-            out.st_nlink = best_effort_cast(res.hard_links);
-            out.st_uid = res.user_id;
-            out.st_gid = res.group_id;
-            out.st_dev = best_effort_cast(res.device_id);
-            out.st_ino = best_effort_cast(res.inode);
-            out.st_rdev = best_effort_cast(res.rdevice_id);
-            out.st_blksize = best_effort_cast(res.block_size);
-            out.st_blocks = best_effort_cast(res.blocks);
+            fill_stat(out_stat, &res);
             0
         })
         .bypass_with(|_| FN_LSTAT(raw_path, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::fstat`.
+#[hook_guard_fn]
+unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+    let (Ok(result) | Err(result)) = xstat(None, Some(fd), false)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_FSTAT(fd, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::stat`.
+#[hook_guard_fn]
+unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(path, None, false)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_STAT(raw_path, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::fstatat`.
+#[hook_guard_fn]
+unsafe extern "C" fn fstatat_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    out_stat: *mut stat,
+    flag: c_int,
+) -> c_int {
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) > 0;
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(path, Some(fd), follow_symlink)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
         .map_err(From::from);
 
     result
@@ -467,4 +525,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FN_FACCESSAT
     );
     replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
+    replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
+    replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
+    replace!(hook_manager, "fstatat", fstatat_detour, FnStatat, FN_STATAT);
 }

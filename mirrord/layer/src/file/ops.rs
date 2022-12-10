@@ -419,8 +419,15 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
     Detour::Success(0)
 }
 
+/// General stat function that can be used for lstat, fstat, stat and fstatat.
+/// Note: We treat cases of `AT_SYMLINK_NOFOLLOW_ANY` as `AT_SYMLINK_NOFOLLOW` because even Go does
+/// that.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lstat(rawish_path: Option<&CStr>) -> Detour<LstatResponse> {
+pub(crate) fn xstat(
+    rawish_path: Option<&CStr>,
+    fd: Option<RawFd>,
+    follow_symlink: bool,
+) -> Detour<LstatResponse> {
     let path = path_from_rawish(rawish_path)?;
 
     FILE_FILTER
