@@ -178,7 +178,7 @@ async fn test_pwrite(
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: Some("/tmp/test_file.txt".to_string().into()),
             fd: None,
-            follow_symlink: true
+            follow_symlink: false
         }))
     );
 
@@ -203,7 +203,7 @@ async fn test_pwrite(
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: Some("/tmp/test_file.txt".to_string().into()),
             fd: None,
-            follow_symlink: false
+            follow_symlink: true
         }))
     );
 
