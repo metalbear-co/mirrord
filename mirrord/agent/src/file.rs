@@ -9,7 +9,7 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    file::{LstatRequest, LstatResponse},
+    file::{XstatRequest, XstatResponse},
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
@@ -476,31 +476,39 @@ impl FileManager {
     ) -> RemoteResult<XstatResponse> {
         let path = match (pathname, fd) {
             // lstat/stat or fstatat with fdcwd
-            (Some(pathname), None) => pathname.strip_prefix("/")?.into(),
+            (Some(pathname), None) => pathname,
             // fstatat
             (Some(pathname), Some(fd)) => {
-                let path = self
+                if let RemoteFile::Directory(path) = self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
-                    .path()
-                    .to_path_buf();
-
-                path.join(pathname)
+                {
+                    path.join(pathname)
+                } else {
+                    return Err(ResponseError::NotDirectory(fd));
+                }
             }
             // fstat
             (None, Some(fd)) => {
-                let path = self
+                if let RemoteFile::File(file) = self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
-                    .path()
-                    .to_path_buf();
-
-                path
+                {
+                    return Ok(XstatResponse {
+                        metadata: file.metadata()?.into(),
+                    });
+                } else {
+                    return Err(ResponseError::NotDirectory(fd));
+                }
             }
             // invalid
-            _ => return Err(std::io::ErrorKind::Unsupported.into()),
+            _ => {
+                return Err(ResponseError::RemoteIO(
+                    std::io::ErrorKind::Unsupported.into(),
+                ))
+            }
         };
         let pathname = path
             .strip_prefix("/")
