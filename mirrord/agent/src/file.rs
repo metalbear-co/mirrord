@@ -506,13 +506,9 @@ impl FileManager {
             // invalid
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
-        let pathname = path
-            .strip_prefix("/")
-            .inspect_err(|fail| error!("file_worker -> {:#?}", fail))
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
-            })?
-            .into()?;
+        let pathname = path.strip_prefix("/").map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
+        })?;
         let res = if follow_symlink {
             resolve_path(pathname, &self.root_path)?.metadata()
         } else {
