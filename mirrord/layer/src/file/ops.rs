@@ -434,7 +434,7 @@ pub(crate) fn xstat(
     fd: Option<RawFd>,
     follow_symlink: bool,
 ) -> Detour<XstatResponse> {
-    // Can't use map because we need to propogate captured error
+    // Can't use map because we need to propagate captured error
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
@@ -442,7 +442,7 @@ pub(crate) fn xstat(
             let fd = {
                 if fd == AT_FDCWD {
                     if path.is_relative() {
-                        // Calls with non absolute paths are sent to libc::open.
+                        // Calls with non absolute paths are sent to libc::fstatat.
                         return Detour::Bypass(Bypass::RelativePath(path));
                     } else {
                         should_ignore!(path, false);

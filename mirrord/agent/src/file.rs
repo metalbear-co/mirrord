@@ -470,21 +470,21 @@ impl FileManager {
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn xstat(
         &mut self,
-        pathname: Option<PathBuf>,
+        path: Option<PathBuf>,
         fd: Option<usize>,
         follow_symlink: bool,
     ) -> RemoteResult<XstatResponse> {
-        let path = match (pathname, fd) {
+        let path = match (path, fd) {
             // lstat/stat or fstatat with fdcwd
-            (Some(pathname), None) => pathname,
+            (Some(path), None) => path,
             // fstatat
-            (Some(pathname), Some(fd)) => {
-                if let RemoteFile::Directory(path) = self
+            (Some(path), Some(fd)) => {
+                if let RemoteFile::Directory(parent_path) = self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    path.join(pathname)
+                    parent_path.join(path)
                 } else {
                     return Err(ResponseError::NotDirectory(fd));
                 }
@@ -500,19 +500,19 @@ impl FileManager {
                         metadata: file.metadata()?.into(),
                     });
                 } else {
-                    return Err(ResponseError::NotDirectory(fd));
+                    return Err(ResponseError::NotFile(fd));
                 }
             }
             // invalid
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
-        let pathname = path.strip_prefix("/").map_err(|_| {
+        let path = path.strip_prefix("/").map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
         })?;
         let res = if follow_symlink {
-            resolve_path(pathname, &self.root_path)?.metadata()
+            resolve_path(path, &self.root_path)?.metadata()
         } else {
-            self.root_path.join(pathname).symlink_metadata()
+            self.root_path.join(path).symlink_metadata()
         };
 
         res.map(|metadata| XstatResponse {
