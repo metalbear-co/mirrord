@@ -1,5 +1,6 @@
 import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
 import { resolve } from 'path';
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
 import * as child_process from "child_process";
@@ -155,29 +156,45 @@ export async function activate(context: vscode.ExtensionContext) {
 async function getMirrordTargets(cliPath: string, targetNamespace?: string) {
 	let targets: string[] = [];
 	const args = ['ls'];
-  
+
 	if (targetNamespace) {
-	  args.push('-n', targetNamespace);
+		args.push('-n', targetNamespace);
 	}
-  
+
 	const child = child_process.spawn(cliPath, args);
-  
+
 	child.stdout.on('data', (data: any) => {
-	  targets = JSON.parse(data.toString());
+		targets = JSON.parse(data.toString());
 	});
-  
+
 	child.stderr.on('data', (data: any) => {
-	  throw new Error(data.toString());
+		throw new Error(data.toString());
 	});
-  
+
 	await new Promise((resolve, reject) => {
-	  child.on('exit', resolve);
-	  child.on('error', reject);
+		child.on('exit', resolve);
+		child.on('error', reject);
 	});
-  
+
 	return targets;
-  }
-  
+}
+
+
+async function extractMirrordLayer() {
+	let extensionPath = globalContext.extensionPath;
+	let cliPath = path.join(extensionPath, 'mirrord');
+	// spawn a process the creats a dylib in the extension folder
+	const child = child_process.spawn(cliPath, ["extract", extensionPath]);
+	
+	await new Promise((resolve, reject) => {
+		child.on('exit', resolve);
+		child.on('error', reject);
+	});
+	
+	if (!fs.existsSync(path.join(extensionPath, LIBRARIES[os.platform()]))) {		
+		throw new Error('Failed to extract mirrord layer.');
+	}
+}
 
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
@@ -209,6 +226,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			libraryPath = debugPath;
 			cliPath = path.join(debugPath, "mirrord");
 		} else {
+			await extractMirrordLayer();
 			libraryPath = extensionPath;
 			cliPath = path.join(extensionPath, "mirrord");
 		}
@@ -219,7 +237,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		// If target wasn't specified in the config file, let user choose pod from dropdown			
 		if (!await isTargetInFile()) {
-			let targetNamespace = await parseNamespace();			
+			let targetNamespace = await parseNamespace();
 			let targets = targetNamespace != undefined ? await getMirrordTargets(cliPath, targetNamespace) : await getMirrordTargets(cliPath);
 			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
 				return new Promise(async resolve => {
