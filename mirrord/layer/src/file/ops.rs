@@ -443,7 +443,7 @@ pub(crate) fn xstat(
                 if fd == AT_FDCWD {
                     if path.is_relative() {
                         // Calls with non absolute paths are sent to libc::open.
-                        return Detour::Bypass(Bypass::RelativePath(path.clone()));
+                        return Detour::Bypass(Bypass::RelativePath(path));
                     } else {
                         should_ignore!(path, false);
                         None
@@ -459,7 +459,7 @@ pub(crate) fn xstat(
             let path = path_from_rawish(path)?;
             if path.is_relative() {
                 // Calls with non absolute paths are sent to libc::open.
-                return Detour::Bypass(Bypass::RelativePath(path.clone()));
+                return Detour::Bypass(Bypass::RelativePath(path));
             }
             should_ignore!(path, false);
             (Some(path), None)
