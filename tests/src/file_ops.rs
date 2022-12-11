@@ -60,7 +60,7 @@ mod file_ops {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
         let args = vec!["--fs-mode", "read"];
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/fs/**")];
+        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
 
         let mut process = run_exec(
             python_command,
