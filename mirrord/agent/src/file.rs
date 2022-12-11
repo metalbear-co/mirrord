@@ -160,13 +160,13 @@ impl FileManager {
                 let access_result = self.access(pathname.into(), mode);
                 Ok(FileResponse::Access(access_result))
             }
-            FileRequest::Lstat(LstatRequest { path }) => {
-                let pathname = path
-                    .strip_prefix("/")
-                    .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
-
-                let lstat_result = self.lstat(pathname.into());
-                Ok(FileResponse::Lstat(lstat_result))
+            FileRequest::Xstat(XstatRequest {
+                path,
+                fd,
+                follow_symlinks,
+            }) => {
+                let xstat_result = self.xstat(path, fd, follow_symlinks);
+                Ok(FileResponse::Xstat(xstat_result))
             }
         }
     }
@@ -468,14 +468,52 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn lstat(&mut self, pathname: PathBuf) -> RemoteResult<LstatResponse> {
-        let pathname = resolve_path(pathname, &self.root_path)?;
+    pub(crate) fn xstat(
+        &mut self,
+        pathname: Option<PathBuf>,
+        fd: Option<usize>,
+        follow_symlink: bool,
+    ) -> RemoteResult<XstatResponse> {
+        let path = match (pathname, fd) {
+            // lstat/stat or fstatat with fdcwd
+            (Some(pathname), None) => pathname.strip_prefix("/")?.into(),
+            // fstatat
+            (Some(pathname), Some(fd)) => {
+                let path = self
+                    .open_files
+                    .get(&fd)
+                    .ok_or(ResponseError::NotFound(fd))?
+                    .path()
+                    .to_path_buf();
 
-        pathname
-            .symlink_metadata()
-            .map(|metadata| LstatResponse {
-                metadata: metadata.into(),
-            })
-            .map_err(ResponseError::from)
+                path.join(pathname)
+            }
+            // fstat
+            (None, Some(fd)) => {
+                let path = self
+                    .open_files
+                    .get(&fd)
+                    .ok_or(ResponseError::NotFound(fd))?
+                    .path()
+                    .to_path_buf();
+
+                path
+            }
+            // invalid
+            _ => return Err(std::io::ErrorKind::Unsupported.into()),
+        };
+        let pathname = path
+            .strip_prefix("/")
+            .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+        let res = if follow_symlink {
+            resolve_path(pathname, &self.root_path)?.metadata()
+        } else {
+            self.root_path.join(pathname).symlink_metadata()
+        };
+
+        res.map(|metadata| XstatResponse {
+            metadata: metadata.into(),
+        })
+        .map_err(ResponseError::from)
     }
 }

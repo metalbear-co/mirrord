@@ -3,12 +3,14 @@ use std::{fs::Metadata, os::unix::prelude::MetadataExt, path::PathBuf};
 use bincode::{Decode, Encode};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct LstatRequest {
-    pub path: PathBuf,
+pub struct XstatRequest {
+    pub path: Option<PathBuf>,
+    pub fd: Option<usize>,
+    pub follow_symlink: bool,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct LstatResponse {
+pub struct XstatResponse {
     pub metadata: MetadataInternal,
 }
 

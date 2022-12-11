@@ -435,7 +435,7 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(path, None, true)
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -450,7 +450,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    let (Ok(result) | Err(result)) = xstat(None, Some(fd), false)
+    let (Ok(result) | Err(result)) = xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -466,7 +466,7 @@ unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(path, None, false)
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -486,9 +486,9 @@ unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
-    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) > 0;
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(path, Some(fd), follow_symlink)
+    let (Ok(result) | Err(result)) = xstat(Some(path), Some(fd), follow_symlink)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -527,5 +527,11 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
     replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
     replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
-    replace!(hook_manager, "fstatat", fstatat_detour, FnStatat, FN_STATAT);
+    replace!(
+        hook_manager,
+        "fstatat",
+        fstatat_detour,
+        FnFstatat,
+        FN_FSTATAT
+    );
 }

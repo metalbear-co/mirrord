@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{LstatRequest, LstatResponse},
+    file::{XstatRequest, XstatResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -187,7 +187,7 @@ pub enum FileRequest {
     WriteLimited(WriteLimitedFileRequest),
     Close(CloseFileRequest),
     Access(AccessFileRequest),
-    Lstat(LstatRequest),
+    Xstat(XstatRequest),
 }
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -253,7 +253,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
-    Lstat(RemoteResult<LstatResponse>),
+    Xstat(RemoteResult<XstatResponse>),
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

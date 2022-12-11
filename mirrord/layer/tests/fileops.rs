@@ -1,4 +1,4 @@
-use std::{collections::HashMap, default, path::PathBuf, process::Stdio, time::Duration};
+use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -175,8 +175,10 @@ async fn test_pwrite(
     // lstat test
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Lstat(LstatRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+            path: Some("/tmp/test_file.txt".to_string().into()),
+            fd: None,
+            follow_symlink: true
         }))
     );
 
@@ -189,8 +191,8 @@ async fn test_pwrite(
     };
     layer_connection
         .codec
-        .send(DaemonMessage::File(FileResponse::Lstat(Ok(
-            LstatResponse { metadata: metadata },
+        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            XstatResponse { metadata: metadata },
         ))))
         .await
         .unwrap();
