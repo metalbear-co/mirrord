@@ -86,6 +86,7 @@ fn generate_local_set() -> RegexSet {
         r"^/Library/.*$",
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
+        "/", // root
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
