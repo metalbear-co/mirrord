@@ -2,10 +2,10 @@ import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
 import { resolve } from 'path';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
+import * as child_process from "child_process";
 const TOML = require('toml');
 const semver = require('semver');
 const https = require('https');
-const k8s = require('@kubernetes/client-node');
 const path = require('path');
 const os = require('os');
 const glob = require('glob');
@@ -43,12 +43,6 @@ const versionCheckInterval = 1000 * 60 * 3;
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
-
-function getK8sApi(): CoreV1Api {
-	let k8sConfig = new k8s.KubeConfig();
-	k8sConfig.loadFromDefault();
-	return k8sConfig.makeApiClient(k8s.CoreV1Api);
-}
 
 // Get the file path to the user's mirrord-config file, if it exists. 
 async function configFilePath() {
@@ -102,12 +96,6 @@ async function checkVersion(version: string) {
 	});
 }
 
-// Gets namespace from config file
-async function parseNamespace() {
-	let parsed = await parseConfigFile();
-	return parsed?.['target']?.['namespace'] || 'default';
-}
-
 async function parseConfigFile() {
 	let filePath: string = await configFilePath();
 	if (filePath) {
@@ -157,6 +145,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
 }
 
+/// Uses `mirrord ls` to get a list of all targets.
+async function getMirrordTargets(cliPath: string) {
+	let targets: string[] = [];
+	const child = child_process.spawn(cliPath, ['ls']);
+
+	child.stdout.on('data', (data: any) => {
+		targets = JSON.parse(data.toString());
+	});
+
+	child.stderr.on('data', (data: any) => {
+		throw new Error(data.toString());
+	});
+
+	await new Promise((resolve, reject) => {
+		child.on('exit', resolve);
+		child.on('error', reject);
+	});
+
+	return targets
+}
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 		if (!globalContext.globalState.get('enabled')) {
@@ -177,52 +185,36 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
-		let libraryPath: string;
-		if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
-			libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
+		let libraryPath: string, cliPath: string;
+
+		const mode = globalContext.extensionMode;
+		const extensionPath = globalContext.extensionPath;
+
+		if (mode === vscode.ExtensionMode.Development) {
+			const debugPath = path.join(path.dirname(extensionPath), "target", "debug");
+			libraryPath = debugPath;
+			cliPath = path.join(debugPath, "mirrord");
 		} else {
-			libraryPath = globalContext.extensionPath;
+			libraryPath = extensionPath;
+			cliPath = path.join(extensionPath, "mirrord");
 		}
+
 		let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
 		config.env ||= {};
 		config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 
-		if (!await isTargetInFile()) { // If target wasn't specified in the config file, let user choose pod from dropdown
-			let podNamespace: string;
-			try {
-				podNamespace = await parseNamespace();
-			} catch (e: any) {
-				vscode.window.showErrorMessage('Failed to parse mirrord config file', e.message);
-				return;
-			}
-			let k8sApi = getK8sApi();
-			// Get pods from kubectl and let user select one to mirror
-			let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
-			let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
-			let impersonatedPodName = '';
-			await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+		// If target wasn't specified in the config file, let user choose pod from dropdown			
+		if (!await isTargetInFile()) {
+			let targets = await getMirrordTargets(cliPath);
+			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
 				return new Promise(async resolve => {
-					if (!k8sApi || !podName) {
+					if (!targetName) {
 						return;
 					}
-					impersonatedPodName = podName;
-					config.env['MIRRORD_IMPERSONATED_TARGET'] = 'pod/' + impersonatedPodName;
-					config.env['MIRRORD_TARGET_NAMESPACE'] = podNamespace; // This is unnecessary 99% of the time, but it ensures the namespace is the one the pod was selected from
+					config.env['MIRRORD_IMPERSONATED_TARGET'] = targetName;
 					return resolve(config);
 				});
 			});
-
-			// let user select container name if there are multiple containers in the pod		
-			const pod = pods.body.items.find(p => p.metadata!.name === impersonatedPodName!);
-			const containerNames = pod!.spec!.containers.map(c => c.name!);
-			if (containerNames.length > 1) {
-				await vscode.window.showQuickPick(containerNames, { placeHolder: 'Select container' }).then(async containerName => {
-					return new Promise(resolve => {
-						config.env['MIRRORD_IMPERSONATED_CONTAINER_NAME'] = containerName;
-						return resolve(config);
-					});
-				});
-			}
 		}
 
 		let filePath = await configFilePath();

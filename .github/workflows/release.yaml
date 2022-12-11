@@ -200,7 +200,7 @@ jobs:
       # TypeScript set at 4.7.4 because @kubernetes/client-node 0.16.3 (and 0.17.0) breaks with version 4.8.2+
       - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/{mirrord,libmirrord_layer.so} vscode-ext/
       - run: mkdir -p /tmp/vscode-ext
       - run: |
           cd vscode-ext 
@@ -211,7 +211,7 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target linux-x64
-      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so vscode-ext/
+      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/{mirrord,libmirrord_layer.so} vscode-ext/
       - run: |
           cd vscode-ext 
           npm install          
@@ -222,7 +222,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target linux-arm64
       - run: rm vscode-ext/libmirrord_layer.so
-      - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib vscode-ext/
+      - run: cp /tmp/artifacts/universal-apple-darwin/{mirrord,libmirrord_layer.dylib} vscode-ext/
       # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
       - run: wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_amd64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
       # Same binary for darwin
