@@ -171,57 +171,59 @@ async fn test_pwrite(
         ))))
         .await
         .unwrap();
+    // Rust compiles with newer libc on Linux that uses statx
+    #[cfg(target_os = "macos")]
+    {
+        // lstat test
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: Some("/tmp/test_file.txt".to_string().into()),
+                fd: None,
+                follow_symlink: false
+            }))
+        );
 
-    // lstat test
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: Some("/tmp/test_file.txt".to_string().into()),
-            fd: None,
-            follow_symlink: false
-        }))
-    );
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 1,
+            user_id: 2,
+            blocks: 3,
+            ..Default::default()
+        };
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
 
-    let metadata = MetadataInternal {
-        device_id: 0,
-        size: 1,
-        user_id: 2,
-        blocks: 3,
-        ..Default::default()
-    };
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
-        ))))
-        .await
-        .unwrap();
+        // fstat test
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: Some("/tmp/test_file.txt".to_string().into()),
+                fd: None,
+                follow_symlink: true
+            }))
+        );
 
-    // fstat test
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: Some("/tmp/test_file.txt".to_string().into()),
-            fd: None,
-            follow_symlink: true
-        }))
-    );
-
-    let metadata = MetadataInternal {
-        device_id: 4,
-        size: 5,
-        user_id: 6,
-        blocks: 7,
-        ..Default::default()
-    };
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
-        ))))
-        .await
-        .unwrap();
-
+        let metadata = MetadataInternal {
+            device_id: 4,
+            size: 5,
+            user_id: 6,
+            blocks: 7,
+            ..Default::default()
+        };
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
     // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();

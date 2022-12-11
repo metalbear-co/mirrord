@@ -41,6 +41,8 @@ fn test_ffunctions() {
     };
 }
 
+// Rust compiles with newer libc on Linux that uses statx
+#[cfg(target_os = "macos")]
 // Test that lstat works remotely
 fn test_lstat() {
     println!(">> test_lstat");
@@ -53,6 +55,7 @@ fn test_lstat() {
     assert_eq!(metadata.blocks(), 3);
 }
 
+#[cfg(target_os = "macos")]
 // Test that stat works remotely
 fn test_stat() {
     println!(">> test_stat");
@@ -68,6 +71,9 @@ fn test_stat() {
 fn main() {
     test_pwrite();
     test_ffunctions();
-    test_lstat();
-    test_stat();
+    #[cfg(target_os = "macos")]
+    {
+        test_lstat();
+        test_stat();
+    }
 }
