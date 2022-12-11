@@ -508,7 +508,11 @@ impl FileManager {
         };
         let pathname = path
             .strip_prefix("/")
-            .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+            .inspect_err(|fail| error!("file_worker -> {:#?}", fail))
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
+            })?
+            .into()?;
         let res = if follow_symlink {
             resolve_path(pathname, &self.root_path)?.metadata()
         } else {
