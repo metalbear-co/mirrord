@@ -524,14 +524,43 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnFaccessat,
         FN_FACCESSAT
     );
-    replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
-    replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
-    replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
-    replace!(
-        hook_manager,
-        "fstatat",
-        fstatat_detour,
-        FnFstatat,
-        FN_FSTATAT
-    );
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+    {
+        replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
+        replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
+        replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
+        replace!(
+            hook_manager,
+            "fstatat",
+            fstatat_detour,
+            FnFstatat,
+            FN_FSTATAT
+        );
+    }
+    // on non aarch64 (Intel) we need to hook also $INODE64 variants
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        replace!(
+            hook_manager,
+            "lstat$INODE64",
+            lstat_detour,
+            FnLstat,
+            FN_LSTAT
+        );
+        replace!(
+            hook_manager,
+            "fstat$INODE64",
+            fstat_detour,
+            FnFstat,
+            FN_FSTAT
+        );
+        replace!(hook_manager, "stat$INODE64", stat_detour, FnStat, FN_STAT);
+        replace!(
+            hook_manager,
+            "fstatat$INODE64",
+            fstatat_detour,
+            FnFstatat,
+            FN_FSTATAT
+        );
+    }
 }
