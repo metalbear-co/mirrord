@@ -18,7 +18,7 @@ use crate::api::env_guard::EnvVarGuard;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
-        get_k8s_api,
+        get_k8s_resource_api,
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -33,7 +33,7 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(config).await?;
+        let client = create_kube_api(Some(config.clone())).await?;
 
         Ok(KubernetesAPI::new(
             client,
@@ -61,7 +61,7 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
 
         let pod_addr = pod_api
             .get(&pod_agent_name)
@@ -89,7 +89,7 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
@@ -136,22 +136,22 @@ impl AgentManagment for KubernetesAPI {
     }
 }
 
-pub async fn create_kube_api(config: &LayerConfig) -> Result<Client> {
+pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
     #[cfg(feature = "env_guard")]
     let _guard = EnvVarGuard::new();
 
-    #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
-    let mut kube_config = if config.accept_invalid_certificates {
-        let mut kube_config = Config::infer().await?;
-        kube_config.accept_invalid_certs = true;
-        // Only warn the first time connecting to the agent, not on child processes.
-        if config.connect_agent_name.is_none() {
-            warn!("Accepting invalid certificates");
+    let mut kube_config = Config::infer().await?;
+
+    if let Some(config) = config {
+        #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
+        if config.accept_invalid_certificates {
+            kube_config.accept_invalid_certs = true;
+            // Only warn the first time connecting to the agent, not on child processes.
+            if config.connect_agent_name.is_none() {
+                warn!("Accepting invalid certificates");
+            }
         }
-        kube_config
-    } else {
-        Config::infer().await?
-    };
+    }
 
     #[cfg(feature = "env_guard")]
     _guard.prepare_config(&mut kube_config);

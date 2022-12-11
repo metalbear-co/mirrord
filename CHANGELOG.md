@@ -7,6 +7,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
+
+### Changed
+
+- Refactor e2e tests: split into modules based on functionality they test.
+- internal refactor in mirrord-agent: Stealer feature changed from working per connection to now starting with
+  the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
+  we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
+  `TcpStealerApi` which bridges the communication between the agent and the stealer task).
+- Tests CI: don't wait for integration tests to start testing E2E tests.
+
 ## 3.13.2
 
 ### Fixed

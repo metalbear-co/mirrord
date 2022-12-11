@@ -8,6 +8,8 @@ use thiserror::Error;
 use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
+use crate::Port;
+
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
     #[error("Index allocator is full, operation `{0}` failed!")]
@@ -30,6 +32,9 @@ pub enum ResponseError {
 
     #[error("Remote operation failed with `{0}`")]
     Remote(#[from] RemoteError),
+
+    #[error("Could not subscribe to port `{0}`, as it is being stolen by another mirrord client.")]
+    PortAlreadyStolen(Port),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
