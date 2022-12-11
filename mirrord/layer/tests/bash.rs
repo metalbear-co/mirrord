@@ -47,28 +47,31 @@ async fn test_bash_script(dylib_path: &PathBuf) {
         .expect_file_open_for_reading("/very_interesting_file", fd)
         .await;
 
-    assert_eq!(
-        cat_layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: None,
-            fd: Some(1),
-            follow_symlink: true
-        }))
-    );
+    #[cfg(not(target_os = "macos"))]
+    {
+        assert_eq!(
+            cat_layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
 
-    let metadata = MetadataInternal {
-        size: 100,
-        blocks: 2,
-        ..Default::default()
-    };
+        let metadata = MetadataInternal {
+            size: 100,
+            blocks: 2,
+            ..Default::default()
+        };
 
-    cat_layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
-        ))))
-        .await
-        .unwrap();
+        cat_layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
 
     cat_layer_connection
         .expect_and_answer_file_read("Very interesting contents.", fd)
