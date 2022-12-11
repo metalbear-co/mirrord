@@ -163,9 +163,9 @@ impl FileManager {
             FileRequest::Xstat(XstatRequest {
                 path,
                 fd,
-                follow_symlinks,
+                follow_symlink,
             }) => {
-                let xstat_result = self.xstat(path, fd, follow_symlinks);
+                let xstat_result = self.xstat(path, fd, follow_symlink);
                 Ok(FileResponse::Xstat(xstat_result))
             }
         }
@@ -504,11 +504,7 @@ impl FileManager {
                 }
             }
             // invalid
-            _ => {
-                return Err(ResponseError::RemoteIO(
-                    std::io::ErrorKind::Unsupported.into(),
-                ))
-            }
+            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
         let pathname = path
             .strip_prefix("/")
