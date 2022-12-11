@@ -57,7 +57,7 @@ fn test_lstat() {
 fn test_stat() {
     println!(">> test_stat");
 
-    let metadata = std::fs::symlink("/tmp/test_file.txt").unwrap();
+    let metadata = std::fs::metadata("/tmp/test_file.txt").unwrap();
 
     assert_eq!(metadata.dev(), 4);
     assert_eq!(metadata.size(), 5);
@@ -69,4 +69,5 @@ fn main() {
     test_pwrite();
     test_ffunctions();
     test_lstat();
+    test_stat();
 }
