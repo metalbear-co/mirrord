@@ -115,6 +115,12 @@ async function isTargetInFile() {
 	return (parsed && (typeof (parsed['target']) === 'string' || parsed['target']?.['path']));
 }
 
+// Gets namespace from config file
+async function parseNamespace() {
+	let parsed = await parseConfigFile();
+	return parsed?.['target']?.['namespace'];
+}
+
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -146,25 +152,33 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 /// Uses `mirrord ls` to get a list of all targets.
-async function getMirrordTargets(cliPath: string) {
+async function getMirrordTargets(cliPath: string, targetNamespace?: string) {
 	let targets: string[] = [];
-	const child = child_process.spawn(cliPath, ['ls']);
-
+	const args = ['ls'];
+  
+	if (targetNamespace) {
+	  args.push('-n', targetNamespace);
+	}
+  
+	const child = child_process.spawn(cliPath, args);
+  
 	child.stdout.on('data', (data: any) => {
-		targets = JSON.parse(data.toString());
+	  targets = JSON.parse(data.toString());
 	});
-
+  
 	child.stderr.on('data', (data: any) => {
-		throw new Error(data.toString());
+	  throw new Error(data.toString());
 	});
-
+  
 	await new Promise((resolve, reject) => {
-		child.on('exit', resolve);
-		child.on('error', reject);
+	  child.on('exit', resolve);
+	  child.on('error', reject);
 	});
+  
+	return targets;
+  }
+  
 
-	return targets
-}
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 		if (!globalContext.globalState.get('enabled')) {
@@ -205,7 +219,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		// If target wasn't specified in the config file, let user choose pod from dropdown			
 		if (!await isTargetInFile()) {
-			let targets = await getMirrordTargets(cliPath);
+			let targetNamespace = await parseNamespace();			
+			let targets = targetNamespace != undefined ? await getMirrordTargets(cliPath, targetNamespace) : await getMirrordTargets(cliPath);
 			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
 				return new Promise(async resolve => {
 					if (!targetName) {
