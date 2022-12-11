@@ -21,6 +21,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Tests CI: don't wait for integration tests to start testing E2E tests.
 
 ### Fixed
+
 - Add missing `fstat`/`lstat`/`fstatat`/`stat` hooks.
 
 ## 3.13.2
