@@ -20,6 +20,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   `TcpStealerApi` which bridges the communication between the agent and the stealer task).
 - Tests CI: don't wait for integration tests to start testing E2E tests.
 
+### Fixed
+- Add missing `fstat`/`lstat`/`fstatat`/`stat` hooks.
+
 ## 3.13.2
 
 ### Fixed
