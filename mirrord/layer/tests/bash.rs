@@ -1,5 +1,10 @@
 use std::{path::PathBuf, time::Duration};
 
+use futures::SinkExt;
+use mirrord_protocol::{
+    file::{MetadataInternal, XstatRequest, XstatResponse},
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use rstest::rstest;
@@ -8,6 +13,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
+use tokio_stream::StreamExt;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
 /// On MacOS, this works because the executable is patched before running, and the calls to
@@ -40,6 +46,32 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)
         .await;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        assert_eq!(
+            cat_layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            size: 100,
+            blocks: 2,
+            ..Default::default()
+        };
+
+        cat_layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
 
     cat_layer_connection
         .expect_and_answer_file_read("Very interesting contents.", fd)

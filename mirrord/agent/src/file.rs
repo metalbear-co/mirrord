@@ -9,6 +9,7 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
+    file::{XstatRequest, XstatResponse},
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
@@ -158,6 +159,14 @@ impl FileManager {
 
                 let access_result = self.access(pathname.into(), mode);
                 Ok(FileResponse::Access(access_result))
+            }
+            FileRequest::Xstat(XstatRequest {
+                path,
+                fd,
+                follow_symlink,
+            }) => {
+                let xstat_result = self.xstat(path, fd, follow_symlink);
+                Ok(FileResponse::Xstat(xstat_result))
             }
         }
     }
@@ -456,5 +465,59 @@ impl FileManager {
             .access(mode)
             .map(|_| AccessFileResponse)
             .map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn xstat(
+        &mut self,
+        path: Option<PathBuf>,
+        fd: Option<usize>,
+        follow_symlink: bool,
+    ) -> RemoteResult<XstatResponse> {
+        let path = match (path, fd) {
+            // lstat/stat or fstatat with fdcwd
+            (Some(path), None) => path,
+            // fstatat
+            (Some(path), Some(fd)) => {
+                if let RemoteFile::Directory(parent_path) = self
+                    .open_files
+                    .get(&fd)
+                    .ok_or(ResponseError::NotFound(fd))?
+                {
+                    parent_path.join(path)
+                } else {
+                    return Err(ResponseError::NotDirectory(fd));
+                }
+            }
+            // fstat
+            (None, Some(fd)) => {
+                if let RemoteFile::File(file) = self
+                    .open_files
+                    .get(&fd)
+                    .ok_or(ResponseError::NotFound(fd))?
+                {
+                    return Ok(XstatResponse {
+                        metadata: file.metadata()?.into(),
+                    });
+                } else {
+                    return Err(ResponseError::NotFile(fd));
+                }
+            }
+            // invalid
+            _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
+        };
+        let path = path.strip_prefix("/").map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
+        })?;
+        let res = if follow_symlink {
+            resolve_path(path, &self.root_path)?.metadata()
+        } else {
+            self.root_path.join(path).symlink_metadata()
+        };
+
+        res.map(|metadata| XstatResponse {
+            metadata: metadata.into(),
+        })
+        .map_err(ResponseError::from)
     }
 }

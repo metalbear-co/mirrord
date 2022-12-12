@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.13.3
+
 ### Added
 
 - Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
@@ -19,6 +21,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
   `TcpStealerApi` which bridges the communication between the agent and the stealer task).
 - Tests CI: don't wait for integration tests to start testing E2E tests.
+
+### Fixed
+
+- Add missing `fstat`/`lstat`/`fstatat`/`stat` hooks.
 
 ## 3.13.2
 

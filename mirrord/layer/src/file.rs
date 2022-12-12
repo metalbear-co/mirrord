@@ -20,6 +20,7 @@ use std::{
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
+    file::{XstatRequest, XstatResponse},
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
@@ -115,6 +116,7 @@ pub struct FileHandler {
     write_limited_queue: ResponseDeque<WriteFileResponse>,
     close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
+    xstat_queue: ResponseDeque<XstatResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -212,6 +214,10 @@ impl FileHandler {
                     )
                 })
             }
+            Xstat(xstat) => {
+                debug!("DaemonMessage::XstatResponse {:#?}!", xstat);
+                pop_send(&mut self.xstat_queue, xstat)
+            }
         }
     }
 
@@ -234,6 +240,7 @@ impl FileHandler {
             WriteLimited(write) => self.handle_hook_write_limited(write, tx).await,
             Close(close) => self.handle_hook_close(close, tx).await,
             Access(access) => self.handle_hook_access(access, tx).await,
+            Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
         }
     }
 
@@ -470,6 +477,26 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Access(access_file_request));
         tx.send(request).await.map_err(From::from)
     }
+
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_xstat(&mut self, xstat: Xstat, tx: &Sender<ClientMessage>) -> Result<()> {
+        let Xstat {
+            path,
+            fd,
+            follow_symlink,
+            file_channel_tx,
+        } = xstat;
+        self.xstat_queue.push_back(file_channel_tx);
+
+        let xstat_request = XstatRequest {
+            path,
+            fd,
+            follow_symlink,
+        };
+
+        let request = ClientMessage::FileRequest(FileRequest::Xstat(xstat_request));
+        tx.send(request).await.map_err(From::from)
+    }
 }
 
 #[derive(Debug)]
@@ -526,6 +553,14 @@ pub struct Access {
 }
 
 #[derive(Debug)]
+pub struct Xstat {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) fd: Option<RemoteFd>,
+    pub(crate) follow_symlink: bool,
+    pub(crate) file_channel_tx: ResponseChannel<XstatResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -537,4 +572,5 @@ pub enum HookMessageFile {
     Seek(Seek),
     Close(Close),
     Access(Access),
+    Xstat(Xstat),
 }

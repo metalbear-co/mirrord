@@ -4,6 +4,7 @@
 pub mod codec;
 pub mod dns;
 pub mod error;
+pub mod file;
 pub mod outgoing;
 pub mod tcp;
 
