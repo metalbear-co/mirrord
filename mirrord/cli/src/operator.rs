@@ -52,7 +52,7 @@ fn operator_setup(
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
-pub(crate) fn operator_command(args: Box<OperatorArgs>) -> Result<()> {
+pub(crate) fn operator_command(args: &OperatorArgs) -> Result<()> {
     match args.command {
         OperatorCommand::Setup {
             accept_tos,

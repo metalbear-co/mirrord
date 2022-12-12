@@ -11,6 +11,7 @@ use clap::Parser;
 use config::*;
 use const_random::const_random;
 use exec::execvp;
+use extension::extension_exec;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
@@ -25,6 +26,7 @@ use mirrord_operator::client::OperatorApiDiscover;
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
+use operator::operator_command;
 use semver::Version;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -32,6 +34,7 @@ use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
 mod operator;
+mod extension;
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -413,7 +416,8 @@ fn main() -> Result<()> {
         }
         Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
-        Commands::Operator(operator) => operator::operator_command(operator)?,
+        Commands::Operator(args) => operator_command(&args)?,
+        Commands::ExtensionExec(args) => extension_exec(&args)?,
     }
 
     Ok(())

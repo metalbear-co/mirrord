@@ -31,7 +31,7 @@ pub(super) enum Commands {
 
     /// Extension execution - used by extension to execute binaries.
     #[command(hide = true, name = "ext")]
-    ExtensionExec(Box<ListTargetArgs>),
+    ExtensionExec(Box<ExtensionExecArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
