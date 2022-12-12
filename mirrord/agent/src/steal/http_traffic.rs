@@ -218,6 +218,12 @@ impl HttpFilterManager {
         Self { port, filters }
     }
 
+    // TODO(alex) [high] 2022-12-12: Is adding a filter like this enough for it to be added to the
+    // hyper task? Do we have a possible deadlock here? Tune in next week for the conclusion!
+    pub(super) fn new_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
+        self.filters.insert(client_id, filter)
+    }
+
     // TODO(alex) [high] 2022-12-12: hyper doesn't take the actual stream, we're going to be
     // separating it in reader/writer, so hyper can just return empty responses to nowhere (we glue
     // a writer from a duplex channel to the actual reader from TcpStream).
