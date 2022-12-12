@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
 
+### Misc
+
+- Better separation in mirrord cli.
+
 ## 3.13.4
 
 ### Changed
