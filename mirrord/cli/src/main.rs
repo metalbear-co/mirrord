@@ -34,7 +34,10 @@ use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
 mod operator;
+<<<<<<< HEAD
 mod extension;
+=======
+>>>>>>> main
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
