@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Don't add temp prefix when using `extract` command.
+
 ## 3.13.3
 
 ### Added

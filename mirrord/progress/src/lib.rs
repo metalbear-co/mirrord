@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 
+use serde::Serialize;
+use serde_json::to_string;
 use termspin::{spinner::dots, Group, Line, Loop, SharedFrames};
 
 /// The environment variable name that is used
@@ -80,6 +82,39 @@ impl ProgressReport {
 
 static TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+/// Message sent when a new task is created using subtask/new
+#[derive(Serialize, Debug, Clone, Default)]
+struct NewTaskMessage {
+    /// Task name (identifier)
+    name: String,
+    /// Parent task name, if subtask.
+    parent: Option<String>,
+}
+
+/// Message sent when a task is finished.
+#[derive(Serialize, Debug, Clone, Default)]
+struct FinishedTaskMessage {
+    /// Finished task name
+    name: String,
+    /// Was the task successful?
+    success: bool,
+    /// Finish message
+    message: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(tag = "type")]
+enum ProgressMessage {
+    NewTask(NewTaskMessage),
+    FinishedTask(FinishedTaskMessage),
+}
+
+impl ProgressMessage {
+    pub(crate) fn print(&self) {
+        println!("{:?}", to_string(self).unwrap());
+    }
+}
+
 pub trait Progress: Sized {
     /// Create a subtask report from this task.
     fn subtask(&self, text: &str) -> Self;
@@ -123,6 +158,7 @@ pub struct TaskProgress {
     indent: usize,
     done: bool,
     fail_on_drop: bool,
+    name: String,
 }
 
 impl TaskProgress {
@@ -149,7 +185,11 @@ impl TaskProgress {
                 println!("{text}");
             }
             ProgressMode::Json => {
-                // TODO
+                let message = ProgressMessage::NewTask(NewTaskMessage {
+                    name: text.to_string(),
+                    ..Default::default()
+                });
+                message.print();
             }
             ProgressMode::Off => {}
         }
@@ -162,6 +202,7 @@ impl TaskProgress {
             indent: 0,
             done: false,
             fail_on_drop: true,
+            name: text.to_string(),
         }
     }
 
@@ -197,7 +238,11 @@ impl Progress for TaskProgress {
                 println!("{text}");
             }
             ProgressMode::Json => {
-                // TODO
+                let message = ProgressMessage::NewTask(NewTaskMessage {
+                    name: text.to_string(),
+                    parent: Some(self.name.clone()),
+                });
+                message.print();
             }
         }
 
@@ -209,6 +254,7 @@ impl Progress for TaskProgress {
             indent: sub_indent,
             done: false,
             fail_on_drop: true,
+            name: text.to_string(),
         }
     }
 
@@ -238,7 +284,12 @@ impl Progress for TaskProgress {
                 }
             }
             ProgressMode::Json => {
-                // TODO
+                let message = ProgressMessage::FinishedTask(FinishedTaskMessage {
+                    name: self.name.clone(),
+                    success: !failure,
+                    message: msg.map(|s| s.to_string()),
+                });
+                message.print();
             }
             ProgressMode::Off => {}
         }

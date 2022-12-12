@@ -71,10 +71,14 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
-/// Extract to given directory, or tmp by default. 
+/// Extract to given directory, or tmp by default.
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
-fn extract_library(dest_dir: Option<String>, progress: &TaskProgress, prefix: bool) -> Result<PathBuf> {
+fn extract_library(
+    dest_dir: Option<String>,
+    progress: &TaskProgress,
+    prefix: bool,
+) -> Result<PathBuf> {
     let progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()

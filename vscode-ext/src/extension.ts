@@ -3,13 +3,15 @@ import { resolve } from 'path';
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
-import * as child_process from "child_process";
+
 const TOML = require('toml');
 const semver = require('semver');
 const https = require('https');
 const path = require('path');
 const os = require('os');
 const glob = require('glob');
+const util = require('node:util');
+const exec = util.promisify(require('node:child_process').exec);
 
 const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = {
 	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
@@ -54,10 +56,76 @@ async function configFilePath() {
 
 class MirrordAPI {
 	context: vscode.ExtensionContext;
+	cliPath: string;
+	_libraryPath: null | string;
+
 	constructor(context: vscode.ExtensionContext) {
 		this.context = context;
+		// for easier debugging, use the local mirrord cli if we're in development mode
+		if (context.extensionMode === vscode.ExtensionMode.Development) {
+			const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
+			this.cliPath = path.join(debugPath, "mirrord");
+		} else {
+			this.cliPath = path.join(context.extensionPath, 'mirrord');
+			fs.chmodSync(this.cliPath, 0o755);
+		}
+		this._libraryPath = null;
+	}
+
+	async getLibraryPath(): Promise<string> {
+		if (!this._libraryPath) {
+			this._libraryPath = await this.extract();
+		}
+		return this._libraryPath;
+	}
+
+	// Execute the mirrord cli with the given arguments, return stdout, stderr.
+	async exec(args: string[]): Promise<[string, string]> {
+		// Check if arg contains space, and if it does, wrap it in quotes
+		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
+		let commandLine = [this.cliPath, ...args];
+		let value = await exec(commandLine.join(' '), { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
+		return [value.stdout as string, value.stderr as string];
+	}
+
+	// Extract layer from mirrord cli and return the path to the library. 
+	async extract(): Promise<string> {
+		let [stdout, stderr] = await this.exec(["extract", this.context.extensionPath]);
+		if (stderr) {
+			throw new Error("error occured: " + stderr);
+		}
+		var parsed;
+		for (var line of stdout.split('\n')) {
+			{
+				parsed = JSON.parse(line);
+				console.log("mirrord progress: ");
+				console.log(parsed);
+				if (parsed["type"] === "FinishedTask" && parsed["name"] === "extracting layer" && parsed["success"]) {
+					return path.join(this.context.extensionPath, LIBRARIES[os.platform()][1]);
+				}
+			}
+		}
+		throw new Error('Failed to extract mirrord layer, last message:' + parsed);
+	}
+
+	/// Uses `mirrord ls` to get a list of all targets.
+	async listTargets(targetNamespace: string | null | undefined): Promise<[string]> {
+		const args = ['ls'];
+
+		if (targetNamespace) {
+			args.push('-n', targetNamespace);
+		}
+
+		let [stdout, stderr] = await this.exec(args);
+
+		if (stderr) {
+			throw new Error("error occured listing targets: " + stderr);
+		}
+
+		return JSON.parse(stdout);
 	}
 }
+
 async function openConfig() {
 	let path = await configFilePath();
 	if (!path) {
@@ -158,43 +226,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 }
 
-/// Uses `mirrord ls` to get a list of all targets.
-async function getMirrordTargets(cliPath: string, targetNamespace: string) {
-	let targets: string[] = [];
-	const args = ['ls'];
-
-	if (targetNamespace) {
-		args.push('-n', targetNamespace);
-	}
-
-	child_process.exec(cliPath + ' ' + args.join(' '), (error, stdout, stderr) => {
-		if (error) {
-			throw new Error(error.message);
-		}
-		if (stderr) {
-			throw new Error(stderr);
-		}
-		targets = JSON.parse(stdout);
-	});
-
-	return targets;
-}
 
 
-async function extractMirrordLayer() {
-	let cliPath = path.join(globalContext.extensionPath, 'mirrord');
-	// spawn a process the creats a dylib in the extension folder
-	let args = ["extract", globalContext.extensionPath];
-	child_process.exec(cliPath + ' ' + args.join(' '));
-
-	let files = await vscode.workspace.fs.readDirectory(vscode.Uri.parse(globalContext.extensionPath));
-
-	let libraryPath = files.find(file => file[0].endsWith('libmirrord_layer.dylib'));
-	if (!libraryPath) {
-		throw new Error('Failed to extract mirrord layer');
-	}
-	return path.join(globalContext.extensionPath, libraryPath[0]);
-}
 
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
@@ -216,28 +249,22 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
-		let libraryPath: string, cliPath: string;
 
 		const mode = globalContext.extensionMode;
 		const extensionPath = globalContext.extensionPath;
 
-		if (mode === vscode.ExtensionMode.Development) {
-			const debugPath = path.join(path.dirname(extensionPath), "target", "debug");
-			libraryPath = debugPath;
-			cliPath = path.join(debugPath, "mirrord");
-		} else {
-			libraryPath = await extractMirrordLayer();
-			cliPath = path.join(extensionPath, "mirrord");
-		}
+		let mirrordApi = new MirrordAPI(globalContext);
 
-		let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
+
+		let libraryPath = await mirrordApi.getLibraryPath();
+		let environmentVariableName = LIBRARIES[os.platform()][0];
 		config.env ||= {};
-		config.env[environmentVariableName] = path.join(libraryPath, libraryName);
+		config.env[environmentVariableName] = libraryPath;
 
 		// If target wasn't specified in the config file, let user choose pod from dropdown			
 		if (!await isTargetInFile()) {
 			let targetNamespace = await parseNamespace();
-			let targets = await getMirrordTargets(cliPath, targetNamespace);
+			let targets = await mirrordApi.listTargets(targetNamespace);
 			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
 				return new Promise(async resolve => {
 					if (!targetName) {
@@ -255,7 +282,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		if (config.type === "go") {
-			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
 			// use our custom delve to fix being loaded into debugserver
 			if (os.platform() === "darwin") {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
@@ -267,4 +294,3 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		});
 	}
 }
-
