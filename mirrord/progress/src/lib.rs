@@ -111,7 +111,7 @@ enum ProgressMessage {
 
 impl ProgressMessage {
     pub(crate) fn print(&self) {
-        println!("{:?}", to_string(self).unwrap());
+        println!("{}", to_string(self).unwrap());
     }
 }
 

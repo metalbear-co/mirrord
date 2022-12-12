@@ -10,7 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Don't add temp prefix when using `extract` command.
-- VS Code extension mirrord enable/disable to be per workspace.
+- VS Code extension: mirrord enable/disable to be per workspace.
+- VS Code extension: bundle the resources
 
 ## 3.13.3
 
