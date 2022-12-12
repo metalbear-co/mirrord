@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 use crate::error::{KubeApiError, Result};
 
-mod container;
+pub mod container;
 #[cfg(feature = "env_guard")]
 mod env_guard;
 pub mod kubernetes;

@@ -16,6 +16,7 @@ use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{
+    container::SKIP_NAMES,
     get_k8s_resource_api,
     kubernetes::{create_kube_api, KubernetesAPI},
     AgentManagment,
@@ -339,7 +340,11 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
                 .as_ref()?
                 .containers
                 .iter()
-                .map(|container| container.name.clone())
+                .filter_map(|container| {
+                    SKIP_NAMES
+                        .contains(container.name.as_str())
+                        .then(|| container.name.clone())
+                })
                 .collect();
             Some((name, containers))
         })

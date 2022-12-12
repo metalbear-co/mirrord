@@ -43,7 +43,7 @@ pub trait ContainerApi {
         P: Progress + Send + Sync;
 }
 
-static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
+pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]));
 
 /// Choose container logic:
