@@ -44,6 +44,7 @@ trust-dns-resolver = { version = "0.22", features = ["serde-config", "tokio-runt
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 rand = "0.8"
 streammap-ext = "0.1"
+num-traits = "0.2"
 regex = "1"
 
 # latest commits on rustls suppress certificate verification

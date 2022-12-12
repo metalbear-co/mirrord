@@ -19,7 +19,6 @@ class FileOpsTest(unittest.TestCase):
         Reads data from a file in "/tmp" and verifies the text expected is the same as the text written.
         """
         file_path, _ = self._create_new_tmp_file()
-        self.assertFalse(self._check_path_exists_on_host(file_path))
         with open(file_path, "r+") as rw_file:
             rw_file.seek(0)
             read_text = rw_file.readline()
@@ -31,7 +30,6 @@ class FileOpsTest(unittest.TestCase):
         """
         read_str = ""
         file_path, _ = self._create_new_tmp_file()
-        self.assertFalse(self._check_path_exists_on_host(file_path))
         with open(file_path, "r+") as rw_file:
             while read_str != TEXT:
                 read_str += rw_file.read(1)
@@ -47,7 +45,6 @@ class FileOpsTest(unittest.TestCase):
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
         file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
-        self.assertFalse(self._check_path_exists_on_host(file_path))
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)
         os.close(file)
