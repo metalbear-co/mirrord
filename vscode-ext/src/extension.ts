@@ -52,6 +52,12 @@ async function configFilePath() {
 	return files[0] || '';
 }
 
+class MirrordAPI {
+	context: vscode.ExtensionContext;
+	constructor(context: vscode.ExtensionContext) {
+		this.context = context;
+	}
+}
 async function openConfig() {
 	let path = await configFilePath();
 	if (!path) {

@@ -131,6 +131,7 @@ pub(super) struct ExecArgs {
     pub(super) binary_args: Vec<String>,
 
     /// Where to extract the library to. Default is temp dir.
+    /// TODO: delete on next major, I think we used it for tests..
     #[arg(long)]
     pub extract_path: Option<String>,
 
