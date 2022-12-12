@@ -16,6 +16,7 @@ use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{
+    container::SKIP_NAMES,
     get_k8s_resource_api,
     kubernetes::{create_kube_api, KubernetesAPI},
     AgentManagment,
@@ -322,6 +323,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 }
 
 /// Returns a list of (pod name, [container names]) pairs.
+/// Filtering mesh side cars
 async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
     let client = create_kube_api(None).await?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
@@ -339,7 +341,10 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
                 .as_ref()?
                 .containers
                 .iter()
-                .map(|container| container.name.clone())
+                .filter_map(|container| {
+                    // filter out mesh side cars
+                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
+                })
                 .collect();
             Some((name, containers))
         })

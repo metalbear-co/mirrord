@@ -13,6 +13,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
 
+## 3.13.4
+
+### Changed
+
+- Adjust filters - all directory filters also filter the directory itself (for when lstat/stating the directory).
+  Added `/Applications`
+
 ## 3.13.3
 
 ### Added
