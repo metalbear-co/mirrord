@@ -48,6 +48,7 @@ async-trait.workspace = true
 hyper = { version = "1.0.0-rc.1", features = ["full"] }
 httparse = "1"
 fancy-regex = { version = "0.10" }
+dashmap = { version = "5.4" }
 
 [dev-dependencies]
 mockall = "0.11"

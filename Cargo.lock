@@ -646,6 +646,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "907076dfda823b0b36d2a1bb5f90c96660a5bbcd7729e10727f07858f22c4edc"
+dependencies = [
+ "cfg-if",
+ "hashbrown",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1767,6 +1780,7 @@ dependencies = [
  "bytes",
  "clap",
  "containerd-client",
+ "dashmap",
  "enum_dispatch",
  "faccess",
  "fancy-regex",
@@ -1852,7 +1866,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.8.5",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "thiserror",
  "tokio",
@@ -1893,7 +1907,7 @@ dependencies = [
  "os_info",
  "rand 0.8.5",
  "regex",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "socket2",
  "stacker",
