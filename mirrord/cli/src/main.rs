@@ -323,6 +323,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 }
 
 /// Returns a list of (pod name, [container names]) pairs.
+/// Filtering mesh side cars
 async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
     let client = create_kube_api(None).await?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
