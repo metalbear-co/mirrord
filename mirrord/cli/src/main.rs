@@ -34,10 +34,7 @@ use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
 mod operator;
-<<<<<<< HEAD
 mod extension;
-=======
->>>>>>> main
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -132,27 +129,7 @@ fn add_to_preload(path: &str) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn create_agent(progress: &TaskProgress) -> Result<()> {
-    let config = LayerConfig::from_env()?;
 
-    if config.operator.enabled
-        && OperatorApiDiscover::discover_operator(&config, progress)
-            .await
-            .is_some()
-    {
-        return Ok(());
-    }
-
-    if config.agent.pause {
-        if config.agent.ephemeral {
-            error!("Pausing is not yet supported together with an ephemeral agent container.");
-            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
-        }
-        if !config.feature.network.incoming.is_steal() {
-            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
-        }
-    }
-    let kube_api = KubernetesAPI::create(&config).await?;
-    let (pod_agent_name, agent_port) = kube_api.create_agent(progress).await?;
     // Set env var for children to re-use.
     std::env::set_var("MIRRORD_CONNECT_AGENT", pod_agent_name);
     std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());

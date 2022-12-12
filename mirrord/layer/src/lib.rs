@@ -53,7 +53,6 @@ use crate::{
 };
 
 mod common;
-mod connection;
 mod detour;
 mod error;
 #[cfg(target_os = "macos")]
