@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.13.4
+
 ### Changed
 
 - Adjust filters - all directory filters also filter the directory itself (for when lstat/stating the directory).
