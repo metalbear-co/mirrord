@@ -16,6 +16,7 @@ use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{
+    container::SKIP_NAMES,
     get_k8s_resource_api,
     kubernetes::{create_kube_api, KubernetesAPI},
     AgentManagment,
@@ -71,7 +72,14 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
-fn extract_library(dest_dir: Option<String>, progress: &TaskProgress) -> Result<PathBuf> {
+/// Extract to given directory, or tmp by default.
+/// If prefix is true, add a random prefix to the file name that identifies the specific build
+/// of the layer. This is useful for debug purposes usually.
+fn extract_library(
+    dest_dir: Option<String>,
+    progress: &TaskProgress,
+    prefix: bool,
+) -> Result<PathBuf> {
     let progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()
@@ -79,7 +87,12 @@ fn extract_library(dest_dir: Option<String>, progress: &TaskProgress) -> Result<
         .to_str()
         .unwrap();
 
-    let file_name = format!("{}-libmirrord_layer.{extension}", const_random!(u64));
+    let file_name = if prefix {
+        format!("{}-libmirrord_layer.{extension}", const_random!(u64))
+    } else {
+        format!("libmirrord_layer.{extension}")
+    };
+
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
@@ -266,7 +279,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     let sub_progress = progress.subtask("preparing to launch process");
-    let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
+    let library_path = extract_library(args.extract_path.clone(), &sub_progress, true)?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     create_agent(&sub_progress)?;
@@ -310,6 +323,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 }
 
 /// Returns a list of (pod name, [container names]) pairs.
+/// Filtering mesh side cars
 async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
     let client = create_kube_api(None).await?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
@@ -327,7 +341,10 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
                 .as_ref()?
                 .containers
                 .iter()
-                .map(|container| container.name.clone())
+                .filter_map(|container| {
+                    // filter out mesh side cars
+                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
+                })
                 .collect();
             Some((name, containers))
         })
@@ -395,7 +412,7 @@ fn main() -> Result<()> {
     match cli.commands {
         Commands::Exec(args) => exec(&args, &cli_progress())?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &cli_progress())?;
+            extract_library(Some(path), &cli_progress(), false)?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
