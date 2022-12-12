@@ -21,11 +21,7 @@ use mirrord_kube::api::{
     kubernetes::{create_kube_api, KubernetesAPI},
     AgentManagment,
 };
-use mirrord_operator::{
-    client::OperatorApiDiscover,
-    license::License,
-    setup::{Operator, OperatorSetup},
-};
+use mirrord_operator::client::OperatorApiDiscover;
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -35,6 +31,7 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
+mod operator;
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -416,47 +413,7 @@ fn main() -> Result<()> {
         }
         Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
-        Commands::Operator(operator) => match operator.command {
-            OperatorCommand::Setup {
-                accept_tos,
-                file,
-                namespace,
-                license_key,
-            } => {
-                if !accept_tos {
-                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
-
-                    return Ok(());
-                }
-
-                if let Some(license_key) = license_key {
-                    let license = License::fetch(license_key.clone())?;
-
-                    eprintln!(
-                        "Installing with license for {} ({})",
-                        license.name, license.organization
-                    );
-
-                    if license.is_expired() {
-                        eprintln!("Using an expired license for operator, deployment will not function when installed");
-                    }
-
-                    eprintln!(
-                        "Intalling mirrord operator with namespace: {}",
-                        namespace.name()
-                    );
-
-                    let operator = Operator::new(license_key, namespace);
-
-                    match file {
-                        Some(path) => operator.to_writer(File::create(path)?)?,
-                        None => operator.to_writer(std::io::stdout())?,
-                    }
-                } else {
-                    eprintln!("--license-key is required to install on cluster");
-                }
-            }
-        },
+        Commands::Operator(operator) => operator::operator_command(operator)?,
     }
 
     Ok(())
