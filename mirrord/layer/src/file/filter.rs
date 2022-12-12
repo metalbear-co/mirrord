@@ -82,8 +82,9 @@ fn generate_local_set() -> RegexSet {
         // asdf
         r".*/\.tool-versions$",
         // macOS
-        r"^/Users/.*$",
-        r"^/Library/.*$",
+        r"^/Users",
+        r"^/Library",
+        r"^/Applications",
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
         "^/$", // root
