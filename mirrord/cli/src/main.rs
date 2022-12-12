@@ -343,7 +343,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
                 .iter()
                 .filter_map(|container| {
                     // filter out mesh side cars
-                    !(SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
+                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
                 })
                 .collect();
             Some((name, containers))
