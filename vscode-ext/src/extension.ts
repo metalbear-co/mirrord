@@ -138,7 +138,7 @@ async function openConfig() {
 }
 
 async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBarItem) {
-	let state = context.globalState;
+	let state = context.workspaceState;
 	if (state.get('enabled')) {
 		state.update('enabled', false);
 		button.text = 'Enable mirrord';
@@ -202,7 +202,7 @@ async function parseNamespace() {
 export async function activate(context: vscode.ExtensionContext) {
 	globalContext = context;
 
-	context.globalState.update('enabled', false);
+	context.workspaceState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 	buttons = { toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0) };
 
@@ -231,7 +231,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
-		if (!globalContext.globalState.get('enabled')) {
+		if (!globalContext.workspaceState.get('enabled')) {
 			return new Promise(resolve => { resolve(config); });
 		}
 
