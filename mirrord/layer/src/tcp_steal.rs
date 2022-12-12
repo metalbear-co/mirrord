@@ -15,6 +15,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{error, trace};
+use mirrord_protocol::tcp::PortSteal::Steal;
 
 use crate::{
     error::LayerError,
@@ -101,7 +102,7 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(port)))
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(Steal(port))))
             .await
             .map_err(From::from)
     }

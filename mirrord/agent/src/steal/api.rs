@@ -84,8 +84,8 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortSubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_subscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        self.send_command(Command::PortSubscribe(port)).await
+    pub(crate) async fn port_subscribe(&mut self, port_steal: PortSteal) -> Result<(), AgentError> {
+        self.send_command(Command::PortSubscribe(port_steal)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortUnsubscribe`], that is passed from the
@@ -128,7 +128,7 @@ impl TcpStealerApi {
 
     pub(crate) async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         match message {
-            LayerTcpSteal::PortSubscribe(port) => self.port_subscribe(port).await,
+            LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.connection_unsubscribe(connection_id).await
             }

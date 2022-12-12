@@ -51,10 +51,19 @@ pub enum DaemonTcp {
     SubscribeResult(RemoteResult<Port>),
 }
 
+/// Describes the stealing subscription to a port:
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum PortSteal {
+    /// Steal all traffic to this port.
+    Steal(Port),
+    /// Steal HTTP traffic matching a given filter.
+    HttpFilterSteal(Port, String)
+}
+
 /// Messages related to Steal Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpSteal {
-    PortSubscribe(Port),
+    PortSubscribe(PortSteal),
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),

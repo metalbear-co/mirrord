@@ -30,7 +30,8 @@ use crate::AgentError::AgentInvariantViolated;
 /// - (stealer -> agent) communication is handled by [`client_senders`], and the [`Sender`] channels
 ///   come inside [`StealerCommand`]s through  [`command_rx`];
 pub(crate) struct TcpConnectionStealer {
-    port_subscriptions: Subscriptions<Port, ClientId>,
+    /// Maps a port to its active subscription.
+    port_subscriptions: HashMap<Port, StealSubscription>,
 
     /// Communication between (agent -> stealer) task.
     ///
@@ -83,7 +84,7 @@ impl TcpConnectionStealer {
         }
 
         Ok(Self {
-            port_subscriptions: Subscriptions::new(),
+            port_subscriptions: HashMap::with_capacity(4),
             command_rx,
             clients: HashMap::with_capacity(8),
             index_allocator: IndexAllocator::new(),
@@ -190,6 +191,41 @@ impl TcpConnectionStealer {
         }
     }
 
+    /// Forward the whole connection to given client.
+    async fn steal_connection(&mut self, client_id: ClientId, address: SocketAddr, port: Port, stream: TcpStream) -> Result<()> {
+        let connection_id = self.index_allocator.next_index().unwrap();
+
+        let (read_half, write_half) = tokio::io::split(stream);
+        self.write_streams.insert(connection_id, write_half);
+        self.read_streams
+            .insert(connection_id, ReaderStream::new(read_half));
+
+        self.connection_clients.insert(connection_id, client_id);
+        self.client_connections
+            .entry(client_id)
+            .or_insert_with(HashSet::new)
+            .insert(connection_id);
+
+        let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
+            connection_id,
+            destination_port: port,
+            source_port: address.port(),
+            address: address.ip(),
+        });
+
+        // Send new connection to subscribed layer.
+        match self.clients.get(&client_id) {
+            Some(daemon_tx) => Ok(daemon_tx.send(new_connection).await?),
+            None => {
+                // Should not happen.
+                debug_assert!(false);
+                error!("Internal error: subscriptions of closed client still present.");
+                self.close_client(client_id)
+            }
+        }
+
+    }
+
     /// Handles a new remote connection that was accepted on the [`TcpConnectionStealer::stealer`]
     /// listener.
     ///
@@ -202,48 +238,15 @@ impl TcpConnectionStealer {
     async fn incoming_connection(
         &mut self,
         (stream, address): (TcpStream, SocketAddr),
-    ) -> Result<(), AgentError> {
+    ) -> Result<()> {
         let real_address = orig_dst::orig_dst_addr(&stream)?;
 
-        // Get the first client that is subscribed to this port and give it the new connection.
-        if let Some(client_id) = self
-            .port_subscriptions
-            .get_topic_subscribers(real_address.port())
-            .first()
-            .cloned()
-        {
-            let connection_id = self.index_allocator.next_index().unwrap();
-
-            let (read_half, write_half) = tokio::io::split(stream);
-            self.write_streams.insert(connection_id, write_half);
-            self.read_streams
-                .insert(connection_id, ReaderStream::new(read_half));
-
-            self.connection_clients.insert(connection_id, client_id);
-            self.client_connections
-                .entry(client_id)
-                .or_insert_with(HashSet::new)
-                .insert(connection_id);
-
-            let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
-                connection_id,
-                destination_port: real_address.port(),
-                source_port: address.port(),
-                address: address.ip(),
-            });
-
-            // Send new connection to subscribed layer.
-            match self.clients.get(&client_id) {
-                Some(daemon_tx) => Ok(daemon_tx.send(new_connection).await?),
-                None => {
-                    // Should not happen.
-                    debug_assert!(false);
-                    error!("Internal error: subscriptions of closed client still present.");
-                    Ok(self.close_client(client_id)?)
-                }
-            }
-        } else {
-            Err(AgentError::UnexpectedConnection(real_address.port()))
+        match self.port_subscriptions.get(&real_address.port()) {
+            Some(StealSubscription::Unfiltered(client_id)) => self.steal_connection(client_id.clone(), address, real_address.port(), stream).await,
+            Some(StealSubscription::HttpFiltered(_manager)) => todo!(),
+            // Got connection to port without subscribers. This would be a bug, as we are supposed
+            // to set the iptables rules such that we only redirect ports with subscribers.
+            None => Err(AgentError::UnexpectedConnection(real_address.port())),
         }
     }
 
@@ -253,27 +256,65 @@ impl TcpConnectionStealer {
         self.clients.insert(client_id, sender);
     }
 
+    /// Initialize iptables member, which creates an iptables chain for our rules.
+    fn init_iptables(&mut self) -> Result<()>{
+        self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
+        Ok(())
+    }
+
+    /// Add port redirection to iptables to steal `port`.
+    fn redirect_port(&mut self, port: Port) -> Result<()> {
+        self.iptables()?
+            .add_redirect(port, self.stealer.local_addr()?.port())
+    }
+
+    fn stop_redirecting_port(&mut self, port: Port) -> Result<()> {
+        self.iptables()?
+            .remove_redirect(port, self.stealer.local_addr()?.port())
+    }
+
     /// Helper function to handle [`Command::PortSubscribe`] messages.
     ///
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn port_subscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
-        let res =
-            if let Some(client_id) = self.port_subscriptions.get_topic_subscribers(port).first() {
-                error!("Port {port:?} is already being stolen by client {client_id:?}!");
-                Err(PortAlreadyStolen(port))
-            } else {
-                if self.port_subscriptions.is_empty() {
-                    // Is this the first client?
-                    // Initialize IP table only when a client is subscribed.
-                    self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
+    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: PortSteal) -> Result<(), AgentError> {
+        let res = match port_steal {
+            PortSteal::Steal(port) => {
+                if let Some(sub) = self.port_subscriptions.get(&port) {
+                    error!("Can't steal whole port {port:?} as it is already being stolen: {sub:?}.");
+                    Err(PortAlreadyStolen(port))
+                } else {
+                    if self.port_subscriptions.is_empty() {
+                        // Is this the first client?
+                        // Initialize IP table only when a client is subscribed.
+                        self.init_iptables()?;
+                    }
+                    self.port_subscriptions.insert(port, StealSubscription::Unfiltered(client_id));
+                    self.redirect_port(port)?;
+                    Ok(port)
                 }
-                self.port_subscriptions.subscribe(client_id, port);
-                self.iptables()?
-                    .add_redirect(port, self.stealer.local_addr()?.port())?;
-                Ok(port)
-            };
+            }
+            PortSteal::HttpFilterSteal(port, regex) => {
+                match self.port_subscriptions.entry(port).or_insert_with(|| StealSubscription::HttpFiltered(HttpFilterManager {/* TODO */})) {
+                    StealSubscription::Unfiltered(earlier_client) => {
+                        error!("Can't filter-steal port {port:?} as it is already being stolen in it's whole by client {earlier_client:?}.");
+                        Err(PortAlreadyStolen(port))
+                    }
+                    StealSubscription::HttpFiltered(manager) => {
+                        if manager.is_empty() {
+                            // Is this the first client?
+                            // Initialize IP table only when a client is subscribed.
+                            // TODO: make the initialization internal to SafeIpTables.
+                            self.init_iptables()?;
+                        }
+                        // TODO: manager.insert(client_id, regex)
+                        self.redirect_port(port)?;
+                        Ok(port)
+                    }
+                }
+            }
+        };
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
             .await
     }
@@ -284,24 +325,37 @@ impl TcpConnectionStealer {
     /// with `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
     fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
-        self.port_subscriptions
-            .get_client_topics(client_id)
-            .iter()
-            .find_map(|subscribed_port| {
-                (*subscribed_port == port).then(|| {
-                    self.iptables()?
-                        .remove_redirect(port, self.stealer.local_addr()?.port())
-                })
-            })
-            .transpose()?;
-
-        self.port_subscriptions.unsubscribe(client_id, port);
-        if self.port_subscriptions.is_empty() {
-            // Was this the last client?
-            self.iptables = None; // The Drop impl of iptables cleans up.
+        let port_unsubscribed = match self.port_subscriptions.get(&port) {
+            Some(StealSubscription::HttpFiltered(manager)) => {
+                //TODO: manager.remove(client_id)
+                manager.is_empty()
+            }
+            Some(StealSubscription::Unfiltered(subscribed_client)) if *subscribed_client == client_id => {
+                true
+            }
+            Some(StealSubscription::Unfiltered(_)) | None => {
+                warn!("A client tried to unsubscribe from a port it was not subscribed to.");
+                false
+            }
+        };
+        if port_unsubscribed { // No remaining subscribers on this port.
+            self.stop_redirecting_port(port)?;
+            self.port_subscriptions.remove(&port);
+            if self.port_subscriptions.is_empty() {
+                // Was this the last client?
+                self.iptables = None; // The Drop impl of iptables cleans up.
+            }
         }
-
         Ok(())
+    }
+
+    fn get_client_ports(&self, client_id: ClientId) -> Vec<Port>{
+        self.port_subscriptions.iter().filter(|(port, sub)| {
+            match sub {
+                StealSubscription::Unfiltered(port_client) => *port_client == client_id,
+                StealSubscription::HttpFiltered(manager) => manager.has_client(client_id)
+            }
+        }).map(|(port, sub)| port.clone()).collect()
     }
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
@@ -309,14 +363,10 @@ impl TcpConnectionStealer {
     /// connecitons.
     #[tracing::instrument(level = "trace", skip(self))]
     fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
-        let stealer_port = self.stealer.local_addr()?.port();
-        let ports = self.port_subscriptions.get_client_topics(client_id);
-        debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
-        ports
-            .into_iter()
-            .try_for_each(|port| self.iptables()?.remove_redirect(port, stealer_port))?;
-
-        self.port_subscriptions.remove_client(client_id);
+        let ports = self.get_client_ports(client_id);
+        for port in ports.iter() {
+            self.port_unsubscribe(client_id, port.clone())?
+        }
 
         // Close and remove all remaining connections of the closed client.
         if let Some(remaining_connections) = self.client_connections.remove(&client_id) {
@@ -405,7 +455,7 @@ impl TcpConnectionStealer {
             Command::ConnectionUnsubscribe(connection_id) => {
                 self.connection_unsubscribe(connection_id)
             }
-            Command::PortSubscribe(port) => self.port_subscribe(client_id, port).await?,
+            Command::PortSubscribe(port_steal) => self.port_subscribe(client_id, port_steal).await?,
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::ClientClose => self.close_client(client_id)?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,

@@ -11,12 +11,13 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::log::warn;
+use mirrord_protocol::tcp::PortSteal;
 
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
-    util::{ClientId, IndexAllocator, Subscriptions},
+    util::{ClientId, IndexAllocator},
 };
 
 pub(super) mod api;
@@ -37,7 +38,7 @@ enum Command {
     /// A layer wants to subscribe to this [`Port`].
     ///
     /// The agent starts stealing traffic on this [`Port`].
-    PortSubscribe(Port),
+    PortSubscribe(PortSteal),
 
     /// A layer wants to unsubscribe from this [`Port`].
     ///
@@ -71,3 +72,28 @@ pub struct StealerCommand {
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
 }
+
+// TODO: define in separate file.
+#[derive(Debug)]
+struct HttpFilterManager;
+
+impl HttpFilterManager {
+    fn is_empty(&self) -> bool {
+        false // TODO
+    }
+
+    fn has_client(&self, client_id: ClientId) -> bool {
+        false // TODO
+    }
+}
+
+
+/// The subscriptions to steal traffic from a specific port.
+#[derive(Debug)]
+enum StealSubscription {
+    /// All of the port's traffic goes to this single client.
+    Unfiltered(ClientId),
+    /// This port's traffic is filtered and distributed to clients using a manager.
+    HttpFiltered(HttpFilterManager),
+}
+
