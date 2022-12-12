@@ -108,7 +108,6 @@ impl EnterpriseTrafficManager {
     // The `Receiver` part of this channel does a `blocking_recv` in the hyper handler.
     pub async fn new_connection<ResponseFromStolenLayer>(
         &mut self,
-        client_id: ClientID,
         connection_id: ConnectionId,
         tcp_stream: TcpStream,
     ) -> Result<(), HttpError> {
