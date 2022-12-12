@@ -10,7 +10,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.12.1"
+version = "3.13.4"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -29,6 +29,7 @@ async-trait = "0.1"
 bytes = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
 tokio-stream = "0.1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 nix = { version = "0.24", features = ["net"] }
@@ -44,6 +45,8 @@ trust-dns-resolver = { version = "0.22", features = ["serde-config", "tokio-runt
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 rand = "0.8"
 streammap-ext = "0.1"
+num-traits = "0.2"
+regex = "1"
 
 # latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032

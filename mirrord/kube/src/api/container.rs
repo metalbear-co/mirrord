@@ -19,7 +19,7 @@ use tokio::pin;
 use tracing::{debug, warn};
 
 use crate::{
-    api::{get_k8s_api, runtime::RuntimeData},
+    api::{get_k8s_resource_api, runtime::RuntimeData},
     error::{KubeApiError, Result},
 };
 
@@ -43,7 +43,7 @@ pub trait ContainerApi {
         P: Progress + Send + Sync;
 }
 
-static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
+pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]));
 
 /// Choose container logic:
@@ -224,7 +224,7 @@ impl ContainerApi for JobContainer {
             }
                 }
             ))?;
-        let job_api = get_k8s_api(client, agent.namespace.as_deref());
+        let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api
             .create(&PostParams::default(), &agent_pod)
@@ -239,7 +239,7 @@ impl ContainerApi for JobContainer {
 
         let pod_progress = progress.subtask("waiting for pod to be ready...");
 
-        let pod_api: Api<Pod> = get_k8s_api(client, agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         let stream = watcher(pod_api.clone(), params).applied_objects();
         pin!(stream);
@@ -322,7 +322,7 @@ impl ContainerApi for EphemeralContainer {
         }))?;
         debug!("Requesting ephemeral_containers_subresource");
 
-        let pod_api = get_k8s_api(client, agent.namespace.as_deref());
+        let pod_api = get_k8s_resource_api(client, agent.namespace.as_deref());
         let mut ephemeral_containers_subresource: Pod = pod_api
             .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
             .await

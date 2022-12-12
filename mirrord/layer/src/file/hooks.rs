@@ -3,16 +3,19 @@
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice};
+use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, AT_EACCESS, AT_FDCWD, FILE};
+use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{OpenOptionsInternal, ReadFileResponse, WriteFileResponse};
+use mirrord_protocol::{
+    file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+};
+use num_traits::Bounded;
 use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
-    close_detour,
+    close_layer_fd,
     detour::DetourGuard,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
@@ -366,10 +369,12 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
+    let res = FN_FCLOSE(file_stream);
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
 
-    close_detour(fd)
+    close_layer_fd(fd);
+    res
 }
 
 /// Hook for `libc::fileno`.
@@ -390,6 +395,161 @@ unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
         FN_FILENO(file_stream)
     }
 }
+
+/// Tries to convert input to type O, if it fails it returns the max value of O.
+/// For example, if you put u32::MAX into a u8, it will return u8::MAX.
+fn best_effort_cast<I: Bounded, O: TryFrom<I> + Bounded>(input: I) -> O {
+    input.try_into().unwrap_or_else(|_| O::max_value())
+}
+
+/// Converts time in nano seconds to seconds, to match the `stat` struct
+/// which has very weird types used
+fn nano_to_secs(nano: i64) -> i64 {
+    best_effort_cast(Duration::from_nanos(best_effort_cast(nano)).as_secs())
+}
+
+/// Fills the `stat` struct with the metadata
+unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal) {
+    out_stat.write_bytes(0, 1);
+    let out = &mut *out_stat;
+    // on macOS the types might be different, so we try to cast and do our best..
+    out.st_mode = best_effort_cast(metadata.mode);
+    out.st_size = best_effort_cast(metadata.size);
+    out.st_atime_nsec = metadata.access_time;
+    out.st_mtime_nsec = metadata.modification_time;
+    out.st_ctime_nsec = metadata.creation_time;
+    out.st_atime = nano_to_secs(metadata.access_time);
+    out.st_mtime = nano_to_secs(metadata.modification_time);
+    out.st_ctime = nano_to_secs(metadata.creation_time);
+    out.st_nlink = best_effort_cast(metadata.hard_links);
+    out.st_uid = metadata.user_id;
+    out.st_gid = metadata.group_id;
+    out.st_dev = best_effort_cast(metadata.device_id);
+    out.st_ino = best_effort_cast(metadata.inode);
+    out.st_rdev = best_effort_cast(metadata.rdevice_id);
+    out.st_blksize = best_effort_cast(metadata.block_size);
+    out.st_blocks = best_effort_cast(metadata.blocks);
+}
+
+/// Hook for `libc::lstat`.
+#[hook_guard_fn]
+unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, false)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_LSTAT(raw_path, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::fstat`.
+#[hook_guard_fn]
+unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+    let (Ok(result) | Err(result)) = xstat(None, Some(fd), true)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_FSTAT(fd, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::stat`.
+#[hook_guard_fn]
+unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_STAT(raw_path, out_stat))
+        .map_err(From::from);
+
+    result
+}
+
+/// Hook for `libc::fstatat`.
+#[hook_guard_fn]
+unsafe extern "C" fn fstatat_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    out_stat: *mut stat,
+    flag: c_int,
+) -> c_int {
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(Some(path), Some(fd), follow_symlink)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
+        .map_err(From::from);
+
+    result
+}
+
+// this requires newer libc which we don't link with to support old libc..
+// leaving this in code so we can enable it when libc is updated.
+// #[cfg(target_os = "linux")]
+// /// Hook for `libc::statx`. This is only available on Linux.
+// #[hook_guard_fn]
+// unsafe extern "C" fn statx_detour(
+//     fd: RawFd,
+//     raw_path: *const c_char,
+//     flag: c_int,
+//     out_stat: *mut statx,
+// ) -> c_int {
+//     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
+//     let path = if flags & libc::AT_EMPTYPATH != 0 {
+//         None
+//     } else {
+//         Some((!raw_path.is_null()).then(|| CStr::from_ptr(raw_path)))
+//     };
+//     let (Ok(result) | Err(result)) = xstat(path, Some(fd), follow_symlink)
+//         .map(|res| {
+//             let res = res.metadata;
+//             out_stat.write_bytes(0, 1);
+//             let out = &mut *out_stat;
+//             // Set mask for available fields
+//             out.stx_mask = libc::STATX_BASIC_STATS;
+//             out.stx_mode = best_effort_cast(metadata.mode);
+//             out.stx_size = best_effort_cast(metadata.size);
+//             out.stx_atime.tv_nsec = metadata.access_time;
+//             out.stx_mtime.tv_nsec = metadata.modification_time;
+//             out.stx_ctime.tv_nsec = metadata.creation_time;
+//             out.stx_atime.tv_sec = nano_to_secs(metadata.access_time);
+//             out.stx_mtime.tv_sec = nano_to_secs(metadata.modification_time);
+//             out.stx_ctime.tv_sec = nano_to_secs(metadata.creation_time);
+//             out.stx_nlink = best_effort_cast(metadata.hard_links);
+//             out.stx_uid = metadata.user_id;
+//             out.stx_gid = metadata.group_id;
+//             out.stx_ino = best_effort_cast(metadata.inode);
+//             out.stx_blksize = best_effort_cast(metadata.block_size);
+//             out.stx_blocks = best_effort_cast(metadata.blocks);
+
+//             out.stx_dev_major = libc::major(metadata.device_id);
+//             out.stx_dev_minor = libc::minor(metadata.device_id);
+//             out.stx_rdev_major = libc::major(metadata.rdevice_id);
+//             out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
+//             0
+//         })
+//         .bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
+//         .map_err(From::from);
+
+//     result
+// }
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
@@ -415,4 +575,49 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnFaccessat,
         FN_FACCESSAT
     );
+    // this requires newer libc which we don't link with to support old libc..
+    // leaving this in code so we can enable it when libc is updated.
+    // #[cfg(target_os = "linux")]
+    // {
+    //     replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
+    // }
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+    {
+        replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
+        replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
+        replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
+        replace!(
+            hook_manager,
+            "fstatat",
+            fstatat_detour,
+            FnFstatat,
+            FN_FSTATAT
+        );
+    }
+    // on non aarch64 (Intel) we need to hook also $INODE64 variants
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        replace!(
+            hook_manager,
+            "lstat$INODE64",
+            lstat_detour,
+            FnLstat,
+            FN_LSTAT
+        );
+        replace!(
+            hook_manager,
+            "fstat$INODE64",
+            fstat_detour,
+            FnFstat,
+            FN_FSTAT
+        );
+        replace!(hook_manager, "stat$INODE64", stat_detour, FnStat, FN_STAT);
+        replace!(
+            hook_manager,
+            "fstatat$INODE64",
+            fstatat_detour,
+            FnFstatat,
+            FN_FSTATAT
+        );
+    }
 }

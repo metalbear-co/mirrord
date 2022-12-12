@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
-	"version": "3.12.1",
+	"version": "3.13.4",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -42,14 +42,14 @@
 			}
 		]
 	},
-	"main": "./out/extension.js",
+	"main": "./dist/extension.js",
 	"scripts": {
-		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./",
 		"pretest": "npm run compile && npm run lint",
 		"lint": "eslint src --ext ts",
 		"format": "eslint src --ext ts --fix",
-		"vscode:prepublish": "npm run esbuild-base -- --minify",
+		"vscode:prepublish": "webpack --mode production",
+		"compile": "webpack --mode none",
+		"watch": "webpack --mode none --watch",
 		"esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
 		"esbuild": "npm run esbuild-base -- --sourcemap",
 		"esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
@@ -70,8 +70,11 @@
 		"glob": "^7.2.3",
 		"mocha": "^9.1.3",
 		"prettier": "2.5.1",
+		"ts-loader": "^9.4.2",
 		"typescript": "^4.5.4",
-		"vsce": "^2.9.2"
+		"vsce": "^2.9.2",
+		"webpack": "^5.75.0",
+		"webpack-cli": "^5.0.1"
 	},
 	"dependencies": {
 		"@kubernetes/client-node": "^0.16.3",

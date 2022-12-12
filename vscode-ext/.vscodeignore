@@ -1,6 +1,11 @@
 **/*.ts
 tsconfig.json
 .eslintrc.json
-dist
 *.vsix
 package-lock.json
+.vscode
+node_modules
+out/
+src/
+tsconfig.json
+webpack.config.json

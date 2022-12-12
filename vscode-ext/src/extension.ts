@@ -1,14 +1,17 @@
 import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
 import { resolve } from 'path';
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
+
 const TOML = require('toml');
 const semver = require('semver');
 const https = require('https');
-const k8s = require('@kubernetes/client-node');
 const path = require('path');
 const os = require('os');
 const glob = require('glob');
+const util = require('node:util');
+const exec = util.promisify(require('node:child_process').exec);
 
 const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = {
 	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
@@ -44,17 +47,83 @@ const versionCheckInterval = 1000 * 60 * 3;
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
 
-function getK8sApi(): CoreV1Api {
-	let k8sConfig = new k8s.KubeConfig();
-	k8sConfig.loadFromDefault();
-	return k8sConfig.makeApiClient(k8s.CoreV1Api);
-}
-
 // Get the file path to the user's mirrord-config file, if it exists. 
 async function configFilePath() {
 	let fileUri = vscode.Uri.joinPath(MIRRORD_DIR, '?(*.)mirrord.+(toml|json|y?(a)ml)');
 	let files = glob.sync(fileUri.fsPath);
 	return files[0] || '';
+}
+
+class MirrordAPI {
+	context: vscode.ExtensionContext;
+	cliPath: string;
+	_libraryPath: null | string;
+
+	constructor(context: vscode.ExtensionContext) {
+		this.context = context;
+		// for easier debugging, use the local mirrord cli if we're in development mode
+		if (context.extensionMode === vscode.ExtensionMode.Development) {
+			const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
+			this.cliPath = path.join(debugPath, "mirrord");
+		} else {
+			this.cliPath = path.join(context.extensionPath, 'mirrord');
+			fs.chmodSync(this.cliPath, 0o755);
+		}
+		this._libraryPath = null;
+	}
+
+	async getLibraryPath(): Promise<string> {
+		if (!this._libraryPath) {
+			this._libraryPath = await this.extract();
+		}
+		return this._libraryPath;
+	}
+
+	// Execute the mirrord cli with the given arguments, return stdout, stderr.
+	async exec(args: string[]): Promise<[string, string]> {
+		// Check if arg contains space, and if it does, wrap it in quotes
+		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
+		let commandLine = [this.cliPath, ...args];
+		let value = await exec(commandLine.join(' '), { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
+		return [value.stdout as string, value.stderr as string];
+	}
+
+	// Extract layer from mirrord cli and return the path to the library. 
+	async extract(): Promise<string> {
+		let [stdout, stderr] = await this.exec(["extract", this.context.extensionPath]);
+		if (stderr) {
+			throw new Error("error occured: " + stderr);
+		}
+		var parsed;
+		for (var line of stdout.split('\n')) {
+			{
+				parsed = JSON.parse(line);
+				console.log("mirrord progress: ");
+				console.log(parsed);
+				if (parsed["type"] === "FinishedTask" && parsed["name"] === "extracting layer" && parsed["success"]) {
+					return path.join(this.context.extensionPath, LIBRARIES[os.platform()][1]);
+				}
+			}
+		}
+		throw new Error('Failed to extract mirrord layer, last message:' + parsed);
+	}
+
+	/// Uses `mirrord ls` to get a list of all targets.
+	async listTargets(targetNamespace: string | null | undefined): Promise<[string]> {
+		const args = ['ls'];
+
+		if (targetNamespace) {
+			args.push('-n', targetNamespace);
+		}
+
+		let [stdout, stderr] = await this.exec(args);
+
+		if (stderr) {
+			throw new Error("error occured listing targets: " + stderr);
+		}
+
+		return JSON.parse(stdout);
+	}
 }
 
 async function openConfig() {
@@ -69,7 +138,7 @@ async function openConfig() {
 }
 
 async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBarItem) {
-	let state = context.globalState;
+	let state = context.workspaceState;
 	if (state.get('enabled')) {
 		state.update('enabled', false);
 		button.text = 'Enable mirrord';
@@ -102,12 +171,6 @@ async function checkVersion(version: string) {
 	});
 }
 
-// Gets namespace from config file
-async function parseNamespace() {
-	let parsed = await parseConfigFile();
-	return parsed?.['target']?.['namespace'] || 'default';
-}
-
 async function parseConfigFile() {
 	let filePath: string = await configFilePath();
 	if (filePath) {
@@ -127,13 +190,19 @@ async function isTargetInFile() {
 	return (parsed && (typeof (parsed['target']) === 'string' || parsed['target']?.['path']));
 }
 
+// Gets namespace from config file
+async function parseNamespace() {
+	let parsed = await parseConfigFile();
+	return parsed?.['target']?.['namespace'];
+}
+
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 	globalContext = context;
 
-	context.globalState.update('enabled', false);
+	context.workspaceState.update('enabled', false);
 	vscode.debug.registerDebugConfigurationProvider('*', new ConfigurationProvider(), 2);
 	buttons = { toggle: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0), settings: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0) };
 
@@ -157,9 +226,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 }
 
+
+
+
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
-		if (!globalContext.globalState.get('enabled')) {
+		if (!globalContext.workspaceState.get('enabled')) {
 			return new Promise(resolve => { resolve(config); });
 		}
 
@@ -177,52 +249,31 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
-		let libraryPath: string;
-		if (globalContext.extensionMode === vscode.ExtensionMode.Development) {
-			libraryPath = path.join(path.dirname(globalContext.extensionPath), "target", "debug");
-		} else {
-			libraryPath = globalContext.extensionPath;
-		}
-		let [environmentVariableName, libraryName] = LIBRARIES[os.platform()];
-		config.env ||= {};
-		config.env[environmentVariableName] = path.join(libraryPath, libraryName);
 
-		if (!await isTargetInFile()) { // If target wasn't specified in the config file, let user choose pod from dropdown
-			let podNamespace: string;
-			try {
-				podNamespace = await parseNamespace();
-			} catch (e: any) {
-				vscode.window.showErrorMessage('Failed to parse mirrord config file', e.message);
-				return;
-			}
-			let k8sApi = getK8sApi();
-			// Get pods from kubectl and let user select one to mirror
-			let pods: { response: any, body: V1PodList } = await k8sApi.listNamespacedPod(podNamespace);
-			let podNames = pods.body.items.map((pod) => pod.metadata!.name!);
-			let impersonatedPodName = '';
-			await vscode.window.showQuickPick(podNames, { placeHolder: 'Select pod to mirror' }).then(async podName => {
+		const mode = globalContext.extensionMode;
+		const extensionPath = globalContext.extensionPath;
+
+		let mirrordApi = new MirrordAPI(globalContext);
+
+
+		let libraryPath = await mirrordApi.getLibraryPath();
+		let environmentVariableName = LIBRARIES[os.platform()][0];
+		config.env ||= {};
+		config.env[environmentVariableName] = libraryPath;
+
+		// If target wasn't specified in the config file, let user choose pod from dropdown			
+		if (!await isTargetInFile()) {
+			let targetNamespace = await parseNamespace();
+			let targets = await mirrordApi.listTargets(targetNamespace);
+			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
 				return new Promise(async resolve => {
-					if (!k8sApi || !podName) {
+					if (!targetName) {
 						return;
 					}
-					impersonatedPodName = podName;
-					config.env['MIRRORD_IMPERSONATED_TARGET'] = 'pod/' + impersonatedPodName;
-					config.env['MIRRORD_TARGET_NAMESPACE'] = podNamespace; // This is unnecessary 99% of the time, but it ensures the namespace is the one the pod was selected from
+					config.env['MIRRORD_IMPERSONATED_TARGET'] = targetName;
 					return resolve(config);
 				});
 			});
-
-			// let user select container name if there are multiple containers in the pod		
-			const pod = pods.body.items.find(p => p.metadata!.name === impersonatedPodName!);
-			const containerNames = pod!.spec!.containers.map(c => c.name!);
-			if (containerNames.length > 1) {
-				await vscode.window.showQuickPick(containerNames, { placeHolder: 'Select container' }).then(async containerName => {
-					return new Promise(resolve => {
-						config.env['MIRRORD_IMPERSONATED_CONTAINER_NAME'] = containerName;
-						return resolve(config);
-					});
-				});
-			}
 		}
 
 		let filePath = await configFilePath();
@@ -231,7 +282,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		if (config.type === "go") {
-			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link";
+			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
 			// use our custom delve to fix being loaded into debugserver
 			if (os.platform() === "darwin") {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
@@ -243,4 +294,3 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		});
 	}
 }
-

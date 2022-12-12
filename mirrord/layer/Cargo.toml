@@ -28,7 +28,7 @@ nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
-frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.9", features = ["auto-download"], branch="metalbear3" }
+frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.8", features = ["auto-download"], branch="metalbear2" }
 futures.workspace = true
 kube.workspace = true
 
@@ -41,9 +41,11 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
+num-traits.workspace = true
+
 rand = "0.8"
 fancy-regex = "0.10"
-regex = "1"
+regex.workspace = true
 errno = "0.2"
 async-trait.workspace = true
 socket2 = "0.4"

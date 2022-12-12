@@ -6,7 +6,7 @@ use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, Target};
 
 use crate::{
-    api::{container::choose_container, get_k8s_api},
+    api::{container::choose_container, get_k8s_resource_api},
     error::{KubeApiError, Result},
 };
 
@@ -125,7 +125,7 @@ impl RuntimeDataProvider for Target {
 #[async_trait]
 impl RuntimeDataProvider for DeploymentTarget {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let deployment_api: Api<Deployment> = get_k8s_api(client, namespace);
+        let deployment_api: Api<Deployment> = get_k8s_resource_api(client, namespace);
         let deployment = deployment_api
             .get(&self.deployment)
             .await
@@ -148,7 +148,7 @@ impl RuntimeDataProvider for DeploymentTarget {
             .collect::<Vec<String>>()
             .join(",");
 
-        let pod_api: Api<Pod> = get_k8s_api(client, namespace);
+        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
         let deployment_pods = pod_api
             .list(&ListParams::default().labels(&formatted_deployments_labels))
             .await
@@ -168,7 +168,7 @@ impl RuntimeDataProvider for DeploymentTarget {
 #[async_trait]
 impl RuntimeDataProvider for PodTarget {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = get_k8s_api(client, namespace);
+        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
         let pod = pod_api.get(&self.pod).await?;
 
         RuntimeData::from_pod(&pod, &self.container)

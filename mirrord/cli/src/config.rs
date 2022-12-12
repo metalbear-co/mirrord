@@ -24,6 +24,10 @@ pub(super) enum Commands {
     /// Operator commands eg. setup
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
+
+    /// List targets/resources like pods/namespaces in json format    
+    #[command(hide = true, name = "ls")]
+    ListTargets(Box<ListTargetArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -127,6 +131,7 @@ pub(super) struct ExecArgs {
     pub(super) binary_args: Vec<String>,
 
     /// Where to extract the library to. Default is temp dir.
+    /// TODO: delete on next major, I think we used it for tests..
     #[arg(long)]
     pub extract_path: Option<String>,
 
@@ -216,4 +221,26 @@ pub(super) enum OperatorCommand {
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
     },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum Format {
+    Json,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct ListTargetArgs {
+    /// Specify the format of the output.
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "FORMAT",
+        value_enum,
+        default_value_t = Format::Json
+    )]
+    pub output: Format,
+
+    /// Specify the namespace to list targets in.
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
 }

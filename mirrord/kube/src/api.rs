@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 use crate::error::{KubeApiError, Result};
 
-mod container;
+pub mod container;
 #[cfg(feature = "env_guard")]
 mod env_guard;
 pub mod kubernetes;
@@ -21,7 +21,7 @@ mod runtime;
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
-pub fn get_k8s_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
+pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
     <K as kube::Resource>::DynamicType: Default,

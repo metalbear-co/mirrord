@@ -9,11 +9,71 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
+- Don't add temp prefix when using `extract` command.
+- VS Code extension: mirrord enable/disable to be per workspace.
+- VS Code extension: bundle the resources
+
+### Misc
+
+- Better separation in mirrord cli.
+
+## 3.13.4
+
+### Changed
+
+- Adjust filters - all directory filters also filter the directory itself (for when lstat/stating the directory).
+  Added `/Applications`
+
+## 3.13.3
+
+### Added
+
+- Add `mirrord ls` which allows listing target path. Hidden from user at the moment, as for now it's meant for extension use only.
+
+### Changed
+
+- Refactor e2e tests: split into modules based on functionality they test.
+- internal refactor in mirrord-agent: Stealer feature changed from working per connection to now starting with
+  the agent itself ("global"). Got rid of `steal_worker` in favor of a similar abstraction to what
+  we have in `sniffer.rs` (`TcpConnectionStealer` that acts as the traffic stealing task, and
+  `TcpStealerApi` which bridges the communication between the agent and the stealer task).
+- Tests CI: don't wait for integration tests to start testing E2E tests.
+
+### Fixed
+
+- Add missing `fstat`/`lstat`/`fstatat`/`stat` hooks.
+
+## 3.13.2
+
+### Fixed
+
+- Weird crash that started happening after Frida upgrade on macOS M1.
+
+## 3.13.1
+
+### Fixed
+
+- Fix asdf:
+  - Add `/tmp` not just `/tmp/` to exclusion.
+  - Add `.tool-version` to exclusion.
+  - `fclose` was calling close which doesn't flush.
+
+## 3.13.0
+
+### Changed
+
 - IntelliJ Plugin: downgrade Java to version 11.
+- IntelliJ Plugin: update platform version to 2022.3.
 - Disable progress in mirrord-layer - can cause issues with forks and generally confusing now
   that agent is created by cli (and soon to be created by IDE plugin via cli).
 - Update to Frida 16.0.7
 - Add more paths to the default ignore list (`/snap` and `*/.asdf/*`) - to fix asdf issues.
+- Add `/bin/` to default ignore list - asdf should be okay now!
+- Update GitHub action to use latest `rust-cache`
+
+### Added
+
+- mirrord-operator: Add securityContext section for deployment in operator setup
 
 ### Fixed
 

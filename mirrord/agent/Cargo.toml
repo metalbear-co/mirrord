@@ -17,7 +17,7 @@ edition.workspace = true
 [dependencies]
 containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="6bc49c007cf93869e7d83fca4818b6aae1145b45"}
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "fs"] }
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 serde_json.workspace = true
 pnet = "0.31"
 nix.workspace = true
@@ -30,7 +30,7 @@ tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
-num-traits = "0.2"
+num-traits.workspace = true
 bollard = "0.13"
 tokio-util.workspace = true
 rand.workspace = true

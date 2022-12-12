@@ -136,6 +136,12 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
     NoProcessFound,
+
+    #[error("mirrord-layer: Port {0} is already being stolen by another mirrord client!")]
+    PortAlreadyStolen(u16),
+
+    #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
+    UnexpectedResponseError(ResponseError),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
@@ -188,6 +194,11 @@ impl From<HookError> for i64 {
                     mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
                     _ => libc::EAI_FAIL,
                 },
+                // for listen, EINVAL means "socket is already connected."
+                // Will not happen, because this ResponseError is not return from any hook, so it
+                // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
+                // this could be changed by waiting for the Subscribed response from agent.
+                ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

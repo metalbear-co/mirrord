@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::Write,
     path::{Path, PathBuf},
@@ -10,22 +11,27 @@ use clap::Parser;
 use config::*;
 use const_random::const_random;
 use exec::execvp;
+use k8s_openapi::api::core::v1::Pod;
+use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::{
-    client::OperatorApiDiscover,
-    license::License,
-    setup::{Operator, OperatorSetup},
+use mirrord_kube::api::{
+    container::SKIP_NAMES,
+    get_k8s_resource_api,
+    kubernetes::{create_kube_api, KubernetesAPI},
+    AgentManagment,
 };
+use mirrord_operator::client::OperatorApiDiscover;
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use semver::Version;
+use serde_json::json;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
+mod operator;
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -63,7 +69,14 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
-fn extract_library(dest_dir: Option<String>, progress: &TaskProgress) -> Result<PathBuf> {
+/// Extract to given directory, or tmp by default.
+/// If prefix is true, add a random prefix to the file name that identifies the specific build
+/// of the layer. This is useful for debug purposes usually.
+fn extract_library(
+    dest_dir: Option<String>,
+    progress: &TaskProgress,
+    prefix: bool,
+) -> Result<PathBuf> {
     let progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()
@@ -71,7 +84,12 @@ fn extract_library(dest_dir: Option<String>, progress: &TaskProgress) -> Result<
         .to_str()
         .unwrap();
 
-    let file_name = format!("{}-libmirrord_layer.{extension}", const_random!(u64));
+    let file_name = if prefix {
+        format!("{}-libmirrord_layer.{extension}", const_random!(u64))
+    } else {
+        format!("libmirrord_layer.{extension}")
+    };
+
     let file_path = match dest_dir {
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => temp_dir().as_path().join(file_name),
@@ -258,7 +276,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     let sub_progress = progress.subtask("preparing to launch process");
-    let library_path = extract_library(args.extract_path.clone(), &sub_progress)?;
+    let library_path = extract_library(args.extract_path.clone(), &sub_progress, true)?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     create_agent(&sub_progress)?;
@@ -301,6 +319,64 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(anyhow!("Failed to execute binary"))
 }
 
+/// Returns a list of (pod name, [container names]) pairs.
+/// Filtering mesh side cars
+async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
+    let client = create_kube_api(None).await?;
+    let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
+    let pods = api.list(&ListParams::default()).await?;
+
+    // convert pods to (name, container names) pairs
+
+    let pod_containers_map: HashMap<String, Vec<String>> = pods
+        .items
+        .iter()
+        .filter_map(|pod| {
+            let name = pod.metadata.name.clone()?;
+            let containers = pod
+                .spec
+                .as_ref()?
+                .containers
+                .iter()
+                .filter_map(|container| {
+                    // filter out mesh side cars
+                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
+                })
+                .collect();
+            Some((name, containers))
+        })
+        .collect();
+
+    Ok(pod_containers_map)
+}
+
+/// Lists all possible target paths for pods.
+/// Example: ```[
+///  "pod/metalbear-deployment-85c754c75f-982p5",
+///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
+///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
+/// ]```
+#[tokio::main(flavor = "current_thread")]
+async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
+    let pods = get_kube_pods(args.namespace.as_deref()).await?;
+    let target_vector = pods
+        .iter()
+        .flat_map(|(pod, containers)| {
+            if containers.len() == 1 {
+                vec![format!("pod/{}", pod)]
+            } else {
+                containers
+                    .iter()
+                    .map(move |container| format!("pod/{}/container/{}", pod, container))
+                    .collect::<Vec<String>>()
+            }
+        })
+        .collect::<Vec<String>>();
+    let json_obj = json!(target_vector);
+    println!("{}", json_obj);
+    Ok(())
+}
+
 fn login(args: LoginArgs) -> Result<()> {
     match &args.token {
         Some(token) => AuthConfig::from_input(token)?.save()?,
@@ -333,50 +409,11 @@ fn main() -> Result<()> {
     match cli.commands {
         Commands::Exec(args) => exec(&args, &cli_progress())?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &cli_progress())?;
+            extract_library(Some(path), &cli_progress(), false)?;
         }
+        Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
-        Commands::Operator(operator) => match operator.command {
-            OperatorCommand::Setup {
-                accept_tos,
-                file,
-                namespace,
-                license_key,
-            } => {
-                if !accept_tos {
-                    eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
-
-                    return Ok(());
-                }
-
-                if let Some(license_key) = license_key {
-                    let license = License::fetch(license_key.clone())?;
-
-                    eprintln!(
-                        "Installing with license for {} ({})",
-                        license.name, license.organization
-                    );
-
-                    if license.is_expired() {
-                        eprintln!("Using an expired license for operator, deployment will not function when installed");
-                    }
-
-                    eprintln!(
-                        "Intalling mirrord operator with namespace: {}",
-                        namespace.name()
-                    );
-
-                    let operator = Operator::new(license_key, namespace);
-
-                    match file {
-                        Some(path) => operator.to_writer(File::create(path)?)?,
-                        None => operator.to_writer(std::io::stdout())?,
-                    }
-                } else {
-                    eprintln!("--license-key is required to install on cluster");
-                }
-            }
-        },
+        Commands::Operator(operator) => operator::operator_command(operator)?,
     }
 
     Ok(())

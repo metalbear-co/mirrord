@@ -20,8 +20,6 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-use crate::util::ClientID;
-
 // TODO(alex) [high] 2022-12-06: Serve 1 hyper per connection? If we don't do 1 to 1, then there is
 // no easy way of knowing to whom we want to respond, or if these bytes are part of read A or read
 // B.
