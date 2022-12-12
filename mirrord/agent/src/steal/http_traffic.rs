@@ -106,26 +106,26 @@ impl EnterpriseTrafficManager {
     // response it gets from the layer, as we're taking the stream.
     //
     // The `Receiver` part of this channel does a `blocking_recv` in the hyper handler.
-    pub async fn new_connection<ResponseFromStolenLayer>(
-        &mut self,
-        connection_id: ConnectionId,
-        tcp_stream: TcpStream,
-    ) -> Result<(), HttpError> {
-        let filter = self
-            .client_filters
-            .get(&client_id)
-            .ok_or(HttpError::ClientNotFound(client_id))
-            .cloned()?;
+    // pub async fn new_connection<ResponseFromStolenLayer>(
+    //     &mut self,
+    //     connection_id: ConnectionId,
+    //     tcp_stream: TcpStream,
+    // ) -> Result<(), HttpError> {
+    //     let filter = self
+    //         .client_filters
+    //         .get(&client_id)
+    //         .ok_or(HttpError::ClientNotFound(client_id))
+    //         .cloned()?;
 
-        // TODO(alex) [high] 2022-12-09: We check if this is HTTP in the building process.
-        // - If we get some IO error, then this whole `tcp_stream` is doomed;
-        // - If the error is just that this is not HTTP, then we create some sort of passthrough
-        //   filter that will just send/receive messages on the stream, very similar to what happens
-        //   when a filter doesn't match.
-        HttpFilter::new(client_id, connection_id, filter, tcp_stream).await?;
+    //     // TODO(alex) [high] 2022-12-09: We check if this is HTTP in the building process.
+    //     // - If we get some IO error, then this whole `tcp_stream` is doomed;
+    //     // - If the error is just that this is not HTTP, then we create some sort of passthrough
+    //     //   filter that will just send/receive messages on the stream, very similar to what
+    // happens     //   when a filter doesn't match.
+    //     HttpFilter::new(client_id, connection_id, filter, tcp_stream).await?;
 
-        todo!()
-    }
+    //     todo!()
+    // }
 }
 
 #[derive(Error, Debug)]
@@ -262,4 +262,10 @@ impl HttpFilter {
 
         todo!()
     }
+}
+
+pub(super) struct HttpFilterManager {}
+
+impl HttpFilterManager {
+    // pub(super) fn new(client_id: ClientID) -> Self {}
 }
