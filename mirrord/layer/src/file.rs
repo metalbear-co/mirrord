@@ -40,7 +40,7 @@ pub(crate) mod hooks;
 pub(crate) mod ops;
 
 type LocalFd = RawFd;
-type RemoteFd = usize;
+type RemoteFd = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -508,7 +508,7 @@ pub struct Open {
 
 #[derive(Debug)]
 pub struct OpenRelative {
-    pub(crate) relative_fd: usize,
+    pub(crate) relative_fd: u64,
     pub(crate) path: PathBuf,
     pub(crate) file_channel_tx: ResponseChannel<OpenFileResponse>,
     pub(crate) open_options: OpenOptionsInternal,
@@ -516,8 +516,8 @@ pub struct OpenRelative {
 
 #[derive(Debug)]
 pub struct Read<T> {
-    pub(crate) remote_fd: usize,
-    pub(crate) buffer_size: usize,
+    pub(crate) remote_fd: u64,
+    pub(crate) buffer_size: u64,
     // TODO(alex): Only used for `pread`.
     pub(crate) start_from: u64,
     pub(crate) file_channel_tx: ResponseChannel<T>,
@@ -525,14 +525,14 @@ pub struct Read<T> {
 
 #[derive(Debug)]
 pub struct Seek {
-    pub(crate) remote_fd: usize,
+    pub(crate) remote_fd: u64,
     pub(crate) seek_from: SeekFrom,
     pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
 }
 
 #[derive(Debug)]
 pub struct Write<T> {
-    pub(crate) remote_fd: usize,
+    pub(crate) remote_fd: u64,
     pub(crate) write_bytes: Vec<u8>,
     // Only used for `pwrite`.
     pub(crate) start_from: u64,
@@ -541,7 +541,7 @@ pub struct Write<T> {
 
 #[derive(Debug)]
 pub struct Close {
-    pub(crate) fd: usize,
+    pub(crate) fd: u64,
     pub(crate) file_channel_tx: ResponseChannel<CloseFileResponse>,
 }
 

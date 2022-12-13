@@ -19,10 +19,10 @@ pub enum ResponseError {
     NotFound(usize),
 
     #[error("Remote operation expected fd `{0}` to be a directory, but it's a file!")]
-    NotDirectory(usize),
+    NotDirectory(u64),
 
     #[error("Remote operation expected fd `{0}` to be a file, but it's a directory!")]
-    NotFile(usize),
+    NotFile(u64),
 
     #[error("IO failed for remote operation with `{0}!")]
     RemoteIO(RemoteIOError),
