@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
 - Add `/System` to default ignore list.
+- Remove `test_mirrord_layer` from CI as it's covered in integration testing.
 
 ### Fixed
 

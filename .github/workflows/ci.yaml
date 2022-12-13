@@ -169,26 +169,6 @@ jobs:
       - run: |
           cargo test -p mirrord-sip
 
-  test_mirrord_layer:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
-      - run: |
-          cargo test -p mirrord-layer -- --skip test_self_open --skip test_pwrite --skip test_mirroring_with_http --skip test_self_connect
-
   test_agent:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -499,7 +479,6 @@ jobs:
         lint,
         lint_macos,
         test_mirrord_config,
-        test_mirrord_layer,
         test_mirrord_protocol,
         test_mirrord_sip,
         build_intellij_plugin,
@@ -519,7 +498,6 @@ jobs:
       (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
       (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
       (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
-      (needs.test_mirrord_layer.result == 'success' || needs.test_mirrord_layer.result == 'skipped') &&
       (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
       (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
       (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&

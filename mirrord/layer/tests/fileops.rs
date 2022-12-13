@@ -268,8 +268,8 @@ async fn test_node_close(
         ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
             path: "/tmp/test_file.txt".to_string().into(),
             open_options: OpenOptionsInternal {
-                read: false,
-                write: true,
+                read: true,
+                write: false,
                 append: false,
                 truncate: false,
                 create: true,
