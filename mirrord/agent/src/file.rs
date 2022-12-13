@@ -297,10 +297,7 @@ impl FileManager {
                             let position_after_read = reader.stream_position()?;
 
                             // Limit the new position to `buffer_size`.
-                            Ok((
-                                read_amount,
-                                position_after_read.clamp(0, buffer_size),
-                            ))
+                            Ok((read_amount, position_after_read.clamp(0, buffer_size)))
                         })
                         .and_then(|(read_amount, seek_to)| {
                             file.seek(SeekFrom::Start(seek_to))?;
