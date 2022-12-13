@@ -1,5 +1,7 @@
-const fs = require('fs');
 
-const data = fs.readFileSync("/tmp/test_file.txt")
+const fs = require('fs');
+const assert = require('assert');
+
+const data = fs.readFileSync("/tmp/test_file.txt", {encoding: "utf-8"})
 console.log(data)
-assert(data === "hello");
+assert.equal(data, "hello");
