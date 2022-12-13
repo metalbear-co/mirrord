@@ -21,6 +21,7 @@ mirrord-operator = { path = "../operator", features = ["client", "license-fetch"
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
+mirrord-protocol = { path = "../protocol" }
 
 clap.workspace = true
 tracing.workspace = true
@@ -37,6 +38,8 @@ const-random = "0.1.15"
 tokio.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
+miette = "5"
+thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

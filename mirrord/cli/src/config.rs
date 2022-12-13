@@ -256,5 +256,5 @@ pub(super) struct ExtensionExecArgs {
     pub config_file: Option<String>,
     /// Specify target
     #[arg(short = 't')]
-    pub target: Option<String>
+    pub target: Option<String>,
 }

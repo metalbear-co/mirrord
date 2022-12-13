@@ -1665,6 +1665,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "miette"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4afd9b301defa984bbdbe112b4763e093ed191750a0d914a78c1106b2d0fe703"
+dependencies = [
+ "miette-derive",
+ "once_cell",
+ "thiserror",
+ "unicode-width",
+]
+
+[[package]]
+name = "miette-derive"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97c2401ab7ac5282ca5c8b518a87635b1a93762b0b90b9990c509888eeccba29"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1708,18 +1731,21 @@ dependencies = [
  "exec",
  "k8s-openapi",
  "kube",
+ "miette",
  "mirrord-auth",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-layer",
  "mirrord-operator",
  "mirrord-progress",
+ "mirrord-protocol",
  "mirrord-sip",
  "rand 0.8.5",
  "regex",
  "reqwest",
  "semver 1.0.14",
  "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1817,7 +1843,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.8.5",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "thiserror",
  "tokio",
@@ -1858,7 +1884,7 @@ dependencies = [
  "os_info",
  "rand 0.8.5",
  "regex",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "socket2",
  "stacker",

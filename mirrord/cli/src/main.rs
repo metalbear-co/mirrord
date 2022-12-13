@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use config::*;
 use const_random::const_random;
@@ -14,15 +13,9 @@ use exec::execvp;
 use extension::extension_exec;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
+use miette::miette;
 use mirrord_auth::AuthConfig;
-use mirrord_config::LayerConfig;
-use mirrord_kube::api::{
-    container::SKIP_NAMES,
-    get_k8s_resource_api,
-    kubernetes::{create_kube_api, KubernetesAPI},
-    AgentManagment,
-};
-use mirrord_operator::client::OperatorApiDiscover;
+use mirrord_kube::api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api};
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -33,8 +26,12 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
-mod operator;
+mod connection;
+mod error;
 mod extension;
+mod operator;
+
+pub(crate) use error::{CliError, Result};
 
 #[cfg(target_os = "linux")]
 const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
@@ -122,13 +119,22 @@ fn add_to_preload(path: &str) -> Result<()> {
         }
         Err(e) => {
             error!("Failed to set environment variable with error {:?}", e);
-            Err(anyhow!("Failed to set environment variable"))
+            Err(miette!("Failed to set environment variable"))
         }
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn create_agent(progress: &TaskProgress) -> Result<()> {
+async fn create_agent(config: &LayerConfig, progress: &TaskProgress) -> Result<()> {
+    if config.agent.pause {
+        if config.agent.ephemeral {
+            error!("Pausing is not yet supported together with an ephemeral agent container.");
+            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
+        }
+        if !config.feature.network.incoming.is_steal() {
+            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+        }
+    }
 
     // Set env var for children to re-use.
     std::env::set_var("MIRRORD_CONNECT_AGENT", pod_agent_name);
@@ -299,7 +305,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
             )
         }
     }
-    Err(anyhow!("Failed to execute binary"))
+    Err(miette!("Failed to execute binary"))
 }
 
 /// Returns a list of (pod name, [container names]) pairs.

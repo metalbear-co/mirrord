@@ -53,6 +53,7 @@ use crate::{
 };
 
 mod common;
+mod connection;
 mod detour;
 mod error;
 #[cfg(target_os = "macos")]
@@ -462,7 +463,7 @@ async fn start_layer_thread(
     config: LayerConfig,
 ) {
     // Environment was set by cli/extension, so we can skip that.
-    if !std::env::var("MIRRORD_EXTERNAL_ENV").is_ok() {
+    if std::env::var("MIRRORD_EXTERNAL_ENV").is_err() {
         let (env_vars_filter, env_vars_select) = match (
             config
                 .feature
