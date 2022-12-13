@@ -256,11 +256,11 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut buffer = vec![0; buffer_size];
+                    let mut buffer = vec![0; buffer_size as usize];
                     let read_amount =
                         file.read(&mut buffer).map(|read_amount| ReadFileResponse {
                             bytes: buffer,
-                            read_amount,
+                            read_amount: read_amount as u64,
                         })?;
 
                     Ok(read_amount)
@@ -289,7 +289,7 @@ impl FileManager {
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
                     let mut reader = BufReader::new(std::io::Read::by_ref(file));
-                    let mut buffer = String::with_capacity(buffer_size);
+                    let mut buffer = String::with_capacity(buffer_size as usize);
                     let read_result = reader
                         .read_line(&mut buffer)
                         .and_then(|read_amount| {
@@ -309,7 +309,7 @@ impl FileManager {
                             // return the full buffer.
                             let response = ReadFileResponse {
                                 bytes: buffer.into_bytes(),
-                                read_amount,
+                                read_amount: read_amount as u64,
                             };
 
                             Ok(response)
@@ -334,7 +334,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut buffer = vec![0; buffer_size];
+                    let mut buffer = vec![0; buffer_size as usize];
 
                     let read_result = file.read_at(&mut buffer, start_from).map(|read_amount| {
                         // We handle the extra bytes in the `pread` hook, so here we can just
@@ -364,9 +364,12 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let written_amount = file
-                        .write_at(&buffer, start_from)
-                        .map(|written_amount| WriteFileResponse { written_amount })?;
+                    let written_amount =
+                        file.write_at(&buffer, start_from).map(|written_amount| {
+                            WriteFileResponse {
+                                written_amount: written_amount as u64,
+                            }
+                        })?;
 
                     Ok(written_amount)
                 } else {

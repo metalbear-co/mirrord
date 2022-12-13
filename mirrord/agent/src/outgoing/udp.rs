@@ -191,7 +191,7 @@ impl UdpOutgoingApi {
                         }) => {
                             let daemon_write = match writers
                                 .get_mut(&connection_id)
-                                .ok_or(ResponseError::NotFound(connection_id as usize))
+                                .ok_or(ResponseError::NotFound(connection_id))
                             {
                                 Ok((mirror, remote_address)) => mirror
                                     .send((BytesMut::from(bytes.as_slice()), *remote_address))

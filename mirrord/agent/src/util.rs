@@ -140,7 +140,7 @@ where
 // delete `new`.
 impl<T> Default for IndexAllocator<T>
 where
-    T: Default + Num,
+    T: Default + Num + CheckedAdd + NumCast + Clone,
 {
     fn default() -> Self {
         IndexAllocator::new()
