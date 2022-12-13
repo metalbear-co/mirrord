@@ -272,7 +272,7 @@ async fn test_node_close(
                 write: false,
                 append: false,
                 truncate: false,
-                create: true,
+                create: false,
                 create_new: false,
             },
         }))
