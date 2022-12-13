@@ -1,18 +1,16 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_protocol::{
-    tcp::{DaemonTcp, TcpData},
+    tcp::{DaemonTcp, PortSteal, TcpData},
     ConnectionId, Port,
 };
 use tokio::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{Receiver, Sender},
 };
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 use tracing::log::warn;
-use mirrord_protocol::tcp::PortSteal;
 
 use self::ip_tables::SafeIpTables;
 use crate::{
@@ -93,7 +91,6 @@ impl HttpFilterManager {
     }
 }
 
-
 /// The subscriptions to steal traffic from a specific port.
 #[derive(Debug)]
 enum StealSubscription {
@@ -102,4 +99,3 @@ enum StealSubscription {
     /// This port's traffic is filtered and distributed to clients using a manager.
     HttpFiltered(HttpFilterManager),
 }
-

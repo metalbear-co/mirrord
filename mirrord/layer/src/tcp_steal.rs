@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
+    tcp::{LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData},
     ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
@@ -15,7 +15,6 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{error, trace};
-use mirrord_protocol::tcp::PortSteal::Steal;
 
 use crate::{
     error::LayerError,
@@ -102,9 +101,11 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(Steal(port))))
-            .await
-            .map_err(From::from)
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+            Steal(port),
+        )))
+        .await
+        .map_err(From::from)
     }
 }
 
