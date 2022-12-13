@@ -188,11 +188,8 @@ impl HttpFilterBuilder {
                 if peeked_amount == 0 {
                     Err(HttpError::Empty)
                 } else {
-                    Ok(peeked_amount)
+                    HttpVersion::new(&buffer[1..peeked_amount], &H2_PREFACE[1..peeked_amount])
                 }
-            })
-            .and_then(|peeked_amount| {
-                HttpVersion::new(&buffer[1..peeked_amount], &H2_PREFACE[1..peeked_amount])
             }) {
             Ok(http_version) => {
                 let (hyper_stream, interceptor_stream) = duplex(1500);
