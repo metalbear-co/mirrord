@@ -341,7 +341,7 @@ impl FileManager {
                         // return the full buffer.
                         ReadFileResponse {
                             bytes: buffer,
-                            read_amount,
+                            read_amount: read_amount as u64,
                         }
                     })?;
 
@@ -420,7 +420,7 @@ impl FileManager {
                     let write_result =
                         file.write(&write_bytes)
                             .map(|write_amount| WriteFileResponse {
-                                written_amount: write_amount,
+                                written_amount: write_amount as u64,
                             })?;
 
                     Ok(write_result)

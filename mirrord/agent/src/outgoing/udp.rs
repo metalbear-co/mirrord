@@ -126,7 +126,7 @@ impl UdpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
-        let mut allocator = IndexAllocator::default();
+        let mut allocator = IndexAllocator::<ConnectionId>::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
