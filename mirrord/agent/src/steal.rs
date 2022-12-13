@@ -9,6 +9,7 @@ use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 use tracing::log::warn;
 use mirrord_protocol::tcp::PortSteal;
@@ -84,6 +85,11 @@ impl HttpFilterManager {
 
     fn has_client(&self, client_id: ClientId) -> bool {
         false // TODO
+    }
+
+    fn new_connection(&self, stream: TcpStream) -> Result<()> {
+        // TODO
+        Ok(())
     }
 }
 

@@ -243,7 +243,9 @@ impl TcpConnectionStealer {
 
         match self.port_subscriptions.get(&real_address.port()) {
             Some(StealSubscription::Unfiltered(client_id)) => self.steal_connection(client_id.clone(), address, real_address.port(), stream).await,
-            Some(StealSubscription::HttpFiltered(_manager)) => todo!(),
+            Some(StealSubscription::HttpFiltered(manager)) => {
+                manager.new_connection(stream)
+            },
             // Got connection to port without subscribers. This would be a bug, as we are supposed
             // to set the iptables rules such that we only redirect ports with subscribers.
             None => Err(AgentError::UnexpectedConnection(real_address.port())),
