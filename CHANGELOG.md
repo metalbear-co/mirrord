@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't add temp prefix when using `extract` command.
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
+- Add `/System` to default ignore list.
 
 ### Fixed
 
