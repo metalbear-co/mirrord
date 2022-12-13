@@ -14,13 +14,17 @@ use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
+    sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::*;
-use crate::AgentError::AgentInvariantViolated;
+use crate::{
+    steal::StealSubscription::{HttpFiltered, Unfiltered},
+    AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
+};
 
 /// Created once per agent during initialization.
 ///
@@ -65,6 +69,12 @@ pub(crate) struct TcpConnectionStealer {
     /// Map a `ClientId` to a set of its `ConnectionId`s. Used to close all connections when
     /// client closes.
     client_connections: HashMap<ClientId, HashSet<ConnectionId>>,
+
+    /// Mspc sender to clone and give http filter managers so that they can send back requests.
+    http_request_sender: Sender<StealerHttpRequest>,
+
+    /// Receives filtered HTTP requests that need to be forwarded a client.
+    http_request_receiver: Receiver<StealerHttpRequest>,
 }
 
 impl TcpConnectionStealer {
@@ -83,6 +93,8 @@ impl TcpConnectionStealer {
             set_namespace(namespace).unwrap();
         }
 
+        let (http_request_sender, http_request_receiver) = channel(1024);
+
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
             command_rx,
@@ -94,6 +106,8 @@ impl TcpConnectionStealer {
             read_streams: StreamMap::with_capacity(8),
             connection_clients: HashMap::with_capacity(8),
             client_connections: HashMap::with_capacity(8),
+            http_request_sender,
+            http_request_receiver,
         })
     }
 
@@ -126,6 +140,7 @@ impl TcpConnectionStealer {
                         self.handle_command(command).await?;
                     } else { break; }
                 },
+                request = self.http_request_receiver.recv() => self.forward_stolen_http_request(request).await?,
                 // Accepts a connection that we're going to be stealing traffic from.
                 accept = self.stealer.accept() => {
                     match accept {
@@ -151,6 +166,34 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
+    }
+
+    /// Forward a stolen HTTP request from the http filter to the direction of the layer.
+    ///
+    /// HttpFilter --> Stealer --> Layer --> Local App
+    ///                        ^- You are here.
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn forward_stolen_http_request(
+        &mut self,
+        request: Option<StealerHttpRequest>,
+    ) -> Result<(), AgentError> {
+        if let Some(request) = request {
+            if let Some(daemon_tx) = self.clients.get(&request.client_id) {
+                Ok(daemon_tx
+                    .send(DaemonTcp::HttpRequest(request.into()))
+                    .await?)
+            } else {
+                // TODO: can this happen when a client unsubscribes?
+                warn!(
+                    "Got stolen request for client {:?} that is not, or no longer, subscribed.",
+                    request.client_id
+                );
+                Ok(())
+            }
+        } else {
+            // This shouldn't ever happen, as `self` also holds a sender of that channel.
+            Err(HttpRequestReceiverClosed)
+        }
     }
 
     /// Forwards data from a remote stream to the client with `connection_id`.
@@ -312,20 +355,22 @@ impl TcpConnectionStealer {
             }
             PortSteal::HttpFilterSteal(port, regex) => {
                 match self.port_subscriptions.entry(port).or_insert_with(|| {
-                    StealSubscription::HttpFiltered(HttpFilterManager {/* TODO */})
+                    HttpFiltered(HttpFilterManager {
+                        request_sender: self.http_request_sender.clone(),
+                    })
                 }) {
-                    StealSubscription::Unfiltered(earlier_client) => {
-                        error!("Can't filter-steal port {port:?} as it is already being stolen in it's whole by client {earlier_client:?}.");
+                    Unfiltered(earlier_client) => {
+                        error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
                         Err(PortAlreadyStolen(port))
                     }
-                    StealSubscription::HttpFiltered(manager) => {
+                    HttpFiltered(manager) => {
                         if manager.is_empty() {
                             // Is this the first client?
                             // Initialize IP table only when a client is subscribed.
                             // TODO: make the initialization internal to SafeIpTables.
                             self.init_iptables()?;
                         }
-                        // TODO: manager.insert(client_id, regex)
+                        // manager.insert(client_id, regex)?;
                         self.redirect_port(port)?;
                         Ok(port)
                     }
@@ -343,16 +388,12 @@ impl TcpConnectionStealer {
     #[tracing::instrument(level = "trace", skip(self))]
     fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
         let port_unsubscribed = match self.port_subscriptions.get(&port) {
-            Some(StealSubscription::HttpFiltered(manager)) => {
-                //TODO: manager.remove(client_id)
+            Some(HttpFiltered(manager)) => {
+                manager.remove(client_id)?;
                 manager.is_empty()
             }
-            Some(StealSubscription::Unfiltered(subscribed_client))
-                if *subscribed_client == client_id =>
-            {
-                true
-            }
-            Some(StealSubscription::Unfiltered(_)) | None => {
+            Some(Unfiltered(subscribed_client)) if *subscribed_client == client_id => true,
+            Some(Unfiltered(_)) | None => {
                 warn!("A client tried to unsubscribe from a port it was not subscribed to.");
                 false
             }
@@ -373,8 +414,8 @@ impl TcpConnectionStealer {
         self.port_subscriptions
             .iter()
             .filter(|(port, sub)| match sub {
-                StealSubscription::Unfiltered(port_client) => *port_client == client_id,
-                StealSubscription::HttpFiltered(manager) => manager.has_client(client_id),
+                Unfiltered(port_client) => *port_client == client_id,
+                HttpFiltered(manager) => manager.has_client(client_id),
             })
             .map(|(port, sub)| *port)
             .collect()
@@ -436,6 +477,29 @@ impl TcpConnectionStealer {
         }
     }
 
+    /// Forward an HTTP response to a stolen HTTP request from the layer to the `HttpFilterManager`.
+    ///
+    ///                       _________________________agent_________________________
+    /// Local App -> Layer -> ClientConnectionHandler -> Stealer -> HttpFilterManager -> Browser
+    ///                                                          ^- You are here.
+    async fn http_response(
+        &mut self,
+        response: HttpResponse,
+    ) -> std::result::Result<(), AgentError> {
+        match self.port_subscriptions.get(&response.port) {
+            Some(HttpFiltered(manager)) => manager.send_response(response),
+            Some(Unfiltered(_)) | None => {
+                warn!(
+                    "Got an http response to port {:?} which is not being filtered. \
+                Maybe the layer unsubscribed and this is a remainder of a closed connection. \
+                Not forwarding.",
+                    response.port
+                );
+                Ok(())
+            }
+        }
+    }
+
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote
     /// connection.
     /// Also remove connection from connection mappings and free the connection index.
@@ -483,6 +547,7 @@ impl TcpConnectionStealer {
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::ClientClose => self.close_client(client_id)?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
+            Command::HttpResponse(response) => self.http_response(response).await?,
         }
 
         Ok(())

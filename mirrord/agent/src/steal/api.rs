@@ -1,4 +1,4 @@
-use mirrord_protocol::tcp::{DaemonTcp, LayerTcpSteal, TcpData};
+use mirrord_protocol::tcp::{DaemonTcp, HttpResponse, LayerTcpSteal, TcpData};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::*;
@@ -116,6 +116,14 @@ impl TcpStealerApi {
         self.send_command(Command::ResponseData(tcp_data)).await
     }
 
+    /// Handles the conversion of [`LayerTcpSteal::HttpResponse`], that is passed from the
+    /// agent, to an internal stealer command [`Command::HttpResponse`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
+    pub(crate) async fn http_response(&mut self, response: HttpResponse) -> Result<(), AgentError> {
+        self.send_command(Command::HttpResponse(response)).await
+    }
+
     /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
     /// agent, to an internal stealer command [`Command::ClientClose`].
     ///
@@ -134,6 +142,7 @@ impl TcpStealerApi {
             }
             LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
             LayerTcpSteal::Data(tcp_data) => self.client_data(tcp_data).await,
+            LayerTcpSteal::HttpResponse(response) => self.http_response(response).await,
         }
     }
 }

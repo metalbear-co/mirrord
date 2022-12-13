@@ -28,6 +28,27 @@ impl fmt::Debug for TcpData {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpRequest {
+    // pub request: Request<Incoming>,
+    pub request: Vec<u8>, // TODO
+    pub connection_id: ConnectionId,
+    /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
+    /// "lazily", with the first filtered request.
+    pub port: Port,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpResponse {
+    /// This is used to make sure the response is sent in its turn, after responses to all earlier
+    /// requests were already sent.
+    pub request_id: u64,
+    pub connection_id: ConnectionId,
+    pub port: Port,
+    // TODO
+    // pub response: Response<Full<Bytes>>
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TcpClose {
     pub connection_id: ConnectionId,
 }
@@ -49,6 +70,7 @@ pub enum DaemonTcp {
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
     /// flakiness.
     SubscribeResult(RemoteResult<Port>),
+    HttpRequest(HttpRequest),
 }
 
 /// Describes the stealing subscription to a port:
@@ -67,4 +89,5 @@ pub enum LayerTcpSteal {
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),
+    HttpResponse(HttpResponse),
 }

@@ -246,7 +246,7 @@ dependencies = [
  "futures-util",
  "hex",
  "http",
- "hyper",
+ "hyper 0.14.23",
  "hyperlocal",
  "log",
  "pin-project-lite",
@@ -1180,6 +1180,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-body"
+version = "1.0.0-rc1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f038884e63a5a85612eeea789f5e0f54c3ada7306234502543b23d98744781f0"
+dependencies = [
+ "bytes",
+ "http",
+]
+
+[[package]]
 name = "http-range-header"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1209,7 +1219,7 @@ dependencies = [
  "futures-util",
  "h2",
  "http",
- "http-body",
+ "http-body 0.4.5",
  "httparse",
  "httpdate",
  "itoa",
@@ -1222,13 +1232,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d85cfb5d312f278a651d0567873b9c32b28d8ced5603a9242c73c54c93fec814"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body 1.0.0-rc1",
+ "httparse",
+ "httpdate",
+ "itoa",
+ "pin-project-lite",
+ "tokio",
+ "tracing",
+ "want",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
- "hyper",
+ "hyper 0.14.23",
  "log",
  "rustls",
  "rustls-native-certs",
@@ -1242,7 +1273,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbb958482e8c7be4bc3cf272a766a2b0bf1a6755e7a6ae777f017a31d11b13b1"
 dependencies = [
- "hyper",
+ "hyper 0.14.23",
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
@@ -1256,7 +1287,7 @@ checksum = "0fafdf7b2b2de7c9784f76e02c0935e65a8117ec3b768644379983ab333ac98c"
 dependencies = [
  "futures-util",
  "hex",
- "hyper",
+ "hyper 0.14.23",
  "pin-project",
  "tokio",
 ]
@@ -1513,8 +1544,8 @@ dependencies = [
  "either",
  "futures",
  "http",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "hyper-rustls",
  "hyper-timeout",
  "jsonpath_lib",
@@ -1832,6 +1863,7 @@ dependencies = [
  "enum_dispatch",
  "faccess",
  "futures",
+ "hyper 1.0.0-rc.1",
  "iptables",
  "libc",
  "mirrord-protocol",
@@ -1903,8 +1935,8 @@ dependencies = [
  "async-trait",
  "base64",
  "futures",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "k8s-openapi",
  "kube",
  "mirrord-config",
@@ -1933,8 +1965,8 @@ dependencies = [
  "fancy-regex",
  "frida-gum",
  "futures",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "itertools",
  "k8s-openapi",
  "kube",
@@ -2020,6 +2052,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "hyper 1.0.0-rc.1",
  "serde",
  "thiserror",
  "tracing",
@@ -2898,8 +2931,8 @@ dependencies = [
  "futures-util",
  "h2",
  "http",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "hyper-rustls",
  "ipnet",
  "js-sys",
@@ -3797,8 +3830,8 @@ dependencies = [
  "futures-util",
  "h2",
  "http",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
@@ -3858,7 +3891,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http",
- "http-body",
+ "http-body 0.4.5",
  "http-range-header",
  "pin-project-lite",
  "tower-layer",

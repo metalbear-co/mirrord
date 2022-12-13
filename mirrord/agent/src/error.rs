@@ -46,6 +46,9 @@ pub enum AgentError {
     #[error("Receiver channel is closed!")]
     ReceiverClosed,
 
+    #[error("Request channel closed unexpectedly.")]
+    HttpRequestReceiverClosed,
+
     #[error("ConnectRequest sender failed with `{0}`")]
     SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
 
