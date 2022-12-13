@@ -315,7 +315,7 @@ impl LayerConnection {
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
                 Ok(mirrord_protocol::ReadFileResponse {
                     bytes: contents,
-                    read_amount,
+                    read_amount: read_amount as u64,
                 }),
             )))
             .await
@@ -325,8 +325,8 @@ impl LayerConnection {
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
     pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
         let buffer_size = self.expect_file_read(expected_fd).await;
-        let read_amount = min(buffer_size, contents.len());
-        let contents = (&contents.as_bytes()[0..read_amount]).to_vec();
+        let read_amount = min(buffer_size, contents.len() as u64);
+        let contents = (&contents.as_bytes()[0..read_amount as usize]).to_vec();
         self.answer_file_read(contents).await;
         // last call should return 0.
         let _buffer_size = self.expect_file_read(expected_fd).await;

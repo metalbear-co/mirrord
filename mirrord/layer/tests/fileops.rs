@@ -301,7 +301,7 @@ async fn test_node_close(
 
         let metadata = MetadataInternal {
             device_id: 0,
-            size: read_amount,
+            size: read_amount as u64,
             user_id: 2,
             blocks: 3,
             ..Default::default()
@@ -326,7 +326,10 @@ async fn test_node_close(
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Read(Ok(
-            ReadFileResponse { bytes, read_amount },
+            ReadFileResponse {
+                bytes,
+                read_amount: read_amount as u64,
+            },
         ))))
         .await
         .unwrap();
