@@ -138,7 +138,10 @@ where
 
 // TODO(alex): Make this more generic, so we can use `default` everywhere, and
 // delete `new`.
-impl<T> Default for IndexAllocator<T: Default> {
+impl<T> Default for IndexAllocator<T>
+where
+    T: Default + Num,
+{
     fn default() -> Self {
         IndexAllocator::new()
     }
