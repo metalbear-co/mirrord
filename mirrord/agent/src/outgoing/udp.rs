@@ -126,7 +126,7 @@ impl UdpOutgoingApi {
             set_namespace(namespace).unwrap();
         }
 
-        let mut allocator = IndexAllocator::default();
+        let mut allocator = IndexAllocator::<ConnectionId>::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
@@ -191,7 +191,7 @@ impl UdpOutgoingApi {
                         }) => {
                             let daemon_write = match writers
                                 .get_mut(&connection_id)
-                                .ok_or(ResponseError::NotFound(connection_id as usize))
+                                .ok_or(ResponseError::NotFound(connection_id))
                             {
                                 Ok((mirror, remote_address)) => mirror
                                     .send((BytesMut::from(bytes.as_slice()), *remote_address))

@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatRequest {
     pub path: Option<PathBuf>,
-    pub fd: Option<usize>,
+    pub fd: Option<u64>,
     pub follow_symlink: bool,
 }
 

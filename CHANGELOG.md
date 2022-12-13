@@ -12,6 +12,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Don't add temp prefix when using `extract` command.
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
+- Add `/System` to default ignore list.
+- Remove `test_mirrord_layer` from CI as it's covered in integration testing.
+
+### Fixed
+
+- fd leak on Linux when using libuv (Node). Caused undefined behavior. Fixes [#757](https://github.com/metalbear-co/mirrord/issues/757).
 
 ### Misc
 
