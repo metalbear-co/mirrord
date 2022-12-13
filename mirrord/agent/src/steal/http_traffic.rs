@@ -305,6 +305,7 @@ impl HttpFilterManager {
 
     // TODO(alex) [high] 2022-12-12: Is adding a filter like this enough for it to be added to the
     // hyper task? Do we have a possible deadlock here? Tune in next week for the conclusion!
+    //
     /// Inserts a new client (layer) and its filter.
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
@@ -328,6 +329,18 @@ impl HttpFilterManager {
     // If it matches the filter, we send this request via a channel to the layer. And on the
     // Manager, we wait for a message from the layer to send on the writer side of the actual
     // TcpStream.
+    //
+    /// Starts a new hyper task if the `connection` contains a _valid-ish_ HTTP request.
+    ///
+    /// The [`TcpStream`] itself os not what we feed hyper, instead we create a [`DuplexStream`],
+    /// where one half (_server_) is where hyper does its magic, while the other half
+    /// (_interceptor_) sends the bytes we get from the remote connection.
+    ///
+    /// The _interceptor_ stream is fed the bytes we're reading from the _original_ [`TcpStream`],
+    /// and sends them to the _server_ stream.
+    ///
+    /// This mechanism is required to avoid having hyper send back [`Response`]s to the remote
+    /// connection.
     async fn new_connection(&self, connection: TcpStream) -> Result<HttpFilter, HttpError> {
         HttpFilterBuilder::new(connection, self.client_filters.clone())
             .await?
