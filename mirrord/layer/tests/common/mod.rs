@@ -264,7 +264,7 @@ impl LayerConnection {
     }
 
     /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
-    pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: usize) {
+    pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: u64) {
         // Verify the app tries to open the expected file.
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
@@ -293,7 +293,7 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_file_read(&mut self, expected_fd: usize) -> usize {
+    pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
             mirrord_protocol::ReadFileRequest {
@@ -323,7 +323,7 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: usize) {
+    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
         let buffer_size = self.expect_file_read(expected_fd).await;
         let read_amount = min(buffer_size, contents.len());
         let contents = (&contents.as_bytes()[0..read_amount]).to_vec();
@@ -335,7 +335,7 @@ impl LayerConnection {
 
     /// Read next layer message and verify it's close.
     /// Answer that close.
-    pub async fn expect_file_close(&mut self, fd: usize) {
+    pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
