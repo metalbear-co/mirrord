@@ -285,6 +285,36 @@ async fn test_node_close(
         .await
         .unwrap();
 
+    let bytes = "hello".as_bytes().to_vec();
+    let read_amount = bytes.len();
+    // on macOS it will send xstat before reading.
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: read_amount,
+            user_id: 2,
+            blocks: 3,
+            ..Default::default()
+        };
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
+
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
@@ -293,8 +323,6 @@ async fn test_node_close(
         }))
     );
 
-    let bytes = "hello".as_bytes().to_vec();
-    let read_amount = bytes.len();
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Read(Ok(
