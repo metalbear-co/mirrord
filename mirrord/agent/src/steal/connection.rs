@@ -248,7 +248,7 @@ impl TcpConnectionStealer {
 
         match self.port_subscriptions.get(&real_address.port()) {
             Some(StealSubscription::Unfiltered(client_id)) => {
-                self.steal_connection(client_id.clone(), address, real_address.port(), stream)
+                self.steal_connection(*client_id, address, real_address.port(), stream)
                     .await
             }
             Some(StealSubscription::HttpFiltered(manager)) => manager.new_connection(stream),
@@ -376,7 +376,7 @@ impl TcpConnectionStealer {
                 StealSubscription::Unfiltered(port_client) => *port_client == client_id,
                 StealSubscription::HttpFiltered(manager) => manager.has_client(client_id),
             })
-            .map(|(port, sub)| port.clone())
+            .map(|(port, sub)| *port)
             .collect()
     }
 
@@ -387,7 +387,7 @@ impl TcpConnectionStealer {
     fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let ports = self.get_client_ports(client_id);
         for port in ports.iter() {
-            self.port_unsubscribe(client_id, port.clone())?
+            self.port_unsubscribe(client_id, *port)?
         }
 
         // Close and remove all remaining connections of the closed client.
