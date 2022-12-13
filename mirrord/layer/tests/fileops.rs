@@ -336,6 +336,25 @@ async fn test_node_close(
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+            remote_fd: 1,
+            buffer_size: 8192
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Read(Ok(
+            ReadFileResponse {
+                bytes: vec![],
+                read_amount: 0,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
