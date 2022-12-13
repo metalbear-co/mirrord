@@ -430,7 +430,7 @@ impl Application {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
-            Application::NodeHTTP => {
+            Application::NodeFileOps => {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
