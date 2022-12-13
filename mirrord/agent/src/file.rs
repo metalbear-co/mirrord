@@ -29,8 +29,8 @@ pub enum RemoteFile {
 #[derive(Debug, Default)]
 pub struct FileManager {
     root_path: PathBuf,
-    pub open_files: HashMap<usize, RemoteFile>,
-    index_allocator: IndexAllocator<usize>,
+    pub open_files: HashMap<u64, RemoteFile>,
+    index_allocator: IndexAllocator<u64>,
 }
 
 /// Resolve a path that might contain symlinks from a specific container to a path accessible from
@@ -215,7 +215,7 @@ impl FileManager {
     #[tracing::instrument(level = "trace", skip(self))]
     fn open_relative(
         &mut self,
-        relative_fd: usize,
+        relative_fd: u64,
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
@@ -250,7 +250,7 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read(&mut self, fd: usize, buffer_size: usize) -> RemoteResult<ReadFileResponse> {
+    pub(crate) fn read(&mut self, fd: u64, buffer_size: u64) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -280,8 +280,8 @@ impl FileManager {
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_line(
         &mut self,
-        fd: usize,
-        buffer_size: usize,
+        fd: u64,
+        buffer_size: u64,
     ) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
@@ -325,8 +325,8 @@ impl FileManager {
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
         &mut self,
-        fd: usize,
-        buffer_size: usize,
+        fd: u64,
+        buffer_size: u64,
         start_from: u64,
     ) -> RemoteResult<ReadFileResponse> {
         self.open_files
@@ -355,7 +355,7 @@ impl FileManager {
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn write_limited(
         &mut self,
-        fd: usize,
+        fd: u64,
         start_from: u64,
         buffer: Vec<u8>,
     ) -> RemoteResult<WriteFileResponse> {
@@ -375,11 +375,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn seek(
-        &mut self,
-        fd: usize,
-        seek_from: SeekFrom,
-    ) -> RemoteResult<SeekFileResponse> {
+    pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
         trace!(
             "FileManager::seek -> fd {:#?} | seek_from {:#?}",
             fd,
@@ -404,7 +400,7 @@ impl FileManager {
 
     pub(crate) fn write(
         &mut self,
-        fd: usize,
+        fd: u64,
         write_bytes: Vec<u8>,
     ) -> RemoteResult<WriteFileResponse> {
         trace!(
@@ -431,7 +427,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: usize) -> RemoteResult<CloseFileResponse> {
+    pub(crate) fn close(&mut self, fd: u64) -> RemoteResult<CloseFileResponse> {
         trace!("FileManager::close -> fd {:#?}", fd,);
 
         let _file = self
@@ -471,7 +467,7 @@ impl FileManager {
     pub(crate) fn xstat(
         &mut self,
         path: Option<PathBuf>,
-        fd: Option<usize>,
+        fd: Option<u64>,
         follow_symlink: bool,
     ) -> RemoteResult<XstatResponse> {
         let path = match (path, fd) {
