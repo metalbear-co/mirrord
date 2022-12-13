@@ -1,38 +1,28 @@
 // #![warn(missing_docs)]
 // #![warn(rustdoc::missing_crate_level_docs)]
 
-use core::{convert::Infallible, pin::Pin};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use core::{future::Future, pin::Pin};
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::{Future, FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use hyper::{
-    body::{self, Incoming},
+    body::Incoming,
     server::conn::{http1, http2},
-    service::{service_fn, Service},
+    service::Service,
     Request, Response,
 };
-use mirrord_protocol::ConnectionId;
 use thiserror::Error;
 use tokio::{
-    io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf},
+    io::{duplex, DuplexStream},
     net::TcpStream,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
+use tracing::error;
 
-use crate::{
-    error::AgentError,
-    util::{run_thread, ClientId},
-};
+use crate::util::ClientId;
 
 #[derive(Error, Debug)]
 pub(super) enum HttpError {
@@ -115,6 +105,24 @@ struct HyperFilter {
     passthrough_tx: Sender<PassthroughRequest>,
 }
 
+// TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
+// agent.
+/// Creates a task to send a message (either [`CapturedRequest`] or [`PassthroughRequest`]) to the
+/// receiving end that lives in the stealer.
+///
+/// As the [`hyper::service::Service`] trait doesn't support `async fn` for the [`Service::call`]
+/// method, we use this helper function that allows us to send a `value: T` via a `Sender<T>`
+/// without the need to call `await`.
+fn spawn_send<T>(value: T, tx: Sender<T>)
+where
+    T: Send + 'static,
+    HttpError: From<tokio::sync::mpsc::error::SendError<T>>,
+{
+    tokio::spawn(async move {
+        tx.send(value).map_err(HttpError::from).await.unwrap();
+    });
+}
+
 impl Service<Request<Incoming>> for HyperFilter {
     type Response = Response<String>;
 
@@ -124,9 +132,12 @@ impl Service<Request<Incoming>> for HyperFilter {
 
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         println!("hyper request \n{:#?}", request);
-        let captured_tx = self.captured_tx.clone();
 
-        request
+        // TODO(alex) [mid] 2022-12-13: Do we care at all about what is sent from here as a
+        // response to our client duplex stream?
+        let response = async { Ok(Response::new("async is love".to_string())) };
+
+        if let Some(client_id) = request
             .headers()
             .iter()
             .map(|(header_name, header_value)| {
@@ -141,28 +152,18 @@ impl Service<Request<Incoming>> for HyperFilter {
                     }
                 })
             })
-            .map(move |client_id| {
-                let captured = CapturedRequest { client_id, request };
+        {
+            spawn_send(
+                CapturedRequest { client_id, request },
+                self.captured_tx.clone(),
+            );
 
-                captured_tx
-                    .send(captured)
-                    .map_ok(|()| Response::new(format!("")))
-                    .map_err(HttpError::from)
-                    .into_future()
-                    .boxed()
-            })
-            .unwrap()
+            Box::pin(response)
+        } else {
+            spawn_send(PassthroughRequest(request), self.passthrough_tx.clone());
 
-        // TODO(alex) [high] 2022-12-13: Now I need to send this data back for the 2 cases:
-        //
-        // 1. `Some(_)`: send the client_id and the request to the stealer, this request has to
-        // reach the layer asap!
-        //
-        // 2. `None`: not filtered, send this to the agent, and let it handle the passthrough?
-
-        // client_request_with_id
-
-        // Box::pin(async { Ok(Response::new("Boo".to_string())) })
+            Box::pin(response)
+        }
     }
 }
 
@@ -213,13 +214,6 @@ impl HttpFilterBuilder {
         }
     }
 
-    /*
-       key: .*3
-
-       key: value
-       key2: value2
-    */
-
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
     fn start(self) -> Result<HttpFilter, HttpError> {
@@ -234,16 +228,8 @@ impl HttpFilterBuilder {
         let (captured_tx, captured_rx) = channel(1500);
         let (passthrough_tx, passthrough_rx) = channel(1500);
 
-        let client_f1 = client_filters.clone();
         let hyper_task = match http_version {
             HttpVersion::V1 => tokio::task::spawn(async move {
-                // TODO(alex) [high] 2022-12-12: We need a channel in the handler to pass the
-                // fully built request to the agent (which will be sent to
-                // the layer).
-
-                // TODO(alex) [high] 2022-12-13: To solve this we can go 2 ways:
-                // 1. Use async closures;
-                // 2. Closure first, then async move;
                 http1::Builder::new()
                     .serve_connection(
                         hyper_stream,
@@ -274,11 +260,10 @@ impl HttpFilterBuilder {
     }
 }
 
-// TODO(alex) [mid] 2022-12-12: Wrapper around some of the streams/channels we need to make the
-// hyper task and the stealer talk.
-//
-// Need a `Sender<Request>` channel here I think, that we use inside hypers' `service_fn` to send
-// the request to the stealer.
+/// Used by the stealer handler to:
+///
+/// 1. Read the requests from hyper's channels through [`captured_rx`], and [`passthrough_rx`];
+/// 2. Send the raw bytes we got from the remote connection to hyper through [`interceptor_stream`];
 struct HttpFilter {
     hyper_task: JoinHandle<Result<(), HttpError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
@@ -305,6 +290,10 @@ pub(super) struct HttpFilterManager {
 }
 
 impl HttpFilterManager {
+    /// Creates a new [`HttpFilterManager`] per port.
+    ///
+    /// You can't create just an empty [`HttpFilterManager`], as we don't steal traffic on ports
+    /// that no client has registered interest in.
     pub(super) fn new(port: u16, client_id: ClientId, filter: Regex) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters
@@ -319,8 +308,20 @@ impl HttpFilterManager {
 
     // TODO(alex) [high] 2022-12-12: Is adding a filter like this enough for it to be added to the
     // hyper task? Do we have a possible deadlock here? Tune in next week for the conclusion!
+    /// Inserts a new client (layer) and its filter.
+    ///
+    /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
+    /// here will impact the tasks as well.
     pub(super) fn new_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
         self.client_filters.insert(client_id, filter)
+    }
+
+    /// Removes a client (layer) from [`HttpFilterManager::client_filters`].
+    ///
+    /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so removing a client
+    /// here will impact the tasks as well.
+    pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, Regex)> {
+        self.client_filters.remove(client_id)
     }
 
     // TODO(alex) [high] 2022-12-12: hyper doesn't take the actual stream, we're going to be
@@ -330,11 +331,9 @@ impl HttpFilterManager {
     // If it matches the filter, we send this request via a channel to the layer. And on the
     // Manager, we wait for a message from the layer to send on the writer side of the actual
     // TcpStream.
-    async fn new_connection(&self, connection: TcpStream) -> Result<(), HttpError> {
-        let http_filter = HttpFilterBuilder::new(connection, self.client_filters.clone())
+    async fn new_connection(&self, connection: TcpStream) -> Result<HttpFilter, HttpError> {
+        HttpFilterBuilder::new(connection, self.client_filters.clone())
             .await?
-            .start()?;
-
-        todo!()
+            .start()
     }
 }
