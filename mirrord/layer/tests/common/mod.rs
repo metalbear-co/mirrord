@@ -362,6 +362,7 @@ pub enum Application {
     PythonDontLoad,
     RustFileOps,
     EnvBashCat,
+    NodeFileOps,
 }
 
 impl Application {
@@ -401,6 +402,7 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
+            Application::NodeFileOps => String::from("node"),
         }
     }
 
@@ -428,6 +430,10 @@ impl Application {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeHTTP => {
+                app_path.push("fileops.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::Go19HTTP => vec![],
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
@@ -444,7 +450,10 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonDontLoad | Application::RustFileOps | Application::EnvBashCat => {
+            Application::PythonDontLoad
+            | Application::RustFileOps
+            | Application::EnvBashCat
+            | Application::NodeFileOps => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,

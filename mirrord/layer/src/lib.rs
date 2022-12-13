@@ -546,6 +546,15 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
         );
+        // Solve leak on uvloop which calls the syscall directly.
+        #[cfg(target_os = "linux")]
+        replace!(
+            &mut hook_manager,
+            "uv_fs_close",
+            uv_fs_close,
+            FnUv_fs_close,
+            FN_UV_FS_CLOSE
+        );
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -602,6 +611,12 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
+    close_layer_fd(fd);
+    FN_UV_FS_CLOSE(a, b, fd, c)
 }
 
 pub(crate) const FAIL_STILL_STUCK: &str = r#"

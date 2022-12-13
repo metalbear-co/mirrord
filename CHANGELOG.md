@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
 
+### Fixed
+
+- fd leak on Linux when using libuv (Node). Caused undefined behavior. Fixes [#757](https://github.com/metalbear-co/mirrord/issues/757).
+
 ### Misc
 
 - Better separation in mirrord cli.
