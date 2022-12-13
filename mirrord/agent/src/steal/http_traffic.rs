@@ -1,7 +1,7 @@
 // #![warn(missing_docs)]
 // #![warn(rustdoc::missing_crate_level_docs)]
 
-use core::convert::Infallible;
+use core::{convert::Infallible, pin::Pin};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -9,11 +9,11 @@ use std::{
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::TryFutureExt;
+use futures::{Future, FutureExt, TryFutureExt};
 use hyper::{
-    body,
+    body::{self, Incoming},
     server::conn::{http1, http2},
-    service::service_fn,
+    service::{service_fn, Service},
     Request, Response,
 };
 use mirrord_protocol::ConnectionId;
@@ -21,7 +21,10 @@ use thiserror::Error;
 use tokio::{
     io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream, ReadBuf},
     net::TcpStream,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
     task::JoinHandle,
 };
 use tracing::{debug, error};
@@ -32,7 +35,7 @@ use crate::{
 };
 
 #[derive(Error, Debug)]
-pub enum HttpError {
+pub(super) enum HttpError {
     #[error("Failed parsing HTTP with 0 bytes!")]
     Empty,
 
@@ -53,6 +56,12 @@ pub enum HttpError {
 
     #[error("Failed with Hyper `{0}`!")]
     Hyper(#[from] hyper::Error),
+
+    #[error("Failed with Captured `{0}`!")]
+    CapturedSender(#[from] tokio::sync::mpsc::error::SendError<CapturedRequest>),
+
+    #[error("Failed with Passthrough `{0}`!")]
+    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<PassthroughRequest>),
 }
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
@@ -69,7 +78,7 @@ struct HttpFilterBuilder {
     original_stream: TcpStream,
     hyper_stream: DuplexStream,
     interceptor_stream: DuplexStream,
-    filters: Arc<DashMap<ClientId, Regex>>,
+    client_filters: Arc<DashMap<ClientId, Regex>>,
 }
 
 impl HttpVersion {
@@ -88,6 +97,72 @@ impl HttpVersion {
         } else {
             Err(HttpError::NotHttp)
         }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct CapturedRequest {
+    client_id: ClientId,
+    request: Request<Incoming>,
+}
+
+#[derive(Debug)]
+pub(super) struct PassthroughRequest(Request<Incoming>);
+
+struct HyperFilter {
+    filters: Arc<DashMap<ClientId, Regex>>,
+    captured_tx: Sender<CapturedRequest>,
+    passthrough_tx: Sender<PassthroughRequest>,
+}
+
+impl Service<Request<Incoming>> for HyperFilter {
+    type Response = Response<String>;
+
+    type Error = HttpError;
+
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn call(&mut self, request: Request<Incoming>) -> Self::Future {
+        println!("hyper request \n{:#?}", request);
+        let captured_tx = self.captured_tx.clone();
+
+        request
+            .headers()
+            .iter()
+            .map(|(header_name, header_value)| {
+                format!("{}={}", header_name, header_value.to_str().unwrap())
+            })
+            .find_map(|header| {
+                self.filters.iter().find_map(|filter| {
+                    if filter.is_match(&header).unwrap() {
+                        Some(filter.key().clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .map(move |client_id| {
+                let captured = CapturedRequest { client_id, request };
+
+                captured_tx
+                    .send(captured)
+                    .map_ok(|()| Response::new(format!("")))
+                    .map_err(HttpError::from)
+                    .into_future()
+                    .boxed()
+            })
+            .unwrap()
+
+        // TODO(alex) [high] 2022-12-13: Now I need to send this data back for the 2 cases:
+        //
+        // 1. `Some(_)`: send the client_id and the request to the stealer, this request has to
+        // reach the layer asap!
+        //
+        // 2. `None`: not filtered, send this to the agent, and let it handle the passthrough?
+
+        // client_request_with_id
+
+        // Box::pin(async { Ok(Response::new("Boo".to_string())) })
     }
 }
 
@@ -123,7 +198,7 @@ impl HttpFilterBuilder {
 
                 Ok(Self {
                     http_version,
-                    filters,
+                    client_filters: filters,
                     original_stream: tcp_stream,
                     hyper_stream,
                     interceptor_stream,
@@ -138,6 +213,13 @@ impl HttpFilterBuilder {
         }
     }
 
+    /*
+       key: .*3
+
+       key: value
+       key2: value2
+    */
+
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
     fn start(self) -> Result<HttpFilter, HttpError> {
@@ -146,22 +228,30 @@ impl HttpFilterBuilder {
             original_stream,
             hyper_stream,
             interceptor_stream,
-            filters,
+            client_filters,
         } = self;
 
+        let (captured_tx, captured_rx) = channel(1500);
+        let (passthrough_tx, passthrough_rx) = channel(1500);
+
+        let client_f1 = client_filters.clone();
         let hyper_task = match http_version {
             HttpVersion::V1 => tokio::task::spawn(async move {
-                let regexes = filters.iter().map(|k| k).collect::<Vec<_>>();
+                // TODO(alex) [high] 2022-12-12: We need a channel in the handler to pass the
+                // fully built request to the agent (which will be sent to
+                // the layer).
 
-                // TODO(alex) [high] 2022-12-12: We need a channel in the handler to pass the fully
-                // built request to the agent (which will be sent to the layer).
+                // TODO(alex) [high] 2022-12-13: To solve this we can go 2 ways:
+                // 1. Use async closures;
+                // 2. Closure first, then async move;
                 http1::Builder::new()
                     .serve_connection(
                         hyper_stream,
-                        service_fn(|request: Request<body::Incoming>| async move {
-                            println!("hyper request \n{:#?}", request);
-                            Ok::<_, Infallible>(Response::new("hello".to_string()))
-                        }),
+                        HyperFilter {
+                            filters: client_filters,
+                            captured_tx,
+                            passthrough_tx,
+                        },
                     )
                     .await
                     .map_err(From::from)
@@ -178,6 +268,8 @@ impl HttpFilterBuilder {
             hyper_task,
             original_stream,
             interceptor_stream,
+            captured_rx,
+            passthrough_rx,
         })
     }
 }
@@ -201,27 +293,34 @@ struct HttpFilter {
     /// We use [`DuplexStream::write`] to write the bytes we have `read` from [`original_stream`]
     /// to the hyper task, acting as a "client".
     interceptor_stream: DuplexStream,
+    captured_rx: Receiver<CapturedRequest>,
+    passthrough_rx: Receiver<PassthroughRequest>,
 }
 
 /// Created for every new port we want to filter HTTP traffic on.
 pub(super) struct HttpFilterManager {
     // TODO(alex) [low] 2022-12-12: Probably don't need this, adding for debugging right now.
     port: u16,
-    filters: Arc<DashMap<ClientId, Regex>>,
+    client_filters: Arc<DashMap<ClientId, Regex>>,
 }
 
 impl HttpFilterManager {
     pub(super) fn new(port: u16, client_id: ClientId, filter: Regex) -> Self {
-        let filters = Arc::new(DashMap::with_capacity(128));
-        filters.insert(client_id, filter).expect("First insertion!");
+        let client_filters = Arc::new(DashMap::with_capacity(128));
+        client_filters
+            .insert(client_id, filter)
+            .expect("First insertion!");
 
-        Self { port, filters }
+        Self {
+            port,
+            client_filters,
+        }
     }
 
     // TODO(alex) [high] 2022-12-12: Is adding a filter like this enough for it to be added to the
     // hyper task? Do we have a possible deadlock here? Tune in next week for the conclusion!
     pub(super) fn new_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
-        self.filters.insert(client_id, filter)
+        self.client_filters.insert(client_id, filter)
     }
 
     // TODO(alex) [high] 2022-12-12: hyper doesn't take the actual stream, we're going to be
@@ -232,7 +331,7 @@ impl HttpFilterManager {
     // Manager, we wait for a message from the layer to send on the writer side of the actual
     // TcpStream.
     async fn new_connection(&self, connection: TcpStream) -> Result<(), HttpError> {
-        let http_filter = HttpFilterBuilder::new(connection, self.filters.clone())
+        let http_filter = HttpFilterBuilder::new(connection, self.client_filters.clone())
             .await?
             .start()?;
 
