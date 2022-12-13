@@ -16,7 +16,7 @@ pub enum ResponseError {
     AllocationFailure(String),
 
     #[error("Failed to find resource `{0}`!")]
-    NotFound(usize),
+    NotFound(u64),
 
     #[error("Remote operation expected fd `{0}` to be a directory, but it's a file!")]
     NotDirectory(u64),

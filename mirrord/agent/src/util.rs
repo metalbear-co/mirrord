@@ -138,7 +138,7 @@ where
 
 // TODO(alex): Make this more generic, so we can use `default` everywhere, and
 // delete `new`.
-impl Default for IndexAllocator<usize> {
+impl<T> Default for IndexAllocator<T: Default> {
     fn default() -> Self {
         IndexAllocator::new()
     }
