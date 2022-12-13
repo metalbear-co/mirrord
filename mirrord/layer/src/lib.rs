@@ -613,6 +613,7 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
     close_layer_fd(fd);
