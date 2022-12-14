@@ -462,72 +462,75 @@ async fn start_layer_thread(
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
 ) {
-    let (env_vars_filter, env_vars_select) = match (
-        config
-            .feature
-            .env
-            .exclude
-            .clone()
-            .map(|exclude| exclude.join(";")),
-        config
-            .feature
-            .env
-            .include
-            .clone()
-            .map(|include| include.join(";")),
-    ) {
-        (Some(_), Some(_)) => panic!(
-            r#"mirrord-layer encountered an issue:
+    // Environment was set by cli/extension, so we can skip that.
+    if std::env::var("MIRRORD_EXTERNAL_ENV").is_err() {
+        let (env_vars_filter, env_vars_select) = match (
+            config
+                .feature
+                .env
+                .exclude
+                .clone()
+                .map(|exclude| exclude.join(";")),
+            config
+                .feature
+                .env
+                .include
+                .clone()
+                .map(|include| include.join(";")),
+        ) {
+            (Some(_), Some(_)) => panic!(
+                r#"mirrord-layer encountered an issue:
+    
+                mirrord doesn't support specifying both
+                `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
+    
+                > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
+                >> If you want to include all, use `--override_env_vars_include="*"`."#
+            ),
+            (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+            (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+            (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+        };
 
-            mirrord doesn't support specifying both
-            `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
+        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
+            let _codec_result = tx
+                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                    env_vars_filter,
+                    env_vars_select,
+                }))
+                .await;
 
-            > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
-            >> If you want to include all, use `--override_env_vars_include="*"`."#
-        ),
-        (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
-        (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
-        (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
-    };
+            select! {
+              msg = rx.recv() => {
+                if let Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars))) = msg {
+                    trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
 
-    if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
-        // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-        let _codec_result = tx
-            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            }))
-            .await;
-
-        select! {
-          msg = rx.recv() => {
-            if let Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env_vars))) = msg {
-                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env_vars);
-
-                for (key, value) in remote_env_vars.into_iter() {
-                    std::env::set_var(&key, &value);
-                    debug_assert_eq!(std::env::var(key), Ok(value));
-                }
-
-                if let Some(overrides) = &config.feature.env.overrides {
-                    for (key, value) in overrides {
-                        std::env::set_var(key, value);
+                    for (key, value) in remote_env_vars.into_iter() {
+                        std::env::set_var(&key, &value);
+                        debug_assert_eq!(std::env::var(key), Ok(value));
                     }
-                }
-            } else {
-                let raw_issue = format!("Expected env vars response, but got {msg:?}");
-                graceful_exit!("{}{FAIL_STILL_STUCK}{}", FAIL_UNEXPECTED_RESPONSE, raw_issue);
-            }
-          },
-          _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
-            graceful_exit!(r#"
-                agent response timeout - expected env var response
 
-                check that the agent image can run on your architecture
-            "#);
-          }
-        }
-    };
+                    if let Some(overrides) = &config.feature.env.overrides {
+                        for (key, value) in overrides {
+                            std::env::set_var(key, value);
+                        }
+                    }
+                } else {
+                    let raw_issue = format!("Expected env vars response, but got {msg:?}");
+                    graceful_exit!("{}{FAIL_STILL_STUCK}{}", FAIL_UNEXPECTED_RESPONSE, raw_issue);
+                }
+              },
+              _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
+                graceful_exit!(r#"
+                    agent response timeout - expected env var response
+    
+                    check that the agent image can run on your architecture
+                "#);
+              }
+            }
+        };
+    }
 
     tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
@@ -568,7 +571,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    go_env::enable_go_env(&mut hook_manager);
+    if std::env::var("MIRRORD_EXTERNAL_ENV").is_err() {
+        go_env::enable_go_env(&mut hook_manager);
+    };
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
