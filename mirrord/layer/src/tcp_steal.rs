@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData},
+    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData},
     ClientMessage, ConnectionId,
 };
 use streammap_ext::StreamMap;
@@ -67,6 +67,12 @@ impl TcpHandler for TcpStealHandler {
         self.write_streams.insert(data.connection_id, connection);
 
         Ok(())
+    }
+
+    /// An http request was stolen by the http filter. Pass it to the local application.
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
+        todo!()
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
