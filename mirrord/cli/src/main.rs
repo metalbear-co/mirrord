@@ -6,7 +6,7 @@ use clap::Parser;
 use config::*;
 use exec::execvp;
 use execution::MirrordExecution;
-use extension::extension_exec;
+// use extension::extension_exec;
 use extract::extract_library;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
@@ -29,7 +29,7 @@ mod config;
 mod connection;
 mod error;
 mod execution;
-mod extension;
+// mod extension;
 mod extract;
 mod operator;
 
@@ -325,7 +325,7 @@ fn main() -> miette::Result<()> {
         Commands::ListTargets(args) => print_pod_targets(&args)?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args)?,
-        Commands::ExtensionExec(args) => extension_exec(&args)?,
+        // Commands::ExtensionExec(args) => extension_exec(&args)?,
     }
 
     Ok(())

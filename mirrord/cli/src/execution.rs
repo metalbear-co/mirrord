@@ -35,7 +35,7 @@ impl MirrordExecution {
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
-        let (env_vars_filter, env_vars_select) = match (
+        let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature
                 .env
@@ -57,13 +57,13 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        if !env_vars_filter.is_empty() || !env_vars_select.is_empty() {
+        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
             // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
             let _codec_result = connection
                 .sender
                 .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                    env_vars_filter,
-                    env_vars_select,
+                    env_vars_exclude,
+                    env_vars_include,
                 }))
                 .await;
 
@@ -96,6 +96,9 @@ impl MirrordExecution {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
         };
 
+        /// Depending on how we plan to connect to the agent, we do different things.
+        /// 1. if no operator, then we provide name and port so layer can port forward to
+        /// 2. if operator, then we provide nothing as layer will find it on its own.
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
                 env_vars.insert("MIRRORD_CONNECT_AGENT".to_string(), name.to_string());
