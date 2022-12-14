@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - cli: Set environment variables from cli to spawned process instead of layer when using `mirrord exec`.
 - cli: use miette for nicer errors
 - cli: some ext exec preparations, nothing user facing yet.
+- vs code ext: use cli, fixes some env bugs with go and better user experience.
 
 ## 3.13.5
 
