@@ -329,11 +329,12 @@ impl TcpConnectionStealer {
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn port_subscribe(
-        &mut self,
-        client_id: ClientId,
-        port_steal: PortSteal,
-    ) -> Result<(), AgentError> {
+    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: PortSteal) -> Result<()> {
+        if self.iptables.is_none() {
+            // TODO: make the initialization internal to SafeIpTables.
+            self.init_iptables()?;
+        }
+        let mut first_subscriber = false;
         let res = match port_steal {
             PortSteal::Steal(port) => {
                 if let Some(sub) = self.port_subscriptions.get(&port) {
@@ -342,19 +343,14 @@ impl TcpConnectionStealer {
                     );
                     Err(PortAlreadyStolen(port))
                 } else {
-                    if self.port_subscriptions.is_empty() {
-                        // Is this the first client?
-                        // Initialize IP table only when a client is subscribed.
-                        self.init_iptables()?;
-                    }
-                    self.port_subscriptions
-                        .insert(port, StealSubscription::Unfiltered(client_id));
-                    self.redirect_port(port)?;
+                    first_subscriber = true;
+                    self.port_subscriptions.insert(port, Unfiltered(client_id));
                     Ok(port)
                 }
             }
             PortSteal::HttpFilterSteal(port, regex) => {
                 match self.port_subscriptions.entry(port).or_insert_with(|| {
+                    first_subscriber = true;
                     HttpFiltered(HttpFilterManager {
                         request_sender: self.http_request_sender.clone(),
                     })
@@ -364,19 +360,17 @@ impl TcpConnectionStealer {
                         Err(PortAlreadyStolen(port))
                     }
                     HttpFiltered(manager) => {
-                        if manager.is_empty() {
-                            // Is this the first client?
-                            // Initialize IP table only when a client is subscribed.
-                            // TODO: make the initialization internal to SafeIpTables.
-                            self.init_iptables()?;
-                        }
-                        // manager.insert(client_id, regex)?;
-                        self.redirect_port(port)?;
+                        manager.insert(client_id, regex)?;
                         Ok(port)
                     }
                 }
             }
         };
+        if first_subscriber {
+            if let Ok(port) = res {
+                self.redirect_port(port)?;
+            }
+        }
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
             .await
     }
