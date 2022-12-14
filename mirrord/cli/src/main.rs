@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 use std::{
     collections::HashMap,
     fs::File,
@@ -8,14 +10,19 @@ use std::{
 
 use clap::Parser;
 use config::*;
+use connection::MirrordExecution;
 use const_random::const_random;
 use exec::execvp;
 use extension::extension_exec;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
-use miette::miette;
+use miette::{miette, IntoDiagnostic, WrapErr};
 use mirrord_auth::AuthConfig;
-use mirrord_kube::api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api};
+use mirrord_config::LayerConfig;
+use mirrord_kube::{
+    api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
+    error::KubeApiError,
+};
 use mirrord_progress::{Progress, TaskProgress};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -69,6 +76,8 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
+use crate::connection::AgentConnectInfo;
+
 /// Extract to given directory, or tmp by default.
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
@@ -96,7 +105,8 @@ fn extract_library(
     };
     if !file_path.exists() {
         let mut file = File::create(&file_path)
-            .with_context(|| format!("Path \"{}\" creation failed", file_path.display()))?;
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Path \"{}\" creation failed", file_path.display()))?;
         let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
         file.write_all(bytes).unwrap();
         debug!("Extracted library file to {:?}", &file_path);
@@ -124,25 +134,11 @@ fn add_to_preload(path: &str) -> Result<()> {
     }
 }
 
+/// Creates an agent and fetches environment variables from it.
+/// Wrapper of async function with tokio for use from sync context.
 #[tokio::main(flavor = "current_thread")]
-async fn create_agent(config: &LayerConfig, progress: &TaskProgress) -> Result<()> {
-    if config.agent.pause {
-        if config.agent.ephemeral {
-            error!("Pausing is not yet supported together with an ephemeral agent container.");
-            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
-        }
-        if !config.feature.network.incoming.is_steal() {
-            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
-        }
-    }
-
-    // Set env var for children to re-use.
-    std::env::set_var("MIRRORD_CONNECT_AGENT", pod_agent_name);
-    std::env::set_var("MIRRORD_CONNECT_PORT", agent_port.to_string());
-
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-    Ok(())
+async fn start_agent(config: &LayerConfig, progress: &TaskProgress) -> Result<MirrordExecution> {
+    MirrordExecution::start(config, progress).await
 }
 
 fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
@@ -268,8 +264,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let library_path = extract_library(args.extract_path.clone(), &sub_progress, true)?;
     add_to_preload(library_path.to_str().unwrap()).unwrap();
 
-    create_agent(&sub_progress)?;
-
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
         None => (false, args.binary.clone()),
@@ -278,6 +272,29 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
+
+    let config = LayerConfig::from_env()?;
+    if config.agent.pause {
+        if config.agent.ephemeral {
+            error!("Pausing is not yet supported together with an ephemeral agent container.");
+            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
+        }
+        if !config.feature.network.incoming.is_steal() {
+            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+        }
+    }
+
+    let execution_info = start_agent(&config, &sub_progress)?;
+    match execution_info.connect_info {
+        AgentConnectInfo::DirectKubernetes(name, port) => {
+            std::env::set_var("MIRRORD_CONNECT_AGENT", name);
+            std::env::set_var("MIRRORD_CONNECT_PORT", port.to_string());
+        }
+        AgentConnectInfo::Operator => {}
+    };
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
@@ -290,30 +307,24 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if let exec::Error::Errno(errno::Errno(86)) = err {
         // "Bad CPU type in executable"
         if _did_sip_patch {
-            error!(
-                "The file you are trying to run, {}, is either SIP protected or a script with a
-                shebang that leads to a SIP protected binary. In order to bypass SIP protection,
-                mirrord creates a non-SIP version of the binary and runs that one instead of the
-                protected one. The non-SIP version is however an x86_64 file, so in order to run
-                it on apple hardware, rosetta has to be installed.
-                Rosetta can be installed by runnning:
-
-                softwareupdate --install-rosetta
-
-                ",
-                &args.binary
-            )
+            return Err(CliError::RosettaMissing(binary));
         }
     }
-    Err(miette!("Failed to execute binary"))
+    Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
 /// Returns a list of (pod name, [container names]) pairs.
 /// Filtering mesh side cars
 async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
-    let client = create_kube_api(None).await?;
+    let client = create_kube_api(None)
+        .await
+        .map_err(CliError::KubernetesAPIFailed)?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
-    let pods = api.list(&ListParams::default()).await?;
+    let pods = api
+        .list(&ListParams::default())
+        .await
+        .map_err(KubeApiError::from)
+        .map_err(CliError::KubernetesAPIFailed)?;
 
     // convert pods to (name, container names) pairs
 
