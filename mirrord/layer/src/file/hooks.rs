@@ -122,7 +122,7 @@ pub(crate) unsafe extern "C" fn read_detour(
     out_buffer: *mut c_void,
     count: size_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = read(fd, count)
+    let (Ok(result) | Err(result)) = read(fd, count as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -131,7 +131,7 @@ pub(crate) unsafe extern "C" fn read_detour(
             if read_amount > 0 {
                 let read_ptr = bytes.as_ptr();
                 let out_buffer = out_buffer.cast();
-                ptr::copy(read_ptr, out_buffer, read_amount);
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
             }
 
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
@@ -157,7 +157,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
 ) -> size_t {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
     let fd = fileno_logic(file_stream);
-    let read_amount = element_size * number_of_elements;
+    let read_amount = (element_size * number_of_elements) as u64;
 
     let (Ok(result) | Err(result)) = read(fd, read_amount)
         .map(|read_file| {
@@ -168,12 +168,12 @@ pub(crate) unsafe extern "C" fn fread_detour(
             if read_amount > 0 {
                 let read_ptr = bytes.as_ptr();
                 let out_buffer = out_buffer.cast();
-                ptr::copy(read_ptr, out_buffer, read_amount);
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
             }
 
             // TODO: The function fread() does not distinguish between end-of-file and error,
             // and callers must use feof(3) and ferror(3) to determine which occurred.
-            read_amount
+            read_amount as usize
         })
         .bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream))
         .map_err(From::from);
@@ -195,9 +195,9 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
     // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
     // `capacity` here.
-    let buffer_size = (capacity - 1) as usize;
+    let buffer_size = capacity - 1;
 
-    let (Ok(result) | Err(result)) = fgets(fd, buffer_size)
+    let (Ok(result) | Err(result)) = fgets(fd, buffer_size as usize)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -206,7 +206,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
             //
             // Callers can check for EOF by using `ferror`.
             if read_amount > 0 {
-                let bytes_slice = &bytes[0..buffer_size.min(read_amount)];
+                let bytes_slice = &bytes[0..buffer_size.min(read_amount as i32) as usize];
                 let eof = vec![0; 1];
 
                 // Append '\0' to comply with `fgets`.
@@ -232,17 +232,17 @@ pub(crate) unsafe extern "C" fn pread_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = pread(fd, amount_to_read, offset as u64)
+    let (Ok(result) | Err(result)) = pread(fd, amount_to_read as u64, offset as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
-            let fixed_read = amount_to_read.min(read_amount);
+            let fixed_read = (amount_to_read as u64).min(read_amount);
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
             //
             // Callers can check for EOF by using `ferror`.
             if read_amount > 0 {
-                let bytes_slice = &bytes[0..fixed_read];
+                let bytes_slice = &bytes[0..fixed_read as usize];
 
                 ptr::copy(bytes_slice.as_ptr().cast(), out_buffer, bytes_slice.len());
             }

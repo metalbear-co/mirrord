@@ -59,7 +59,7 @@ pub(crate) enum HookError {
     SendErrorHookMessage(#[from] SendError<HookMessage>),
 
     #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
-    LocalFileCreation(usize),
+    LocalFileCreation(u64),
 
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]

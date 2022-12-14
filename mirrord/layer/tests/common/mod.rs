@@ -264,7 +264,7 @@ impl LayerConnection {
     }
 
     /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
-    pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: usize) {
+    pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: u64) {
         // Verify the app tries to open the expected file.
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
@@ -293,7 +293,7 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_file_read(&mut self, expected_fd: usize) -> usize {
+    pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
             mirrord_protocol::ReadFileRequest {
@@ -315,7 +315,7 @@ impl LayerConnection {
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
                 Ok(mirrord_protocol::ReadFileResponse {
                     bytes: contents,
-                    read_amount,
+                    read_amount: read_amount as u64,
                 }),
             )))
             .await
@@ -323,10 +323,10 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: usize) {
+    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
         let buffer_size = self.expect_file_read(expected_fd).await;
-        let read_amount = min(buffer_size, contents.len());
-        let contents = (&contents.as_bytes()[0..read_amount]).to_vec();
+        let read_amount = min(buffer_size, contents.len() as u64);
+        let contents = (&contents.as_bytes()[0..read_amount as usize]).to_vec();
         self.answer_file_read(contents).await;
         // last call should return 0.
         let _buffer_size = self.expect_file_read(expected_fd).await;
@@ -335,7 +335,7 @@ impl LayerConnection {
 
     /// Read next layer message and verify it's close.
     /// Answer that close.
-    pub async fn expect_file_close(&mut self, fd: usize) {
+    pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
@@ -362,6 +362,7 @@ pub enum Application {
     PythonDontLoad,
     RustFileOps,
     EnvBashCat,
+    NodeFileOps,
 }
 
 impl Application {
@@ -401,6 +402,7 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
+            Application::NodeFileOps => String::from("node"),
         }
     }
 
@@ -428,6 +430,10 @@ impl Application {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeFileOps => {
+                app_path.push("fileops.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::Go19HTTP => vec![],
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
@@ -444,7 +450,10 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonDontLoad | Application::RustFileOps | Application::EnvBashCat => {
+            Application::PythonDontLoad
+            | Application::RustFileOps
+            | Application::EnvBashCat
+            | Application::NodeFileOps => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,

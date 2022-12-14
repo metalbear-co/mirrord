@@ -97,7 +97,7 @@ async fn layer_recv(
         }) => {
             let daemon_write = match writers
                 .get_mut(&connection_id)
-                .ok_or(ResponseError::NotFound(connection_id as usize))
+                .ok_or(ResponseError::NotFound(connection_id))
             {
                 Ok(writer) => writer.write_all(&bytes).await.map_err(ResponseError::from),
                 Err(fail) => Err(fail),
