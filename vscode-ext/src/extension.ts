@@ -89,10 +89,7 @@ class MirrordAPI {
 	// Spawn the mirrord cli with the given arguments
 	// used for reading/interacting while process still runs.
 	spawn(args: string[]): ChildProcess {
-		// Check if arg contains space, and if it does, wrap it in quotes
-		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
-		let commandLine = [this.cliPath, ...args];
-		return spawn(commandLine.join(' '), { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
+		return spawn(this.cliPath, args, { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
 	}
 
 
@@ -120,36 +117,55 @@ class MirrordAPI {
 	async binaryExecute(target: string | null, configFile: string | null): Promise<Map<string, string> | null> {
 		/// Create a promise that resolves when the mirrord process exits
 		return new Promise<Map<string, string> | null>((resolve, reject) => {
-			setTimeout(() => {
-				const args = ["ext"];
-				if (target) {
-					args.push("-t", target);
-				}
-				if (configFile) {
-					args.push("-f", configFile);
-				}
-				let child = this.spawn(args);
+			setTimeout(() => { reject("Timeout"); }, 60 * 1000);
 
-				child.on('error', (err) => {
-					console.error('Failed to run mirrord.' + err);
-					mirrordFailure(err);
-					reject(err);
-				});
+			const args = ["ext"];
+			if (target) {
+				args.push("-t", target);
+			}
+			if (configFile) {
+				args.push("-f", configFile);
+			}
+			let child = this.spawn(args);
 
-				child.stderr?.on('data', (data) => {
-					console.error(`mirrord stderr: ${data}`);
-				});
+			child.on('error', (err) => {
+				console.error('Failed to run mirrord.' + err);
+				mirrordFailure(err);
+				reject(err);
+			});
 
-				child.stdout?.on('data', (data) => {
-					console.log(`mirrord: ${data}`);
-					let message = JSON.parse(data);
+			child.stderr?.on('data', (data) => {
+				console.error(`mirrord stderr: ${data}`);
+			});
+
+			let buffer = "";
+			child.stdout?.on('data', (data) => {
+				console.log(`mirrord: ${data}`);
+				buffer += data;
+				// fml - AH
+				let messages = buffer.split("\n");
+				for (const rawMessage of messages.slice(0, -1)) {
+					if (!rawMessage) {
+						break;
+					}
+					// remove from buffer + \n;
+					buffer = buffer.slice(rawMessage.length + 1);
+
+					let message;
+					try {
+						message = JSON.parse(rawMessage);
+					}
+					catch (e) {
+						console.error("Failed to parse message from mirrord: " + data);
+						return;
+					}
 
 					// First make sure it's not last message
 					if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
 						if (message["success"]) {
 							vscode.window.showInformationMessage("mirrord started successfully, launching target.");
 							let res = JSON.parse(message["message"]);
-							resolve(res);
+							resolve(res["environment"]);
 						} else {
 							mirrordFailure(null);
 							reject(null);
@@ -163,10 +179,9 @@ class MirrordAPI {
 						formattedMessage += ": " + formattedMessage;
 					}
 					vscode.window.showInformationMessage(message["name"]);
+				}
+			});
 
-				});
-
-			}, 1000 * 60);
 		});
 	}
 }

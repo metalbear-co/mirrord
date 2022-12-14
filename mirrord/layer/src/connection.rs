@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{any::Provider, time::Duration};
 
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
