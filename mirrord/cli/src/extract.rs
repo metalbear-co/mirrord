@@ -1,11 +1,44 @@
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use const_random::const_random;
+use mirrord_progress::Progress;
+use tracing::debug;
+
+use crate::{error::CliError, Result};
+
+/// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::str::FromStr;
+
+    use super::*;
+
+    pub fn temp_dir() -> PathBuf {
+        PathBuf::from_str("/tmp/").unwrap()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+use std::env::temp_dir;
+
+#[cfg(target_os = "macos")]
+use mac::temp_dir;
+
 /// Extract to given directory, or tmp by default.
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
-fn extract_library(
+pub(crate) fn extract_library<P>(
     dest_dir: Option<String>,
-    progress: &TaskProgress,
+    progress: &P,
     prefix: bool,
-) -> Result<PathBuf> {
+) -> Result<PathBuf>
+where
+    P: Progress + Send + Sync,
+{
     let progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()
@@ -25,8 +58,7 @@ fn extract_library(
     };
     if !file_path.exists() {
         let mut file = File::create(&file_path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Path \"{}\" creation failed", file_path.display()))?;
+            .map_err(|e| CliError::LayerExtractFailed(file_path.clone(), e))?;
         let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
         file.write_all(bytes).unwrap();
         debug!("Extracted library file to {:?}", &file_path);

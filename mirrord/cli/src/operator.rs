@@ -1,12 +1,15 @@
 use std::{fs::File, path::PathBuf};
 
-use anyhow::Result;
 use mirrord_operator::{
     license::License,
     setup::{Operator, OperatorNamespace, OperatorSetup},
 };
 
-use crate::config::{OperatorArgs, OperatorCommand};
+use crate::{
+    config::{OperatorArgs, OperatorCommand},
+    error::CliError,
+    Result,
+};
 
 /// Setup the operator into a file or to stdout, with explanation.
 fn operator_setup(
@@ -22,7 +25,7 @@ fn operator_setup(
     }
 
     if let Some(license_key) = license_key {
-        let license = License::fetch(license_key.clone())?;
+        let license = License::fetch(license_key.clone()).map_err(CliError::LicenseError)?;
 
         eprintln!(
             "Installing with license for {} ({})",
@@ -41,8 +44,10 @@ fn operator_setup(
         let operator = Operator::new(license_key, namespace);
 
         match file {
-            Some(path) => operator.to_writer(File::create(path)?)?,
-            None => operator.to_writer(std::io::stdout())?,
+            Some(path) => {
+                operator.to_writer(File::create(path).map_err(CliError::ManifestFileError)?)?
+            }
+            None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to write to std out.. well.. */
         }
     } else {
         eprintln!("--license-key is required to install on cluster");
@@ -52,7 +57,7 @@ fn operator_setup(
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
-pub(crate) fn operator_command(args: &OperatorArgs) -> Result<()> {
+pub(crate) fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
         OperatorCommand::Setup {
             accept_tos,

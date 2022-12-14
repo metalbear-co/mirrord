@@ -134,11 +134,6 @@ pub(super) struct ExecArgs {
     /// Arguments to pass to the binary.
     pub(super) binary_args: Vec<String>,
 
-    /// Where to extract the library to. Default is temp dir.
-    /// TODO: delete on next major, I think we used it for tests..
-    #[arg(long)]
-    pub extract_path: Option<String>,
-
     /// Use an Ephemeral Container to mirror traffic.
     #[arg(short, long)]
     pub ephemeral_container: bool,

@@ -1,14 +1,29 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use tracing::trace;
 
-use crate::connection::{AgentConnectInfo, create_and_connect};
+use crate::{
+    connection::{create_and_connect, AgentConnectInfo},
+    error::CliError,
+    extract::extract_library,
+    Result,
+};
+
+#[cfg(target_os = "linux")]
+const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+
+#[cfg(target_os = "macos")]
+const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
 /// Struct for holding the execution information
 /// What agent to connect to, what environment variables to set
 pub(crate) struct MirrordExecution {
-    pub connect_info: AgentConnectInfo,
     pub environment: HashMap<String, String>,
 }
 
@@ -17,9 +32,9 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
-        let config = LayerConfig::from_env()?;
+        let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (connect_info, connection) = create_and_connect(&config, progress).await?;
+        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
         let (env_vars_filter, env_vars_select) = match (
             config
                 .feature
@@ -65,23 +80,21 @@ impl MirrordExecution {
                             remote_env.insert(key.clone(), value.clone());
                         }
                     }
-                    env_vars = Some(remote_env)
+                    env_vars.extend(remote_env);
                 }
                 Err(_) => return Err(CliError::GetEnvironmentTimeout),
-                Ok(x) => return Err(CliError::InvalidMessage("{:?}".to_string())),
+                Ok(x) => return Err(CliError::InvalidMessage(format!("{x:#?}"))),
             };
         }
 
+        let lib_path: String = lib_path.to_string_lossy().into();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
         // If already exists, we append.
-        std::env::var(INJECTION_ENV_VAR)
-            .map(|v| {
-                env_vars.insert(
-                    INJECTION_ENV_VAR.to_string(),
-                    format!("{}:{}", value, lib_path).to_string(),
-                )
-            })
-            .map_err(|_| env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path.to_string()));
+        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{}:{}", v, lib_path))
+        } else {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+        };
 
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
@@ -90,9 +103,11 @@ impl MirrordExecution {
             }
             AgentConnectInfo::Operator => {}
         };
-        
+
+        // Let layer know we already brought env var for it. Remove after removing that part from
+        // there.
+        env_vars.insert("MIRRORD_EXTERNAL_ENV".to_string(), "true".to_string());
         Ok(Self {
-            connect_info,
             environment: env_vars,
         })
     }

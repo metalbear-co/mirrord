@@ -38,7 +38,7 @@ const-random = "0.1.15"
 tokio.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
-miette = "5"
+miette = { version = "5", features = ["fancy"] } 
 thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -571,7 +571,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    go_env::enable_go_env(&mut hook_manager);
+    if std::env::var("MIRRORD_EXTERNAL_ENV").is_err() {
+        go_env::enable_go_env(&mut hook_manager);
+    };
     #[cfg(target_os = "linux")]
     #[cfg(target_arch = "x86_64")]
     {
