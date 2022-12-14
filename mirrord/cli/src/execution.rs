@@ -73,14 +73,13 @@ impl MirrordExecution {
             )
             .await
             {
-                Ok(Some(DaemonMessage::GetEnvVarsResponse(Ok(mut remote_env)))) => {
+                Ok(Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env)))) => {
                     trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
-                    if let Some(overrides) = &config.feature.env.overrides {
-                        for (key, value) in overrides {
-                            remote_env.insert(key.clone(), value.clone());
-                        }
-                    }
+
                     env_vars.extend(remote_env);
+                    if let Some(overrides) = &config.feature.env.overrides {
+                        env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    }
                 }
                 Err(_) => return Err(CliError::GetEnvironmentTimeout),
                 Ok(x) => return Err(CliError::InvalidMessage(format!("{x:#?}"))),
