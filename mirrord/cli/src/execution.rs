@@ -62,8 +62,8 @@ impl MirrordExecution {
             let _codec_result = connection
                 .sender
                 .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                    env_vars_exclude,
-                    env_vars_include,
+                    env_vars_filter: env_vars_exclude,
+                    env_vars_select: env_vars_include,
                 }))
                 .await;
 
@@ -96,9 +96,9 @@ impl MirrordExecution {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
         };
 
-        /// Depending on how we plan to connect to the agent, we do different things.
-        /// 1. if no operator, then we provide name and port so layer can port forward to
-        /// 2. if operator, then we provide nothing as layer will find it on its own.
+        // Depending on how we plan to connect to the agent, we do different things.
+        // 1. if no operator, then we provide name and port so layer can port forward to
+        // 2. if operator, then we provide nothing as layer will find it on its own.
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
                 env_vars.insert("MIRRORD_CONNECT_AGENT".to_string(), name.to_string());
