@@ -1,4 +1,3 @@
-import { format, resolve } from 'path';
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
@@ -116,72 +115,78 @@ class MirrordAPI {
 	// Has 60 seconds timeout
 	async binaryExecute(target: string | null, configFile: string | null): Promise<Map<string, string> | null> {
 		/// Create a promise that resolves when the mirrord process exits
-		return new Promise<Map<string, string> | null>((resolve, reject) => {
-			setTimeout(() => { reject("Timeout"); }, 60 * 1000);
+		return await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: "mirrord",
+			cancellable: false
+		}, (progress, _) => {
+			return new Promise<Map<string, string> | null>((resolve, reject) => {
+				setTimeout(() => { reject("Timeout"); }, 60 * 1000);
 
-			const args = ["ext"];
-			if (target) {
-				args.push("-t", target);
-			}
-			if (configFile) {
-				args.push("-f", configFile);
-			}
-			let child = this.spawn(args);
-
-			child.on('error', (err) => {
-				console.error('Failed to run mirrord.' + err);
-				mirrordFailure(err);
-				reject(err);
-			});
-
-			child.stderr?.on('data', (data) => {
-				console.error(`mirrord stderr: ${data}`);
-			});
-
-			let buffer = "";
-			child.stdout?.on('data', (data) => {
-				console.log(`mirrord: ${data}`);
-				buffer += data;
-				// fml - AH
-				let messages = buffer.split("\n");
-				for (const rawMessage of messages.slice(0, -1)) {
-					if (!rawMessage) {
-						break;
-					}
-					// remove from buffer + \n;
-					buffer = buffer.slice(rawMessage.length + 1);
-
-					let message;
-					try {
-						message = JSON.parse(rawMessage);
-					}
-					catch (e) {
-						console.error("Failed to parse message from mirrord: " + data);
-						return;
-					}
-
-					// First make sure it's not last message
-					if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
-						if (message["success"]) {
-							vscode.window.showInformationMessage("mirrord started successfully, launching target.");
-							let res = JSON.parse(message["message"]);
-							resolve(res["environment"]);
-						} else {
-							mirrordFailure(null);
-							reject(null);
-						}
-						return;
-					}
-					// If it is not last message, it is progress
-					let formattedMessage = message["message"];
-
-					if (message["message"]) {
-						formattedMessage += ": " + formattedMessage;
-					}
-					vscode.window.showInformationMessage(message["name"]);
+				const args = ["ext"];
+				if (target) {
+					args.push("-t", target);
 				}
-			});
+				if (configFile) {
+					args.push("-f", configFile);
+				}
+				let child = this.spawn(args);
 
+				child.on('error', (err) => {
+					console.error('Failed to run mirrord.' + err);
+					mirrordFailure(err);
+					reject(err);
+				});
+
+				child.stderr?.on('data', (data) => {
+					console.error(`mirrord stderr: ${data}`);
+				});
+
+				let buffer = "";
+				child.stdout?.on('data', (data) => {
+					console.log(`mirrord: ${data}`);
+					buffer += data;
+					// fml - AH
+					let messages = buffer.split("\n");
+					for (const rawMessage of messages.slice(0, -1)) {
+						if (!rawMessage) {
+							break;
+						}
+						// remove from buffer + \n;
+						buffer = buffer.slice(rawMessage.length + 1);
+
+						let message;
+						try {
+							message = JSON.parse(rawMessage);
+						}
+						catch (e) {
+							console.error("Failed to parse message from mirrord: " + data);
+							return;
+						}
+
+						// First make sure it's not last message
+						if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
+							if (message["success"]) {
+								progress.report({message: "mirrord started successfully, launching target."});
+								let res = JSON.parse(message["message"]);
+								resolve(res["environment"]);
+							} else {
+								mirrordFailure(null);
+								reject(null);
+							}
+							return;
+						}
+						// If it is not last message, it is progress
+						let formattedMessage = message["name"];
+
+						if (message["message"]) {
+							formattedMessage += ": " + message["message"];
+						}
+						progress.report({message: formattedMessage});
+					}
+				});
+
+			});
 		});
 	}
 }
