@@ -6,6 +6,7 @@ use std::{
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use serde::Serialize;
 use tracing::trace;
 
 use crate::{
@@ -23,6 +24,7 @@ const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
 /// Struct for holding the execution information
 /// What agent to connect to, what environment variables to set
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct MirrordExecution {
     pub environment: HashMap<String, String>,
 }
@@ -109,6 +111,7 @@ impl MirrordExecution {
         // Let layer know we already brought env var for it. Remove after removing that part from
         // there.
         env_vars.insert("MIRRORD_EXTERNAL_ENV".to_string(), "true".to_string());
+
         Ok(Self {
             environment: env_vars,
         })

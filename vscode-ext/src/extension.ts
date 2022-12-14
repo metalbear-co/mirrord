@@ -1,8 +1,8 @@
-import { CoreV1Api, V1NamespaceList, V1PodList } from '@kubernetes/client-node';
-import { resolve } from 'path';
+import { format, resolve } from 'path';
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
+import { ChildProcess, spawn } from 'child_process';
 
 const TOML = require('toml');
 const semver = require('semver');
@@ -13,10 +13,7 @@ const glob = require('glob');
 const util = require('node:util');
 const exec = util.promisify(require('node:child_process').exec);
 
-const LIBRARIES: { [platform: string]: [var_name: string, lib_name: string] } = {
-	'darwin': ['DYLD_INSERT_LIBRARIES', 'libmirrord_layer.dylib'],
-	'linux': ['LD_PRELOAD', 'libmirrord_layer.so']
-};
+
 
 const DEFAULT_CONFIG = `
 {
@@ -54,10 +51,18 @@ async function configFilePath() {
 	return files[0] || '';
 }
 
+// Display error message with help
+function mirrordFailure(err: any) {
+	vscode.window.showErrorMessage("mirrord failed to start. Please check the logs/errors.", "Get help on Discord").then(value => {
+		if (value === "Get help on Discord") {
+			vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/pSKEdmNZcK'));
+		}
+	});
+}
+
 class MirrordAPI {
 	context: vscode.ExtensionContext;
 	cliPath: string;
-	_libraryPath: null | string;
 
 	constructor(context: vscode.ExtensionContext) {
 		this.context = context;
@@ -69,15 +74,8 @@ class MirrordAPI {
 			this.cliPath = path.join(context.extensionPath, 'mirrord');
 			fs.chmodSync(this.cliPath, 0o755);
 		}
-		this._libraryPath = null;
 	}
 
-	async getLibraryPath(): Promise<string> {
-		if (!this._libraryPath) {
-			this._libraryPath = await this.extract();
-		}
-		return this._libraryPath;
-	}
 
 	// Execute the mirrord cli with the given arguments, return stdout, stderr.
 	async exec(args: string[]): Promise<[string, string]> {
@@ -88,25 +86,15 @@ class MirrordAPI {
 		return [value.stdout as string, value.stderr as string];
 	}
 
-	// Extract layer from mirrord cli and return the path to the library. 
-	async extract(): Promise<string> {
-		let [stdout, stderr] = await this.exec(["extract", this.context.extensionPath]);
-		if (stderr) {
-			throw new Error("error occured: " + stderr);
-		}
-		var parsed;
-		for (var line of stdout.split('\n')) {
-			{
-				parsed = JSON.parse(line);
-				console.log("mirrord progress: ");
-				console.log(parsed);
-				if (parsed["type"] === "FinishedTask" && parsed["name"] === "extracting layer" && parsed["success"]) {
-					return path.join(this.context.extensionPath, LIBRARIES[os.platform()][1]);
-				}
-			}
-		}
-		throw new Error('Failed to extract mirrord layer, last message:' + parsed);
+	// Spawn the mirrord cli with the given arguments
+	// used for reading/interacting while process still runs.
+	spawn(args: string[]): ChildProcess {
+		// Check if arg contains space, and if it does, wrap it in quotes
+		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
+		let commandLine = [this.cliPath, ...args];
+		return spawn(commandLine.join(' '), { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
 	}
+
 
 	/// Uses `mirrord ls` to get a list of all targets.
 	async listTargets(targetNamespace: string | null | undefined): Promise<[string]> {
@@ -119,10 +107,67 @@ class MirrordAPI {
 		let [stdout, stderr] = await this.exec(args);
 
 		if (stderr) {
+			mirrordFailure(stderr);
 			throw new Error("error occured listing targets: " + stderr);
 		}
 
 		return JSON.parse(stdout);
+	}
+
+	// Run the extension execute sequence
+	// Creating agent and gathering execution runtime (env vars to set)
+	// Has 60 seconds timeout
+	async binaryExecute(target: string | null, configFile: string | null): Promise<Map<string, string> | null> {
+		/// Create a promise that resolves when the mirrord process exits
+		return new Promise<Map<string, string> | null>((resolve, reject) => {
+			setTimeout(() => {
+				const args = ["ext"];
+				if (target) {
+					args.push("-t", target);
+				}
+				if (configFile) {
+					args.push("-f", configFile);
+				}
+				let child = this.spawn(args);
+
+				child.on('error', (err) => {
+					console.error('Failed to run mirrord.' + err);
+					mirrordFailure(err);
+					reject(err);
+				});
+
+				child.stderr?.on('data', (data) => {
+					console.error(`mirrord stderr: ${data}`);
+				});
+
+				child.stdout?.on('data', (data) => {
+					console.log(`mirrord: ${data}`);
+					let message = JSON.parse(data);
+
+					// First make sure it's not last message
+					if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
+						if (message["success"]) {
+							vscode.window.showInformationMessage("mirrord started successfully, launching target.");
+							let res = JSON.parse(message["message"]);
+							resolve(res);
+						} else {
+							mirrordFailure(null);
+							reject(null);
+						}
+						return;
+					}
+					// If it is not last message, it is progress
+					let formattedMessage = message["message"];
+
+					if (message["message"]) {
+						formattedMessage += ": " + formattedMessage;
+					}
+					vscode.window.showInformationMessage(message["name"]);
+
+				});
+
+			}, 1000 * 60);
+		});
 	}
 }
 
@@ -255,11 +300,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		let mirrordApi = new MirrordAPI(globalContext);
 
-
-		let libraryPath = await mirrordApi.getLibraryPath();
-		let environmentVariableName = LIBRARIES[os.platform()][0];
 		config.env ||= {};
-		config.env[environmentVariableName] = libraryPath;
+		let target = null;
 
 		// If target wasn't specified in the config file, let user choose pod from dropdown			
 		if (!await isTargetInFile()) {
@@ -270,16 +312,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 					if (!targetName) {
 						return;
 					}
-					config.env['MIRRORD_IMPERSONATED_TARGET'] = targetName;
+					target = targetName;
 					return resolve(config);
 				});
 			});
 		}
 
-		let filePath = await configFilePath();
-		if (filePath) {
-			config.env['MIRRORD_CONFIG_FILE'] = filePath;
-		}
+		let configPath = await configFilePath();
 
 		if (config.type === "go") {
 			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
@@ -289,6 +328,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			}
 		}
 
+		let env = await mirrordApi.binaryExecute(target, configPath);
+		config.env = Object.assign({}, config.env, env);
 		return new Promise(resolve => {
 			return resolve(config);
 		});

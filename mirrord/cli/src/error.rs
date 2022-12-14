@@ -143,4 +143,6 @@ pub(crate) enum CliError {
     #[error("Error extracting layer to `{0:#?}`: `{1:#?}`")]
     #[diagnostic(help("Please report a bug.{GENERAL_HELP}",))]
     LayerExtractFailed(PathBuf, std::io::Error),
+    #[error("JSON Serialization error: `{0:#?}`")]
+    JsonSerializeError(#[from] serde_json::Error),
 }

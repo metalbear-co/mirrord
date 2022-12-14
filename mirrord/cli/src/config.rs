@@ -28,9 +28,10 @@ pub(super) enum Commands {
     /// List targets/resources like pods/namespaces in json format
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
-    //// Extension execution - used by extension to execute binaries.
-    // #[command(hide = true, name = "ext")]
-    // ExtensionExec(Box<ExtensionExecArgs>),
+
+    /// Extension execution - used by extension to execute binaries.
+    #[command(hide = true, name = "ext")]
+    ExtensionExec(Box<ExtensionExecArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
