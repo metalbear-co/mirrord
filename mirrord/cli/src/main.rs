@@ -37,14 +37,10 @@ mod connection;
 mod error;
 mod extension;
 mod operator;
+mod execution;
 
 pub(crate) use error::{CliError, Result};
 
-#[cfg(target_os = "linux")]
-const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
-
-#[cfg(target_os = "macos")]
-const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
     "--pause specified without --steal: Incoming requests to the application will
                                            not be handled. The target container running the deployed application is paused,
@@ -114,24 +110,6 @@ fn extract_library(
 
     progress.done_with("layer extracted");
     Ok(file_path)
-}
-
-fn add_to_preload(path: &str) -> Result<()> {
-    match std::env::var(INJECTION_ENV_VAR) {
-        Ok(value) => {
-            let new_value = format!("{}:{}", value, path);
-            std::env::set_var(INJECTION_ENV_VAR, new_value);
-            Ok(())
-        }
-        Err(std::env::VarError::NotPresent) => {
-            std::env::set_var(INJECTION_ENV_VAR, path);
-            Ok(())
-        }
-        Err(e) => {
-            error!("Failed to set environment variable with error {:?}", e);
-            Err(miette!("Failed to set environment variable"))
-        }
-    }
 }
 
 /// Creates an agent and fetches environment variables from it.
@@ -262,7 +240,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let sub_progress = progress.subtask("preparing to launch process");
     let library_path = extract_library(args.extract_path.clone(), &sub_progress, true)?;
-    add_to_preload(library_path.to_str().unwrap()).unwrap();
 
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
@@ -285,16 +262,14 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     let execution_info = start_agent(&config, &sub_progress)?;
-    match execution_info.connect_info {
-        AgentConnectInfo::DirectKubernetes(name, port) => {
-            std::env::set_var("MIRRORD_CONNECT_AGENT", name);
-            std::env::set_var("MIRRORD_CONNECT_PORT", port.to_string());
-        }
-        AgentConnectInfo::Operator => {}
-    };
 
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    // Set environment variables from agent + layer settings.
+    for (key, value) in execution_info.environment {
+        std::env::set_var(key, value);
+    }
 
     let mut binary_args = args.binary_args.clone();
     binary_args.insert(0, args.binary.clone());
