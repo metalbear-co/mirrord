@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.14.0
+
 ### Changed
 
 - cli: Set environment variables from cli to spawned process instead of layer when using `mirrord exec`.
