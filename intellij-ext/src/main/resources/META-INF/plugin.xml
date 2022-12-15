@@ -17,12 +17,22 @@
         <notificationGroup id="mirrord Notification Handler"
                            displayType="BALLOON"/>
     </extensions>
-
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+                serviceImplementation="com.metalbear.mirrord.MirrordSettingsState"/>
+    </extensions>
     <projectListeners>
         <listener class="com.metalbear.mirrord.MirrordListener"
                   topic="com.intellij.execution.ExecutionListener"/>
     </projectListeners>
 
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.metalbear.mirrord.MirrordSettingsConfigurable"
+                id="com.metalbear.mirrord.MirrordSettingsConfigurable"
+                displayName="mirrord"/>
+    </extensions>
     <actions>
         <action id="com.metalbear.mirrord.MirrordEnabler"
                 class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
