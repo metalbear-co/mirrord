@@ -12,7 +12,7 @@ use mirrord_protocol::{
 };
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{copy, sink, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::TcpStream,
     sync::mpsc::{channel, Receiver, Sender},
 };
@@ -75,6 +75,15 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Receives filtered HTTP requests that need to be forwarded a client.
     http_request_receiver: Receiver<StealerHttpRequest>,
+
+    /// For sending letting the [`Self::start`] task this connection was closed.
+    http_connection_close_sender: Sender<ConnectionId>,
+
+    /// [`Self::start`] listens to this, removes the connection and frees the index.
+    http_connection_close_receiver: Receiver<ConnectionId>,
+
+    /// Used to send http responses back to the original remote connection.
+    http_write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
 }
 
 impl TcpConnectionStealer {
@@ -94,6 +103,7 @@ impl TcpConnectionStealer {
         }
 
         let (http_request_sender, http_request_receiver) = channel(1024);
+        let (connection_close_sender, connection_close_receiver) = channel(1024);
 
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
@@ -108,6 +118,9 @@ impl TcpConnectionStealer {
             client_connections: HashMap::with_capacity(8),
             http_request_sender,
             http_request_receiver,
+            http_connection_close_sender: connection_close_sender,
+            http_connection_close_receiver: connection_close_receiver,
+            http_write_streams: HashMap::with_capacity(8),
         })
     }
 
@@ -158,6 +171,10 @@ impl TcpConnectionStealer {
                     if let Err(fail) = self.forward_incoming_tcp_data(connection_id, incoming_data).await {
                         error!("Failed reading incoming tcp data with {fail:#?}!");
                     }
+                }
+                Some(connection_id) = self.http_connection_close_receiver.recv() => {
+                    self.http_write_streams.remove(&connection_id);
+                    self.index_allocator.free_index(connection_id);
                 }
                 _ = cancellation_token.cancelled() => {
                     break;
@@ -274,6 +291,60 @@ impl TcpConnectionStealer {
         }
     }
 
+    /// Create a task that copies all data incoming from [`stream_with_browser`] into
+    /// [`stream_with_filter`], drains whatever comes back from [`stream_with_filter`], and hold on
+    /// to the writing half of [`stream_with_browser`] in [`self.http_write_streams`], for sending
+    /// back responses.
+    async fn forward_filter_stream(
+        &mut self,
+        stream_with_browser: TcpStream,
+        stream_with_filter: DuplexStream,
+        connection_id: ConnectionId,
+    ) {
+        // In `browser2stealer` the stealer reads incoming data from the outside - from the browser.
+        // In `stealer2browser` the stealer writes the responses back to the browser. The responses
+        // are either originated in the local application and forwareded by the layer, or if the
+        // request was not matched by any filter, the response is originated in the remote app.
+        let (mut browser2stealer, stealer2browser) = split(stream_with_browser);
+
+        // `filter2nowhere` is an incoming stream of http responses that the filter (specifically
+        // hyper) generates and we ignore.
+        // `stealer2filter` is an outgoing stream where we send to the stealer the incoming data
+        // from `browser2stealer`.
+        let (mut filter2nowhere, mut stealer2filter) = split(stream_with_filter);
+
+        // Hold on to the `stealer2browser` for sending http responses.
+        self.http_write_streams
+            .insert(connection_id, stealer2browser);
+
+        // Dump all the responses by hyper down a sink.
+        // The responses that hyper sends are meaningless, the real responses that will be
+        // forwarded come from the layer (or from the deployed application in the case of a
+        // passthrough).
+        tokio::spawn(async move {
+            let mut hyper_response_sink = sink();
+            if let Err(err) = copy(&mut filter2nowhere, &mut hyper_response_sink).await {
+                error!(
+                    "Encountered error: \"{err:?}\" while dumping hyper responses down the sink."
+                )
+            };
+        });
+
+        // With this sender the forwarding task will let the "main task" (`start`) know that the
+        // connection is closed and the response stream can be removed.
+        let connection_close_sender = self.http_connection_close_sender.clone();
+
+        // Forward all incoming data from browser onwards to the filter.
+        tokio::spawn(async move {
+            if let Err(err) = copy(&mut browser2stealer, &mut stealer2filter).await {
+                error!("Encountered error: \"{err:?}\" while forwarding incoming stream to filter.")
+            }
+            if let Err(err) = connection_close_sender.send(connection_id).await {
+                error!("Stream forwarding task could not communicate stream close to main task.");
+            }
+        });
+    }
+
     /// Handles a new remote connection that was accepted on the [`TcpConnectionStealer::stealer`]
     /// listener.
     ///
@@ -290,11 +361,24 @@ impl TcpConnectionStealer {
         let real_address = orig_dst::orig_dst_addr(&stream)?;
 
         match self.port_subscriptions.get(&real_address.port()) {
-            Some(StealSubscription::Unfiltered(client_id)) => {
+            // We got an incoming connection in a port that is being stolen in its whole by a single
+            // client.
+            Some(Unfiltered(client_id)) => {
                 self.steal_connection(*client_id, address, real_address.port(), stream)
                     .await
             }
-            Some(StealSubscription::HttpFiltered(manager)) => manager.new_connection(stream),
+
+            // We got an incoming connection in a port that is being http filtered by one or more
+            // clients.
+            Some(HttpFiltered(manager)) => {
+                let connection_id = self.index_allocator.next_index().unwrap();
+                let (original_stream, filter_stream) =
+                    manager.new_connection(stream, connection_id);
+                self.forward_filter_stream(original_stream, filter_stream, connection_id)
+                    .await;
+                Ok(())
+            }
+
             // Got connection to port without subscribers. This would be a bug, as we are supposed
             // to set the iptables rules such that we only redirect ports with subscribers.
             None => Err(AgentError::UnexpectedConnection(real_address.port())),
@@ -407,11 +491,11 @@ impl TcpConnectionStealer {
     fn get_client_ports(&self, client_id: ClientId) -> Vec<Port> {
         self.port_subscriptions
             .iter()
-            .filter(|(port, sub)| match sub {
+            .filter(|(_port, sub)| match sub {
                 Unfiltered(port_client) => *port_client == client_id,
                 HttpFiltered(manager) => manager.has_client(client_id),
             })
-            .map(|(port, sub)| *port)
+            .map(|(port, _sub)| *port)
             .collect()
     }
 

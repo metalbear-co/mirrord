@@ -1,10 +1,13 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use http_body_util::BodyExt;
+use hyper::{body::Incoming, http::request::Parts, Request};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequest, HttpResponse, PortSteal, TcpData},
+    tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, PortSteal, TcpData},
     ConnectionId, Port,
 };
 use tokio::{
+    io::DuplexStream,
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::Sender,
@@ -79,22 +82,40 @@ pub struct StealerCommand {
 
 /// A stolen HTTP request. Unlike [`mirrord_protocol::tcp::HttpRequest`], it also contains a
 /// ClientId.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug)]
 pub struct StealerHttpRequest {
     pub port: Port,
     pub connection_id: ConnectionId,
     pub client_id: ClientId,
-    // pub request: Request<Incoming>,
-    pub request: Vec<u8>, // TODO
+    pub request: Request<Incoming>,
 }
 
-impl Into<HttpRequest> for StealerHttpRequest {
-    fn into(self) -> HttpRequest {
-        HttpRequest {
+impl StealerHttpRequest {
+    async fn into_serializable(self) -> Result<HttpRequest, hyper::Error> {
+        let (
+            Parts {
+                method,
+                uri,
+                version,
+                headers,
+                extensions: _, // TODO: do we need to use it? There is not such `http_serde` method.
+                ..
+            },
+            body,
+        ) = self.request.into_parts();
+        let body = body.collect().await?.to_bytes().to_vec();
+        let internal_req = InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        };
+        Ok(HttpRequest {
             port: self.port,
             connection_id: self.connection_id,
-            request: self.request,
-        }
+            request: internal_req,
+        })
     }
 }
 
@@ -114,9 +135,12 @@ impl HttpFilterManager {
         false // TODO
     }
 
-    fn new_connection(&self, stream: TcpStream) -> Result<()> {
-        // TODO
-        Ok(())
+    fn new_connection(
+        &self,
+        stream: TcpStream,
+        connection_id: ConnectionId,
+    ) -> (TcpStream, DuplexStream) {
+        todo!()
     }
 
     fn send_response(&self, response: HttpResponse) -> Result<()> {
