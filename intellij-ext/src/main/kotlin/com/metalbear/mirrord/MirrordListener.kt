@@ -18,8 +18,8 @@ class MirrordListener : ExecutionListener {
     private val defaults = MirrordDefaultConfig()
 
     init {
-        mirrordEnv["DYLD_INSERT_LIBRARIES"] = defaults.dylibPath
-        mirrordEnv["LD_PRELOAD"] = defaults.ldPreloadPath
+//        mirrordEnv["DYLD_INSERT_LIBRARIES"] = defaults.dylibPath
+//        mirrordEnv["LD_PRELOAD"] = defaults.ldPreloadPath
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = defaults.acceptInvalidCertificates.toString()
         mirrordEnv["MIRRORD_SKIP_PROCESSES"] = defaults.skipProcesses
         mirrordEnv["DEBUGGER_IGNORE_PORTS_PATCH"] = defaults.ignorePorts
@@ -43,52 +43,51 @@ class MirrordListener : ExecutionListener {
         if (enabled && id.isEmpty()) {
             id = executorId // id is set here to make sure we don't spawn the dialog twice
             ApplicationManager.getApplication().invokeLater {
-                val kubeDataProvider = KubeDataProvider()
-
-                val namespaces = try {
-                    kubeDataProvider.getNamespaces().asJBList()
-                } catch (e: Exception) {
-                    MirrordEnabler.notify(
-                        "Error occurred while fetching namespaces from Kubernetes context.\n " +
-                                "If you're missing permissions, use the textbox to write the namespace.\n `${e.message}`",
-                        NotificationType.WARNING,
-                        env.project
-                    )
-                    null
-                }
+//                val kubeDataProvider = KubeDataProvider()
+//
+//                val namespaces = try {
+//                    kubeDataProvider.getNamespaces().asJBList()
+//                } catch (e: Exception) {
+//                    MirrordEnabler.notify(
+//                        "Error occurred while fetching namespaces from Kubernetes context.\n " +
+//                                "If you're missing permissions, use the textbox to write the namespace.\n `${e.message}`",
+//                        NotificationType.WARNING,
+//                        env.project
+//                    )
+//                    null
+//                }
 
                 // in case listing namespace fails, we will use a textbox to get the namespace from the user
-                val podNamespace = if (namespaces != null) {
-                    val namespaceDialog = namespaces.let { MirrordDialogBuilder.createMirrordNamespaceDialog(it) }.let {
-                        MirrordDialogBuilder.createDialogBuilder(
-                            it
-                        )
-                    }
-                    if (namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
-                        namespaces.selectedValue
-                    } else {
-                        null
-                    }
-                } else {
-                    val namespaceTextField = JTextField()
-                    val namespaceTextDialog =
-                        MirrordDialogBuilder.createMirrordNamespaceTextDialog(namespaceTextField).let {
-                            MirrordDialogBuilder.createDialogBuilder(
-                                it
-                            )
-                        }
-                    if (namespaceTextDialog.show() == DialogWrapper.OK_EXIT_CODE && namespaceTextField.text.isNotEmpty()) {
-                        namespaceTextField.text
-                    } else {
-                        null
-                    }
-                }
+//                val podNamespace = if (namespaces != null) {
+//                    val namespaceDialog = namespaces.let { MirrordDialogBuilder.createMirrordNamespaceDialog(it) }.let {
+//                        MirrordDialogBuilder.createDialogBuilder(
+//                            it
+//                        )
+//                    }
+//                    if (namespaceDialog.show() == DialogWrapper.OK_EXIT_CODE && !namespaces.isSelectionEmpty) {
+//                        namespaces.selectedValue
+//                    } else {
+//                        null
+//                    }
+//                } else {
+//                    val namespaceTextField = JTextField()
+//                    val namespaceTextDialog =
+//                        MirrordDialogBuilder.createMirrordNamespaceTextDialog(namespaceTextField).let {
+//                            MirrordDialogBuilder.createDialogBuilder(
+//                                it
+//                            )
+//                        }
+//                    if (namespaceTextDialog.show() == DialogWrapper.OK_EXIT_CODE && namespaceTextField.text.isNotEmpty()) {
+//                        namespaceTextField.text
+//                    } else {
+//                        null
+//                    }
+//                }
 
-                defaultFlow = podNamespace == null
-
-                if (podNamespace != null) {
-                    val pods = try {
-                        kubeDataProvider.getNameSpacedPods(podNamespace).asJBList()
+//                defaultFlow = podNamespace == null
+                val podNamespace = null;
+                val pods = try {
+                        MirrordApi.listPods(podNamespace).asJBList()
                     } catch (e: Exception) {
                         MirrordEnabler.notify(
                             "Error occurred while fetching pods from Kubernetes context: `${e.message}`",
@@ -134,7 +133,7 @@ class MirrordListener : ExecutionListener {
                     )
                     if (mirrordConfigDialog.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
                         mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue}"
-                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = podNamespace
+//                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = podNamespace
                         mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
                         mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
                         mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
@@ -156,11 +155,10 @@ class MirrordListener : ExecutionListener {
                         val envMap = getRunConfigEnv(env)
                         envMap?.putAll(mirrordEnv)
                         envSet = envMap != null
-                    }
                 } else {
-                    id = ""
-                    defaultFlow = true
-                }
+                        id = ""
+                        defaultFlow = true
+                    }
             }
         }
         return super.processStartScheduled(executorId, env)

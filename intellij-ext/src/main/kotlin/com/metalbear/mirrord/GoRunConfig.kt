@@ -8,6 +8,7 @@ import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
 import com.intellij.openapi.application.PathManager
 import java.nio.file.Paths
+import com.intellij.openapi.util.SystemInfo
 
 class GoRunConfig : GoRunConfigurationExtension() {
     companion object {
@@ -63,11 +64,10 @@ class GoRunConfig : GoRunConfigurationExtension() {
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
             MirrordListener.enabled && !MirrordListener.envSet &&
-            System.getProperty("os.name").toLowerCase().startsWith("mac") &&
+            SystemInfo.isMac &&
             !MirrordListener.defaultFlow
         ) {
-            val arch = System.getProperty("os.arch")
-            val delvePath = getCustomDelvePath(arch)
+            val delvePath = getCustomDelvePath()
             // convert the delve file to an executable
             val delveExecutable = Paths.get(delvePath).toFile()
             if (delveExecutable.exists()) {
@@ -80,7 +80,7 @@ class GoRunConfig : GoRunConfigurationExtension() {
         super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
     }
 
-    private fun getCustomDelvePath(arch: String): String {
-        return Paths.get(PathManager.getPluginsPath(), "mirrord", "dlv_$arch").toString()
+    private fun getCustomDelvePath(): String {
+        return MirrordPathManager.getBinary("dlv", false)!!
     }
 }

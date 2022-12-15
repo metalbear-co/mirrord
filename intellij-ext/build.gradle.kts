@@ -1,5 +1,6 @@
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.nio.file.Paths
 
 fun properties(key: String) = project.findProperty(key).toString()
 
@@ -9,7 +10,7 @@ plugins {
     // Kotlin support
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
     // Gradle IntelliJ Plugin
-    id("org.jetbrains.intellij") version "1.9.0"
+    id("org.jetbrains.intellij") version "1.10.1"
     // Gradle Changelog Plugin
     id("org.jetbrains.changelog") version "1.3.1"
     // Gradle Qodana Plugin
@@ -25,10 +26,6 @@ repositories {
 }
 dependencies {
     implementation("com.github.zafarkhaja:java-semver:0.9.0")
-    implementation("io.kubernetes:client-java:16.0.1") {
-        exclude(group = "org.slf4j", module = "slf4j-api")
-        exclude(group = "org.yaml", module = "snakeyaml")
-    }
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
@@ -95,27 +92,16 @@ tasks {
     }
 
     prepareSandbox {
-        val sharedLibs =
-            mapOf("macos" to "$projectDir/libmirrord_layer.dylib", "linux" to "$projectDir/libmirrord_layer.so")
-        sharedLibs.forEach { (_, lib) ->
-            from(file(lib)) {
-                into(pluginName.get())
-            }
-            // NOTE: comment this line when developing locally without either of shared libs
-            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
-                if (!inputs.sourceFiles.files.contains(File(lib))) throw StopExecutionException("Expected library: $lib >> Not Found")
-            }
+        // binaries to copy from $projectDir/bin to $pluginDir/bin with same path.
+        // besides mirrord binaries, we have custom delve until delve 20 is widely used
+        val binaries = listOf("macos/mirrord", "linux/arm64/mirrord", "linux/x86-64/mirrord", "macos/arm64/dlv", "macos/x86-64/dlv")
+        binaries.forEach {
+                binary -> from(file(project.projectDir.resolve("bin").resolve(binary))) {
+                    // into treats last part as directory, so need to drop it.
+                    into(Paths.get(pluginName.get(), "bin", binary).parent.toString())
         }
-        // custom delve
-        val delveExecutables = mapOf("aarch64" to "$projectDir/dlv_aarch64", "amd64" to "$projectDir/dlv_amd64")
-        delveExecutables.forEach { (_, delve) ->
-            from(file(delve)) {
-                into(pluginName.get())
-            }
-            if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
-                if (!inputs.sourceFiles.files.contains(File(delve))) throw StopExecutionException("Expected delve executable: $delve >> Not Found")
-            }
         }
+
     }
 
     // Configure UI tests plugin
