@@ -155,45 +155,34 @@ mod http_traffic_tests {
 
     use super::*;
 
-    // TODO(alex) [mid] 2022-12-14: Be smart, use `reqwest` instead of creating your own tcp
-    // connection and request thingies.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
-        let mut hello_request = r#"
-GET / HTTP/1.1
-Host: mirrord.local
-First-Header: mirrord
-Mirrord-Test: Hello
-
-"#
-        .to_string()
-        .into_bytes();
-
         let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 7777))
             .await
             .expect("Bound TcpListener.");
-        println!("Server created!");
 
-        tokio::spawn(async move {
-            let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, 7777))
-                .await
-                .expect("Connected TcpStream.");
-            println!("Client connected!");
+        let request_task = tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let request = client
+                .get("http://127.0.0.1:7777")
+                .header("First-Header", "mirrord")
+                .header("Mirrord-Test", "Hello")
+                .build()
+                .unwrap();
 
-            let client_wrote = client.write(&mut hello_request).await.unwrap();
-            assert_eq!(client_wrote, hello_request.len());
+            // Send a request and wait compare the dummy response we get from the filter's hyper
+            // handler.
+            let response = client.execute(request).await.unwrap();
+            assert_eq!(response.text().await.unwrap(), "Captured!".to_string());
         });
 
         let (tcp_stream, _) = server.accept().await.expect("Connection success!");
-        println!("Server accepted connection!");
-
-        let mut interceptor_buffer = vec![0; 15000];
 
         let client_id = 1;
         let filter = Regex::new("Hello").expect("Valid regex.");
 
         let (captured_tx, mut captured_rx) = channel(15000);
-        let (passthrough_tx, passthrough_rx) = channel(15000);
+        let (passthrough_tx, _) = channel(15000);
 
         let http_filter_manager = HttpFilterManager::new(
             tcp_stream.local_addr().unwrap().port(),
@@ -212,28 +201,29 @@ Mirrord-Test: Hello
             .await
             .unwrap();
 
-        // TODO(alex) [mid] 2022-12-14: We only ever break out of this loop if the client ->
-        // interceptor -> captured mechanism worked, any deviation will keep this running forever.
-        //
-        // If we try to break on `0` bytes read, we might break the loop too soon?
+        let mut interceptor_buffer = vec![0; 15000];
+
         loop {
             select! {
                 // Server stream reads what it received from the client (remote app), and sends it
                 // to the hyper task via the intermmediate DuplexStream.
                 Ok(read) = original_stream.read(&mut interceptor_buffer) => {
-                    // if read == 0 {
-                    //     break;
-                    // }
-                    // println!("read {:#?} bytes {:#?}", read, &interceptor_buffer[..read]);
+                    if read == 0 {
+                        break;
+                    }
 
                     let wrote = interceptor_stream.write(&interceptor_buffer[..read]).await.unwrap();
                     assert_eq!(wrote, read);
                 }
 
                 // Receives captured requests from the hyper task.
-                captured = captured_rx.recv() => {
-                    println!("Yay! We have a captured request {:#?}!", captured);
-                    assert!(captured.is_some());
+                Some(_) = captured_rx.recv() => {
+                    // Send the dummy response from hyper to our client, so it can stop blocking
+                    // and exit.
+                    let mut response_buffer = vec![0;1500];
+                    let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
+                    original_stream.write(&response_buffer[..read_amount]).await.unwrap();
+
                     break;
                 }
 
@@ -243,11 +233,11 @@ Mirrord-Test: Hello
             }
         }
 
+        // Manually close this stream to notify the filter's hyper handler that this connection is
+        // over.
         drop(interceptor_stream);
 
-        println!("I'm out of the loop");
-
-        // TODO(alex) [high] 2022-12-14: Stuck here, as we never break the hyper task.
-        println!("Hyper task {:#?}", hyper_task.await);
+        assert!(hyper_task.await.is_ok());
+        assert!(request_task.await.is_ok());
     }
 }

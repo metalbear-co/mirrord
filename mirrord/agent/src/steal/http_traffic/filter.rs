@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::server::conn::{http1, http2};
+use hyper::server::conn::http1;
 use tokio::{
     io::{duplex, DuplexStream},
     net::TcpStream,
-    runtime::Handle,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::Sender,
     task::JoinHandle,
 };
 use tracing::error;
