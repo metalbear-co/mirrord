@@ -1,6 +1,8 @@
 use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
+use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
+use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, Port, RemoteResult};
 
@@ -25,27 +27,6 @@ impl fmt::Debug for TcpData {
             .field("bytes (length)", &self.bytes.len())
             .finish()
     }
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct HttpRequest {
-    // pub request: Request<Incoming>,
-    pub request: Vec<u8>, // TODO
-    pub connection_id: ConnectionId,
-    /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
-    /// "lazily", with the first filtered request.
-    pub port: Port,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct HttpResponse {
-    /// This is used to make sure the response is sent in its turn, after responses to all earlier
-    /// requests were already sent.
-    pub request_id: u64,
-    pub connection_id: ConnectionId,
-    pub port: Port,
-    // TODO
-    // pub response: Response<Full<Bytes>>
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -90,4 +71,59 @@ pub enum LayerTcpSteal {
     PortUnsubscribe(Port),
     Data(TcpData),
     HttpResponse(HttpResponse),
+}
+
+/// (De-)Serializable HTTP request.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct InternalHttpRequest {
+    #[serde(with = "http_serde::method")]
+    pub method: Method,
+
+    #[serde(with = "http_serde::uri")]
+    pub uri: Uri,
+
+    #[serde(with = "http_serde::header_map")]
+    pub headers: HeaderMap,
+
+    #[serde(with = "http_serde::version")]
+    pub version: Version,
+
+    pub body: Vec<u8>,
+    // TODO: What about `extensions`? There is no `http_serde` method for it but it is in `Parts`.
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpRequest {
+    #[bincode(with_serde)]
+    pub request: InternalHttpRequest,
+    pub connection_id: ConnectionId,
+    /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
+    /// "lazily", with the first filtered request.
+    pub port: Port,
+}
+
+/// (De-)Serializable HTTP response.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct InternalHttpResponse {
+    #[serde(with = "http_serde::status_code")]
+    status: StatusCode,
+
+    #[serde(with = "http_serde::version")]
+    version: Version,
+
+    #[serde(with = "http_serde::header_map")]
+    headers: HeaderMap,
+
+    body: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpResponse {
+    /// This is used to make sure the response is sent in its turn, after responses to all earlier
+    /// requests were already sent.
+    pub request_id: u64,
+    pub connection_id: ConnectionId,
+    pub port: Port,
+    #[bincode(with_serde)]
+    pub request: InternalHttpRequest,
 }

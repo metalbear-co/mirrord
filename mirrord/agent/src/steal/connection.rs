@@ -197,7 +197,7 @@ impl TcpConnectionStealer {
         if let Some(request) = request {
             if let Some(daemon_tx) = self.clients.get(&request.client_id) {
                 Ok(daemon_tx
-                    .send(DaemonTcp::HttpRequest(request.into()))
+                    .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
                     .await?)
             } else {
                 // TODO: can this happen when a client unsubscribes?

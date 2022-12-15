@@ -108,6 +108,9 @@ pub enum AgentError {
 
     #[error("An internal invariant of the agent was violated, this should not happen.")]
     AgentInvariantViolated,
+
+    #[error("Reading request body failed with `{0}`")]
+    HttpRequestSerializationError(#[from] hyper::Error),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

@@ -1190,10 +1190,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-body-util"
+version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d177b8dc6ca73620521c881e0a7d7b495b6b606ea6d079800aa83f5bcbb303fc"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body 1.0.0-rc1",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "http-range-header"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfe8eed0a9285ef776bb792479ea3834e8b94e13d615c2f66d03dd50a435a29"
+
+[[package]]
+name = "http-serde"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e272971f774ba29341db2f686255ff8a979365a26fb9e4277f6b6d9ec0cdd5e"
+dependencies = [
+ "http",
+ "serde",
+]
 
 [[package]]
 name = "httparse"
@@ -1863,6 +1886,7 @@ dependencies = [
  "enum_dispatch",
  "faccess",
  "futures",
+ "http-body-util",
  "hyper 1.0.0-rc.1",
  "iptables",
  "libc",
@@ -2052,6 +2076,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "http-serde",
  "hyper 1.0.0-rc.1",
  "serde",
  "thiserror",

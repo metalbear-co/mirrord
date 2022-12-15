@@ -46,6 +46,7 @@ wildmatch = "2"
 enum_dispatch = "0.3.8"
 async-trait.workspace = true
 hyper.workspace = true
+http-body-util = "0.1.0-rc.1"
 
 [dev-dependencies]
 mockall = "0.11"
