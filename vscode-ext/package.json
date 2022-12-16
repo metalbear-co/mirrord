@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
-	"version": "3.13.4",
+	"version": "3.14.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
@@ -77,13 +77,11 @@
 		"webpack-cli": "^5.0.1"
 	},
 	"dependencies": {
-		"@kubernetes/client-node": "^0.16.3",
 		"es5-ext": "<=0.10.53",
 		"ffi-napi": "^4.0.3",
 		"minipass": "^3.3.5",
 		"nan": "^2.15.0",
 		"node-go-require": "^2.0.0",
-		"node-netstat": "^1.8.0",
 		"ref-array-napi": "^1.2.2",
 		"ref-napi": "^3.0.3",
 		"ref-struct-napi": "^1.1.1",

@@ -235,3 +235,138 @@ async fn test_pwrite(
         &String::from_utf8_lossy(&data)
     );
 }
+
+/// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
+/// matches the expected bytes written.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+async fn test_node_close(
+    #[values(Application::NodeFileOps)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+    // pwrite test
+    // reply to open
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/test_file.txt".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        }))
+    );
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+
+    let bytes = "hello".as_bytes().to_vec();
+    let read_amount = bytes.len();
+    // on macOS it will send xstat before reading.
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: read_amount as u64,
+            user_id: 2,
+            blocks: 3,
+            ..Default::default()
+        };
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+            remote_fd: 1,
+            buffer_size: 8192
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Read(Ok(
+            ReadFileResponse {
+                bytes,
+                read_amount: read_amount as u64,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+            remote_fd: 1,
+            buffer_size: 8192
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Read(Ok(
+            ReadFileResponse {
+                bytes: vec![],
+                read_amount: 0,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Close(Ok(
+            CloseFileResponse {},
+        ))))
+        .await
+        .unwrap();
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+}

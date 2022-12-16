@@ -27,20 +27,20 @@ pub struct LogMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadFileRequest {
-    pub remote_fd: usize,
-    pub buffer_size: usize,
+    pub remote_fd: u64,
+    pub buffer_size: u64,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLineFileRequest {
-    pub remote_fd: usize,
-    pub buffer_size: usize,
+    pub remote_fd: u64,
+    pub buffer_size: u64,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLimitedFileRequest {
-    pub remote_fd: usize,
-    pub buffer_size: usize,
+    pub remote_fd: u64,
+    pub buffer_size: u64,
     pub start_from: u64,
 }
 
@@ -125,26 +125,26 @@ pub struct OpenFileRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenRelativeFileRequest {
-    pub relative_fd: usize,
+    pub relative_fd: u64,
     pub path: PathBuf,
     pub open_options: OpenOptionsInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SeekFileRequest {
-    pub fd: usize,
+    pub fd: u64,
     pub seek_from: SeekFromInternal,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct WriteFileRequest {
-    pub fd: usize,
+    pub fd: u64,
     pub write_bytes: Vec<u8>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct WriteLimitedFileRequest {
-    pub remote_fd: usize,
+    pub remote_fd: u64,
     pub start_from: u64,
     pub write_bytes: Vec<u8>,
 }
@@ -160,7 +160,7 @@ impl fmt::Debug for WriteFileRequest {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct CloseFileRequest {
-    pub fd: usize,
+    pub fd: u64,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -205,13 +205,13 @@ pub enum ClientMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct OpenFileResponse {
-    pub fd: usize,
+    pub fd: u64,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
-    pub read_amount: usize,
+    pub read_amount: u64,
 }
 
 impl fmt::Debug for ReadFileResponse {
@@ -230,7 +230,7 @@ pub struct SeekFileResponse {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct WriteFileResponse {
-    pub written_amount: usize,
+    pub written_amount: u64,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

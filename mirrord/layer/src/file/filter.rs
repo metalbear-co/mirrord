@@ -85,6 +85,7 @@ fn generate_local_set() -> RegexSet {
         r"^/Users",
         r"^/Library",
         r"^/Applications",
+        r"^/System",
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
         "^/$", // root

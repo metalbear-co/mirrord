@@ -274,14 +274,7 @@ mod utils {
             Some(binary_path) => binary_path,
         };
         let temp_dir = tempdir::TempDir::new("test").unwrap();
-        let mut mirrord_args = vec![
-            "exec",
-            "--target",
-            target,
-            "-c",
-            "--extract-path",
-            temp_dir.path().to_str().unwrap(),
-        ];
+        let mut mirrord_args = vec!["exec", "--target", target, "-c"];
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }

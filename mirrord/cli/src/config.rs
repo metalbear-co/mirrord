@@ -25,9 +25,13 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
 
-    /// List targets/resources like pods/namespaces in json format    
+    /// List targets/resources like pods/namespaces in json format
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
+
+    /// Extension execution - used by extension to execute binaries.
+    #[command(hide = true, name = "ext")]
+    ExtensionExec(Box<ExtensionExecArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -129,11 +133,6 @@ pub(super) struct ExecArgs {
 
     /// Arguments to pass to the binary.
     pub(super) binary_args: Vec<String>,
-
-    /// Where to extract the library to. Default is temp dir.
-    /// TODO: delete on next major, I think we used it for tests..
-    #[arg(long)]
-    pub extract_path: Option<String>,
 
     /// Use an Ephemeral Container to mirror traffic.
     #[arg(short, long)]
@@ -243,4 +242,14 @@ pub(super) struct ListTargetArgs {
     /// Specify the namespace to list targets in.
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct ExtensionExecArgs {
+    /// Specify config file to use
+    #[arg(short = 'f')]
+    pub config_file: Option<String>,
+    /// Specify target
+    #[arg(short = 't')]
+    pub target: Option<String>,
 }

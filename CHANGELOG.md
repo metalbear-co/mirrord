@@ -7,11 +7,28 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.14.0
+
+### Changed
+
+- cli: Set environment variables from cli to spawned process instead of layer when using `mirrord exec`.
+- cli: use miette for nicer errors
+- cli: some ext exec preparations, nothing user facing yet.
+- vs code ext: use cli, fixes some env bugs with go and better user experience.
+
+## 3.13.5
+
 ### Changed
 
 - Don't add temp prefix when using `extract` command.
 - VS Code extension: mirrord enable/disable to be per workspace.
 - VS Code extension: bundle the resources
+- Add `/System` to default ignore list.
+- Remove `test_mirrord_layer` from CI as it's covered in integration testing.
+
+### Fixed
+
+- fd leak on Linux when using libuv (Node). Caused undefined behavior. Fixes [#757](https://github.com/metalbear-co/mirrord/issues/757).
 
 ### Misc
 

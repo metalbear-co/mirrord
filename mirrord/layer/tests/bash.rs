@@ -41,7 +41,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
 
-    let fd: usize = 1;
+    let fd: u64 = 1;
 
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)
