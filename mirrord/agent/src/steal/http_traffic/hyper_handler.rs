@@ -5,12 +5,11 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
 use hyper::{body::Incoming, service::Service, Request, Response};
-use tokio::sync::mpsc::Sender;
 use mirrord_protocol::{ConnectionId, Port};
-use crate::steal::StealerHttpRequest;
+use tokio::sync::mpsc::Sender;
 
 use super::{error::HttpTrafficError, PassthroughRequest};
-use crate::util::ClientId;
+use crate::{steal::StealerHttpRequest, util::ClientId};
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
@@ -24,8 +23,8 @@ pub(super) struct HyperHandler {
 // TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
 // agent.
 //
-/// Creates a task to send a message (either [`StealerHttpRequest`] or [`PassthroughRequest`]) to the
-/// receiving end that lives in the stealer.
+/// Creates a task to send a message (either [`StealerHttpRequest`] or [`PassthroughRequest`]) to
+/// the receiving end that lives in the stealer.
 ///
 /// As the [`hyper::service::Service`] trait doesn't support `async fn` for the [`Service::call`]
 /// method, we use this helper function that allows us to send a `value: T` via a `Sender<T>`
@@ -71,7 +70,7 @@ impl Service<Request<Incoming>> for HyperHandler {
                     port: self.port,
                     connection_id: self.connection_id,
                     client_id,
-                    request
+                    request,
                 },
                 self.captured_tx.clone(),
             );

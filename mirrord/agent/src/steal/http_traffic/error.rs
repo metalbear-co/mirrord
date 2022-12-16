@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::{StealerHttpRequest, PassthroughRequest};
+use super::{PassthroughRequest, StealerHttpRequest};
 use crate::util::ClientId;
 
 /// Errors specific to the HTTP traffic feature.

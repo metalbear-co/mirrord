@@ -3,6 +3,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::server::conn::http1;
+use mirrord_protocol::ConnectionId;
 use tokio::{
     io::{duplex, DuplexStream},
     net::TcpStream,
@@ -10,14 +11,11 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::error;
-use mirrord_protocol::ConnectionId;
-use crate::steal::StealerHttpRequest;
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion,
-    PassthroughRequest,
+    error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion, PassthroughRequest,
 };
-use crate::util::ClientId;
+use crate::{steal::StealerHttpRequest, util::ClientId};
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 

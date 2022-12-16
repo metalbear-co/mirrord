@@ -6,15 +6,14 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::{body::Incoming, Request};
-use tokio::{net::TcpStream, sync::mpsc::Sender};
 use mirrord_protocol::ConnectionId;
-use crate::steal::StealerHttpRequest;
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
     filter::{HttpFilter, HttpFilterBuilder},
 };
-use crate::util::ClientId;
+use crate::{steal::StealerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 mod filter;
@@ -105,7 +104,6 @@ impl HttpFilterManager {
         self.client_filters.remove(client_id)
     }
 
-
     pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
         self.client_filters.contains_key(client_id)
     }
@@ -144,7 +142,6 @@ impl HttpFilterManager {
         .await?
         .start()
     }
-
 
     pub(super) fn is_empty(&self) -> bool {
         self.client_filters.is_empty()
@@ -201,12 +198,14 @@ mod http_traffic_tests {
             passthrough_tx,
         );
 
+        let connection_id = 0;
+
         let HttpFilter {
             hyper_task,
             mut original_stream,
             mut interceptor_stream,
         } = http_filter_manager
-            .new_connection(tcp_stream)
+            .new_connection(tcp_stream, connection_id)
             .await
             .unwrap();
 

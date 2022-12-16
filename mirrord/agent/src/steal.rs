@@ -6,11 +6,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, PortSteal, TcpData},
     ConnectionId, Port,
 };
-use tokio::{
-    net::TcpListener,
-    select,
-    sync::mpsc::Sender,
-};
+use tokio::{net::TcpListener, select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -18,9 +14,9 @@ use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
+    steal::http_traffic::HttpFilterManager,
     util::{ClientId, IndexAllocator},
 };
-use crate::steal::http_traffic::HttpFilterManager;
 
 pub(super) mod api;
 pub(super) mod connection;

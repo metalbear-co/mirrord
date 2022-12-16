@@ -54,7 +54,7 @@ pub enum RemoteError {
     ConnectTimedOut(SocketAddr),
 
     #[error(r#"Get bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
-    BadHttpFilterRegex(String, String)
+    BadHttpFilterRegex(String, String),
 }
 
 impl From<AddrParseError> for RemoteError {
