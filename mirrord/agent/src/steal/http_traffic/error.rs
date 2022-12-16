@@ -15,9 +15,6 @@ pub enum HttpTrafficError {
     #[error("Failed parsing HTTP smaller than minimal!")]
     TooSmall,
 
-    #[error("Failed as the buffer does not contain a valid HTTP request!")]
-    NotHttp,
-
     #[error("Failed with IO `{0}`!")]
     IO(#[from] std::io::Error),
 

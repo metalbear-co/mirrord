@@ -107,10 +107,10 @@ impl HttpFilterBuilder {
                 if peeked_amount == 0 {
                     Err(HttpTrafficError::Empty)
                 } else {
-                    HttpVersion::new(
+                    Ok(HttpVersion::new(
                         &buffer[..peeked_amount],
                         &H2_PREFACE[..peeked_amount.min(H2_PREFACE.len())],
-                    )
+                    ))
                 }
             }) {
             Ok(http_version) => {
@@ -133,7 +133,10 @@ impl HttpFilterBuilder {
             // reads from each side and writes to the other side.
             //
             // This being the handling mechanism for not-http passthrough.
-            Err(HttpTrafficError::NotHttp) => todo!(),
+            //
+            // ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move this
+            // into the `HttpVersion` enum, and have it be `NotHttp` variant, thus unifying the
+            // creation of tasks there.
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
                 Err(fail)
@@ -185,6 +188,18 @@ impl HttpFilterBuilder {
                 // TODO(alex) [mid] 2022-12-14: Handle this as a passthrough case!
                 todo!()
             }),
+            // TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
+            //
+            // ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
+            // destination from the stealer, then we can spawn a task that just pairs a stream that
+            // reads from each side and writes to the other side.
+            //
+            // This being the handling mechanism for not-http passthrough.
+            //
+            // ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move this
+            // into the `HttpVersion` enum, and have it be `NotHttp` variant, thus unifying the
+            // creation of tasks there.
+            HttpVersion::NotHttp => todo!(),
         };
 
         Ok(HttpFilter {

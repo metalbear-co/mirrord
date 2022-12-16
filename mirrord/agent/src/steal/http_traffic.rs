@@ -24,23 +24,24 @@ enum HttpVersion {
     #[default]
     V1,
     V2,
+    NotHttp,
 }
 
 impl HttpVersion {
     /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
     /// comparing it with a slice of [`H2_PREFACE`].
-    fn new(buffer: &[u8], h2_preface: &[u8]) -> Result<Self, HttpTrafficError> {
+    fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
         if buffer == h2_preface {
-            Ok(Self::V2)
+            Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),
             Ok(_) | Err(httparse::Error::TooManyHeaders)
         ) {
-            Ok(Self::V1)
+            Self::V1
         } else {
-            Err(HttpTrafficError::NotHttp)
+            Self::NotHttp
         }
     }
 }
