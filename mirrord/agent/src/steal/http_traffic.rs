@@ -11,12 +11,12 @@ use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
-    filter::{HttpFilter, HttpFilterBuilder},
+    filter::{HttpFilter, HttpFilterBuilder, StolenConnection},
 };
 use crate::{steal::StealerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
-mod filter;
+pub(super) mod filter;
 mod hyper_handler;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -129,12 +129,10 @@ impl HttpFilterManager {
     /// connection.
     pub(super) async fn new_connection(
         &self,
-        connection: TcpStream,
-        connection_id: ConnectionId,
+        stolen_connection: StolenConnection,
     ) -> Result<HttpFilter, HttpTrafficError> {
         HttpFilterBuilder::new(
-            connection,
-            connection_id,
+            stolen_connection,
             self.client_filters.clone(),
             self.captured_tx.clone(),
             self.passthrough_tx.clone(),
@@ -199,13 +197,18 @@ mod http_traffic_tests {
         );
 
         let connection_id = 0;
+        let stolen_connection = StolenConnection::new(
+            tcp_stream,
+            (Ipv4Addr::LOCALHOST, 7777).into(),
+            connection_id,
+        );
 
         let HttpFilter {
             hyper_task,
             mut original_stream,
             mut interceptor_stream,
         } = http_filter_manager
-            .new_connection(tcp_stream, connection_id)
+            .new_connection(stolen_connection)
             .await
             .unwrap();
 

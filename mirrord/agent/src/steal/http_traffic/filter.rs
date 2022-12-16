@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use core::ops::Deref;
+use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
@@ -21,13 +22,12 @@ const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
-    original_stream: TcpStream,
+    stolen_connection: StolenConnection,
     hyper_stream: DuplexStream,
     interceptor_stream: DuplexStream,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
-    connection_id: ConnectionId,
 }
 
 /// Used by the stealer handler to:
@@ -50,6 +50,40 @@ pub(crate) struct HttpFilter {
     pub(crate) interceptor_stream: DuplexStream,
 }
 
+/// Wrapper around the stealer's [`TcpStream`] that is being used to steal the data, that would
+/// originally go to [`StolenStream::original_address`].
+#[derive(Debug)]
+pub(crate) struct StolenConnection {
+    tcp_stream: TcpStream,
+
+    /// Address that this stream was originally supposed to connect to.
+    original_address: SocketAddr,
+
+    connection_id: ConnectionId,
+}
+
+impl StolenConnection {
+    pub(crate) fn new(
+        tcp_stream: TcpStream,
+        original_address: SocketAddr,
+        connection_id: ConnectionId,
+    ) -> Self {
+        Self {
+            tcp_stream,
+            original_address,
+            connection_id,
+        }
+    }
+}
+
+impl Deref for StolenConnection {
+    type Target = TcpStream;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tcp_stream
+    }
+}
+
 impl HttpFilterBuilder {
     /// Does not consume bytes from the stream.
     ///
@@ -57,8 +91,7 @@ impl HttpFilterBuilder {
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     pub(super) async fn new(
-        tcp_stream: TcpStream,
-        connection_id: ConnectionId,
+        stolen_connection: StolenConnection,
         filters: Arc<DashMap<ClientId, Regex>>,
         captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
@@ -66,7 +99,7 @@ impl HttpFilterBuilder {
         let mut buffer = [0u8; 64];
         // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
         // might return 0 bytes peeked.
-        match tcp_stream
+        match stolen_connection
             .peek(&mut buffer)
             .await
             .map_err(From::from)
@@ -86,15 +119,20 @@ impl HttpFilterBuilder {
                 Ok(Self {
                     http_version,
                     client_filters: filters,
-                    original_stream: tcp_stream,
+                    stolen_connection,
                     hyper_stream,
                     interceptor_stream,
                     captured_tx,
                     passthrough_tx,
-                    connection_id,
                 })
             }
-            // TODO(alex) [mid] 2022-12-09: This whole filter is a passthrough case.
+            // TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
+            //
+            // ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
+            // destination from the stealer, then we can spawn a task that just pairs a stream that
+            // reads from each side and writes to the other side.
+            //
+            // This being the handling mechanism for not-http passthrough.
             Err(HttpTrafficError::NotHttp) => todo!(),
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
@@ -108,17 +146,21 @@ impl HttpFilterBuilder {
     pub(super) fn start(self) -> Result<HttpFilter, HttpTrafficError> {
         let Self {
             http_version,
-            original_stream,
             hyper_stream,
             interceptor_stream,
             client_filters,
             captured_tx,
             passthrough_tx,
-            connection_id,
+            stolen_connection:
+                StolenConnection {
+                    tcp_stream,
+                    original_address,
+                    connection_id,
+                },
         } = self;
 
         // Incoming tcp stream definitely has an address.
-        let port = original_stream.local_addr().unwrap().port();
+        let port = tcp_stream.local_addr().unwrap().port();
 
         let hyper_task = match http_version {
             HttpVersion::V1 => tokio::task::spawn(async move {
@@ -147,7 +189,7 @@ impl HttpFilterBuilder {
 
         Ok(HttpFilter {
             hyper_task,
-            original_stream,
+            original_stream: tcp_stream,
             interceptor_stream,
         })
     }

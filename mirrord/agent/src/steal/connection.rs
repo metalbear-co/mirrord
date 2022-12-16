@@ -22,7 +22,7 @@ use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::error;
 
-use super::*;
+use super::{http_traffic::filter::StolenConnection, *};
 use crate::{
     steal::{
         http_traffic::{HttpFilterManager, PassthroughRequest},
@@ -384,7 +384,10 @@ impl TcpConnectionStealer {
             // clients.
             Some(HttpFiltered(manager)) => {
                 let connection_id = self.index_allocator.next_index().unwrap();
-                let http_filter = manager.new_connection(stream, connection_id).await?;
+                let stolen_connection = StolenConnection::new(stream, real_address, connection_id);
+
+                let http_filter = manager.new_connection(stolen_connection).await?;
+
                 self.forward_filter_stream(
                     http_filter.original_stream,
                     http_filter.interceptor_stream,
