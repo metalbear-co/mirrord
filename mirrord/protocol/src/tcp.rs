@@ -1,7 +1,7 @@
 use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
-use hyper::{HeaderMap, Method, Request, StatusCode, Uri, Version};
+use hyper::{Body, HeaderMap, Method, Request, StatusCode, Uri, Version};
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, Port, RemoteResult};
@@ -89,11 +89,12 @@ pub struct InternalHttpRequest {
     pub version: Version,
 
     pub body: Vec<u8>,
+
     // TODO: What about `extensions`? There is no `http_serde` method for it but it is in `Parts`.
 }
 
 impl InternalHttpRequest {
-    pub fn into_hyper_request(self) -> Request<Vec<u8>> {
+    pub fn into_hyper_request(self) -> Request<Body> {
         let Self {
             method,
             uri,

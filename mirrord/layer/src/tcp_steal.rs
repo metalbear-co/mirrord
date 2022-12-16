@@ -2,10 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData},
-    ClientMessage, ConnectionId,
-};
+use mirrord_protocol::{tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData}, ClientMessage, ConnectionId, Port};
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
@@ -15,6 +12,8 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{error, trace};
+use hyper::{Body, Client};
+use hyper::client::conn::{handshake, SendRequest};
 
 use crate::{
     error::LayerError,
@@ -26,6 +25,7 @@ pub struct TcpStealHandler {
     ports: HashSet<Listen>,
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
     read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
+    request_senders: HashMap<ConnectionId, SendRequest<Body>> // TODO: is Vec<u8> right?
 }
 
 #[async_trait]
@@ -72,6 +72,13 @@ impl TcpHandler for TcpStealHandler {
     /// An http request was stolen by the http filter. Pass it to the local application.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
+        let sender = match self.request_senders.get_mut(&request.connection_id) {
+            Some(sender) => sender,
+            None => self.create_http_connection(request.port, request.connection_id),
+        };
+        tokio::spawn( async move {
+            let res = sender.send_request(request.request.into_hyper_request()).await?;
+        });
         todo!()
     }
 
@@ -132,4 +139,22 @@ impl TcpStealHandler {
             )),
         }
     }
+
+    async fn create_http_connection(&mut self, port: Port, connection_id: ConnectionId) -> &mut SendRequest<Body> {
+        let target_stream = TcpStream::connect(format!("localhost:{}", port)).await?;
+
+        let (mut sender, connection) = handshake(target_stream).await?;
+
+        // spawn a task to poll the connection and drive the HTTP state
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                error!("Error in http connection {} on port {}: {}", connection_id, port, e);
+            }
+        });
+
+        // TODO: can those two lines be done in one step?
+        self.request_senders.insert(connection_id, sender);
+        self.request_senders.get_mut(&connection_id).unwrap()
+    }
+
 }

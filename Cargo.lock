@@ -2037,6 +2037,7 @@ dependencies = [
  "futures",
  "http-body 0.4.5",
  "hyper 0.14.23",
+ "hyper 1.0.0-rc.1",
  "itertools",
  "k8s-openapi",
  "kube",

@@ -55,6 +55,7 @@ stacker = "0.1"
 urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
+hyper = { workspace = true, features = ["client"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
