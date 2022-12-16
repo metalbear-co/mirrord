@@ -1,7 +1,7 @@
 use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
-use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
+use hyper::{HeaderMap, Method, Request, StatusCode, Uri, Version};
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, Port, RemoteResult};
@@ -90,6 +90,28 @@ pub struct InternalHttpRequest {
 
     pub body: Vec<u8>,
     // TODO: What about `extensions`? There is no `http_serde` method for it but it is in `Parts`.
+}
+
+impl InternalHttpRequest {
+    pub fn into_hyper_request(self) -> Request<Vec<u8>> {
+        let Self {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        } = self;
+        let mut request = Request::new(body);
+        // TODO: can we construct the request with those values instead of constructing, then
+        //       setting? Does it matter?
+        *request.method_mut() = method;
+        *request.uri_mut() = uri;
+        *request.version_mut() = version;
+        *request.headers_mut() = headers;
+        // TODO: extensions?
+
+        request
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
