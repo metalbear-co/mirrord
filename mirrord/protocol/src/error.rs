@@ -52,6 +52,9 @@ pub enum RemoteError {
     /// on both IPv6 and IPv4.
     #[error("Connect call to `SocketAddr` `{0}` timed out!")]
     ConnectTimedOut(SocketAddr),
+
+    #[error(r#"Get bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
+    BadHttpFilterRegex(String, String)
 }
 
 impl From<AddrParseError> for RemoteError {

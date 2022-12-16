@@ -6,21 +6,25 @@ use fancy_regex::Regex;
 use futures::TryFutureExt;
 use hyper::{body::Incoming, service::Service, Request, Response};
 use tokio::sync::mpsc::Sender;
+use mirrord_protocol::{ConnectionId, Port};
+use crate::steal::StealerHttpRequest;
 
-use super::{error::HttpTrafficError, CapturedRequest, PassthroughRequest};
+use super::{error::HttpTrafficError, PassthroughRequest};
 use crate::util::ClientId;
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
-    pub(super) captured_tx: Sender<CapturedRequest>,
+    pub(super) captured_tx: Sender<StealerHttpRequest>,
     pub(super) passthrough_tx: Sender<PassthroughRequest>,
+    pub(crate) connection_id: ConnectionId,
+    pub(crate) port: Port,
 }
 
 // TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
 // agent.
 //
-/// Creates a task to send a message (either [`CapturedRequest`] or [`PassthroughRequest`]) to the
+/// Creates a task to send a message (either [`StealerHttpRequest`] or [`PassthroughRequest`]) to the
 /// receiving end that lives in the stealer.
 ///
 /// As the [`hyper::service::Service`] trait doesn't support `async fn` for the [`Service::call`]
@@ -63,7 +67,12 @@ impl Service<Request<Incoming>> for HyperHandler {
             })
         {
             spawn_send(
-                CapturedRequest { client_id, request },
+                StealerHttpRequest {
+                    port: self.port,
+                    connection_id: self.connection_id,
+                    client_id,
+                    request
+                },
                 self.captured_tx.clone(),
             );
 

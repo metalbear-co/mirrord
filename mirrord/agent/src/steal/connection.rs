@@ -6,6 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use iptables::IPTables;
+use fancy_regex::Regex;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
     ResponseError::PortAlreadyStolen,
@@ -19,12 +20,14 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::error;
+use mirrord_protocol::RemoteError::BadHttpFilterRegex;
 
 use super::*;
 use crate::{
     steal::StealSubscription::{HttpFiltered, Unfiltered},
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
+use crate::steal::http_traffic::{HttpFilterManager, PassthroughRequest};
 
 /// Created once per agent during initialization.
 ///
@@ -84,6 +87,9 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+
+    // TODO: ?
+    passthrough_sender: Sender<PassthroughRequest>,
 }
 
 impl TcpConnectionStealer {
@@ -105,6 +111,9 @@ impl TcpConnectionStealer {
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
 
+        // TODO: ?
+        let (passthrough_sender, passthrough_receive) = channel(1024);
+
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
             command_rx,
@@ -121,6 +130,7 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
+            passthrough_sender
         })
     }
 
@@ -372,9 +382,8 @@ impl TcpConnectionStealer {
             // clients.
             Some(HttpFiltered(manager)) => {
                 let connection_id = self.index_allocator.next_index().unwrap();
-                let (original_stream, filter_stream) =
-                    manager.new_connection(stream, connection_id);
-                self.forward_filter_stream(original_stream, filter_stream, connection_id)
+                let http_filter = manager.new_connection(stream, connection_id).await?;
+                self.forward_filter_stream(http_filter.original_stream, http_filter.interceptor_stream, connection_id)
                     .await;
                 Ok(())
             }
@@ -433,19 +442,35 @@ impl TcpConnectionStealer {
                 }
             }
             PortSteal::HttpFilterSteal(port, regex) => {
-                match self.port_subscriptions.entry(port).or_insert_with(|| {
-                    first_subscriber = true;
-                    HttpFiltered(HttpFilterManager {
-                        request_sender: self.http_request_sender.clone(),
-                    })
-                }) {
-                    Unfiltered(earlier_client) => {
-                        error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
-                        Err(PortAlreadyStolen(port))
+                match Regex::new(&regex) {
+                    Ok(regex) => {
+                        match self.port_subscriptions.get_mut(&port) {
+                            Some(Unfiltered(earlier_client)) => {
+                                error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
+                                Err(PortAlreadyStolen(port))
+                            }
+                            Some(HttpFiltered(manager)) => {
+                                manager.new_client(client_id, regex);
+                                Ok(port)
+                            }
+                            None => {
+                                first_subscriber = true;
+                                let manager = HttpFiltered(
+                                    HttpFilterManager::new(
+                                        port,
+                                        client_id,
+                                        regex,
+                                        self.http_request_sender.clone(),
+                                        self.passthrough_sender.clone()
+                                    )
+                                );
+                                self.port_subscriptions.insert(port, manager);
+                                Ok(port)
+                            }
+                        }
                     }
-                    HttpFiltered(manager) => {
-                        manager.insert(client_id, regex)?;
-                        Ok(port)
+                    Err(e) => {
+                        Err(From::from(BadHttpFilterRegex(regex, e.to_string())))
                     }
                 }
             }
@@ -465,9 +490,9 @@ impl TcpConnectionStealer {
     /// with `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
     fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
-        let port_unsubscribed = match self.port_subscriptions.get(&port) {
+        let port_unsubscribed = match self.port_subscriptions.get_mut(&port) {
             Some(HttpFiltered(manager)) => {
-                manager.remove(client_id)?;
+                manager.remove_client(&client_id);
                 manager.is_empty()
             }
             Some(Unfiltered(subscribed_client)) if *subscribed_client == client_id => true,
@@ -493,7 +518,7 @@ impl TcpConnectionStealer {
             .iter()
             .filter(|(_port, sub)| match sub {
                 Unfiltered(port_client) => *port_client == client_id,
-                HttpFiltered(manager) => manager.has_client(client_id),
+                HttpFiltered(manager) => manager.contains_client(&client_id),
             })
             .map(|(port, _sub)| *port)
             .collect()
@@ -564,8 +589,9 @@ impl TcpConnectionStealer {
         &mut self,
         response: HttpResponse,
     ) -> std::result::Result<(), AgentError> {
+        todo!();
         match self.port_subscriptions.get(&response.port) {
-            Some(HttpFiltered(manager)) => manager.send_response(response),
+            Some(HttpFiltered(manager)) => todo!(),
             Some(Unfiltered(_)) | None => {
                 warn!(
                     "Got an http response to port {:?} which is not being filtered. \

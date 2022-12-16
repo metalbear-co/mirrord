@@ -7,8 +7,7 @@ use mirrord_protocol::{
     ConnectionId, Port,
 };
 use tokio::{
-    io::DuplexStream,
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     select,
     sync::mpsc::Sender,
 };
@@ -21,10 +20,11 @@ use crate::{
     runtime::set_namespace,
     util::{ClientId, IndexAllocator},
 };
+use crate::steal::http_traffic::HttpFilterManager;
 
 pub(super) mod api;
 pub(super) mod connection;
-mod http_traffic;
+pub(crate) mod http_traffic;
 mod ip_tables;
 mod orig_dst;
 
@@ -120,45 +120,45 @@ impl StealerHttpRequest {
     }
 }
 
-// TODO: define in separate file.
-#[derive(Debug)]
-struct HttpFilterManager {
-    /// Channel to send classified requests back to stealer over.
-    request_sender: Sender<StealerHttpRequest>,
-}
-
-impl HttpFilterManager {
-    fn is_empty(&self) -> bool {
-        false // TODO
-    }
-
-    fn has_client(&self, client_id: ClientId) -> bool {
-        false // TODO
-    }
-
-    fn new_connection(
-        &self,
-        stream: TcpStream,
-        connection_id: ConnectionId,
-    ) -> (TcpStream, DuplexStream) {
-        todo!()
-    }
-
-    fn send_response(&self, response: HttpResponse) -> Result<()> {
-        // TODO
-        Ok(())
-    }
-
-    fn insert(&self, client_id: ClientId, regex_str: String) -> Result<()> {
-        // TODO
-        Ok(())
-    }
-
-    fn remove(&self, client_id: ClientId) -> Result<()> {
-        // TODO
-        Ok(())
-    }
-}
+// // TODO: define in separate file.
+// #[derive(Debug)]
+// struct HttpFilterManager {
+//     /// Channel to send classified requests back to stealer over.
+//     request_sender: Sender<StealerHttpRequest>,
+// }
+//
+// impl HttpFilterManager {
+//     fn is_empty(&self) -> bool {
+//         false // TODO
+//     }
+//
+//     fn has_client(&self, client_id: ClientId) -> bool {
+//         false // TODO
+//     }
+//
+//     fn new_connection(
+//         &self,
+//         stream: TcpStream,
+//         connection_id: ConnectionId,
+//     ) -> (TcpStream, DuplexStream) {
+//         todo!()
+//     }
+//
+//     fn send_response(&self, response: HttpResponse) -> Result<()> {
+//         // TODO
+//         Ok(())
+//     }
+//
+//     fn insert(&self, client_id: ClientId, regex_str: String) -> Result<()> {
+//         // TODO
+//         Ok(())
+//     }
+//
+//     fn remove(&self, client_id: ClientId) -> Result<()> {
+//         // TODO
+//         Ok(())
+//     }
+// }
 
 /// The subscriptions to steal traffic from a specific port.
 #[derive(Debug)]

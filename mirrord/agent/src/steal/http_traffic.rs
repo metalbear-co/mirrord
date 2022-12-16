@@ -7,6 +7,8 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::{body::Incoming, Request};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
+use mirrord_protocol::ConnectionId;
+use crate::steal::StealerHttpRequest;
 
 use self::{
     error::HttpTrafficError,
@@ -14,7 +16,7 @@ use self::{
 };
 use crate::util::ClientId;
 
-pub(super) mod error;
+pub(crate) mod error;
 mod filter;
 mod hyper_handler;
 
@@ -45,22 +47,17 @@ impl HttpVersion {
 }
 
 #[derive(Debug)]
-pub(crate) struct CapturedRequest {
-    client_id: ClientId,
-    request: Request<Incoming>,
-}
-
-#[derive(Debug)]
-pub(crate) struct PassthroughRequest(Request<Incoming>);
+pub struct PassthroughRequest(Request<Incoming>);
 
 /// Created for every new port we want to filter HTTP traffic on.
+#[derive(Debug)]
 pub(super) struct HttpFilterManager {
     // TODO(alex) [low] 2022-12-12: Probably don't need this, adding for debugging right now.
     port: u16,
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
-    captured_tx: Sender<CapturedRequest>,
+    captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
 }
 
@@ -73,7 +70,7 @@ impl HttpFilterManager {
         port: u16,
         client_id: ClientId,
         filter: Regex,
-        captured_tx: Sender<CapturedRequest>,
+        captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
@@ -108,6 +105,11 @@ impl HttpFilterManager {
         self.client_filters.remove(client_id)
     }
 
+
+    pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
+        self.client_filters.contains_key(client_id)
+    }
+
     // TODO(alex) [high] 2022-12-12: hyper doesn't take the actual stream, we're going to be
     // separating it in reader/writer, so hyper can just return empty responses to nowhere (we glue
     // a writer from a duplex channel to the actual reader from TcpStream).
@@ -130,15 +132,22 @@ impl HttpFilterManager {
     pub(super) async fn new_connection(
         &self,
         connection: TcpStream,
+        connection_id: ConnectionId,
     ) -> Result<HttpFilter, HttpTrafficError> {
         HttpFilterBuilder::new(
             connection,
+            connection_id,
             self.client_filters.clone(),
             self.captured_tx.clone(),
             self.passthrough_tx.clone(),
         )
         .await?
         .start()
+    }
+
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.client_filters.is_empty()
     }
 }
 

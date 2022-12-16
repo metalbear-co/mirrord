@@ -10,9 +10,11 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::error;
+use mirrord_protocol::ConnectionId;
+use crate::steal::StealerHttpRequest;
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, CapturedRequest, HttpVersion,
+    error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion,
     PassthroughRequest,
 };
 use crate::util::ClientId;
@@ -25,8 +27,9 @@ pub(super) struct HttpFilterBuilder {
     hyper_stream: DuplexStream,
     interceptor_stream: DuplexStream,
     client_filters: Arc<DashMap<ClientId, Regex>>,
-    captured_tx: Sender<CapturedRequest>,
+    captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
+    connection_id: ConnectionId,
 }
 
 /// Used by the stealer handler to:
@@ -37,7 +40,7 @@ pub(crate) struct HttpFilter {
     pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
     /// from.
-    pub(super) original_stream: TcpStream,
+    pub(crate) original_stream: TcpStream,
 
     /// A stream that we use to communicate with the hyper task.
     ///
@@ -46,7 +49,7 @@ pub(crate) struct HttpFilter {
     ///
     /// We use [`DuplexStream::write`] to write the bytes we have `read` from [`original_stream`]
     /// to the hyper task, acting as a "client".
-    pub(super) interceptor_stream: DuplexStream,
+    pub(crate) interceptor_stream: DuplexStream,
 }
 
 impl HttpFilterBuilder {
@@ -57,8 +60,9 @@ impl HttpFilterBuilder {
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     pub(super) async fn new(
         tcp_stream: TcpStream,
+        connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
-        captured_tx: Sender<CapturedRequest>,
+        captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Result<Self, HttpTrafficError> {
         let mut buffer = [0u8; 64];
@@ -89,6 +93,7 @@ impl HttpFilterBuilder {
                     interceptor_stream,
                     captured_tx,
                     passthrough_tx,
+                    connection_id,
                 })
             }
             // TODO(alex) [mid] 2022-12-09: This whole filter is a passthrough case.
@@ -111,7 +116,11 @@ impl HttpFilterBuilder {
             client_filters,
             captured_tx,
             passthrough_tx,
+            connection_id,
         } = self;
+
+        // Incoming tcp stream definitely has an address.
+        let port = original_stream.local_addr().unwrap().port();
 
         let hyper_task = match http_version {
             HttpVersion::V1 => tokio::task::spawn(async move {
@@ -122,6 +131,8 @@ impl HttpFilterBuilder {
                             filters: client_filters,
                             captured_tx,
                             passthrough_tx,
+                            connection_id,
+                            port,
                         },
                     )
                     .await

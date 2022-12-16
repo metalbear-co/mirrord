@@ -111,6 +111,9 @@ pub enum AgentError {
 
     #[error("Reading request body failed with `{0}`")]
     HttpRequestSerializationError(#[from] hyper::Error),
+
+    #[error("HTTP filter-stealing error: `{0}`")]
+    HttpFilterError(#[from] crate::steal::http_traffic::error::HttpTrafficError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
