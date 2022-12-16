@@ -53,10 +53,18 @@ class MirrordEnabler : ToggleAction() {
         } else {
             notify("mirrord disabled", NotificationType.INFORMATION, e.project)
         }
-
         MirrordListener.enabled = state
+        if (MirrordSettingsState.telemetryEnabled == null ) {
+            telemetryConsent()
+        }
     }
 
+    /**
+     * Shows a notification asking for consent to send telemetries
+     */
+    private fun telemetryConsent() {
+
+    }
     private val pluginId = PluginId.getId("com.metalbear.mirrord")
     private val version: String? = PluginManagerCore.getPlugin(pluginId)?.version
     private val os: String = System.getProperty("os.name").replace(" ", "%20")

@@ -22,17 +22,21 @@ class MirrordSettingsConfigurable : Configurable {
     override fun isModified(): Boolean
         {
             val settings = MirrordSettingsState
-            return (mySettingsComponent!!.telemetryEnabledStatus != settings.telemetryEnabled)
+            var modified = (mySettingsComponent!!.telemetryEnabledStatus != settings.telemetryEnabled)
+            modified = modified || (mySettingsComponent!!.versionCheckEnabledStatus != settings.versionCheckEnabled)
+            return modified
         }
 
     override fun apply() {
         val settings = MirrordSettingsState
         settings.telemetryEnabled = mySettingsComponent!!.telemetryEnabledStatus
+        settings.versionCheckEnabled = mySettingsComponent!!.versionCheckEnabledStatus
     }
 
     override fun reset() {
         val settings = MirrordSettingsState
         mySettingsComponent!!.telemetryEnabledStatus = settings.telemetryEnabled ?: false
+        mySettingsComponent!!.versionCheckEnabledStatus = settings.versionCheckEnabled
     }
 
     override fun disposeUIResources() {
