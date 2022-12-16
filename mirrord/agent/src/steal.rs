@@ -24,6 +24,7 @@ use crate::{
 
 pub(super) mod api;
 pub(super) mod connection;
+mod http_traffic;
 mod ip_tables;
 mod orig_dst;
 
