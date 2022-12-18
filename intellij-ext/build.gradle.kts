@@ -10,7 +10,7 @@ plugins {
     // Kotlin support
     id("org.jetbrains.kotlin.jvm") version "1.6.10"
     // Gradle IntelliJ Plugin
-    id("org.jetbrains.intellij") version "1.10.1"
+    id("org.jetbrains.intellij") version "1.11.0"
     // Gradle Changelog Plugin
     id("org.jetbrains.changelog") version "1.3.1"
     // Gradle Qodana Plugin
@@ -25,12 +25,10 @@ repositories {
     mavenCentral()
 }
 dependencies {
-    implementation("com.github.zafarkhaja:java-semver:0.9.0")
-
-    implementation project(":mirrord-products-idea")
-    implementation project(":mirrord-products-pycharm")
-    implementation project(":mirrord-products-rubymine")
-    implementation project(":mirrord-products-goland")
+    implementation(project(":mirrord-products-idea"))
+    implementation(project(":mirrord-products-pycharm"))
+    implementation(project(":mirrord-products-rubymine"))
+    implementation(project(":mirrord-products-goland"))
 
 }
 
@@ -44,14 +42,27 @@ intellij {
 }
 
 allprojects {
-    ext.jetbrains = [
-        version : "2022.2",
-    pycharm : "PythonCore:222.3345.40",
-    rubymine: "org.jetbrains.plugins.ruby:222.3345.16",
-    goland  : "org.jetbrains.plugins.go:222.3345.90",
-    scala   : "org.intellij.scala:2022.2.3"
-    ]
+    // Configure project's dependencies
+    repositories {
+        mavenCentral()
+    }
+
+
+    properties("javaVersion").let {
+        tasks.withType<JavaCompile> {
+            sourceCompatibility = it
+            targetCompatibility = it
+        }
+
+        tasks.withType<KotlinCompile> {
+            kotlinOptions {
+                jvmTarget = it
+            }
+        }
+    }
+
 }
+
 // Configure Gradle Qodana Plugin - read more: https://github.com/JetBrains/gradle-qodana-plugin
 qodana {
     cachePath.set(projectDir.resolve(".qodana").canonicalPath)

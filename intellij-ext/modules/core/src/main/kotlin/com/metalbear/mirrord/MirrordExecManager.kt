@@ -8,11 +8,11 @@ package com.metalbear.mirrord
  */
 object MirrordExecManager {
     var enabled: Boolean = false
-
-    fun start() {
-        if (!enabled) {
-            return
-        }
-        if (!)
-    }
+//
+//    fun start() {
+//        if (!enabled) {
+//            return
+//        }
+//        if (!)
+//    }
 }

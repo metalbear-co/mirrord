@@ -17,15 +17,7 @@ object MirrordExecDialog {
         setTitle(dialogHeading)
     }
 
-    fun createMirrordNamespaceDialog(namespaces: JBList<String>): JPanel = JPanel(BorderLayout()).apply {
-        size = Dimension(260, 360)
-        add(createSelectionDialog(namespaceLabel, namespaces), BorderLayout.CENTER)
-    }
 
-    fun createMirrordNamespaceTextDialog(namespace: JTextField): JPanel = JPanel(BorderLayout()).apply {
-        size = Dimension(200, 300)
-        add(createTextDialog(namespaceTextBoxLabel, namespace), BorderLayout.CENTER)
-    }
 
     fun createMirrordConfigDialog(
         pods: JBList<String>,

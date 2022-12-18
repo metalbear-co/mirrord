@@ -9,7 +9,7 @@ import com.intellij.execution.target.TargetedCommandLineBuilder
 import java.nio.file.Paths
 import com.intellij.openapi.util.SystemInfo
 
-class GoRunConfig : GoRunConfigurationExtension() {
+class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
     companion object {
         fun clearGoEnv() {
             for (env in keysToClear) {

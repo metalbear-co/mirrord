@@ -178,7 +178,7 @@ class MirrordListener : ExecutionListener {
         if (enabled && envSet && executorId == id) {
             id = ""
             if (env.runProfile::class.simpleName == "GoApplicationConfiguration") {
-                GoRunConfig.clearGoEnv()
+//                GoRunConfig.clearGoEnv()
                 return super.processTerminating(executorId, env, handler)
             }
             val envMap = try {
