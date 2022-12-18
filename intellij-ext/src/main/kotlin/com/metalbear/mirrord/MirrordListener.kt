@@ -18,8 +18,7 @@ class MirrordListener : ExecutionListener {
     private val defaults = MirrordDefaultConfig()
 
     init {
-//        mirrordEnv["DYLD_INSERT_LIBRARIES"] = defaults.dylibPath
-//        mirrordEnv["LD_PRELOAD"] = defaults.ldPreloadPath
+
         mirrordEnv["MIRRORD_ACCEPT_INVALID_CERTIFICATES"] = defaults.acceptInvalidCertificates.toString()
         mirrordEnv["MIRRORD_SKIP_PROCESSES"] = defaults.skipProcesses
         mirrordEnv["DEBUGGER_IGNORE_PORTS_PATCH"] = defaults.ignorePorts
@@ -85,80 +84,81 @@ class MirrordListener : ExecutionListener {
 //                }
 
 //                defaultFlow = podNamespace == null
-                val podNamespace = null;
-                val pods = try {
-                        MirrordApi.listPods(podNamespace).asJBList()
-                    } catch (e: Exception) {
-                        MirrordEnabler.notify(
-                            "Error occurred while fetching pods from Kubernetes context: `${e.message}`",
-                            NotificationType.ERROR,
-                            env.project
-                        )
-                        defaultFlow = true
-                        return@invokeLater super.processStartScheduled(executorId, env)
-                    }
-
-                    val fileOps = JCheckBox("File Operations", defaults.fileOps)
-                    val stealTraffic = JCheckBox("TCP Steal Traffic", defaults.stealTraffic)
-                    val telemetry = JCheckBox("Telemetry", defaults.telemetry)
-                    val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
-                    val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
-                    val tcpOutgoingTraffic = JCheckBox("TCP Outgoing Traffic", defaults.tcpOutgoingTraffic)
-                    val udpOutgoingTraffic = JCheckBox("UDP Outgoing Traffic", defaults.udpOutgoingTraffic)
-
-
-                    val agentRustLog = JComboBox(LogLevel.values())
-                    agentRustLog.selectedItem = defaults.agentRustLog
-                    val rustLog = JComboBox(LogLevel.values())
-                    rustLog.selectedItem = defaults.rustLog
-
-                    val excludeEnv = JTextField(defaults.overrideEnvVarsExclude)
-                    val includeEnv = JTextField(defaults.overrideEnvVarsInclude)
-
-                    val mirrordConfigDialog = MirrordDialogBuilder.createDialogBuilder(
-                        MirrordDialogBuilder.createMirrordConfigDialog(
-                            pods,
-                            fileOps,
-                            stealTraffic,
-                            telemetry,
-                            ephemeralContainer,
-                            remoteDns,
-                            tcpOutgoingTraffic,
-                            udpOutgoingTraffic,
-                            agentRustLog,
-                            rustLog,
-                            excludeEnv,
-                            includeEnv,
-                        )
-                    )
-                    if (mirrordConfigDialog.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
-                        mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue}"
-//                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = podNamespace
-                        mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
-                        mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
-                        mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
-                        mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
-                        mirrordEnv["MIRRORD_TCP_OUTGOING"] = tcpOutgoingTraffic.isSelected.toString()
-                        mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()
-                        mirrordEnv["MIRRORD_PROGRESS_MODE"] = "off"
-                        mirrordEnv["RUST_LOG"] = (rustLog.selectedItem as LogLevel).name
-                        mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = (agentRustLog.selectedItem as LogLevel).name
-                        if (excludeEnv.text.isNotEmpty()) {
-                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
-                        }
-                        if (includeEnv.text.isNotEmpty()) {
-                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
-                        }
-                        if (!telemetry.isSelected) {
-                            MirrordEnabler.versionCheckDisabled = true
-                        }
-                        val envMap = getRunConfigEnv(env)
-                        envMap?.putAll(mirrordEnv)
-                        envSet = envMap != null
-                } else {
-                        id = ""
-                        defaultFlow = true
-                    }
+//                val podNamespace = null;
+//                val pods = try {
+//                        MirrordApi.listPods(podNamespace).asJBList()
+//                    } catch (e: Exception) {
+//                        MirrordEnabler.notify(
+//                            "Error occurred while fetching pods from Kubernetes context: `${e.message}`",
+//                            NotificationType.ERROR,
+//                            env.project
+//                        )
+//                        defaultFlow = true
+//                        return@invokeLater super.processStartScheduled(executorId, env)
+//                    }
+//
+//                    val fileOps = JCheckBox("File Operations", defaults.fileOps)
+//                    val stealTraffic = JCheckBox("TCP Steal Traffic", defaults.stealTraffic)
+//                    val telemetry = JCheckBox("Telemetry", defaults.telemetry)
+//                    val ephemeralContainer = JCheckBox("Use Ephemeral Container", defaults.ephemeralContainers)
+//                    val remoteDns = JCheckBox("Remote DNS", defaults.remoteDns)
+//                    val tcpOutgoingTraffic = JCheckBox("TCP Outgoing Traffic", defaults.tcpOutgoingTraffic)
+//                    val udpOutgoingTraffic = JCheckBox("UDP Outgoing Traffic", defaults.udpOutgoingTraffic)
+//
+//
+//                    val agentRustLog = JComboBox(LogLevel.values())
+//                    agentRustLog.selectedItem = defaults.agentRustLog
+//                    val rustLog = JComboBox(LogLevel.values())
+//                    rustLog.selectedItem = defaults.rustLog
+//
+//                    val excludeEnv = JTextField(defaults.overrideEnvVarsExclude)
+//                    val includeEnv = JTextField(defaults.overrideEnvVarsInclude)
+//
+//                    val mirrordConfigDialog = MirrordDialogBuilder.createDialogBuilder(
+//                        MirrordDialogBuilder.createMirrordConfigDialog(
+//                            pods,
+//                            fileOps,
+//                            stealTraffic,
+//                            telemetry,
+//                            ephemeralContainer,
+//                            remoteDns,
+//                            tcpOutgoingTraffic,
+//                            udpOutgoingTraffic,
+//                            agentRustLog,
+//                            rustLog,
+//                            excludeEnv,
+//                            includeEnv,
+//                        )
+//                    )
+//                    if (mirrordConfigDialog.show() == DialogWrapper.OK_EXIT_CODE && !pods.isSelectionEmpty) {
+//                        mirrordEnv["MIRRORD_IMPERSONATED_TARGET"] = "pod/${pods.selectedValue}"
+////                        mirrordEnv["MIRRORD_TARGET_NAMESPACE"] = podNamespace
+//                        mirrordEnv["MIRRORD_FILE_OPS"] = fileOps.isSelected.toString()
+//                        mirrordEnv["MIRRORD_AGENT_TCP_STEAL_TRAFFIC"] = stealTraffic.isSelected.toString()
+//                        mirrordEnv["MIRRORD_EPHEMERAL_CONTAINER"] = ephemeralContainer.isSelected.toString()
+//                        mirrordEnv["MIRRORD_REMOTE_DNS"] = remoteDns.isSelected.toString()
+//                        mirrordEnv["MIRRORD_TCP_OUTGOING"] = tcpOutgoingTraffic.isSelected.toString()
+//                        mirrordEnv["MIRRORD_UDP_OUTGOING"] = udpOutgoingTraffic.isSelected.toString()
+//                        mirrordEnv["MIRRORD_PROGRESS_MODE"] = "off"
+//                        mirrordEnv["RUST_LOG"] = (rustLog.selectedItem as LogLevel).name
+//                        mirrordEnv["MIRRORD_AGENT_RUST_LOG"] = (agentRustLog.selectedItem as LogLevel).name
+//                        if (excludeEnv.text.isNotEmpty()) {
+//                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE"] = excludeEnv.text.toString()
+//                        }
+//                        if (includeEnv.text.isNotEmpty()) {
+//                            mirrordEnv["MIRRORD_OVERRIDE_ENV_VARS_INCLUDE"] = includeEnv.text.toString()
+//                        }
+//                        if (!telemetry.isSelected) {
+//                            MirrordEnabler.versionCheckDisabled = true
+//                        }
+//                        val envMap = getRunConfigEnv(env)
+//                        envMap?.putAll(mirrordEnv)
+//                        envSet = envMap != null
+//                } else {
+//                        id = ""
+//                        defaultFlow = true
+//                    }
+//            }
             }
         }
         return super.processStartScheduled(executorId, env)
@@ -189,7 +189,7 @@ class MirrordListener : ExecutionListener {
                 val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
                 envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
             } catch (e: Exception) {
-                MirrordEnabler.notify(
+                MirrordNotifier.notify(
                     "Error occurred while removing mirrord environment",
                     NotificationType.ERROR,
                     env.project
@@ -213,7 +213,7 @@ class MirrordListener : ExecutionListener {
             val envMethod = env.runProfile.javaClass.getMethod("getEnvs")
             envMethod.invoke(env.runProfile) as LinkedHashMap<String, String>
         } catch (e: Exception) {
-            MirrordEnabler.notify(
+            MirrordNotifier.notify(
                 "Error occurred while substituting provided configuration",
                 NotificationType.ERROR,
                 env.project

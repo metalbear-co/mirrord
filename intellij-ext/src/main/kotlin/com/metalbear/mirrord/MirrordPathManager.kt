@@ -14,7 +14,7 @@ object MirrordPathManager {
      * Get matching binary based on platform and architecture.
      */
     fun getBinary(name: String, universalOnMac: Boolean): String? {
-        val os = when {
+            val os = when {
             SystemInfo.isLinux -> "linux"
             SystemInfo.isMac -> "macos"
             SystemInfo.isWindows -> "windows"
@@ -34,16 +34,6 @@ object MirrordPathManager {
 
         val binaryPath = pluginDir().resolve(format).takeIf { Files.exists(it) } ?: return null
         return if (Files.isExecutable(binaryPath) || binaryPath.toFile().setExecutable(true)) {
-            // Convert to WSL Path if on Windows
-            if (SystemInfo.isWindows) {
-                val wslRegex = "^[a-zA-Z]:".toRegex()
-
-                val wslPath = wslRegex.replace(binaryPath.toString()) { drive ->
-                    "/mnt/" + drive.value.toLowerCase().removeSuffix(":")
-                }
-
-                return wslPath.replace("\\", "/")
-            }
             return binaryPath.toString()
         } else {
             null
