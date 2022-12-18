@@ -26,6 +26,12 @@ repositories {
 }
 dependencies {
     implementation("com.github.zafarkhaja:java-semver:0.9.0")
+
+    implementation project(":mirrord-products-idea")
+    implementation project(":mirrord-products-pycharm")
+    implementation project(":mirrord-products-rubymine")
+    implementation project(":mirrord-products-goland")
+
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
@@ -37,6 +43,15 @@ intellij {
     plugins.set(properties("platformPlugins").split(',').map(String::trim).filter(String::isNotEmpty))
 }
 
+allprojects {
+    ext.jetbrains = [
+        version : "2022.2",
+    pycharm : "PythonCore:222.3345.40",
+    rubymine: "org.jetbrains.plugins.ruby:222.3345.16",
+    goland  : "org.jetbrains.plugins.go:222.3345.90",
+    scala   : "org.intellij.scala:2022.2.3"
+    ]
+}
 // Configure Gradle Qodana Plugin - read more: https://github.com/JetBrains/gradle-qodana-plugin
 qodana {
     cachePath.set(projectDir.resolve(".qodana").canonicalPath)

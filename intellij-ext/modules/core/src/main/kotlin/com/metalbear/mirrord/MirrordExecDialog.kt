@@ -8,11 +8,9 @@ import javax.swing.*
 import javax.swing.border.EmptyBorder
 
 
-object MirrordDialogBuilder {
+object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
-    private const val podLabel = "Select Pod"
-    private const val namespaceLabel = "Select Namespace"
-    private const val namespaceTextBoxLabel = "Enter Namespace"
+    private const val podLabel = "Select Target"
 
     fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
         setCenterPanel(dialogPanel)

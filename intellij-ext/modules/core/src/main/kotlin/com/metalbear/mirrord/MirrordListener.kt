@@ -5,11 +5,7 @@ import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
-import javax.swing.JCheckBox
-import javax.swing.JComboBox
-import javax.swing.JTextField
 import javax.swing.ListSelectionModel
 
 

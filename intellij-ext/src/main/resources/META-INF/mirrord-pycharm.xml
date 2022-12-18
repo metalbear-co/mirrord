@@ -1,0 +1,6 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="Pythonid">
+        <runConfigurationExtension implementation="com.metalbear.mirrord.products.pycharm.PyCharmRunConfigurationExtension" id="mirrordPyCharm"/>
+    </extensions>
+</idea-plugin>
+

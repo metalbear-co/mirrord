@@ -1,0 +1,5 @@
+<idea-plugin>
+<extensions defaultExtensionNs="org.jetbrains.plugins.gradle">
+    <executionEnvironmentProvider implementation="com.metalbear.mirrord.products.idea.GradleEnvFileProvider" order="first"/>
+</extensions>
+</idea-plugin>

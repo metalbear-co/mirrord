@@ -21,10 +21,7 @@
         <applicationService
                 serviceImplementation="com.metalbear.mirrord.MirrordSettingsState"/>
     </extensions>
-    <projectListeners>
-        <listener class="com.metalbear.mirrord.MirrordListener"
-                  topic="com.intellij.execution.ExecutionListener"/>
-    </projectListeners>
+
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable
@@ -53,6 +50,14 @@
 
     </actions>
 
-    <depends optional="true" config-file="go-plugin.xml">org.jetbrains.plugins.go</depends>
+    <extensions defaultExtensionNs="com.intellij">
+        <runConfigurationExtension implementation="com.metalbear.mirrord.MirrordRunConfigurationExtension"/>
+    </extensions>
+    <depends optional="true" config-file="mirrord-sbt.xml">org.intellij.scala</depends>
+    <depends optional="true" config-file="mirrord-idea.xml">com.intellij.modules.java</depends>
+    <depends optional="true" config-file="mirrord-gradle.xml">com.intellij.gradle</depends>
+    <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>
+    <depends optional="true" config-file="mirrord-rubymine.xml">com.intellij.modules.ruby</depends>
+    <depends optional="true" config-file="mirrord-goland.xml">org.jetbrains.plugins.go</depends>
 
 </idea-plugin>

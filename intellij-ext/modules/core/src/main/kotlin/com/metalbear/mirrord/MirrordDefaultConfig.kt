@@ -1,9 +1,5 @@
 package com.metalbear.mirrord
 
-import com.intellij.openapi.application.PathManager
-import com.intellij.util.system.CpuArch
-import java.nio.file.Paths
-
 data class MirrordDefaultConfig(
     val acceptInvalidCertificates: Boolean = false,
     val skipProcesses: String = "",

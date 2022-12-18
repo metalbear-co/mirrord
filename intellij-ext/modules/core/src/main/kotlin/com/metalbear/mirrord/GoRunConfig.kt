@@ -6,20 +6,21 @@ import com.goide.execution.extension.GoRunConfigurationExtension
 import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
-import com.intellij.openapi.application.PathManager
 import java.nio.file.Paths
 import com.intellij.openapi.util.SystemInfo
 
 class GoRunConfig : GoRunConfigurationExtension() {
     companion object {
         fun clearGoEnv() {
-            for (key in MirrordListener.mirrordEnv.keys) {
-                if (goCmdLine?.getEnvironmentVariable(key) != null) {
-                    goCmdLine?.removeEnvironmentVariable(key)
+            for (env in keysToClear) {
+                goCmdLine?.getEnvironmentVariable(env)?.let {
+                    goCmdLine?.removeEnvironmentVariable(env)
                 }
             }
+
         }
 
+        val keysToClear = arrayOf("LD_PRELOAD", "DYLD_INSERT_LIBRARIES")
         var goCmdLine: TargetedCommandLineBuilder? = null
     }
 
@@ -44,12 +45,8 @@ class GoRunConfig : GoRunConfigurationExtension() {
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN && MirrordListener.enabled && !MirrordListener.envSet) {
             goCmdLine = cmdLine
-            MirrordListener.mirrordEnv["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver"
 
-            for ((key, value) in MirrordListener.mirrordEnv) {
-                cmdLine.addEnvironmentVariable(key, value)
-            }
-            MirrordListener.envSet = true
+            cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
     }
@@ -63,9 +60,9 @@ class GoRunConfig : GoRunConfigurationExtension() {
         commandLineType: GoRunningState.CommandLineType
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
-            MirrordListener.enabled && !MirrordListener.envSet &&
+            MirrordListener.enabled &&
             SystemInfo.isMac &&
-            !MirrordListener.defaultFlow
+            state.isDebug
         ) {
             val delvePath = getCustomDelvePath()
             // convert the delve file to an executable

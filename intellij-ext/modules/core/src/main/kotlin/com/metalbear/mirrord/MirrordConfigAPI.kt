@@ -7,7 +7,6 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.util.io.exists
 import com.intellij.util.io.write
 import com.google.gson.Gson
-import com.intellij.util.io.readBytes
 import com.intellij.util.io.readText
 import java.nio.file.Path
 

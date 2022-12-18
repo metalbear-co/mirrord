@@ -8,6 +8,7 @@ import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import java.net.URL
@@ -46,26 +47,28 @@ object MirrordVersionCheck {
 
         val localVersion = Version.valueOf(version)
         if (localVersion.lessThan(remoteVersion)) {
-            MirrordNotifier.notifier(
-                "The version of the mirrord plugin is outdated. Would you like to update it now?",
-                NotificationType.INFORMATION
-            )
-                .addAction(object : NotificationAction("Update") {
-                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        try {
-                            PluginManagerConfigurable.showPluginConfigurable(project, listOf(pluginId))
-                        } catch (e: Exception) {
+            ApplicationManager.getApplication().invokeLater {
+                MirrordNotifier.notifier(
+                    "The version of the mirrord plugin is outdated. Would you like to update it now?",
+                    NotificationType.INFORMATION
+                )
+                    .addAction(object : NotificationAction("Update") {
+                        override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                            try {
+                                PluginManagerConfigurable.showPluginConfigurable(project, listOf(pluginId))
+                            } catch (e: Exception) {
+                                notification.expire()
+                            }
                             notification.expire()
                         }
-                        notification.expire()
-                    }
-                })
-                .addAction(object : NotificationAction("Don't show again") {
-                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        MirrordSettingsState.versionCheckEnabled = false
-                        notification.expire()
-                    }
-                }).notify(project)
+                    })
+                    .addAction(object : NotificationAction("Don't show again") {
+                        override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                            MirrordSettingsState.versionCheckEnabled = false
+                            notification.expire()
+                        }
+                    }).notify(project)
+            }
         }
         return
     }

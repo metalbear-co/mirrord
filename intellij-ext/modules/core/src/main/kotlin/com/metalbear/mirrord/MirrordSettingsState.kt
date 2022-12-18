@@ -6,7 +6,7 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 
 
-@State(name = "com.metalbear.mirrord.MirrordSettingsState", storages = [Storage("mirrord.xml")])
+@State(name = "MirrordSettingsState", storages = [Storage("mirrord.xml")])
 object MirrordSettingsState : PersistentStateComponent<MirrordSettingsState> {
     var telemetryEnabled: Boolean? = null
     var versionCheckEnabled: Boolean = false
