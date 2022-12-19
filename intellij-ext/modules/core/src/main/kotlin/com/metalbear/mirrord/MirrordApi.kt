@@ -100,7 +100,7 @@ object MirrordApi {
                 if (success) {
                     val innerMessage = message.message ?: throw Error("Invalid inner message")
                     val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                    MirrordNotifier.progress("mirrord started!")
+                    MirrordNotifier.progress("mirrord started!", project)
                     return executionInfo.environment
                 } else {
                     MirrordNotifier.errorNotification("mirrord failed launching", project)
