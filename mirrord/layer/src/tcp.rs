@@ -20,6 +20,7 @@ use crate::{
     detour::DetourGuard,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
+    tcp_steal::http_forwarding::HttpForwarderError,
     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 
@@ -96,7 +97,9 @@ pub(crate) trait TcpHandler {
                 error!("Port subscription failed with unexpected error: {other_error}.");
                 Err(UnexpectedResponseError(other_error))
             }
-            DaemonTcp::HttpRequest(request) => self.handle_http_request(request).await,
+            DaemonTcp::HttpRequest(request) => {
+                self.handle_http_request(request).await.map_err(From::from)
+            }
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);
@@ -155,7 +158,8 @@ pub(crate) trait TcpHandler {
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError>;
 
     /// Handle New Data messages
-    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError>;
+    async fn handle_http_request(&mut self, request: HttpRequest)
+        -> Result<(), HttpForwarderError>;
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;

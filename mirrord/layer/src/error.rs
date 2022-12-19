@@ -12,6 +12,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
+use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
@@ -142,6 +143,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
     UnexpectedResponseError(ResponseError),
+
+    #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
+    HttpForwardingError(#[from] HttpForwarderError),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

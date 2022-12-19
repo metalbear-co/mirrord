@@ -24,6 +24,7 @@ use tracing::{debug, error, warn};
 use crate::{
     error::{LayerError, Result},
     tcp::{Listen, TcpHandler},
+    tcp_steal::http_forwarding::HttpForwarderError,
 };
 
 #[tracing::instrument(level = "trace", skip(remote_stream))]
@@ -199,7 +200,7 @@ impl TcpHandler for TcpMirrorHandler {
     async fn handle_http_request(
         &mut self,
         _request: HttpRequest,
-    ) -> std::result::Result<(), LayerError> {
+    ) -> std::result::Result<(), HttpForwarderError> {
         error!("Error: Mirror handler received http request.");
         debug_assert!(false);
         Ok(())

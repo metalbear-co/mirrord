@@ -112,6 +112,7 @@ impl StealerHttpRequest {
             port: self.port,
             connection_id: self.connection_id,
             request: internal_req,
+            request_id: 0, // TODO: Use a real request_id!
         })
     }
 }
