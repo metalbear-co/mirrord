@@ -28,7 +28,7 @@ const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 ///
 /// **WARNING**: Can't be too small, otherwise we end up accepting things like "Foo " as valid HTTP
 /// requests.
-pub(crate) const MINIMAL_HEADER_SIZE: usize = 10;
+pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub(super) struct HttpFilterBuilder {
