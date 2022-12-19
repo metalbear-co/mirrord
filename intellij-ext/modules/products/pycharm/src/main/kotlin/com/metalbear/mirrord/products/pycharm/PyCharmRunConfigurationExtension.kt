@@ -1,28 +1,33 @@
-package com.metalbear.mirrord.products.idea
+package com.metalbear.mirrord.products.pycharm
 
-import com.intellij.execution.RunConfigurationExtension
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.configurations.JavaParameters
-import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.wsl.WslPath.Companion.getDistributionByWindowsUncPath
 import com.intellij.openapi.util.SystemInfo
+import com.jetbrains.python.run.AbstractPythonRunConfiguration
+import com.jetbrains.python.run.PythonRunConfigurationExtension
 import com.metalbear.mirrord.MirrordExecManager
-import org.jetbrains.annotations.NotNull
 
-class IdeaRunConfigurationExtension: RunConfigurationExtension() {
-    override fun isApplicableFor(configuration: RunConfigurationBase<*>): Boolean {
+
+class PyCharmRunConfigurationExtension: PythonRunConfigurationExtension() {
+    override fun isApplicableFor(configuration: AbstractPythonRunConfiguration<*>): Boolean {
+        return true
+    }
+
+    override fun isEnabledFor(
+        applicableConfiguration: AbstractPythonRunConfiguration<*>,
+        runnerSettings: RunnerSettings?
+    ): Boolean {
         return true
     }
 
 
     override fun patchCommandLine(
-        configuration: RunConfigurationBase<*>,
+        configuration: AbstractPythonRunConfiguration<*>,
         runnerSettings: RunnerSettings?,
         cmdLine: GeneralCommandLine,
         runnerId: String
     ) {
-
         // dunno if this works
         val wsl = when {
             SystemInfo.isWindows -> {
@@ -40,16 +45,6 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
                 currentEnv[entry.key] =  entry.value
             }
         }
-
-        super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId)
     }
 
-
-    override fun <T : RunConfigurationBase<*>> updateJavaParameters(
-        configuration: T,
-        params: JavaParameters,
-        runnerSettings: RunnerSettings?
-    ) {
-        return
-    }
 }
