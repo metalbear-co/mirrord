@@ -10,6 +10,11 @@ plugins {
 
 }
 
+tasks {
+    buildSearchableOptions {
+        enabled = false
+    }
+}
 
 intellij {
     version.set(properties("platformVersion"))

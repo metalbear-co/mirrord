@@ -72,7 +72,11 @@ qodana {
 }
 
 tasks {
+    buildSearchableOptions {
+        enabled = false
+    }
     // Set the JVM compatibility versions
+
     properties("javaVersion").let {
         withType<JavaCompile> {
             sourceCompatibility = it
