@@ -1,7 +1,7 @@
 // #![warn(missing_docs)]
 // #![warn(rustdoc::missing_crate_level_docs)]
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
@@ -11,13 +11,17 @@ use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
-    filter::{HttpFilter, HttpFilterBuilder, StolenConnection},
+    filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
+    reversable_stream::ReversableStream,
 };
 use crate::{steal::StealerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;
 mod hyper_handler;
+pub(super) mod reversable_stream;
+
+pub(super) type DefaultReversableStream = ReversableStream<MINIMAL_HEADER_SIZE>;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HttpVersion {
@@ -30,17 +34,26 @@ enum HttpVersion {
 impl HttpVersion {
     /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
     /// comparing it with a slice of [`H2_PREFACE`].
+    #[tracing::instrument(level = "debug")]
     fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
+        println!(
+            "buffer {:#?} | h2_preface {:#?}",
+            String::from_utf8_lossy(buffer),
+            h2_preface
+        );
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
         if buffer == h2_preface {
+            println!("HTTP2");
             Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),
             Ok(_) | Err(httparse::Error::TooManyHeaders)
         ) {
+            println!("HTTP1");
             Self::V1
         } else {
+            println!("Not http!");
             Self::NotHttp
         }
     }
@@ -130,10 +143,14 @@ impl HttpFilterManager {
     /// connection.
     pub(super) async fn new_connection(
         &self,
-        stolen_connection: StolenConnection,
+        original_stream: TcpStream,
+        original_address: SocketAddr,
+        connection_id: ConnectionId,
     ) -> Result<Option<HttpFilter>, HttpTrafficError> {
         HttpFilterBuilder::new(
-            stolen_connection,
+            original_stream,
+            original_address,
+            connection_id,
             self.client_filters.clone(),
             self.captured_tx.clone(),
             self.passthrough_tx.clone(),
@@ -162,14 +179,15 @@ mod http_traffic_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
-        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 7777))
+        let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 7777).into();
+        let server = TcpListener::bind(server_address)
             .await
             .expect("Bound TcpListener.");
 
         let request_task = tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .get("http://127.0.0.1:7777")
+                .get(format!("http://127.0.0.1:{}", server_address.port()))
                 .header("First-Header", "mirrord")
                 .header("Mirrord-Test", "Hello")
                 .build()
@@ -197,19 +215,12 @@ mod http_traffic_tests {
             passthrough_tx,
         );
 
-        let connection_id = 0;
-        let stolen_connection = StolenConnection::new(
-            tcp_stream,
-            (Ipv4Addr::LOCALHOST, 7777).into(),
-            connection_id,
-        );
-
         let HttpFilter {
             hyper_task,
-            mut original_stream,
+            mut reversable_stream,
             mut interceptor_stream,
         } = http_filter_manager
-            .new_connection(stolen_connection)
+            .new_connection(tcp_stream, server_address, 0)
             .await
             .unwrap()
             .unwrap();
@@ -220,7 +231,7 @@ mod http_traffic_tests {
             select! {
                 // Server stream reads what it received from the client (remote app), and sends it
                 // to the hyper task via the intermmediate DuplexStream.
-                Ok(read) = original_stream.read(&mut interceptor_buffer) => {
+                Ok(read) = reversable_stream.read(&mut interceptor_buffer) => {
                     if read == 0 {
                         break;
                     }
@@ -235,7 +246,7 @@ mod http_traffic_tests {
                     // and exit.
                     let mut response_buffer = vec![0;1500];
                     let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
-                    original_stream.write(&response_buffer[..read_amount]).await.unwrap();
+                    reversable_stream.write(&response_buffer[..read_amount]).await.unwrap();
 
                     break;
                 }
@@ -256,16 +267,15 @@ mod http_traffic_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_total_passthrough_not_http() {
-        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 8888))
+        let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 8888).into();
+        let server = TcpListener::bind(server_address)
             .await
             .expect("Bound TcpListener.");
 
         let request_task = tokio::spawn(async move {
             let message =
-                "Hey / This is not an HTTP message! Don't even filter it, ok?".to_string();
-            let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, 8888))
-                .await
-                .unwrap();
+                "Hey / friend this is not an HTTP message! Don't even filter it, ok?".to_string();
+            let mut client = TcpStream::connect(server_address).await.unwrap();
 
             let wrote = client.write(message.as_bytes()).await.unwrap();
             assert_eq!(wrote, message.len());
@@ -287,15 +297,8 @@ mod http_traffic_tests {
             passthrough_tx,
         );
 
-        let connection_id = 0;
-        let stolen_connection = StolenConnection::new(
-            tcp_stream,
-            (Ipv4Addr::LOCALHOST, 7777).into(),
-            connection_id,
-        );
-
         if let None = http_filter_manager
-            .new_connection(stolen_connection)
+            .new_connection(tcp_stream, server_address, 0)
             .await
             .unwrap()
         {

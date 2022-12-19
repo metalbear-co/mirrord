@@ -50,6 +50,7 @@ hyper = { workspace = true, features = ["full"] }
 httparse = "1"
 fancy-regex = { version = "0.10" }
 dashmap = { version = "5.4" }
+pin-project = "1"
 
 [dev-dependencies]
 mockall = "0.11"

@@ -7,6 +7,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
+use httparse::Header;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
 use tokio::{
@@ -18,7 +19,8 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion, PassthroughRequest,
+    error::HttpTrafficError, hyper_handler::HyperHandler, reversable_stream::ReversableStream,
+    DefaultReversableStream, HttpVersion, PassthroughRequest,
 };
 use crate::{
     steal::{http_traffic::error, StealerHttpRequest},
@@ -26,11 +28,14 @@ use crate::{
 };
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+pub(crate) const MINIMAL_HEADER_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
-    stolen_connection: StolenConnection,
+    reversable_stream: DefaultReversableStream,
+    original_address: SocketAddr,
+    connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
@@ -44,7 +49,7 @@ pub(crate) struct HttpFilter {
     pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
     /// from.
-    pub(crate) original_stream: TcpStream,
+    pub(crate) reversable_stream: DefaultReversableStream,
 
     /// A stream that we use to communicate with the hyper task.
     ///
@@ -56,47 +61,6 @@ pub(crate) struct HttpFilter {
     pub(crate) interceptor_stream: DuplexStream,
 }
 
-/// Wrapper around the stealer's [`TcpStream`] that is being used to steal the data, that would
-/// originally go to [`StolenStream::original_address`].
-#[derive(Debug)]
-pub(crate) struct StolenConnection {
-    tcp_stream: TcpStream,
-
-    /// Address that this stream was originally supposed to connect to.
-    original_address: SocketAddr,
-
-    connection_id: ConnectionId,
-}
-
-impl StolenConnection {
-    #[tracing::instrument(level = "debug")]
-    pub(crate) fn new(
-        tcp_stream: TcpStream,
-        original_address: SocketAddr,
-        connection_id: ConnectionId,
-    ) -> Self {
-        Self {
-            tcp_stream,
-            original_address,
-            connection_id,
-        }
-    }
-}
-
-impl Deref for StolenConnection {
-    type Target = TcpStream;
-
-    fn deref(&self) -> &Self::Target {
-        &self.tcp_stream
-    }
-}
-
-impl DerefMut for StolenConnection {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tcp_stream
-    }
-}
-
 impl HttpFilterBuilder {
     /// Does not consume bytes from the stream.
     ///
@@ -105,12 +69,13 @@ impl HttpFilterBuilder {
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     #[tracing::instrument(level = "debug")]
     pub(super) async fn new(
-        mut stolen_connection: StolenConnection,
+        stolen_stream: TcpStream,
+        original_address: SocketAddr,
+        connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
         captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Result<Self, HttpTrafficError> {
-        let mut buffer = [0u8; 64];
         // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
         // might return 0 bytes peeked.
         //
@@ -120,25 +85,19 @@ impl HttpFilterBuilder {
         // But wait, we're taking the not-http-stream as well, as the http-stream, so here we could
         // read. This requires changing a bunch of stuff though, probably easier to find a fix for
         // `peek`.
+        let reversable_stream = DefaultReversableStream::read_header(stolen_stream).await;
+        match reversable_stream.and_then(|mut stream| {
+            let http_version =
+                HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
 
-        match stolen_connection
-            .peek(&mut buffer)
-            .await
-            .map_err(From::from)
-            .and_then(|peeked_amount| {
-                if peeked_amount == 0 {
-                    Err(HttpTrafficError::Empty)
-                } else {
-                    Ok(HttpVersion::new(
-                        &buffer[..peeked_amount],
-                        &H2_PREFACE[..peeked_amount.min(H2_PREFACE.len())],
-                    ))
-                }
-            }) {
-            Ok(http_version) => Ok(Self {
+            Ok((stream, http_version))
+        }) {
+            Ok((reversable_stream, http_version)) => Ok(Self {
                 http_version,
                 client_filters: filters,
-                stolen_connection,
+                reversable_stream,
+                original_address,
+                connection_id,
                 captured_tx,
                 passthrough_tx,
             }),
@@ -169,16 +128,13 @@ impl HttpFilterBuilder {
             client_filters,
             captured_tx,
             passthrough_tx,
-            stolen_connection:
-                StolenConnection {
-                    mut tcp_stream,
-                    original_address,
-                    connection_id,
-                },
+            mut reversable_stream,
+            original_address,
+            connection_id,
         } = self;
 
         // Incoming tcp stream definitely has an address.
-        let port = tcp_stream.local_addr().unwrap().port();
+        let port = reversable_stream.local_addr().unwrap().port();
 
         match http_version {
             HttpVersion::V1 => {
@@ -202,7 +158,7 @@ impl HttpFilterBuilder {
 
                 Ok(Some(HttpFilter {
                     hyper_task,
-                    original_stream: tcp_stream,
+                    reversable_stream,
                     interceptor_stream,
                 }))
             }
@@ -214,7 +170,8 @@ impl HttpFilterBuilder {
                 let passhtrough_task = tokio::task::spawn(async move {
                     let mut interceptor_to_original = TcpStream::connect(original_address).await?;
 
-                    copy_bidirectional(&mut tcp_stream, &mut interceptor_to_original).await?;
+                    copy_bidirectional(&mut reversable_stream, &mut interceptor_to_original)
+                        .await?;
                     Ok::<_, error::HttpTrafficError>(())
                 });
 

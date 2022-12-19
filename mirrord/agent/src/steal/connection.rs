@@ -22,7 +22,14 @@ use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::error;
 
-use super::{http_traffic::filter::StolenConnection, *};
+use super::{
+    http_traffic::{
+        reversable_stream::ReversableStream,
+        filter::{HttpFilter, MINIMAL_HEADER_SIZE},
+        DefaultReversableStream,
+    },
+    *,
+};
 use crate::{
     steal::{
         http_traffic::{HttpFilterManager, PassthroughRequest},
@@ -88,7 +95,7 @@ pub(crate) struct TcpConnectionStealer {
     http_connection_close_receiver: Receiver<ConnectionId>,
 
     /// Used to send http responses back to the original remote connection.
-    http_write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
+    http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversableStream>>,
 
     // TODO: ?
     passthrough_sender: Sender<PassthroughRequest>,
@@ -309,7 +316,7 @@ impl TcpConnectionStealer {
     /// back responses.
     async fn forward_filter_stream(
         &mut self,
-        stream_with_browser: TcpStream,
+        stream_with_browser: DefaultReversableStream,
         stream_with_filter: DuplexStream,
         connection_id: ConnectionId,
     ) {
@@ -384,12 +391,18 @@ impl TcpConnectionStealer {
             // clients.
             Some(HttpFiltered(manager)) => {
                 let connection_id = self.index_allocator.next_index().unwrap();
-                let stolen_connection = StolenConnection::new(stream, real_address, connection_id);
 
-                if let Some(http_filter) = manager.new_connection(stolen_connection).await? {
+                if let Some(HttpFilter {
+                    reversable_stream,
+                    interceptor_stream,
+                    ..
+                }) = manager
+                    .new_connection(stream, real_address, connection_id)
+                    .await?
+                {
                     self.forward_filter_stream(
-                        http_filter.original_stream,
-                        http_filter.interceptor_stream,
+                        reversable_stream,
+                        interceptor_stream,
                         connection_id,
                     )
                     .await;
