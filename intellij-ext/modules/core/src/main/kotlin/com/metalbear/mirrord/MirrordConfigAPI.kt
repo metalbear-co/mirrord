@@ -39,7 +39,7 @@ object MirrordConfigAPI {
 }
     """
 
-    private fun getConfigPath(project: Project): Path {
+    fun getConfigPath(project: Project): Path {
         val basePath = project.basePath ?: throw Error("couldn't resolve project path");
         return Path.of(basePath, ".mirrord", "mirrord.json")
     }
@@ -66,8 +66,7 @@ object MirrordConfigAPI {
         }
         val data = configPath.readText()
         val gson = Gson();
-        val configData = gson.fromJson(data, ConfigData::class.java)
-        return configData
+        return gson.fromJson(data, ConfigData::class.java)
     }
 
     /**

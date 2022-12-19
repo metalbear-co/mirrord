@@ -10,8 +10,7 @@ import com.intellij.execution.target.TargetedCommandLineBuilder
 import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo
 import com.metalbear.mirrord.MirrordExecManager
-import org.jetbrains.concurrency.resolvedPromise
-import java.net.InetAddress
+import com.metalbear.mirrord.MirrordPathManager
 import java.nio.file.Paths
 
 class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
@@ -37,7 +36,7 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN) {
 
-            val wsl = state.getTargetEnvironmentRequest()?.let {
+            val wsl = state.targetEnvironmentRequest?.let {
                 if (it is WslTargetEnvironmentRequest) {
                     it.configuration.distribution
                 } else {
@@ -46,8 +45,14 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
             }
             val project = configuration.getProject()
 
-            MirrordExecManager.start()
-            cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
+            MirrordExecManager.start(wsl, project)?.let {
+                env ->
+                for (entry in env.entries.iterator()) {
+                    cmdLine.addEnvironmentVariable(entry.key, entry.value)
+                }
+                cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
+            }
+
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
     }
@@ -61,7 +66,7 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
         commandLineType: GoRunningState.CommandLineType
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
-            MirrordListener.enabled &&
+            MirrordExecManager.enabled &&
             SystemInfo.isMac &&
             state.isDebug
         ) {

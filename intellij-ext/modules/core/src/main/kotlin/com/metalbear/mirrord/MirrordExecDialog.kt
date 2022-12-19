@@ -13,19 +13,7 @@ object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
     private const val targetLabel = "Select Target"
 
-    private fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
-        setCenterPanel(dialogPanel)
-        setTitle(dialogHeading)
-    }
-
-
-    private fun createMirrordTargetsDialog(
-        targets: List<String>,
-    ): JPanel = JPanel(BorderLayout()).apply {
-        add(createSelectionDialog(podLabel, targets.asJBList()), BorderLayout.WEST)
-    }
-
-    fun selectTargetDialog(targets: List<String>): String {
+    fun selectTargetDialog(targets: List<String>): String? {
         val jbTargets = targets.asJBList()
         val result = DialogBuilder(). apply {
 
@@ -37,7 +25,7 @@ object MirrordExecDialog {
         if (result == DialogWrapper.OK_EXIT_CODE && !jbTargets.isSelectionEmpty) {
             return jbTargets.selectedValue
         }
-
+        return null
     }
 
     private fun List<String>.asJBList() = JBList(this).apply {
