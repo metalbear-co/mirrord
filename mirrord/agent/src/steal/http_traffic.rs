@@ -253,4 +253,56 @@ mod http_traffic_tests {
         assert!(hyper_task.await.is_ok());
         assert!(request_task.await.is_ok());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http_traffic_filter_total_passthrough_not_http() {
+        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 8888))
+            .await
+            .expect("Bound TcpListener.");
+
+        let request_task = tokio::spawn(async move {
+            let message =
+                "Hey / This is not an HTTP message! Don't even filter it, ok?".to_string();
+            let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, 8888))
+                .await
+                .unwrap();
+
+            let wrote = client.write(message.as_bytes()).await.unwrap();
+            assert_eq!(wrote, message.len());
+        });
+
+        let (tcp_stream, _) = server.accept().await.expect("Connection success!");
+
+        let client_id = 1;
+        let filter = Regex::new("Hello").expect("Valid regex.");
+
+        let (captured_tx, _) = channel(15000);
+        let (passthrough_tx, _) = channel(15000);
+
+        let http_filter_manager = HttpFilterManager::new(
+            tcp_stream.local_addr().unwrap().port(),
+            client_id,
+            filter,
+            captured_tx,
+            passthrough_tx,
+        );
+
+        let connection_id = 0;
+        let stolen_connection = StolenConnection::new(
+            tcp_stream,
+            (Ipv4Addr::LOCALHOST, 7777).into(),
+            connection_id,
+        );
+
+        if let None = http_filter_manager
+            .new_connection(stolen_connection)
+            .await
+            .unwrap()
+        {
+        } else {
+            panic!("`http_filter_manager.new_connection` has to be `None` here!");
+        }
+
+        assert!(request_task.await.is_ok());
+    }
 }

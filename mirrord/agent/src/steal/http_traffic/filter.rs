@@ -1,4 +1,8 @@
-use core::ops::Deref;
+use core::{
+    future::poll_fn,
+    ops::{Deref, DerefMut},
+    task::Poll,
+};
 use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
@@ -6,7 +10,7 @@ use fancy_regex::Regex;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::{duplex, DuplexStream},
+    io::{copy_bidirectional, duplex, AsyncReadExt, DuplexStream},
     net::TcpStream,
     sync::mpsc::Sender,
     task::JoinHandle,
@@ -16,10 +20,14 @@ use tracing::error;
 use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion, PassthroughRequest,
 };
-use crate::{steal::StealerHttpRequest, util::ClientId};
+use crate::{
+    steal::{http_traffic::error, StealerHttpRequest},
+    util::ClientId,
+};
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
+#[derive(Debug)]
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
     stolen_connection: StolenConnection,
@@ -61,6 +69,7 @@ pub(crate) struct StolenConnection {
 }
 
 impl StolenConnection {
+    #[tracing::instrument(level = "debug")]
     pub(crate) fn new(
         tcp_stream: TcpStream,
         original_address: SocketAddr,
@@ -82,14 +91,21 @@ impl Deref for StolenConnection {
     }
 }
 
+impl DerefMut for StolenConnection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tcp_stream
+    }
+}
+
 impl HttpFilterBuilder {
     /// Does not consume bytes from the stream.
     ///
     /// Checks if the first available bytes in a stream could be of an http request.
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
+    #[tracing::instrument(level = "debug")]
     pub(super) async fn new(
-        stolen_connection: StolenConnection,
+        mut stolen_connection: StolenConnection,
         filters: Arc<DashMap<ClientId, Regex>>,
         captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
@@ -97,6 +113,14 @@ impl HttpFilterBuilder {
         let mut buffer = [0u8; 64];
         // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
         // might return 0 bytes peeked.
+        //
+        // ADD(alex) [mid] 2022-12-19: Just hit this issue while running tests, we return error due
+        // to peeking 0 bytes.
+        //
+        // But wait, we're taking the not-http-stream as well, as the http-stream, so here we could
+        // read. This requires changing a bunch of stuff though, probably easier to find a fix for
+        // `peek`.
+
         match stolen_connection
             .peek(&mut buffer)
             .await
@@ -138,6 +162,7 @@ impl HttpFilterBuilder {
 
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
+    #[tracing::instrument(level = "debug")]
     pub(super) fn start(self) -> Result<Option<HttpFilter>, HttpTrafficError> {
         let Self {
             http_version,
@@ -146,7 +171,7 @@ impl HttpFilterBuilder {
             passthrough_tx,
             stolen_connection:
                 StolenConnection {
-                    tcp_stream,
+                    mut tcp_stream,
                     original_address,
                     connection_id,
                 },
@@ -187,22 +212,14 @@ impl HttpFilterBuilder {
             HttpVersion::V2 | HttpVersion::NotHttp => {
                 println!("foo");
                 let passhtrough_task = tokio::task::spawn(async move {
-                    // TODO(alex) [mid] 2022-12-14: Handle this as a passthrough case!
-                    todo!()
+                    let mut interceptor_to_original = TcpStream::connect(original_address).await?;
+
+                    copy_bidirectional(&mut tcp_stream, &mut interceptor_to_original).await?;
+                    Ok::<_, error::HttpTrafficError>(())
                 });
 
                 Ok(None)
-            } /* TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
-               *
-               * ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
-               * destination from the stealer, then we can spawn a task that just pairs a stream
-               * that reads from each side and writes to the other side.
-               *
-               * This being the handling mechanism for not-http passthrough.
-               *
-               * ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move
-               * this into the `HttpVersion` enum, and have it be `NotHttp`
-               * variant, thus unifying the creation of tasks there. */
+            }
         }
     }
 }
