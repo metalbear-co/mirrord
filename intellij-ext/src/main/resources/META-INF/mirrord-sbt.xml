@@ -1,5 +1,0 @@
-<idea-plugin>
-    <extensions defaultExtensionNs="com.intellij">
-        <configurationType implementation="com.metalbear.mirrord.products.idea.scala.SbtEnvFileConfigurationType" id="mirrordSbt"/>
-    </extensions>
-</idea-plugin>
