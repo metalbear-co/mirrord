@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- layer + go - connect didn't intercept sometimes (we lacked a match). Fixes [851](https://github.com/metalbear-co/mirrord/issues/851).
+
 ## 3.14.0
 
 ### Changed
