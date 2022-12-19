@@ -8,6 +8,11 @@ use tokio::{
 
 use super::error::HttpTrafficError;
 
+/// Wraps a [`TcpStream`] to allow a sort of _peek_ functionality, even though we're actually going
+/// to be calling [`TcpStream::read_exact`] on it.
+///
+/// Very useful to the HTTP filter component on [`stealer`], where we have to look at the first
+/// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
 #[derive(Debug)]
 #[pin_project]
 pub(crate) struct ReversableStream<const HEADER_SIZE: usize> {

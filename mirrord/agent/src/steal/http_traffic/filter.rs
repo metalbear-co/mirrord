@@ -76,16 +76,8 @@ impl HttpFilterBuilder {
         captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Result<Self, HttpTrafficError> {
-        // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
-        // might return 0 bytes peeked.
-        //
-        // ADD(alex) [mid] 2022-12-19: Just hit this issue while running tests, we return error due
-        // to peeking 0 bytes.
-        //
-        // But wait, we're taking the not-http-stream as well, as the http-stream, so here we could
-        // read. This requires changing a bunch of stuff though, probably easier to find a fix for
-        // `peek`.
         let reversable_stream = DefaultReversableStream::read_header(stolen_stream).await;
+
         match reversable_stream.and_then(|mut stream| {
             let http_version =
                 HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
@@ -101,17 +93,6 @@ impl HttpFilterBuilder {
                 captured_tx,
                 passthrough_tx,
             }),
-            // TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
-            //
-            // ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
-            // destination from the stealer, then we can spawn a task that just pairs a stream that
-            // reads from each side and writes to the other side.
-            //
-            // This being the handling mechanism for not-http passthrough.
-            //
-            // ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move this
-            // into the `HttpVersion` enum, and have it be `NotHttp` variant, thus unifying the
-            // creation of tasks there.
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
                 Err(fail)

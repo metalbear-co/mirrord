@@ -23,11 +23,15 @@ pub(super) mod reversable_stream;
 
 pub(super) type DefaultReversableStream = ReversableStream<MINIMAL_HEADER_SIZE>;
 
+/// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HttpVersion {
     #[default]
     V1,
     V2,
+
+    /// Handled as a special passthrough case, where the captured stream just forwards messages to
+    /// their original destination (and vice-versa).
     NotHttp,
 }
 
