@@ -37,7 +37,7 @@ object MirrordExecManager {
         }
         var target: String? = null;
         if (!MirrordConfigAPI.isTargetSet(project)) {
-            ApplicationManager.getApplication().invokeLater {
+            ApplicationManager.getApplication().invokeAndWait {
                 target = chooseTarget(wslDistribution, project);
             }
         }
