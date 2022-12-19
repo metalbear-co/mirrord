@@ -4,6 +4,7 @@ import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.util.io.exists
+import kotlinx.collections.immutable.toImmutableMap
 
 /**
  * Functions to be called when one of our entry points to the program
@@ -42,6 +43,9 @@ object MirrordExecManager {
             }
         }
 
-        return MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
+        var env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
+
+        env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535"
+        return env.toImmutableMap()
     }
 }

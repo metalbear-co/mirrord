@@ -14,6 +14,8 @@ object MirrordNotifier {
         .getInstance()
         .getNotificationGroup("mirrord Notification Handler")
 
+    private val progressNotificationManager = SingletonNotificationManager("mirrord Notification Handler", NotificationType.INFORMATION)
+
     fun notify(message: String, type: NotificationType, project: Project?) {
         ApplicationManager.getApplication().invokeLater {
             notificationManager
@@ -22,6 +24,11 @@ object MirrordNotifier {
         }
     }
 
+    fun progress(message: String, project: Project?) {
+        ApplicationManager.getApplication().invokeLater {
+            progressNotificationManager.notify("mirrord", message, project) {}
+        }
+    }
     fun notifier(message: String, type: NotificationType): Notification {
         return notificationManager.createNotification("mirrord", message, type)
     }

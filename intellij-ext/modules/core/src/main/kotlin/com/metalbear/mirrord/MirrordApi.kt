@@ -25,7 +25,7 @@ data class Message (
 )
 
 data class MirrordExecution(
-    val environment: Map<String, String>
+    val environment: MutableMap<String, String>
 )
 
 /**
@@ -62,7 +62,7 @@ object MirrordApi {
 
     }
 
-    fun exec(target: String?, configFile: String?, project: Project?, wslDistribution: WSLDistribution?): Map<String, String> {
+    fun exec(target: String?, configFile: String?, project: Project?, wslDistribution: WSLDistribution?): MutableMap<String, String> {
         var commandLine = GeneralCommandLine(cliPath(), "ext")
 
         target?.let {
@@ -100,6 +100,7 @@ object MirrordApi {
                 if (success) {
                     val innerMessage = message.message ?: throw Error("Invalid inner message")
                     val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
+                    MirrordNotifier.progress("mirrord started!")
                     return executionInfo.environment
                 } else {
                     MirrordNotifier.errorNotification("mirrord failed launching", project)
@@ -112,7 +113,7 @@ object MirrordApi {
                 displayMessage += ": $it"
             }
 
-            MirrordNotifier.notify(displayMessage, NotificationType.INFORMATION, project)
+            MirrordNotifier.progress(displayMessage, project)
         }
 
 
