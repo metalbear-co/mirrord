@@ -1,17 +1,11 @@
-use core::{
-    future::poll_fn,
-    ops::{Deref, DerefMut},
-    task::Poll,
-};
 use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use httparse::Header;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::{copy_bidirectional, duplex, AsyncReadExt, DuplexStream},
+    io::{copy_bidirectional, duplex, DuplexStream},
     net::TcpStream,
     sync::mpsc::Sender,
     task::JoinHandle,
@@ -19,8 +13,8 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, reversable_stream::ReversableStream,
-    DefaultReversableStream, HttpVersion, PassthroughRequest,
+    error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversableStream, HttpVersion,
+    PassthroughRequest,
 };
 use crate::{
     steal::{http_traffic::error, StealerHttpRequest},
@@ -28,6 +22,12 @@ use crate::{
 };
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+
+/// Controls the amount of data we read when trying to detect if the stream's first message contains
+/// an HTTP request.
+///
+/// **WARNING**: Can't be too small, otherwise we end up accepting things like "Foo " as valid HTTP
+/// requests.
 pub(crate) const MINIMAL_HEADER_SIZE: usize = 10;
 
 #[derive(Debug)]
@@ -166,7 +166,6 @@ impl HttpFilterBuilder {
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
             // some more effort to chase some missing implementations.
             HttpVersion::V2 | HttpVersion::NotHttp => {
-                println!("foo");
                 let passhtrough_task = tokio::task::spawn(async move {
                     let mut interceptor_to_original = TcpStream::connect(original_address).await?;
 

@@ -36,24 +36,16 @@ impl HttpVersion {
     /// comparing it with a slice of [`H2_PREFACE`].
     #[tracing::instrument(level = "debug")]
     fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
-        println!(
-            "buffer {:#?} | h2_preface {:#?}",
-            String::from_utf8_lossy(buffer),
-            h2_preface
-        );
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
         if buffer == h2_preface {
-            println!("HTTP2");
             Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),
             Ok(_) | Err(httparse::Error::TooManyHeaders)
         ) {
-            println!("HTTP1");
             Self::V1
         } else {
-            println!("Not http!");
             Self::NotHttp
         }
     }
@@ -87,9 +79,7 @@ impl HttpFilterManager {
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
-        client_filters
-            .insert(client_id, filter)
-            .inspect(|foo| println!("{:#?}", foo));
+        client_filters.insert(client_id, filter);
 
         Self {
             port,

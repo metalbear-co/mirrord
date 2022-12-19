@@ -23,11 +23,7 @@ use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::{
-    http_traffic::{
-        reversable_stream::ReversableStream,
-        filter::{HttpFilter, MINIMAL_HEADER_SIZE},
-        DefaultReversableStream,
-    },
+    http_traffic::{filter::HttpFilter, DefaultReversableStream},
     *,
 };
 use crate::{
