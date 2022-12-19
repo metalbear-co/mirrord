@@ -50,10 +50,7 @@
 
     </actions>
 
-    <extensions defaultExtensionNs="com.intellij">
-        <runConfigurationExtension implementation="com.metalbear.mirrord.MirrordRunConfigurationExtension"/>
-    </extensions>
-    <depends optional="true" config-file="mirrord-sbt.xml">org.intellij.scala</depends>
+
     <depends optional="true" config-file="mirrord-idea.xml">com.intellij.modules.java</depends>
     <depends optional="true" config-file="mirrord-gradle.xml">com.intellij.gradle</depends>
     <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>

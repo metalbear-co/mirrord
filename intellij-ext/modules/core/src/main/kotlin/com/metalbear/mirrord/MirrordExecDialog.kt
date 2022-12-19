@@ -1,6 +1,7 @@
 package com.metalbear.mirrord
 
 import com.intellij.openapi.ui.DialogBuilder
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import java.awt.*
@@ -10,58 +11,37 @@ import javax.swing.border.EmptyBorder
 
 object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
-    private const val podLabel = "Select Target"
+    private const val targetLabel = "Select Target"
 
-    fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
+    private fun createDialogBuilder(dialogPanel: JPanel): DialogBuilder = DialogBuilder().apply {
         setCenterPanel(dialogPanel)
         setTitle(dialogHeading)
     }
 
 
-
-    fun createMirrordConfigDialog(
-        pods: JBList<String>,
-        fileOps: JCheckBox,
-        stealTraffic: JCheckBox,
-        telemetry: JCheckBox,
-        ephemeralContainer: JCheckBox,
-        remoteDns: JCheckBox,
-        tcpOutgoingTraffic: JCheckBox,
-        udpOutgoingTraffic: JCheckBox,
-        agentRustLog: JComboBox<LogLevel>,
-        rustLog: JComboBox<LogLevel>,
-        excludeEnv: JTextField,
-        includeEnv: JTextField
+    private fun createMirrordTargetsDialog(
+        targets: List<String>,
     ): JPanel = JPanel(BorderLayout()).apply {
-        add(createSelectionDialog(podLabel, pods), BorderLayout.WEST)
-        add(JSeparator(JSeparator.VERTICAL), BorderLayout.CENTER)
-        add(JPanel(GridLayout(6, 2, 15, 2)).apply {
-            add(fileOps)
-            add(stealTraffic)
-            add(telemetry)
-            add(ephemeralContainer)
-            add(remoteDns)
-            add(JLabel()) // empty label for filling up the row
-            add(tcpOutgoingTraffic)
-            add(udpOutgoingTraffic)
-            add(JPanel(GridBagLayout()).apply {
-                add(JLabel("Agent Log Level:"))
-                add(agentRustLog)
+        add(createSelectionDialog(podLabel, targets.asJBList()), BorderLayout.WEST)
+    }
+
+    fun selectTargetDialog(targets: List<String>): String {
+        val jbTargets = targets.asJBList()
+        val result = DialogBuilder(). apply {
+
+            setCenterPanel(JPanel(BorderLayout()).apply {
+                add(createSelectionDialog(targetLabel, jbTargets), BorderLayout.WEST)
             })
-            add(JPanel(GridBagLayout()).apply {
-                add(JLabel("Layer Log Level:"))
-                add(rustLog)
-            })
-            add(JPanel(GridLayout(2, 1)).apply {
-                add(JLabel("Exclude env vars:"))
-                add(excludeEnv)
-            })
-            add(JPanel(GridLayout(2, 1)).apply {
-                add(JLabel("Include env vars:"))
-                add(includeEnv)
-            })
-            border = EmptyBorder(0, 5, 5, 5)
-        }, BorderLayout.EAST)
+            setTitle(dialogHeading)
+        }.show()
+        if (result == DialogWrapper.OK_EXIT_CODE && !jbTargets.isSelectionEmpty) {
+            return jbTargets.selectedValue
+        }
+
+    }
+
+    private fun List<String>.asJBList() = JBList(this).apply {
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
     private fun createSelectionDialog(label: String, items: JBList<String>): JPanel =
@@ -78,15 +58,5 @@ object MirrordExecDialog {
             })
         }
 
-    private fun createTextDialog(label: String, item: JTextField): JPanel =
-        JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = EmptyBorder(10, 5, 10, 5)
-            add(JLabel(label).apply {
-                alignmentX = JLabel.LEFT_ALIGNMENT
-            })
-            add(Box.createRigidArea(Dimension(0, 5)))
-            add(item)
-        }
 
 }

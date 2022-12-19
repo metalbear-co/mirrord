@@ -1,28 +1,20 @@
-package com.metalbear.mirrord
+package com.metalbear.mirrord.products.goland
 
 import com.goide.execution.GoRunConfigurationBase
 import com.goide.execution.GoRunningState
 import com.goide.execution.extension.GoRunConfigurationExtension
 import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
+import com.intellij.execution.target.TargetEnvironmentRequest
 import com.intellij.execution.target.TargetedCommandLineBuilder
-import java.nio.file.Paths
+import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo
+import com.metalbear.mirrord.MirrordExecManager
+import org.jetbrains.concurrency.resolvedPromise
+import java.net.InetAddress
+import java.nio.file.Paths
 
 class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
-    companion object {
-        fun clearGoEnv() {
-            for (env in keysToClear) {
-                goCmdLine?.getEnvironmentVariable(env)?.let {
-                    goCmdLine?.removeEnvironmentVariable(env)
-                }
-            }
-
-        }
-
-        val keysToClear = arrayOf("LD_PRELOAD", "DYLD_INSERT_LIBRARIES")
-        var goCmdLine: TargetedCommandLineBuilder? = null
-    }
 
     override fun isApplicableFor(configuration: GoRunConfigurationBase<*>): Boolean {
         return true
@@ -43,9 +35,18 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
         state: GoRunningState<out GoRunConfigurationBase<*>>,
         commandLineType: GoRunningState.CommandLineType
     ) {
-        if (commandLineType == GoRunningState.CommandLineType.RUN && MirrordListener.enabled && !MirrordListener.envSet) {
-            goCmdLine = cmdLine
+        if (commandLineType == GoRunningState.CommandLineType.RUN) {
 
+            val wsl = state.getTargetEnvironmentRequest()?.let {
+                if (it is WslTargetEnvironmentRequest) {
+                    it.configuration.distribution
+                } else {
+                    null
+                }
+            }
+            val project = configuration.getProject()
+
+            MirrordExecManager.start()
             cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
