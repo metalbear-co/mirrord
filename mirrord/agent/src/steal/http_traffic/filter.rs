@@ -23,8 +23,6 @@ const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
     stolen_connection: StolenConnection,
-    hyper_stream: DuplexStream,
-    interceptor_stream: DuplexStream,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
@@ -113,19 +111,13 @@ impl HttpFilterBuilder {
                     ))
                 }
             }) {
-            Ok(http_version) => {
-                let (hyper_stream, interceptor_stream) = duplex(15000);
-
-                Ok(Self {
-                    http_version,
-                    client_filters: filters,
-                    stolen_connection,
-                    hyper_stream,
-                    interceptor_stream,
-                    captured_tx,
-                    passthrough_tx,
-                })
-            }
+            Ok(http_version) => Ok(Self {
+                http_version,
+                client_filters: filters,
+                stolen_connection,
+                captured_tx,
+                passthrough_tx,
+            }),
             // TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
             //
             // ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
@@ -146,11 +138,9 @@ impl HttpFilterBuilder {
 
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
-    pub(super) fn start(self) -> Result<HttpFilter, HttpTrafficError> {
+    pub(super) fn start(self) -> Result<Option<HttpFilter>, HttpTrafficError> {
         let Self {
             http_version,
-            hyper_stream,
-            interceptor_stream,
             client_filters,
             captured_tx,
             passthrough_tx,
@@ -165,47 +155,54 @@ impl HttpFilterBuilder {
         // Incoming tcp stream definitely has an address.
         let port = tcp_stream.local_addr().unwrap().port();
 
-        let hyper_task = match http_version {
-            HttpVersion::V1 => tokio::task::spawn(async move {
-                http1::Builder::new()
-                    .serve_connection(
-                        hyper_stream,
-                        HyperHandler {
-                            filters: client_filters,
-                            captured_tx,
-                            passthrough_tx,
-                            connection_id,
-                            port,
-                        },
-                    )
-                    .await
-                    .map_err(From::from)
-            }),
+        match http_version {
+            HttpVersion::V1 => {
+                let (hyper_stream, interceptor_stream) = duplex(15000);
+
+                let hyper_task = tokio::task::spawn(async move {
+                    http1::Builder::new()
+                        .serve_connection(
+                            hyper_stream,
+                            HyperHandler {
+                                filters: client_filters,
+                                captured_tx,
+                                passthrough_tx,
+                                connection_id,
+                                port,
+                            },
+                        )
+                        .await
+                        .map_err(From::from)
+                });
+
+                Ok(Some(HttpFilter {
+                    hyper_task,
+                    original_stream: tcp_stream,
+                    interceptor_stream,
+                }))
+            }
             // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
             // some more effort to chase some missing implementations.
-            HttpVersion::V2 => tokio::task::spawn(async move {
-                // TODO(alex) [mid] 2022-12-14: Handle this as a passthrough case!
-                todo!()
-            }),
-            // TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
-            //
-            // ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
-            // destination from the stealer, then we can spawn a task that just pairs a stream that
-            // reads from each side and writes to the other side.
-            //
-            // This being the handling mechanism for not-http passthrough.
-            //
-            // ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move this
-            // into the `HttpVersion` enum, and have it be `NotHttp` variant, thus unifying the
-            // creation of tasks there.
-            HttpVersion::NotHttp => todo!(),
-        };
+            HttpVersion::V2 | HttpVersion::NotHttp => {
+                println!("foo");
+                let passhtrough_task = tokio::task::spawn(async move {
+                    // TODO(alex) [mid] 2022-12-14: Handle this as a passthrough case!
+                    todo!()
+                });
 
-        Ok(HttpFilter {
-            hyper_task,
-            original_stream: tcp_stream,
-            interceptor_stream,
-        })
+                Ok(None)
+            } /* TODO(alex) [high] 2022-12-09: This whole filter is a passthrough case.
+               *
+               * ADD(alex) [high] 2022-12-16: Here we can use `orig_dst` or even get the original
+               * destination from the stealer, then we can spawn a task that just pairs a stream
+               * that reads from each side and writes to the other side.
+               *
+               * This being the handling mechanism for not-http passthrough.
+               *
+               * ADD(alex) [high] 2022-12-16: Should this even be an error? I think we could move
+               * this into the `HttpVersion` enum, and have it be `NotHttp`
+               * variant, thus unifying the creation of tasks there. */
+        }
     }
 }

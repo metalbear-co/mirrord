@@ -386,14 +386,15 @@ impl TcpConnectionStealer {
                 let connection_id = self.index_allocator.next_index().unwrap();
                 let stolen_connection = StolenConnection::new(stream, real_address, connection_id);
 
-                let http_filter = manager.new_connection(stolen_connection).await?;
+                if let Some(http_filter) = manager.new_connection(stolen_connection).await? {
+                    self.forward_filter_stream(
+                        http_filter.original_stream,
+                        http_filter.interceptor_stream,
+                        connection_id,
+                    )
+                    .await;
+                }
 
-                self.forward_filter_stream(
-                    http_filter.original_stream,
-                    http_filter.interceptor_stream,
-                    connection_id,
-                )
-                .await;
                 Ok(())
             }
 

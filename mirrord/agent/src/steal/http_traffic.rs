@@ -131,7 +131,7 @@ impl HttpFilterManager {
     pub(super) async fn new_connection(
         &self,
         stolen_connection: StolenConnection,
-    ) -> Result<HttpFilter, HttpTrafficError> {
+    ) -> Result<Option<HttpFilter>, HttpTrafficError> {
         HttpFilterBuilder::new(
             stolen_connection,
             self.client_filters.clone(),
@@ -211,6 +211,7 @@ mod http_traffic_tests {
         } = http_filter_manager
             .new_connection(stolen_connection)
             .await
+            .unwrap()
             .unwrap();
 
         let mut interceptor_buffer = vec![0; 15000];
