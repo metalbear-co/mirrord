@@ -20,7 +20,6 @@ use crate::{
     detour::DetourGuard,
     error::LayerError,
     socket::{SocketInformation, CONNECTION_QUEUE},
-    tcp_steal::http_forwarding::HttpForwarderError,
     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 
@@ -158,8 +157,7 @@ pub(crate) trait TcpHandler {
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError>;
 
     /// Handle New Data messages
-    async fn handle_http_request(&mut self, request: HttpRequest)
-        -> Result<(), HttpForwarderError>;
+    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError>;
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
