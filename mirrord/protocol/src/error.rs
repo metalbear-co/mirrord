@@ -53,7 +53,7 @@ pub enum RemoteError {
     #[error("Connect call to `SocketAddr` `{0}` timed out!")]
     ConnectTimedOut(SocketAddr),
 
-    #[error(r#"Get bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
+    #[error(r#"Got bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterRegex(String, String),
 }
 
