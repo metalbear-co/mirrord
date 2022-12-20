@@ -131,6 +131,7 @@ impl HttpFilterBuilder {
                                 passthrough_tx,
                                 connection_id,
                                 port,
+                                request_id: 0,
                             },
                         )
                         .await

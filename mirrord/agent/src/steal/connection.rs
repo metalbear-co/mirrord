@@ -1,11 +1,13 @@
 use std::{
-    collections::HashSet,
+    collections::{BinaryHeap, HashSet},
     io,
     net::{Ipv4Addr, SocketAddr},
 };
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fancy_regex::Regex;
+use http_body_util::Full;
+use hyper::{Response, Version};
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -27,6 +29,7 @@ use super::{
     *,
 };
 use crate::{
+    error::Result,
     steal::{
         http_traffic::{HttpFilterManager, PassthroughRequest},
         StealSubscription::{HttpFiltered, Unfiltered},
@@ -44,7 +47,6 @@ use crate::{
 pub(crate) struct TcpConnectionStealer {
     /// Maps a port to its active subscription.
     port_subscriptions: HashMap<Port, StealSubscription>,
-
     /// Communication between (agent -> stealer) task.
     ///
     /// The agent controls the stealer task through [`TcpStealerAPI::command_tx`].
@@ -93,6 +95,10 @@ pub(crate) struct TcpConnectionStealer {
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
+    http_request_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
+
+    http_request_counters: HashMap<ConnectionId, RequestId>,
+
     // TODO: ?
     passthrough_sender: Sender<PassthroughRequest>,
 }
@@ -135,6 +141,8 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
+            http_request_queues: HashMap::with_capacity(8),
+            http_request_counters: HashMap::with_capacity(8),
             passthrough_sender,
         })
     }
@@ -190,6 +198,7 @@ impl TcpConnectionStealer {
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
                     self.http_write_streams.remove(&connection_id);
                     self.index_allocator.free_index(connection_id);
+                    // TODO: Send a close message to all clients that were subscribed to the connection.
                 }
                 _ = cancellation_token.cancelled() => {
                     break;
@@ -355,7 +364,7 @@ impl TcpConnectionStealer {
                 error!("Encountered error: \"{err:?}\" while forwarding incoming stream to filter.")
             }
             if let Err(err) = connection_close_sender.send(connection_id).await {
-                error!("Stream forwarding task could not communicate stream close to main task.");
+                error!("Stream forwarding task could not communicate stream close to main task: {err:?}.");
             }
         });
     }
@@ -591,28 +600,67 @@ impl TcpConnectionStealer {
         }
     }
 
-    /// Forward an HTTP response to a stolen HTTP request from the layer to the `HttpFilterManager`.
+    // TODO: make this correct.
+    fn response_to_bytes(response: Response<Full<Bytes>>) -> Vec<u8> {
+        // Convert the HTTP version to bytes
+        let version = match response.version() {
+            Version::HTTP_10 => b"HTTP/1.0",
+            Version::HTTP_11 => b"HTTP/1.1",
+            Version::HTTP_2 => b"HTTP/2",
+        };
+
+        // Convert the headers to bytes
+        let headers = response.headers().to_bytes();
+
+        // Convert the status code to bytes
+        let status_code = response.status().as_u16().to_be_bytes();
+
+        // Convert the body to bytes
+        let body = response.into_body().into_inner();
+
+        // Concatenate the HTTP version, headers, status code, and body into a single byte array
+        let mut bytes =
+            BytesMut::with_capacity(version.len() + headers.len() + status_code.len() + body.len());
+        bytes.put(version);
+        bytes.put(b"\r\n");
+        bytes.put(headers);
+        bytes.put(status_code);
+        bytes.put(b"\r\n\r\n");
+        bytes.put(body);
+
+        bytes.try_into().unwrap()
+    }
+
+    /// Forward an HTTP response to a stolen HTTP request from the layer to the back to the browser.
     ///
     ///                       _________________________agent_________________________
-    /// Local App -> Layer -> ClientConnectionHandler -> Stealer -> HttpFilterManager -> Browser
+    /// Local App -> Layer -> ClientConnectionHandler -> Stealer -> Browser
     ///                                                          ^- You are here.
-    async fn http_response(
-        &mut self,
-        response: HttpResponse,
-    ) -> std::result::Result<(), AgentError> {
-        todo!();
-        match self.port_subscriptions.get(&response.port) {
-            Some(HttpFiltered(manager)) => todo!(),
-            Some(Unfiltered(_)) | None => {
-                warn!(
-                    "Got an http response to port {:?} which is not being filtered. \
-                Maybe the layer unsubscribed and this is a remainder of a closed connection. \
-                Not forwarding.",
-                    response.port
-                );
-                Ok(())
-            }
+    async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
+        let mut tcp_stream_write_half;
+        if let Some(stream) = self.http_write_streams.get(&response.connection_id) {
+            tcp_stream_write_half = stream;
+        } else {
+            warn!(
+                "Got an http response in a connection for which no tcp stream is present. Not forwarding.",
+            );
+            return Ok(());
         }
+        if response.request_id
+            == self
+                .http_request_counters
+                .entry(response.connection_id)
+                .or_insert(0)
+        {
+            tcp_stream_write_half
+                .write_all(&Self::response_to_bytes(response.response.into()))
+                .await?;
+            counter = self.http_request_counters.get_mut(&response.connection_id);
+            // TODO: iterate queue and send all consecutive responses.
+        } else {
+            // TODO: insert response into queueu.
+        }
+        Ok(())
     }
 
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote

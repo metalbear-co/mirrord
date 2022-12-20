@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
 use hyper::{body::Incoming, service::Service, Request, Response};
-use mirrord_protocol::{ConnectionId, Port};
+use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::sync::mpsc::Sender;
 
 use super::{error::HttpTrafficError, PassthroughRequest};
@@ -18,6 +18,7 @@ pub(super) struct HyperHandler {
     pub(super) passthrough_tx: Sender<PassthroughRequest>,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
+    pub(crate) request_id: RequestId,
 }
 
 // TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
@@ -70,15 +71,18 @@ impl Service<Request<Incoming>> for HyperHandler {
                     port: self.port,
                     connection_id: self.connection_id,
                     client_id,
+                    request_id: self.request_id,
                     request,
                 },
                 self.captured_tx.clone(),
             );
 
             let response = async { Ok(Response::new("Captured!".to_string())) };
+            self.request_id += 1;
             Box::pin(response)
         } else {
             spawn_send(PassthroughRequest(request), self.passthrough_tx.clone());
+            self.request_id += 1;
 
             let response = async { Ok(Response::new("Passthrough!".to_string())) };
             Box::pin(response)
