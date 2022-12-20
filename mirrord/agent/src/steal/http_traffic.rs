@@ -12,16 +12,16 @@ use tokio::{net::TcpStream, sync::mpsc::Sender};
 use self::{
     error::HttpTrafficError,
     filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
-    reversable_stream::ReversableStream,
+    reversible_stream::ReversibleStream,
 };
 use crate::{steal::StealerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;
 mod hyper_handler;
-pub(super) mod reversable_stream;
+pub(super) mod reversible_stream;
 
-pub(super) type DefaultReversableStream = ReversableStream<MINIMAL_HEADER_SIZE>;
+pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -211,7 +211,7 @@ mod http_traffic_tests {
 
         let HttpFilter {
             hyper_task,
-            mut reversable_stream,
+            mut reversible_stream,
             mut interceptor_stream,
         } = http_filter_manager
             .new_connection(tcp_stream, server_address, 0)
@@ -225,7 +225,7 @@ mod http_traffic_tests {
             select! {
                 // Server stream reads what it received from the client (remote app), and sends it
                 // to the hyper task via the intermmediate DuplexStream.
-                Ok(read) = reversable_stream.read(&mut interceptor_buffer) => {
+                Ok(read) = reversible_stream.read(&mut interceptor_buffer) => {
                     if read == 0 {
                         break;
                     }
@@ -240,7 +240,7 @@ mod http_traffic_tests {
                     // and exit.
                     let mut response_buffer = vec![0;1500];
                     let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
-                    reversable_stream.write(&response_buffer[..read_amount]).await.unwrap();
+                    reversible_stream.write(&response_buffer[..read_amount]).await.unwrap();
 
                     break;
                 }
@@ -299,7 +299,7 @@ mod http_traffic_tests {
 
         let HttpFilter {
             hyper_task,
-            mut reversable_stream,
+            mut reversible_stream,
             mut interceptor_stream,
         } = http_filter_manager
             .new_connection(tcp_stream, server_address, 0)
@@ -313,7 +313,7 @@ mod http_traffic_tests {
             select! {
                 // Server stream reads what it received from the client (remote app), and sends it
                 // to the hyper task via the intermmediate DuplexStream.
-                Ok(read) = reversable_stream.read(&mut interceptor_buffer) => {
+                Ok(read) = reversible_stream.read(&mut interceptor_buffer) => {
                     if read == 0 {
                         break;
                     }
@@ -328,7 +328,7 @@ mod http_traffic_tests {
                     // and exit.
                     let mut response_buffer = vec![0;1500];
                     let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
-                    reversable_stream.write(&response_buffer[..read_amount]).await.unwrap();
+                    reversible_stream.write(&response_buffer[..read_amount]).await.unwrap();
 
                     break;
                 }

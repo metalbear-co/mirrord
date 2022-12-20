@@ -17,14 +17,14 @@ use super::error::HttpTrafficError;
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 #[derive(Debug)]
 #[pin_project]
-pub(crate) struct ReversableStream<const HEADER_SIZE: usize> {
+pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
     #[pin]
     stream: TcpStream,
     header: [u8; HEADER_SIZE],
     num_forwarded: usize,
 }
 
-impl<const HEADER_SIZE: usize> ReversableStream<HEADER_SIZE> {
+impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
     pub(crate) async fn read_header(stream: TcpStream) -> Result<Self, HttpTrafficError> {
         let mut this = Self {
             stream,
@@ -46,7 +46,7 @@ impl<const HEADER_SIZE: usize> ReversableStream<HEADER_SIZE> {
     }
 }
 
-impl<const HEADER_SIZE: usize> AsyncRead for ReversableStream<HEADER_SIZE> {
+impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -70,7 +70,7 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversableStream<HEADER_SIZE> {
     }
 }
 
-impl<const HEADER_SIZE: usize> AsyncWrite for ReversableStream<HEADER_SIZE> {
+impl<const HEADER_SIZE: usize> AsyncWrite for ReversibleStream<HEADER_SIZE> {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
