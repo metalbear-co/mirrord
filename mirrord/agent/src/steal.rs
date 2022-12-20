@@ -4,7 +4,7 @@ use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::request::Parts, Request};
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
-    ConnectionId, Port,
+    ConnectionId, Port, RequestId,
 };
 use tokio::{net::TcpListener, select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -84,6 +84,7 @@ pub struct StealerHttpRequest {
     pub port: Port,
     pub connection_id: ConnectionId,
     pub client_id: ClientId,
+    pub request_id: RequestId,
     pub request: Request<Incoming>,
 }
 
