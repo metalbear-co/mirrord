@@ -4,8 +4,8 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
-    body::Incoming, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode, Uri,
-    Version,
+    body::Incoming, http, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode,
+    Uri, Version,
 };
 use serde::{Deserialize, Serialize};
 
@@ -206,8 +206,10 @@ impl HttpResponse {
     }
 }
 
-impl From<InternalHttpResponse> for Response<Full<Bytes>> {
-    fn from(value: InternalHttpResponse) -> Self {
+impl TryFrom<InternalHttpResponse> for Response<Full<Bytes>> {
+    type Error = http::Error;
+
+    fn try_from(value: InternalHttpResponse) -> Result<Self, Self::Error> {
         let InternalHttpResponse {
             status,
             version,
@@ -215,10 +217,10 @@ impl From<InternalHttpResponse> for Response<Full<Bytes>> {
             body,
         } = value;
 
-        let builder = Response::Builder().status(status).version(version);
+        let mut builder = Response::builder().status(status).version(version);
         if let Some(h) = builder.headers_mut() {
             *h = headers;
         }
-        builder.body(body)
+        builder.body(Full::new(Bytes::from(body)))
     }
 }
