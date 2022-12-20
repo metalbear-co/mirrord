@@ -441,14 +441,14 @@ impl TcpConnectionStealer {
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: PortSteal) -> Result<()> {
+    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
         if self.iptables.is_none() {
             // TODO: make the initialization internal to SafeIpTables.
             self.init_iptables()?;
         }
         let mut first_subscriber = false;
         let res = match port_steal {
-            PortSteal::Steal(port) => {
+            StealType::Steal(port) => {
                 if let Some(sub) = self.port_subscriptions.get(&port) {
                     error!(
                         "Can't steal whole port {port:?} as it is already being stolen: {sub:?}."
@@ -460,7 +460,7 @@ impl TcpConnectionStealer {
                     Ok(port)
                 }
             }
-            PortSteal::HttpFilterSteal(port, regex) => match Regex::new(&regex) {
+            StealType::HttpFilterSteal(port, regex) => match Regex::new(&regex) {
                 Ok(regex) => match self.port_subscriptions.get_mut(&port) {
                     Some(Unfiltered(earlier_client)) => {
                         error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");

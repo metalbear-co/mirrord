@@ -61,7 +61,7 @@ pub enum DaemonTcp {
 
 /// Describes the stealing subscription to a port:
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum PortSteal {
+pub enum StealType {
     /// Steal all traffic to this port.
     Steal(Port),
     /// Steal HTTP traffic matching a given filter.
@@ -71,7 +71,7 @@ pub enum PortSteal {
 /// Messages related to Steal Tcp handler from client.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpSteal {
-    PortSubscribe(PortSteal),
+    PortSubscribe(StealType),
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),

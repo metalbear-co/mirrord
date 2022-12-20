@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::request::Parts, Request};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, PortSteal, TcpData},
+    tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
     ConnectionId, Port,
 };
 use tokio::{net::TcpListener, select, sync::mpsc::Sender};
@@ -37,7 +37,7 @@ enum Command {
     /// A layer wants to subscribe to this [`Port`].
     ///
     /// The agent starts stealing traffic on this [`Port`].
-    PortSubscribe(PortSteal),
+    PortSubscribe(StealType),
 
     /// A layer wants to unsubscribe from this [`Port`].
     ///

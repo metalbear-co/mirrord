@@ -84,7 +84,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortSubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_subscribe(&mut self, port_steal: PortSteal) -> Result<(), AgentError> {
+    pub(crate) async fn port_subscribe(&mut self, port_steal: StealType) -> Result<(), AgentError> {
         self.send_command(Command::PortSubscribe(port_steal)).await
     }
 

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::{handshake, SendRequest};
 use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, PortSteal::Steal, TcpClose, TcpData},
+    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, StealType::Steal, TcpClose, TcpData},
     ClientMessage, ConnectionId, Port,
 };
 use streammap_ext::StreamMap;
