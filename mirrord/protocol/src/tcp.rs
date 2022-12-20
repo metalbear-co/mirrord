@@ -63,7 +63,7 @@ pub enum DaemonTcp {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum StealType {
     /// Steal all traffic to this port.
-    Steal(Port),
+    All(Port),
     /// Steal HTTP traffic matching a given filter.
     HttpFilterSteal(Port, String),
 }

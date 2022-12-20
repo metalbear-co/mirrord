@@ -448,7 +448,7 @@ impl TcpConnectionStealer {
         }
         let mut first_subscriber = false;
         let res = match port_steal {
-            StealType::Steal(port) => {
+            StealType::All(port) => {
                 if let Some(sub) = self.port_subscriptions.get(&port) {
                     error!(
                         "Can't steal whole port {port:?} as it is already being stolen: {sub:?}."

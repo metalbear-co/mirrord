@@ -9,7 +9,7 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::{handshake, SendRequest};
 use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, StealType::Steal, TcpClose, TcpData},
+    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, StealType::All, TcpClose, TcpData},
     ClientMessage, ConnectionId, Port,
 };
 use streammap_ext::StreamMap;
@@ -145,9 +145,9 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
-            Steal(port),
-        )))
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(All(
+            port,
+        ))))
         .await
         .map_err(From::from)
     }
