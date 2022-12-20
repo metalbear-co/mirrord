@@ -3,9 +3,10 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::{body::Incoming, Request};
+use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
@@ -56,7 +57,7 @@ impl HttpVersion {
 }
 
 #[derive(Debug)]
-pub struct PassthroughRequest(Request<Incoming>);
+pub struct PassthroughResponse(Bytes);
 
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
@@ -67,7 +68,7 @@ pub(super) struct HttpFilterManager {
 
     /// We clone this to pass them down to the hyper tasks.
     captured_tx: Sender<StealerHttpRequest>,
-    passthrough_tx: Sender<PassthroughRequest>,
+    passthrough_tx: Sender<PassthroughResponse>,
 }
 
 impl HttpFilterManager {
@@ -80,7 +81,7 @@ impl HttpFilterManager {
         client_id: ClientId,
         filter: Regex,
         captured_tx: Sender<StealerHttpRequest>,
-        passthrough_tx: Sender<PassthroughRequest>,
+        passthrough_tx: Sender<PassthroughResponse>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters.insert(client_id, filter);

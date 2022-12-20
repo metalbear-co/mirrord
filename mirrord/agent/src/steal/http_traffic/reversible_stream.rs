@@ -1,3 +1,4 @@
+use core::ops::Deref;
 use std::net::SocketAddr;
 
 use pin_project::pin_project;
@@ -15,6 +16,7 @@ use super::error::HttpTrafficError;
 /// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
 ///
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
+// impl deref with pin
 #[derive(Debug)]
 #[pin_project]
 pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
