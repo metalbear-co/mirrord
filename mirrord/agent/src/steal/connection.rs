@@ -460,7 +460,7 @@ impl TcpConnectionStealer {
                     Ok(port)
                 }
             }
-            StealType::HttpFilterSteal(port, regex) => match Regex::new(&regex) {
+            StealType::FilteredHttp(port, regex) => match Regex::new(&regex) {
                 Ok(regex) => match self.port_subscriptions.get_mut(&port) {
                     Some(Unfiltered(earlier_client)) => {
                         error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");

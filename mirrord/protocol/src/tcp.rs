@@ -65,7 +65,7 @@ pub enum StealType {
     /// Steal all traffic to this port.
     All(Port),
     /// Steal HTTP traffic matching a given filter.
-    HttpFilterSteal(Port, String),
+    FilteredHttp(Port, String),
 }
 
 /// Messages related to Steal Tcp handler from client.
