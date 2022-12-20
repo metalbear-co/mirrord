@@ -179,8 +179,9 @@ impl TcpStealHandler {
     }
 
     /// Send a filtered HTTP request to the application in the appropriate port.
-    /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new local
-    /// connection will be started for it, otherwise it will be sent in the existing local connection.
+    /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
+    /// local connection will be started for it, otherwise it will be sent in the existing local
+    /// connection.
     pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
             sender
@@ -218,8 +219,8 @@ impl TcpStealHandler {
     /// from this connection in.
     /// Spawn a task that receives requests on a channel and sends them to the application on that
     /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
-    /// The requests from the tests will arrive together with responses from all other connections
-    /// at [`self.response_receiver`].
+    /// The responses from all the http client tasks will arrive together at
+    /// [`self.response_receiver`].
     async fn create_http_connection(
         &mut self,
         http_request: HttpRequest,
