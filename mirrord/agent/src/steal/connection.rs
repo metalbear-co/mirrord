@@ -95,7 +95,7 @@ pub(crate) struct TcpConnectionStealer {
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
-    http_request_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
+    http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
 
     http_request_counters: HashMap<ConnectionId, RequestId>,
 
@@ -141,7 +141,7 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
-            http_request_queues: HashMap::with_capacity(8),
+            http_response_queues: HashMap::with_capacity(8),
             http_request_counters: HashMap::with_capacity(8),
             passthrough_sender,
         })
@@ -327,7 +327,7 @@ impl TcpConnectionStealer {
     ) {
         // In `browser2stealer` the stealer reads incoming data from the outside - from the browser.
         // In `stealer2browser` the stealer writes the responses back to the browser. The responses
-        // are either originated in the local application and forwareded by the layer, or if the
+        // are either originated in the local application and forwarded by the layer, or if the
         // request was not matched by any filter, the response is originated in the remote app.
         let (mut browser2stealer, stealer2browser) = split(stream_with_browser);
 
@@ -546,7 +546,7 @@ impl TcpConnectionStealer {
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
     /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
-    /// connecitons.
+    /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
     fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let ports = self.get_client_ports(client_id);
@@ -633,9 +633,9 @@ impl TcpConnectionStealer {
 
     /// Forward an HTTP response to a stolen HTTP request from the layer to the back to the browser.
     ///
-    ///                       _________________________agent_________________________
-    /// Local App -> Layer -> ClientConnectionHandler -> Stealer -> Browser
-    ///                                                          ^- You are here.
+    ///                         _______________agent_______________
+    /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
+    ///                                                             ^- You are here.
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
         let mut tcp_stream_write_half;
         if let Some(stream) = self.http_write_streams.get(&response.connection_id) {
@@ -646,19 +646,36 @@ impl TcpConnectionStealer {
             );
             return Ok(());
         }
-        if response.request_id
-            == self
-                .http_request_counters
-                .entry(response.connection_id)
-                .or_insert(0)
-        {
+        let counter = self
+            .http_request_counters
+            .entry(response.connection_id)
+            .or_insert(0);
+        if response.request_id == counter {
             tcp_stream_write_half
-                .write_all(&Self::response_to_bytes(response.response.into()))
+                .write_all(&Self::response_to_bytes(response.response.try_into()?))
                 .await?;
-            counter = self.http_request_counters.get_mut(&response.connection_id);
-            // TODO: iterate queue and send all consecutive responses.
+            *counter += 1;
+            if let Some(queue) = self.http_response_queues.get_mut(&response.connection_id) {
+                while queue
+                    .peek()
+                    .is_some_and(|response| response.request_id == *counter)
+                {
+                    // The next response arrived before the one that just arrived and was waiting
+                    // in the queue for all earlier responses to be sent.
+                    let response = queue.pop().unwrap();
+                    tcp_stream_write_half
+                        .write_all(&Self::response_to_bytes(response.response.try_into()?))
+                        .await?;
+                    *counter += 1;
+                }
+            }
         } else {
-            // TODO: insert response into queueu.
+            // The response is not the next one that should be sent back, so store in the priority
+            // queue until all the earlier responses are available.
+            self.http_response_queues
+                .entry(response.connection_id)
+                .or_insert_with(BinaryHeap::with_capacity(8))
+                .push(response);
         }
         Ok(())
     }
