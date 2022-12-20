@@ -1,7 +1,7 @@
 // #![warn(missing_docs)]
 // #![warn(rustdoc::missing_crate_level_docs)]
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
@@ -11,36 +11,46 @@ use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
-    filter::{HttpFilter, HttpFilterBuilder},
+    filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
+    reversible_stream::ReversibleStream,
 };
 use crate::{steal::StealerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
-mod filter;
+pub(super) mod filter;
 mod hyper_handler;
+pub(super) mod reversible_stream;
 
+pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+
+/// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HttpVersion {
     #[default]
     V1,
     V2,
+
+    /// Handled as a special passthrough case, where the captured stream just forwards messages to
+    /// their original destination (and vice-versa).
+    NotHttp,
 }
 
 impl HttpVersion {
     /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
     /// comparing it with a slice of [`H2_PREFACE`].
-    fn new(buffer: &[u8], h2_preface: &[u8]) -> Result<Self, HttpTrafficError> {
+    #[tracing::instrument(level = "debug")]
+    fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
         if buffer == h2_preface {
-            Ok(Self::V2)
+            Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),
             Ok(_) | Err(httparse::Error::TooManyHeaders)
         ) {
-            Ok(Self::V1)
+            Self::V1
         } else {
-            Err(HttpTrafficError::NotHttp)
+            Self::NotHttp
         }
     }
 }
@@ -73,9 +83,7 @@ impl HttpFilterManager {
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
-        client_filters
-            .insert(client_id, filter)
-            .inspect(|foo| println!("{:#?}", foo));
+        client_filters.insert(client_id, filter);
 
         Self {
             port,
@@ -129,11 +137,13 @@ impl HttpFilterManager {
     /// connection.
     pub(super) async fn new_connection(
         &self,
-        connection: TcpStream,
+        original_stream: TcpStream,
+        original_address: SocketAddr,
         connection_id: ConnectionId,
-    ) -> Result<HttpFilter, HttpTrafficError> {
+    ) -> Result<Option<HttpFilter>, HttpTrafficError> {
         HttpFilterBuilder::new(
-            connection,
+            original_stream,
+            original_address,
             connection_id,
             self.client_filters.clone(),
             self.captured_tx.clone(),
@@ -163,14 +173,15 @@ mod http_traffic_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
-        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 7777))
+        let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 7777).into();
+        let server = TcpListener::bind(server_address)
             .await
             .expect("Bound TcpListener.");
 
         let request_task = tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .get("http://127.0.0.1:7777")
+                .get(format!("http://127.0.0.1:{}", server_address.port()))
                 .header("First-Header", "mirrord")
                 .header("Mirrord-Test", "Hello")
                 .build()
@@ -198,15 +209,14 @@ mod http_traffic_tests {
             passthrough_tx,
         );
 
-        let connection_id = 0;
-
         let HttpFilter {
             hyper_task,
-            mut original_stream,
+            mut reversible_stream,
             mut interceptor_stream,
         } = http_filter_manager
-            .new_connection(tcp_stream, connection_id)
+            .new_connection(tcp_stream, server_address, 0)
             .await
+            .unwrap()
             .unwrap();
 
         let mut interceptor_buffer = vec![0; 15000];
@@ -215,7 +225,7 @@ mod http_traffic_tests {
             select! {
                 // Server stream reads what it received from the client (remote app), and sends it
                 // to the hyper task via the intermmediate DuplexStream.
-                Ok(read) = original_stream.read(&mut interceptor_buffer) => {
+                Ok(read) = reversible_stream.read(&mut interceptor_buffer) => {
                     if read == 0 {
                         break;
                     }
@@ -230,7 +240,7 @@ mod http_traffic_tests {
                     // and exit.
                     let mut response_buffer = vec![0;1500];
                     let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
-                    original_stream.write(&response_buffer[..read_amount]).await.unwrap();
+                    reversible_stream.write(&response_buffer[..read_amount]).await.unwrap();
 
                     break;
                 }
@@ -246,6 +256,138 @@ mod http_traffic_tests {
         drop(interceptor_stream);
 
         assert!(hyper_task.await.is_ok());
+        assert!(request_task.await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http_traffic_filter_no_headers_match_the_request() {
+        let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 8888).into();
+        let server = TcpListener::bind(server_address)
+            .await
+            .expect("Bound TcpListener.");
+
+        let request_task = tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let request = client
+                .get(format!("http://127.0.0.1:{}", server_address.port()))
+                .header("First-Header", "mirrord")
+                .header("Mirrord-Test", "Hello")
+                .build()
+                .unwrap();
+
+            // Send a request and wait compare the dummy response we get from the filter's hyper
+            // handler.
+            let response = client.execute(request).await.unwrap();
+            assert_eq!(response.text().await.unwrap(), "Passthrough!".to_string());
+        });
+
+        let (tcp_stream, _) = server.accept().await.expect("Connection success!");
+
+        let client_id = 1;
+        let filter = Regex::new("Goodbye").expect("Valid regex.");
+
+        let (captured_tx, _) = channel(15000);
+        let (passthrough_tx, mut passthrough_rx) = channel(15000);
+
+        let http_filter_manager = HttpFilterManager::new(
+            tcp_stream.local_addr().unwrap().port(),
+            client_id,
+            filter,
+            captured_tx,
+            passthrough_tx,
+        );
+
+        let HttpFilter {
+            hyper_task,
+            mut reversible_stream,
+            mut interceptor_stream,
+        } = http_filter_manager
+            .new_connection(tcp_stream, server_address, 0)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut interceptor_buffer = vec![0; 15000];
+
+        loop {
+            select! {
+                // Server stream reads what it received from the client (remote app), and sends it
+                // to the hyper task via the intermmediate DuplexStream.
+                Ok(read) = reversible_stream.read(&mut interceptor_buffer) => {
+                    if read == 0 {
+                        break;
+                    }
+
+                    let wrote = interceptor_stream.write(&interceptor_buffer[..read]).await.unwrap();
+                    assert_eq!(wrote, read);
+                }
+
+                // Receives requests from the hyper task that did not match any filter.
+                Some(_) = passthrough_rx.recv() => {
+                    // Send the dummy response from hyper to our client, so it can stop blocking
+                    // and exit.
+                    let mut response_buffer = vec![0;1500];
+                    let read_amount = interceptor_stream.read(&mut response_buffer).await.unwrap();
+                    reversible_stream.write(&response_buffer[..read_amount]).await.unwrap();
+
+                    break;
+                }
+
+                else => {
+                    break;
+                }
+            }
+        }
+
+        // Manually close this stream to notify the filter's hyper handler that this connection is
+        // over.
+        drop(interceptor_stream);
+
+        assert!(hyper_task.await.is_ok());
+        assert!(request_task.await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_http_traffic_filter_total_passthrough_not_http() {
+        let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 9999).into();
+        let server = TcpListener::bind(server_address)
+            .await
+            .expect("Bound TcpListener.");
+
+        let request_task = tokio::spawn(async move {
+            let message =
+                "Hey / friend this is not an HTTP message! Don't even filter it, ok?".to_string();
+            let mut client = TcpStream::connect(server_address).await.unwrap();
+
+            let wrote = client.write(message.as_bytes()).await.unwrap();
+            assert_eq!(wrote, message.len());
+        });
+
+        let (tcp_stream, _) = server.accept().await.expect("Connection success!");
+
+        let client_id = 1;
+        let filter = Regex::new("Hello").expect("Valid regex.");
+
+        let (captured_tx, _) = channel(15000);
+        let (passthrough_tx, _) = channel(15000);
+
+        let http_filter_manager = HttpFilterManager::new(
+            tcp_stream.local_addr().unwrap().port(),
+            client_id,
+            filter,
+            captured_tx,
+            passthrough_tx,
+        );
+
+        if let None = http_filter_manager
+            .new_connection(tcp_stream, server_address, 0)
+            .await
+            .unwrap()
+        {
+        } else {
+            panic!("`http_filter_manager.new_connection` has to be `None` here!");
+        }
+
         assert!(request_task.await.is_ok());
     }
 }

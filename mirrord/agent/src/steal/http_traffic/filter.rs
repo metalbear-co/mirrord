@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::{duplex, DuplexStream},
+    io::{copy_bidirectional, duplex, DuplexStream},
     net::TcpStream,
     sync::mpsc::Sender,
     task::JoinHandle,
@@ -13,21 +13,32 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, HttpVersion, PassthroughRequest,
+    error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
+    PassthroughRequest,
 };
-use crate::{steal::StealerHttpRequest, util::ClientId};
+use crate::{
+    steal::{http_traffic::error, StealerHttpRequest},
+    util::ClientId,
+};
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
+/// Controls the amount of data we read when trying to detect if the stream's first message contains
+/// an HTTP request.
+///
+/// **WARNING**: Can't be too small, otherwise we end up accepting things like "Foo " as valid HTTP
+/// requests.
+pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
+
+#[derive(Debug)]
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
-    original_stream: TcpStream,
-    hyper_stream: DuplexStream,
-    interceptor_stream: DuplexStream,
+    reversible_stream: DefaultReversibleStream,
+    original_address: SocketAddr,
+    connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     captured_tx: Sender<StealerHttpRequest>,
     passthrough_tx: Sender<PassthroughRequest>,
-    connection_id: ConnectionId,
 }
 
 /// Used by the stealer handler to:
@@ -38,7 +49,7 @@ pub(crate) struct HttpFilter {
     pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
     /// from.
-    pub(crate) original_stream: TcpStream,
+    pub(crate) reversible_stream: DefaultReversibleStream,
 
     /// A stream that we use to communicate with the hyper task.
     ///
@@ -56,46 +67,32 @@ impl HttpFilterBuilder {
     /// Checks if the first available bytes in a stream could be of an http request.
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
+    #[tracing::instrument(level = "debug")]
     pub(super) async fn new(
-        tcp_stream: TcpStream,
+        stolen_stream: TcpStream,
+        original_address: SocketAddr,
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
         captured_tx: Sender<StealerHttpRequest>,
         passthrough_tx: Sender<PassthroughRequest>,
     ) -> Result<Self, HttpTrafficError> {
-        let mut buffer = [0u8; 64];
-        // TODO(alex) [mid] 2022-12-09: Maybe we do need `poll_peek` here, otherwise just `peek`
-        // might return 0 bytes peeked.
-        match tcp_stream
-            .peek(&mut buffer)
-            .await
-            .map_err(From::from)
-            .and_then(|peeked_amount| {
-                if peeked_amount == 0 {
-                    Err(HttpTrafficError::Empty)
-                } else {
-                    HttpVersion::new(
-                        &buffer[..peeked_amount],
-                        &H2_PREFACE[..peeked_amount.min(H2_PREFACE.len())],
-                    )
-                }
-            }) {
-            Ok(http_version) => {
-                let (hyper_stream, interceptor_stream) = duplex(15000);
+        let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 
-                Ok(Self {
-                    http_version,
-                    client_filters: filters,
-                    original_stream: tcp_stream,
-                    hyper_stream,
-                    interceptor_stream,
-                    captured_tx,
-                    passthrough_tx,
-                    connection_id,
-                })
-            }
-            // TODO(alex) [mid] 2022-12-09: This whole filter is a passthrough case.
-            Err(HttpTrafficError::NotHttp) => todo!(),
+        match reversible_stream.and_then(|mut stream| {
+            let http_version =
+                HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
+
+            Ok((stream, http_version))
+        }) {
+            Ok((reversible_stream, http_version)) => Ok(Self {
+                http_version,
+                client_filters: filters,
+                reversible_stream,
+                original_address,
+                connection_id,
+                captured_tx,
+                passthrough_tx,
+            }),
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
                 Err(fail)
@@ -105,50 +102,61 @@ impl HttpFilterBuilder {
 
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
-    pub(super) fn start(self) -> Result<HttpFilter, HttpTrafficError> {
+    #[tracing::instrument(level = "debug")]
+    pub(super) fn start(self) -> Result<Option<HttpFilter>, HttpTrafficError> {
         let Self {
             http_version,
-            original_stream,
-            hyper_stream,
-            interceptor_stream,
             client_filters,
             captured_tx,
             passthrough_tx,
+            mut reversible_stream,
+            original_address,
             connection_id,
         } = self;
 
         // Incoming tcp stream definitely has an address.
-        let port = original_stream.local_addr().unwrap().port();
+        let port = reversible_stream.local_addr().unwrap().port();
 
-        let hyper_task = match http_version {
-            HttpVersion::V1 => tokio::task::spawn(async move {
-                http1::Builder::new()
-                    .serve_connection(
-                        hyper_stream,
-                        HyperHandler {
-                            filters: client_filters,
-                            captured_tx,
-                            passthrough_tx,
-                            connection_id,
-                            port,
-                        },
-                    )
-                    .await
-                    .map_err(From::from)
-            }),
+        match http_version {
+            HttpVersion::V1 => {
+                let (hyper_stream, interceptor_stream) = duplex(15000);
+
+                let hyper_task = tokio::task::spawn(async move {
+                    http1::Builder::new()
+                        .serve_connection(
+                            hyper_stream,
+                            HyperHandler {
+                                filters: client_filters,
+                                captured_tx,
+                                passthrough_tx,
+                                connection_id,
+                                port,
+                            },
+                        )
+                        .await
+                        .map_err(From::from)
+                });
+
+                Ok(Some(HttpFilter {
+                    hyper_task,
+                    reversible_stream,
+                    interceptor_stream,
+                }))
+            }
             // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
             // some more effort to chase some missing implementations.
-            HttpVersion::V2 => tokio::task::spawn(async move {
-                // TODO(alex) [mid] 2022-12-14: Handle this as a passthrough case!
-                todo!()
-            }),
-        };
+            HttpVersion::V2 | HttpVersion::NotHttp => {
+                let passhtrough_task = tokio::task::spawn(async move {
+                    let mut interceptor_to_original = TcpStream::connect(original_address).await?;
 
-        Ok(HttpFilter {
-            hyper_task,
-            original_stream,
-            interceptor_stream,
-        })
+                    copy_bidirectional(&mut reversible_stream, &mut interceptor_to_original)
+                        .await?;
+                    Ok::<_, error::HttpTrafficError>(())
+                });
+
+                Ok(None)
+            }
+        }
     }
 }
