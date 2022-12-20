@@ -13,6 +13,8 @@ use super::error::HttpTrafficError;
 ///
 /// Very useful to the HTTP filter component on [`stealer`], where we have to look at the first
 /// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
+///
+/// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 #[derive(Debug)]
 #[pin_project]
 pub(crate) struct ReversableStream<const HEADER_SIZE: usize> {
