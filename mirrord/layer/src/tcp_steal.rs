@@ -180,7 +180,7 @@ impl TcpStealHandler {
 
     /// Send a filtered HTTP request to the application in the appropriate port.
     /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new local
-    /// connection will be started for it, otherwise it will be sent in the existing connection.
+    /// connection will be started for it, otherwise it will be sent in the existing local connection.
     pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
             sender
