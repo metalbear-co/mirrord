@@ -197,7 +197,7 @@ impl TcpStealHandler {
     /// Manage a single tcp connection, forward requests, wait for responses, send responses back.
     async fn connection_task(
         mut request_receiver: Receiver<HttpRequest>,
-        mut sender: SendRequest<Full<Bytes>>,
+        mut http_request_sender: SendRequest<Full<Bytes>>,
         response_sender: Sender<HttpResponse>,
         port: Port,
         connection_id: ConnectionId,
@@ -206,7 +206,7 @@ impl TcpStealHandler {
         while let Some(req) = request_receiver.recv().await {
             let request_id = req.request_id;
             // Send to application.
-            let res = sender.send_request(req.request.into()).await?;
+            let res = http_request_sender.send_request(req.request.into()).await?;
             let res =
                 HttpResponse::from_hyper_response(res, port, connection_id, request_id).await?;
             // Send response back to forwarder.
