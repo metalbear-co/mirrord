@@ -1,7 +1,12 @@
 use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
-use hyper::{HeaderMap, Method, Request, StatusCode, Uri, Version};
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::{
+    body::Incoming, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode, Uri,
+    Version,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, Port, RemoteResult};
@@ -92,16 +97,16 @@ pub struct InternalHttpRequest {
     // TODO: What about `extensions`? There is no `http_serde` method for it but it is in `Parts`.
 }
 
-impl InternalHttpRequest {
-    pub fn into_hyper_request(self) -> Request<Vec<u8>> {
-        let Self {
+impl From<InternalHttpRequest> for Request<Full<Bytes>> {
+    fn from(value: InternalHttpRequest) -> Self {
+        let InternalHttpRequest {
             method,
             uri,
             headers,
             version,
             body,
-        } = self;
-        let mut request = Request::new(body);
+        } = value;
+        let mut request = Request::new(Full::new(Bytes::from(body)));
         // TODO: can we construct the request with those values instead of constructing, then
         //       setting? Does it matter?
         *request.method_mut() = method;
@@ -114,11 +119,15 @@ impl InternalHttpRequest {
     }
 }
 
+// TODO: is u64 fine?
+type RequestId = u64;
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct HttpRequest {
     #[bincode(with_serde)]
     pub request: InternalHttpRequest,
     pub connection_id: ConnectionId,
+    pub request_id: RequestId,
     /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
     /// "lazily", with the first filtered request.
     pub port: Port,
@@ -147,5 +156,38 @@ pub struct HttpResponse {
     pub connection_id: ConnectionId,
     pub port: Port,
     #[bincode(with_serde)]
-    pub request: InternalHttpRequest,
+    pub request: InternalHttpResponse,
+}
+
+impl HttpResponse {
+    pub async fn from_hyper_response(
+        response: Response<Incoming>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: u64,
+    ) -> Result<HttpResponse, hyper::Error> {
+        let (
+            Parts {
+                status,
+                version,
+                headers,
+                extensions: _, // TODO: do we need to use it? There is not such `http_serde` method.
+                ..
+            },
+            body,
+        ) = response.into_parts();
+        let body = body.collect().await?.to_bytes().to_vec();
+        let internal_req = InternalHttpResponse {
+            status,
+            headers,
+            version,
+            body,
+        };
+        Ok(HttpResponse {
+            request_id,
+            port,
+            connection_id,
+            request: internal_req,
+        })
+    }
 }

@@ -96,7 +96,9 @@ pub(crate) trait TcpHandler {
                 error!("Port subscription failed with unexpected error: {other_error}.");
                 Err(UnexpectedResponseError(other_error))
             }
-            DaemonTcp::HttpRequest(request) => self.handle_http_request(request).await,
+            DaemonTcp::HttpRequest(request) => {
+                self.handle_http_request(request).await.map_err(From::from)
+            }
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);
