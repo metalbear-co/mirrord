@@ -28,7 +28,7 @@ use super::{
 };
 use crate::{
     steal::{
-        http_traffic::{HttpFilterManager, PassthroughResponse},
+        http_traffic::{HttpFilterManager, UnmatchedResponse},
         StealSubscription::{HttpFiltered, Unfiltered},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
@@ -94,7 +94,7 @@ pub(crate) struct TcpConnectionStealer {
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
     // TODO: ?
-    passthrough_sender: Sender<PassthroughResponse>,
+    passthrough_sender: Sender<UnmatchedResponse>,
 }
 
 impl TcpConnectionStealer {

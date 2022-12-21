@@ -1,29 +1,28 @@
 use core::{future::Future, pin::Pin};
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
 use http_body_util::BodyExt;
 use hyper::{
-    body::{Body, Buf, Incoming},
-    service::Service,
-    Request, Response,
+    body::Incoming, client, header::HOST, http::HeaderValue, service::Service, Request, Response,
 };
 use mirrord_protocol::{ConnectionId, Port};
 use reqwest::{Client, Url};
-use tokio::sync::mpsc::Sender;
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 
-use super::{error::HttpTrafficError, PassthroughResponse};
+use super::{error::HttpTrafficError, UnmatchedResponse};
 use crate::{steal::StealerHttpRequest, util::ClientId};
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
     pub(super) captured_tx: Sender<StealerHttpRequest>,
-    pub(super) passthrough_tx: Sender<PassthroughResponse>,
+    pub(super) unmatched_tx: Sender<UnmatchedResponse>,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
+    pub(crate) original_destination: SocketAddr,
 }
 
 // TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
@@ -44,33 +43,41 @@ where
     tokio::spawn(async move { tx.send(value).map_err(HttpTrafficError::from).await });
 }
 
-// #[tracing::instrument(level = "debug", skip(tx))]
-fn intercepted_request(request: Request<Incoming>, tx: Sender<PassthroughResponse>) {
-    let (headers, body) = request.into_parts();
-    let client = Client::new();
-
+#[tracing::instrument(level = "debug", skip(tx))]
+fn intercepted_request(
+    mut request: Request<Incoming>,
+    tx: Sender<UnmatchedResponse>,
+    original_destination: SocketAddr,
+) {
     tokio::spawn(async move {
-        let body_bytes = body.collect().await.unwrap().to_bytes();
+        println!("original {:#?}", original_destination);
+        let target_stream = TcpStream::connect(original_destination).await.unwrap();
 
-        let uri = headers.uri.to_string();
-        let url = Url::parse(&uri).unwrap();
-        let intercepted_request = client
-            .request(headers.method, url)
-            .headers(headers.headers)
-            .body(body_bytes)
-            .build()
-            .unwrap();
+        println!("Connecting to {:#?}", target_stream);
+        let (mut request_sender, connection) =
+            client::conn::http1::handshake(target_stream).await.unwrap();
+        println!("hands shaked {:#?}", connection);
 
-        let intercepted_response = client
-            .execute(intercepted_request)
-            .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap();
+        tokio::spawn(async move {
+            if let Err(fail) = connection.await {
+                eprintln!("Error in connection: {}", fail);
+            }
+        });
 
-        let response = PassthroughResponse(intercepted_response);
+        // TODO(alex) [mid] 2022-12-21: Does the host come in with the address of our intercepted
+        // stream, or of the original destination already?
+        //
+        // Doing this only because the local tests are not handled by the stealer mechanism, so the
+        // host comes with the wrong address.
+        let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
+        request.headers_mut().insert(HOST, proper_host).unwrap();
+        println!("request {:#?}", request);
+        let intercepted_response = request_sender.send_request(request).await.unwrap();
+        println!("Sent request {:#?}", intercepted_response);
+
+        let response = UnmatchedResponse(intercepted_response);
         // TODO(alex) [high] 2022-12-20: Send this response back in the original stream.
+        println!("Unmatched response {:#?}", response);
         tx.send(response).map_err(HttpTrafficError::from).await
     });
 }
@@ -117,9 +124,13 @@ impl Service<Request<Incoming>> for HyperHandler {
             let response = async { Ok(Response::new("Captured!".to_string())) };
             Box::pin(response)
         } else {
-            intercepted_request(request, self.passthrough_tx.clone());
+            intercepted_request(
+                request,
+                self.unmatched_tx.clone(),
+                self.original_destination,
+            );
 
-            let response = async { Ok(Response::new("Passthrough!".to_string())) };
+            let response = async { Ok(Response::new("Unmatched!".to_string())) };
             Box::pin(response)
         }
     }

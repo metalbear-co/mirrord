@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::{PassthroughResponse, StealerHttpRequest};
+use super::{StealerHttpRequest, UnmatchedResponse};
 use crate::util::ClientId;
 
 /// Errors specific to the HTTP traffic feature.
@@ -28,5 +28,5 @@ pub enum HttpTrafficError {
     CapturedSender(#[from] tokio::sync::mpsc::error::SendError<StealerHttpRequest>),
 
     #[error("Failed with Passthrough `{0}`!")]
-    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<PassthroughResponse>),
+    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<UnmatchedResponse>),
 }
