@@ -431,6 +431,12 @@
             "null"
           ]
         },
+        "http_filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "incoming": {
           "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; - `steal`: redirect incoming requests to the remote pod to the local process",
           "anyOf": [
