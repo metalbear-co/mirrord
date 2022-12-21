@@ -117,46 +117,6 @@ impl StealerHttpRequest {
     }
 }
 
-// // TODO: define in separate file.
-// #[derive(Debug)]
-// struct HttpFilterManager {
-//     /// Channel to send classified requests back to stealer over.
-//     request_sender: Sender<StealerHttpRequest>,
-// }
-//
-// impl HttpFilterManager {
-//     fn is_empty(&self) -> bool {
-//         false // TODO
-//     }
-//
-//     fn has_client(&self, client_id: ClientId) -> bool {
-//         false // TODO
-//     }
-//
-//     fn new_connection(
-//         &self,
-//         stream: TcpStream,
-//         connection_id: ConnectionId,
-//     ) -> (TcpStream, DuplexStream) {
-//         todo!()
-//     }
-//
-//     fn send_response(&self, response: HttpResponse) -> Result<()> {
-//         // TODO
-//         Ok(())
-//     }
-//
-//     fn insert(&self, client_id: ClientId, regex_str: String) -> Result<()> {
-//         // TODO
-//         Ok(())
-//     }
-//
-//     fn remove(&self, client_id: ClientId) -> Result<()> {
-//         // TODO
-//         Ok(())
-//     }
-// }
-
 /// The subscriptions to steal traffic from a specific port.
 #[derive(Debug)]
 enum StealSubscription {
