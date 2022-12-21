@@ -191,7 +191,7 @@ impl HttpResponse {
             body,
         ) = response.into_parts();
         let body = body.collect().await?.to_bytes().to_vec();
-        let internal_req = InternalHttpResponse {
+        let internal_response = InternalHttpResponse {
             status,
             headers,
             version,
@@ -201,7 +201,7 @@ impl HttpResponse {
             request_id,
             port,
             connection_id,
-            response: internal_req,
+            response: internal_response,
         })
     }
 }
