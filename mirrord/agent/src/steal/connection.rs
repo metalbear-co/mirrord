@@ -7,7 +7,7 @@ use std::{
 use bytes::{BufMut, Bytes, BytesMut};
 use fancy_regex::Regex;
 use http_body_util::Full;
-use hyper::{Response, Version};
+use hyper::{body::Body, Response, Version};
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -95,8 +95,12 @@ pub(crate) struct TcpConnectionStealer {
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
+    /// For a connection with pending requests, a priority queue with response that were already
+    /// returned, but that cannot be sent yet because there are earlier responses that are not
+    /// available yet.
     http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
 
+    /// Saves for a connection the request_id of the next response that should be sent.
     http_request_counters: HashMap<ConnectionId, RequestId>,
 
     // TODO: ?
@@ -601,34 +605,69 @@ impl TcpConnectionStealer {
     }
 
     // TODO: make this correct.
-    fn response_to_bytes(response: Response<Full<Bytes>>) -> Vec<u8> {
-        // Convert the HTTP version to bytes
-        let version = match response.version() {
-            Version::HTTP_10 => b"HTTP/1.0",
-            Version::HTTP_11 => b"HTTP/1.1",
-            Version::HTTP_2 => b"HTTP/2",
+    async fn response_to_bytes(response: Response<Full<Bytes>>) -> Vec<u8> {
+        let (
+            response::Parts {
+                status,
+                version,
+                headers,
+                extensions: _, // TODO: should we be using this?
+                ..
+            },
+            body,
+        ) = response.into_parts();
+
+        // Enough for body + headers of length 64 each + 64 bytes for status line.
+        // This will probably be more than enough most of the time.
+        let mut bytes =
+            BytesMut::with_capacity(body.size_hint().lower() as usize + 64 * headers.len() + 64);
+
+        let version = match version {
+            Version::HTTP_09 => "HTTP/0.9",
+            Version::HTTP_10 => "HTTP/1.0",
+            Version::HTTP_11 => "HTTP/1.1",
+            Version::HTTP_2 => "HTTP/2",
+            Version::HTTP_3 => "HTTP/3",
+            _ => "HTTP/1.1", // TODO: What should happen here?
         };
 
-        // Convert the headers to bytes
-        let headers = response.headers().to_bytes();
+        // Status line.
+        bytes.put(version.as_bytes()); // HTTP/1.1
+        bytes.put(&b" "[..]);
+        bytes.put(status.as_str().as_bytes()); // 200
+        bytes.put(&b" "[..]);
+        if let Some(reason) = status.canonical_reason() {
+            bytes.put(reason.as_bytes()); // OK
+        } else {
+            bytes.put(&b"LOL"[..]);
+        }
 
-        // Convert the status code to bytes
-        let status_code = response.status().as_u16().to_be_bytes();
+        // Headers.
+        for (name, value) in headers.into_iter() {
+            if let Some(name) = name {
+                bytes.put(&b"\r\n"[..]);
+                bytes.put(name.as_str().as_bytes());
+                bytes.put(&b": "[..]);
+            } else {
+                // TODO: are multiple values for the same header comma delimited?
+                bytes.put(&b","[..])
+            }
+            bytes.put(value.as_bytes())
+        }
+        bytes.put(&b"\r\n\r\n"[..]);
 
-        // Convert the body to bytes
-        let body = response.into_body().into_inner();
+        // Body.
+        bytes.put(body.collect().await.unwrap().to_bytes()); // Unwrap Infallible.
 
-        // Concatenate the HTTP version, headers, status code, and body into a single byte array
-        let mut bytes =
-            BytesMut::with_capacity(version.len() + headers.len() + status_code.len() + body.len());
-        bytes.put(version);
-        bytes.put(b"\r\n");
-        bytes.put(headers);
-        bytes.put(status_code);
-        bytes.put(b"\r\n\r\n");
-        bytes.put(body);
+        bytes.to_vec()
+    }
 
-        bytes.try_into().unwrap()
+    fn handle_response_reconstruction_fail(err: hyper::http::Error) -> hyper::http::Error {
+        error!("Could not reconstruct http response: {err:?}");
+        // TODO: What should happen? Currently just skipping that response, which would
+        //       also spoils the rest of the stream. Should hopefully never happen.
+        debug_assert!(false);
+        err
     }
 
     /// Forward an HTTP response to a stolen HTTP request from the layer to the back to the browser.
@@ -637,8 +676,8 @@ impl TcpConnectionStealer {
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
-        let mut tcp_stream_write_half;
-        if let Some(stream) = self.http_write_streams.get(&response.connection_id) {
+        let tcp_stream_write_half;
+        if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id) {
             tcp_stream_write_half = stream;
         } else {
             warn!(
@@ -650,10 +689,16 @@ impl TcpConnectionStealer {
             .http_request_counters
             .entry(response.connection_id)
             .or_insert(0);
-        if response.request_id == counter {
-            tcp_stream_write_half
-                .write_all(&Self::response_to_bytes(response.response.try_into()?))
-                .await?;
+        if response.request_id == *counter {
+            if let Ok(response) = response
+                .response
+                .try_into()
+                .map_err(Self::handle_response_reconstruction_fail)
+            {
+                tcp_stream_write_half
+                    .write_all(&Self::response_to_bytes(response).await)
+                    .await?; // TODO: handle error?
+            }
             *counter += 1;
             if let Some(queue) = self.http_response_queues.get_mut(&response.connection_id) {
                 while queue
@@ -663,9 +708,15 @@ impl TcpConnectionStealer {
                     // The next response arrived before the one that just arrived and was waiting
                     // in the queue for all earlier responses to be sent.
                     let response = queue.pop().unwrap();
-                    tcp_stream_write_half
-                        .write_all(&Self::response_to_bytes(response.response.try_into()?))
-                        .await?;
+                    if let Ok(response) = response
+                        .response
+                        .try_into()
+                        .map_err(Self::handle_response_reconstruction_fail)
+                    {
+                        tcp_stream_write_half
+                            .write_all(&Self::response_to_bytes(response).await)
+                            .await?; // TODO: handle error?
+                    }
                     *counter += 1;
                 }
             }
@@ -674,7 +725,7 @@ impl TcpConnectionStealer {
             // queue until all the earlier responses are available.
             self.http_response_queues
                 .entry(response.connection_id)
-                .or_insert_with(BinaryHeap::with_capacity(8))
+                .or_insert_with(|| BinaryHeap::with_capacity(8))
                 .push(response);
         }
         Ok(())
