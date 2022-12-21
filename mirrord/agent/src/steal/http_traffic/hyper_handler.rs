@@ -45,18 +45,15 @@ where
 
 #[tracing::instrument(level = "debug", skip(tx))]
 fn intercepted_request(
-    mut request: Request<Incoming>,
+    request: Request<Incoming>,
     tx: Sender<UnmatchedResponse>,
     original_destination: SocketAddr,
 ) {
     tokio::spawn(async move {
-        println!("original {:#?}", original_destination);
         let target_stream = TcpStream::connect(original_destination).await.unwrap();
 
-        println!("Connecting to {:#?}", target_stream);
         let (mut request_sender, connection) =
             client::conn::http1::handshake(target_stream).await.unwrap();
-        println!("hands shaked {:#?}", connection);
 
         tokio::spawn(async move {
             if let Err(fail) = connection.await {
@@ -71,13 +68,10 @@ fn intercepted_request(
         // host comes with the wrong address.
         // let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
         // request.headers_mut().insert(HOST, proper_host).unwrap();
-        // println!("request {:#?}", request);
         let intercepted_response = request_sender.send_request(request).await.unwrap();
-        println!("Sent request {:#?}", intercepted_response);
 
         let response = UnmatchedResponse(intercepted_response);
         // TODO(alex) [high] 2022-12-20: Send this response back in the original stream.
-        println!("Unmatched response {:#?}", response);
         tx.send(response).map_err(HttpTrafficError::from).await
     });
 }
