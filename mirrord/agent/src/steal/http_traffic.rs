@@ -3,7 +3,6 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::{body::Incoming, Response};
@@ -164,11 +163,9 @@ mod http_traffic_tests {
     use core::convert::Infallible;
     use std::net::Ipv4Addr;
 
+    use bytes::Bytes;
     use http_body_util::{BodyExt, Full};
-    use hyper::{
-        body::Body, client, header::HOST, http::HeaderValue, server::conn::http1,
-        service::service_fn, Request,
-    };
+    use hyper::{client, server::conn::http1, service::service_fn, Request};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,

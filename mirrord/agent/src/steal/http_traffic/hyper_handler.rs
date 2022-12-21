@@ -4,12 +4,8 @@ use std::{net::SocketAddr, sync::Arc};
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use http_body_util::BodyExt;
-use hyper::{
-    body::Incoming, client, header::HOST, http::HeaderValue, service::Service, Request, Response,
-};
+use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{ConnectionId, Port};
-use reqwest::{Client, Url};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use super::{error::HttpTrafficError, UnmatchedResponse};

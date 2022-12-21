@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_protocol::{file::*, *};
+use mirrord_protocol::*;
 use rstest::rstest;
 use tokio::{
     net::{TcpListener, TcpStream},

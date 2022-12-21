@@ -94,7 +94,7 @@ pub(crate) struct TcpConnectionStealer {
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
     // TODO: ?
-    passthrough_sender: Sender<UnmatchedResponse>,
+    unmatched_tx: Sender<UnmatchedResponse>,
 }
 
 impl TcpConnectionStealer {
@@ -117,7 +117,7 @@ impl TcpConnectionStealer {
         let (connection_close_sender, connection_close_receiver) = channel(1024);
 
         // TODO: ?
-        let (passthrough_sender, passthrough_receive) = channel(1024);
+        let (unmatched_tx, unmatched_rx) = channel(1024);
 
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
@@ -135,7 +135,7 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
-            passthrough_sender,
+            unmatched_tx,
         })
     }
 
@@ -477,7 +477,7 @@ impl TcpConnectionStealer {
                             client_id,
                             regex,
                             self.http_request_sender.clone(),
-                            self.passthrough_sender.clone(),
+                            self.unmatched_tx.clone(),
                         ));
                         self.port_subscriptions.insert(port, manager);
                         Ok(port)
