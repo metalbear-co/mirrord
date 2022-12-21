@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- vscode ext: use process env for running mirrord. Fixes [#854](https://github.com/metalbear-co/mirrord/issues/854)
+
 ## 3.14.1
 
 ### Fixed

@@ -81,14 +81,25 @@ class MirrordAPI {
 		// Check if arg contains space, and if it does, wrap it in quotes
 		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
 		let commandLine = [this.cliPath, ...args];
-		let value = await exec(commandLine.join(' '), { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
+		// clone env vars and add MIRRORD_PROGRESS_MODE
+		let env = {
+			// eslint-disable-next-line @typescript-eslint/naming-convention
+			"MIRRORD_PROGRESS_MODE": "json",
+			...process.env,
+		};
+		let value = await exec(commandLine.join(' '), { "env": env });
 		return [value.stdout as string, value.stderr as string];
 	}
 
 	// Spawn the mirrord cli with the given arguments
 	// used for reading/interacting while process still runs.
 	spawn(args: string[]): ChildProcess {
-		return spawn(this.cliPath, args, { "env": { "MIRRORD_PROGRESS_MODE": "json" } });
+		let env = {
+			// eslint-disable-next-line @typescript-eslint/naming-convention
+			"MIRRORD_PROGRESS_MODE": "json",
+			...process.env,
+		};
+		return spawn(this.cliPath, args, { "env": env });
 	}
 
 
