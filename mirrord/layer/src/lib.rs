@@ -281,7 +281,12 @@ struct Layer {
 }
 
 impl Layer {
-    fn new(tx: Sender<ClientMessage>, rx: Receiver<DaemonMessage>, steal: bool) -> Layer {
+    fn new(
+        tx: Sender<ClientMessage>,
+        rx: Receiver<DaemonMessage>,
+        steal: bool,
+        http_filter: Option<String>,
+    ) -> Layer {
         Self {
             tx,
             rx,
@@ -291,7 +296,7 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::default(),
+            tcp_steal_handler: TcpStealHandler::new(http_filter),
             steal,
         }
     }
@@ -395,7 +400,12 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(tx, rx, config.feature.network.incoming.is_steal());
+    let mut layer = Layer::new(
+        tx,
+        rx,
+        config.feature.network.incoming.is_steal(),
+        config.feature.network.http_filter,
+    );
     loop {
         select! {
             hook_message = receiver.recv() => {

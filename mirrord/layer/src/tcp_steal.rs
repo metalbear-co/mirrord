@@ -49,6 +49,9 @@ pub struct TcpStealHandler {
 
     /// Receives responses in the main layer task sent from all http client tasks.
     http_response_receiver: Receiver<HttpResponse>,
+
+    /// A string with a header regex to filter HTTP requests by.
+    http_filter: Option<String>,
 }
 
 impl Default for TcpStealHandler {
@@ -61,6 +64,7 @@ impl Default for TcpStealHandler {
             http_request_senders: Default::default(),
             http_response_sender: response_sender,
             http_response_receiver: response_receiver,
+            http_filter: None,
         }
     }
 }
@@ -154,6 +158,19 @@ impl TcpHandler for TcpStealHandler {
 }
 
 impl TcpStealHandler {
+    pub(crate) fn new(http_filter: Option<String>) -> Self {
+        let (response_sender, response_receiver) = channel(1024);
+        Self {
+            ports: Default::default(),
+            write_streams: Default::default(),
+            read_streams: Default::default(),
+            http_request_senders: Default::default(),
+            http_response_sender: response_sender,
+            http_response_receiver: response_receiver,
+            http_filter,
+        }
+    }
+
     /// Get the available response data, either normal TcpData, or a response to a filtered HTTP
     /// request - whatever is ready first.
     pub async fn next(&mut self) -> Option<ClientMessage> {
