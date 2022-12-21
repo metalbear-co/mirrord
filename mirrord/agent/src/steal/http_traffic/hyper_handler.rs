@@ -69,9 +69,9 @@ fn intercepted_request(
         //
         // Doing this only because the local tests are not handled by the stealer mechanism, so the
         // host comes with the wrong address.
-        let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
-        request.headers_mut().insert(HOST, proper_host).unwrap();
-        println!("request {:#?}", request);
+        // let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
+        // request.headers_mut().insert(HOST, proper_host).unwrap();
+        // println!("request {:#?}", request);
         let intercepted_response = request_sender.send_request(request).await.unwrap();
         println!("Sent request {:#?}", intercepted_response);
 
