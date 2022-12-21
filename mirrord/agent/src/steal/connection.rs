@@ -100,6 +100,15 @@ pub(crate) struct TcpConnectionStealer {
     /// available yet.
     http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
 
+    /// Keep track of the clients that already received an http request out of a connection.
+    /// This is used to inform them when the connection is closed.
+    ///
+    /// Note: The set of clients here is not the same as the set of clients that subscribe to the
+    /// port of a connection, as some clients might have defined a regex that no request matched,
+    /// so they did not get any request out of this connection, so they are not even aware of this
+    /// connection.
+    http_connection_clients: HashMap<ConnectionId, HashSet<ClientId>>,
+
     /// Saves for a connection the request_id of the next response that should be sent.
     http_request_counters: HashMap<ConnectionId, RequestId>,
 
@@ -146,6 +155,7 @@ impl TcpConnectionStealer {
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
             http_response_queues: HashMap::with_capacity(8),
+            http_connection_clients: HashMap::with_capacity(8),
             http_request_counters: HashMap::with_capacity(8),
             passthrough_sender,
         })
@@ -201,8 +211,18 @@ impl TcpConnectionStealer {
                 }
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
                     self.http_write_streams.remove(&connection_id);
+                    // Send a close message to all clients that were subscribed to the connection.
+                    if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
+                        // TODO: is this too much to do in an iteration of the select loop?
+                        for client_id in clients.into_iter() {
+                            if let Some(client_tx) = self.clients.get(&client_id) {
+                                client_tx.send(DaemonTcp::Close(TcpClose {connection_id})).await?
+                            } else {
+                                warn!("Cannot notify client {client_id} on the closing of a connection.")
+                            }
+                        }
+                    }
                     self.index_allocator.free_index(connection_id);
-                    // TODO: Send a close message to all clients that were subscribed to the connection.
                 }
                 _ = cancellation_token.cancelled() => {
                     break;
@@ -224,6 +244,11 @@ impl TcpConnectionStealer {
     ) -> Result<(), AgentError> {
         if let Some(request) = request {
             if let Some(daemon_tx) = self.clients.get(&request.client_id) {
+                // Note down: client_id got a request out of connection_id.
+                self.http_connection_clients
+                    .entry(request.connection_id)
+                    .or_insert_with(|| HashSet::with_capacity(2))
+                    .insert(request.client_id);
                 Ok(daemon_tx
                     .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
                     .await?)
