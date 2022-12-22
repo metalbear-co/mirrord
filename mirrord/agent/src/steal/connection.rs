@@ -676,15 +676,16 @@ impl TcpConnectionStealer {
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
-        let tcp_stream_write_half;
-        if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id) {
-            tcp_stream_write_half = stream;
+        let tcp_stream_write_half = if let Some(stream) =
+            self.http_write_streams.get_mut(&response.connection_id)
+        {
+            stream
         } else {
             warn!(
                 "Got an http response in a connection for which no tcp stream is present. Not forwarding.",
             );
             return Ok(());
-        }
+        };
         let counter = self
             .http_request_counters
             .entry(response.connection_id)
