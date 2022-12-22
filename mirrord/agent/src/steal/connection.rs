@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{
     http_traffic::{
@@ -714,6 +714,7 @@ impl TcpConnectionStealer {
     ///                         _______________agent_______________
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
         let http_tx = if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id)
         {
@@ -729,6 +730,7 @@ impl TcpConnectionStealer {
             .entry(response.connection_id)
             .or_insert(0);
         if response.request_id == *counter {
+            debug!("The response is next in line, sending it immediately."); // TODO: delete.
             if let Ok(response) = response
                 .response
                 .try_into()
@@ -744,6 +746,8 @@ impl TcpConnectionStealer {
                     .peek()
                     .is_some_and(|response| response.request_id == *counter)
                 {
+                    debug!("Sending pending response from queue."); // TODO: delete.
+
                     // The next response arrived before the one that just arrived and was waiting
                     // in the queue for all earlier responses to be sent.
                     let response = queue.pop().unwrap();
@@ -763,6 +767,10 @@ impl TcpConnectionStealer {
             // The response is not the next one that should be sent back, so store in the priority
             // queue until all the earlier responses are available.
             if response.request_id > *counter {
+                debug!(
+                    "Got response with id {}, but the counter is currently {}, so putting it into queue.",
+                    response.request_id, counter
+                ); // TODO: trace.
                 self.http_response_queues
                     .entry(response.connection_id)
                     .or_insert_with(|| BinaryHeap::with_capacity(8))
