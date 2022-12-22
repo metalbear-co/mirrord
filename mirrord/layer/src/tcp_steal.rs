@@ -25,7 +25,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::{
     error::LayerError,
@@ -169,6 +169,7 @@ impl TcpHandler for TcpStealHandler {
 
 impl TcpStealHandler {
     pub(crate) fn new(http_filter: Option<String>) -> Self {
+        // TODO: buffer size?
         let (response_sender, response_receiver) = channel(1024);
         Self {
             ports: Default::default(),
@@ -202,6 +203,7 @@ impl TcpStealHandler {
                 }
             }
             Some(res) = self.http_response_receiver.recv() => {
+                debug!("TCP steal handler got an HTTP response to be sent to agent: {res:?}");
                 Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)))
             }
         }
@@ -211,8 +213,13 @@ impl TcpStealHandler {
     /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
+            debug!(
+                "Got an HTTP request from an existing connection, sending it to the client task \
+                to be forwarded to the application."
+            ); // TODO: trace.
             sender
                 .send(request)
                 .await
@@ -233,13 +240,18 @@ impl TcpStealHandler {
     ) -> Result<(), HttpForwarderError> {
         // Listen for more requests in this connection and forward them to app.
         while let Some(req) = request_receiver.recv().await {
+            debug!("HTTP client task received a new request to send: {req:?}."); // TODO: trace.
             let request_id = req.request_id;
             // Send to application.
             let res = http_request_sender.send_request(req.request.into()).await?;
+            // TODO: trace.
+            debug!("HTTP client task sent request to local app and got response: {res:?}.");
             let res =
                 HttpResponse::from_hyper_response(res, port, connection_id, request_id).await?;
+            debug!("HTTP client task sending converted response to main task: {res:?}.");
             // Send response back to forwarder.
             response_sender.send(res).await?;
+            debug!("HTTP client task done sending converted response to main task.");
         }
         Ok(())
     }
@@ -250,6 +262,7 @@ impl TcpStealHandler {
     /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
     /// The responses from all the http client tasks will arrive together at
     /// [`self.response_receiver`].
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn create_http_connection(
         &mut self,
         http_request: HttpRequest,
@@ -285,6 +298,7 @@ impl TcpStealHandler {
         let response_sender = self.http_response_sender.clone();
 
         tokio::spawn(async move {
+            debug!("HTTP client task started."); // TODO: trace.
             if let Err(e) = Self::connection_task(
                 request_receiver,
                 sender,
@@ -298,7 +312,8 @@ impl TcpStealHandler {
                     "Error while forwarding http connection {connection_id} (port {port}): {e:?}."
                 )
             } else {
-                trace!(
+                debug!(
+                    // TODO: trace.
                     "Filtered http connection {connection_id} (port {port}) closed without errors."
                 )
             }
