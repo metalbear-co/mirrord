@@ -498,7 +498,8 @@ pub(super) fn getaddrinfo(
 
             Bypass::CStrConversion
         })?
-        .map(String::from);
+        .map(String::from)
+        .or_else(|| Some(String::from("localhost")));
 
     let service = rawish_service
         .map(CStr::to_str)
