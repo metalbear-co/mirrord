@@ -676,8 +676,7 @@ impl TcpConnectionStealer {
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
-        let tcp_stream_write_half = if let Some(stream) =
-            self.http_write_streams.get_mut(&response.connection_id)
+        let http_tx = if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id)
         {
             stream
         } else {
@@ -696,7 +695,7 @@ impl TcpConnectionStealer {
                 .try_into()
                 .map_err(Self::handle_response_reconstruction_fail)
             {
-                tcp_stream_write_half
+                http_tx
                     .write_all(&Self::response_to_bytes(response).await)
                     .await?; // TODO: handle error?
             }
@@ -714,7 +713,7 @@ impl TcpConnectionStealer {
                         .try_into()
                         .map_err(Self::handle_response_reconstruction_fail)
                     {
-                        tcp_stream_write_half
+                        http_tx
                             .write_all(&Self::response_to_bytes(response).await)
                             .await?; // TODO: handle error?
                     }
