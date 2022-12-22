@@ -114,8 +114,7 @@ impl HttpFilterBuilder {
             original_destination,
         } = self;
 
-        // Incoming tcp stream definitely has an address.
-        let port = reversible_stream.local_addr().unwrap().port();
+        let port = original_destination.port();
 
         match http_version {
             HttpVersion::V1 => {
@@ -132,6 +131,7 @@ impl HttpFilterBuilder {
                                 connection_id,
                                 port,
                                 original_destination,
+                                request_id: 0,
                             },
                         )
                         .await

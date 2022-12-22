@@ -1,15 +1,15 @@
-use std::{fmt, net::IpAddr};
+use std::{cmp::Ordering, fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
-    body::Incoming, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode, Uri,
-    Version,
+    body::Incoming, http, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode,
+    Uri, Version,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionId, Port, RemoteResult};
+use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -119,9 +119,6 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
     }
 }
 
-// TODO: is u64 fine?
-type RequestId = u64;
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct HttpRequest {
     #[bincode(with_serde)]
@@ -152,19 +149,36 @@ pub struct InternalHttpResponse {
 pub struct HttpResponse {
     /// This is used to make sure the response is sent in its turn, after responses to all earlier
     /// requests were already sent.
-    pub request_id: u64,
-    pub connection_id: ConnectionId,
     pub port: Port,
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
     #[bincode(with_serde)]
-    pub request: InternalHttpResponse,
+    pub response: InternalHttpResponse,
 }
 
+impl PartialOrd<Self> for HttpResponse {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// A total order of responses in which the response with the LESSER `request_id` is the GREATER one.
+impl Ord for HttpResponse {
+    /// request1 > request2  iff. request1.request_id < request2.request_id.
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reversed order because we want to process lower request_ids first, so we want a min heap
+        // instead of the default max heap.
+        other.request_id.cmp(&self.request_id)
+    }
+}
+
+// Not implemented as From<Response<Incoming>> because async.
 impl HttpResponse {
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
         connection_id: ConnectionId,
-        request_id: u64,
+        request_id: RequestId,
     ) -> Result<HttpResponse, hyper::Error> {
         let (
             Parts {
@@ -177,7 +191,7 @@ impl HttpResponse {
             body,
         ) = response.into_parts();
         let body = body.collect().await?.to_bytes().to_vec();
-        let internal_req = InternalHttpResponse {
+        let internal_response = InternalHttpResponse {
             status,
             headers,
             version,
@@ -187,7 +201,26 @@ impl HttpResponse {
             request_id,
             port,
             connection_id,
-            request: internal_req,
+            response: internal_response,
         })
+    }
+}
+
+impl TryFrom<InternalHttpResponse> for Response<Full<Bytes>> {
+    type Error = http::Error;
+
+    fn try_from(value: InternalHttpResponse) -> Result<Self, Self::Error> {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut builder = Response::builder().status(status).version(version);
+        if let Some(h) = builder.headers_mut() {
+            *h = headers;
+        }
+        builder.body(Full::new(Bytes::from(body)))
     }
 }

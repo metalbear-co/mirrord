@@ -1,11 +1,13 @@
 use std::{
-    collections::HashSet,
+    collections::{BinaryHeap, HashSet},
     io,
     net::{Ipv4Addr, SocketAddr},
 };
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fancy_regex::Regex;
+use http_body_util::Full;
+use hyper::{body::Body, Response, Version};
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -27,6 +29,7 @@ use super::{
     *,
 };
 use crate::{
+    error::Result,
     steal::{
         http_traffic::{HttpFilterManager, UnmatchedResponse},
         StealSubscription::{HttpFiltered, Unfiltered},
@@ -44,7 +47,6 @@ use crate::{
 pub(crate) struct TcpConnectionStealer {
     /// Maps a port to its active subscription.
     port_subscriptions: HashMap<Port, StealSubscription>,
-
     /// Communication between (agent -> stealer) task.
     ///
     /// The agent controls the stealer task through [`TcpStealerAPI::command_tx`].
@@ -93,6 +95,23 @@ pub(crate) struct TcpConnectionStealer {
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
+    /// For a connection with pending requests, a priority queue with responses that were already
+    /// returned, but that cannot be sent yet because there are earlier responses that are not
+    /// available yet.
+    http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
+
+    /// Keep track of the clients that already received an http request out of a connection.
+    /// This is used to inform them when the connection is closed.
+    ///
+    /// Note: The set of clients here is not the same as the set of clients that subscribe to the
+    /// port of a connection, as some clients might have defined a regex that no request matched,
+    /// so they did not get any request out of this connection, so they are not even aware of this
+    /// connection.
+    http_connection_clients: HashMap<ConnectionId, HashSet<ClientId>>,
+
+    /// Saves for a connection the request_id of the next response that should be sent.
+    http_request_counters: HashMap<ConnectionId, RequestId>,
+
     // TODO: ?
     unmatched_tx: Sender<UnmatchedResponse>,
 }
@@ -135,6 +154,9 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_write_streams: HashMap::with_capacity(8),
+            http_response_queues: HashMap::with_capacity(8),
+            http_connection_clients: HashMap::with_capacity(8),
+            http_request_counters: HashMap::with_capacity(8),
             unmatched_tx,
         })
     }
@@ -189,6 +211,17 @@ impl TcpConnectionStealer {
                 }
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
                     self.http_write_streams.remove(&connection_id);
+                    // Send a close message to all clients that were subscribed to the connection.
+                    if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
+                        // TODO: is this too much to do in an iteration of the select loop?
+                        for client_id in clients.into_iter() {
+                            if let Some(client_tx) = self.clients.get(&client_id) {
+                                client_tx.send(DaemonTcp::Close(TcpClose {connection_id})).await?
+                            } else {
+                                warn!("Cannot notify client {client_id} on the closing of a connection.")
+                            }
+                        }
+                    }
                     self.index_allocator.free_index(connection_id);
                 }
                 _ = cancellation_token.cancelled() => {
@@ -211,6 +244,11 @@ impl TcpConnectionStealer {
     ) -> Result<(), AgentError> {
         if let Some(request) = request {
             if let Some(daemon_tx) = self.clients.get(&request.client_id) {
+                // Note down: client_id got a request out of connection_id.
+                self.http_connection_clients
+                    .entry(request.connection_id)
+                    .or_insert_with(|| HashSet::with_capacity(2))
+                    .insert(request.client_id);
                 Ok(daemon_tx
                     .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
                     .await?)
@@ -318,7 +356,7 @@ impl TcpConnectionStealer {
     ) {
         // In `browser2stealer` the stealer reads incoming data from the outside - from the browser.
         // In `stealer2browser` the stealer writes the responses back to the browser. The responses
-        // are either originated in the local application and forwareded by the layer, or if the
+        // are either originated in the local application and forwarded by the layer, or if the
         // request was not matched by any filter, the response is originated in the remote app.
         let (mut browser2stealer, stealer2browser) = split(stream_with_browser);
 
@@ -355,7 +393,7 @@ impl TcpConnectionStealer {
                 error!("Encountered error: \"{err:?}\" while forwarding incoming stream to filter.")
             }
             if let Err(err) = connection_close_sender.send(connection_id).await {
-                error!("Stream forwarding task could not communicate stream close to main task.");
+                error!("Stream forwarding task could not communicate stream close to main task: {err:?}.");
             }
         });
     }
@@ -537,7 +575,7 @@ impl TcpConnectionStealer {
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
     /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
-    /// connecitons.
+    /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
     fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let ports = self.get_client_ports(client_id);
@@ -591,28 +629,139 @@ impl TcpConnectionStealer {
         }
     }
 
-    /// Forward an HTTP response to a stolen HTTP request from the layer to the `HttpFilterManager`.
+    // TODO: make this correct.
+    async fn response_to_bytes(response: Response<Full<Bytes>>) -> Vec<u8> {
+        let (
+            response::Parts {
+                status,
+                version,
+                headers,
+                extensions: _, // TODO: should we be using this?
+                ..
+            },
+            body,
+        ) = response.into_parts();
+
+        // Enough for body + headers of length 64 each + 64 bytes for status line.
+        // This will probably be more than enough most of the time.
+        let mut bytes =
+            BytesMut::with_capacity(body.size_hint().lower() as usize + 64 * headers.len() + 64);
+
+        let version = match version {
+            Version::HTTP_09 => "HTTP/0.9",
+            Version::HTTP_10 => "HTTP/1.0",
+            Version::HTTP_11 => "HTTP/1.1",
+            Version::HTTP_2 => "HTTP/2",
+            Version::HTTP_3 => "HTTP/3",
+            _ => "HTTP/1.1", // TODO: What should happen here?
+        };
+
+        // Status line.
+        bytes.put(version.as_bytes()); // HTTP/1.1
+        bytes.put(&b" "[..]);
+        bytes.put(status.as_str().as_bytes()); // 200
+        bytes.put(&b" "[..]);
+        if let Some(reason) = status.canonical_reason() {
+            bytes.put(reason.as_bytes()); // OK
+        } else {
+            bytes.put(&b"LOL"[..]);
+        }
+
+        // Headers.
+        for (name, value) in headers.into_iter() {
+            if let Some(name) = name {
+                bytes.put(&b"\r\n"[..]);
+                bytes.put(name.as_str().as_bytes());
+                bytes.put(&b": "[..]);
+            } else {
+                // TODO: are multiple values for the same header comma delimited?
+                bytes.put(&b","[..])
+            }
+            bytes.put(value.as_bytes())
+        }
+        bytes.put(&b"\r\n\r\n"[..]);
+
+        // Body.
+        bytes.put(body.collect().await.unwrap().to_bytes()); // Unwrap Infallible.
+
+        bytes.to_vec()
+    }
+
+    fn handle_response_reconstruction_fail(err: hyper::http::Error) -> hyper::http::Error {
+        error!("Could not reconstruct http response: {err:?}");
+        // TODO: What should happen? Currently just skipping that response, which would
+        //       also spoils the rest of the stream. Should hopefully never happen.
+        debug_assert!(false);
+        err
+    }
+
+    /// Forward an HTTP response to a stolen HTTP request from the layer to the back to the browser.
     ///
-    ///                       _________________________agent_________________________
-    /// Local App -> Layer -> ClientConnectionHandler -> Stealer -> HttpFilterManager -> Browser
-    ///                                                          ^- You are here.
-    async fn http_response(
-        &mut self,
-        response: HttpResponse,
-    ) -> std::result::Result<(), AgentError> {
-        todo!();
-        match self.port_subscriptions.get(&response.port) {
-            Some(HttpFiltered(manager)) => todo!(),
-            Some(Unfiltered(_)) | None => {
-                warn!(
-                    "Got an http response to port {:?} which is not being filtered. \
-                Maybe the layer unsubscribed and this is a remainder of a closed connection. \
-                Not forwarding.",
-                    response.port
+    ///                         _______________agent_______________
+    /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
+    ///                                                             ^- You are here.
+    async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
+        let http_tx = if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id)
+        {
+            stream
+        } else {
+            warn!(
+                "Got an http response in a connection for which no tcp stream is present. Not forwarding.",
+            );
+            return Ok(());
+        };
+        let counter = self
+            .http_request_counters
+            .entry(response.connection_id)
+            .or_insert(0);
+        if response.request_id == *counter {
+            if let Ok(response) = response
+                .response
+                .try_into()
+                .map_err(Self::handle_response_reconstruction_fail)
+            {
+                http_tx
+                    .write_all(&Self::response_to_bytes(response).await)
+                    .await?; // TODO: handle error?
+            }
+            *counter += 1;
+            if let Some(queue) = self.http_response_queues.get_mut(&response.connection_id) {
+                while queue
+                    .peek()
+                    .is_some_and(|response| response.request_id == *counter)
+                {
+                    // The next response arrived before the one that just arrived and was waiting
+                    // in the queue for all earlier responses to be sent.
+                    let response = queue.pop().unwrap();
+                    if let Ok(response) = response
+                        .response
+                        .try_into()
+                        .map_err(Self::handle_response_reconstruction_fail)
+                    {
+                        http_tx
+                            .write_all(&Self::response_to_bytes(response).await)
+                            .await?; // TODO: handle error?
+                    }
+                    *counter += 1;
+                }
+            }
+        } else {
+            // The response is not the next one that should be sent back, so store in the priority
+            // queue until all the earlier responses are available.
+
+            if response.request_id > *counter {
+                self.http_response_queues
+                    .entry(response.connection_id)
+                    .or_insert_with(|| BinaryHeap::with_capacity(8))
+                    .push(response);
+            } else {
+                error!(
+                    "Got an http response with a request_id that was already received and sent to \
+                    the browser for this connection. Dropping the duplicate response."
                 );
-                Ok(())
             }
         }
+        Ok(())
     }
 
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote

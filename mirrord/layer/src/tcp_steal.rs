@@ -154,6 +154,8 @@ impl TcpHandler for TcpStealHandler {
 }
 
 impl TcpStealHandler {
+    /// Get the available response data, either normal TcpData, or a response to a filtered HTTP
+    /// request - whatever is ready first.
     pub async fn next(&mut self) -> Option<ClientMessage> {
         select! {
             opt = self.read_streams.next() => {
