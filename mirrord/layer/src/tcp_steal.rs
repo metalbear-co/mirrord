@@ -20,7 +20,6 @@ use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
-    select,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
@@ -49,30 +48,12 @@ pub struct TcpStealHandler {
     /// This sender is cloned and moved into those tasks.
     http_response_sender: Sender<HttpResponse>,
 
-    /// Receives responses in the main layer task sent from all http client tasks.
-    http_response_receiver: Receiver<HttpResponse>,
-
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
 }
 
 // TODO: let user specify http ports.
 const HTTP_PORTS: [Port; 2] = [80, 8080];
-
-impl Default for TcpStealHandler {
-    fn default() -> Self {
-        let (response_sender, response_receiver) = channel(1024);
-        Self {
-            ports: Default::default(),
-            write_streams: Default::default(),
-            read_streams: Default::default(),
-            http_request_senders: Default::default(),
-            http_response_sender: response_sender,
-            http_response_receiver: response_receiver,
-            http_filter: None,
-        }
-    }
-}
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
@@ -168,45 +149,35 @@ impl TcpHandler for TcpStealHandler {
 }
 
 impl TcpStealHandler {
-    pub(crate) fn new(http_filter: Option<String>) -> Self {
-        // TODO: buffer size?
-        let (response_sender, response_receiver) = channel(1024);
+    pub(crate) fn new(
+        http_filter: Option<String>,
+        http_response_sender: Sender<HttpResponse>,
+    ) -> Self {
         Self {
             ports: Default::default(),
             write_streams: Default::default(),
             read_streams: Default::default(),
             http_request_senders: Default::default(),
-            http_response_sender: response_sender,
-            http_response_receiver: response_receiver,
+            http_response_sender,
             http_filter,
         }
     }
 
-    /// Get the available response data, either normal TcpData, or a response to a filtered HTTP
-    /// request - whatever is ready first.
     #[tracing::instrument(level = "debug", skip(self))] // TODO: trace.
     pub async fn next(&mut self) -> Option<ClientMessage> {
-        select! {
-            opt = self.read_streams.next() => {
-                let (connection_id, value) = opt?;
-                match value {
-                    Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                        connection_id,
-                        bytes: bytes.to_vec(),
-                    }))),
-                    Some(Err(err)) => {
-                        error!("connection id {connection_id:?} read error: {err:?}");
-                        None
-                    }
-                    None => Some(ClientMessage::TcpSteal(
-                        LayerTcpSteal::ConnectionUnsubscribe(connection_id),
-                    )),
-                }
+        let (connection_id, value) = self.read_streams.next().await?;
+        match value {
+            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                connection_id,
+                bytes: bytes.to_vec(),
+            }))),
+            Some(Err(err)) => {
+                error!("connection id {connection_id:?} read error: {err:?}");
+                None
             }
-            Some(res) = self.http_response_receiver.recv() => {
-                debug!("TCP steal handler got an HTTP response to be sent to agent: {res:?}"); // TODO: trace.
-                Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)))
-            }
+            None => Some(ClientMessage::TcpSteal(
+                LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+            )),
         }
     }
 

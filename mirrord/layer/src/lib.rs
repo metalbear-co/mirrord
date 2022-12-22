@@ -29,6 +29,7 @@ use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
+    tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 #[cfg(target_os = "macos")]
@@ -277,6 +278,9 @@ struct Layer {
 
     pub tcp_steal_handler: TcpStealHandler,
 
+    /// Receives responses in the layer loop to be forwarded to the agent.
+    pub http_response_receiver: Receiver<HttpResponse>,
+
     steal: bool,
 }
 
@@ -287,6 +291,8 @@ impl Layer {
         steal: bool,
         http_filter: Option<String>,
     ) -> Layer {
+        // TODO: buffer size?
+        let (http_response_sender, http_response_receiver) = channel(1024);
         Self {
             tx,
             rx,
@@ -296,7 +302,8 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::new(http_filter),
+            tcp_steal_handler: TcpStealHandler::new(http_filter, http_response_sender),
+            http_response_receiver,
             steal,
         }
     }
@@ -448,7 +455,10 @@ async fn thread_loop(
             },
             Some(message) = layer.tcp_steal_handler.next() => {
                 layer.send(message).await.unwrap();
-            },
+            }
+            Some(resposne) = layer.http_response_receiver.recv() => {
+                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(resposne))).await.unwrap();
+            }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
