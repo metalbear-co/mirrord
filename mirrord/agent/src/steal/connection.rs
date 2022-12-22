@@ -95,7 +95,7 @@ pub(crate) struct TcpConnectionStealer {
     /// Used to send http responses back to the original remote connection.
     http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
 
-    /// For a connection with pending requests, a priority queue with response that were already
+    /// For a connection with pending requests, a priority queue with responses that were already
     /// returned, but that cannot be sent yet because there are earlier responses that are not
     /// available yet.
     http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
