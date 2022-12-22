@@ -162,7 +162,7 @@ impl PartialOrd<Self> for HttpResponse {
     }
 }
 
-/// An total order which a request with a LESSER ID is GREATER.
+/// A total order of responses in which the response with the LESSER `request_id` is the GREATER one.
 impl Ord for HttpResponse {
     /// request1 > request2  iff. request1.request_id < request2.request_id.
     fn cmp(&self, other: &Self) -> Ordering {
