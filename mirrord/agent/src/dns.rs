@@ -73,7 +73,10 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
         trace!("dns_worker -> request {:#?}", request);
 
-        let result = dns_lookup(root_path.as_path(), request.node.unwrap());
+        let result = dns_lookup(
+            root_path.as_path(),
+            request.node.unwrap_or("localhost".to_string()),
+        );
         if let Err(result) = tx.send(GetAddrInfoResponse(result.await)) {
             error!("couldn't send result to caller {result:?}");
         }
