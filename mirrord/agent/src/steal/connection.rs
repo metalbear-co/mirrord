@@ -723,10 +723,18 @@ impl TcpConnectionStealer {
         } else {
             // The response is not the next one that should be sent back, so store in the priority
             // queue until all the earlier responses are available.
-            self.http_response_queues
-                .entry(response.connection_id)
-                .or_insert_with(|| BinaryHeap::with_capacity(8))
-                .push(response);
+
+            if response.request_id > *counter {
+                self.http_response_queues
+                    .entry(response.connection_id)
+                    .or_insert_with(|| BinaryHeap::with_capacity(8))
+                    .push(response);
+            } else {
+                error!(
+                    "Got an http response with a request_id that was already received and sent to \
+                    the browser for this connection. Dropping the duplicate response."
+                );
+            }
         }
         Ok(())
     }
