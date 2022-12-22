@@ -116,7 +116,7 @@ impl TcpHandler for TcpStealHandler {
     }
 
     /// An http request was stolen by the http filter. Pass it to the local application.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         self.forward_request(request).await
     }
@@ -184,6 +184,7 @@ impl TcpStealHandler {
 
     /// Get the available response data, either normal TcpData, or a response to a filtered HTTP
     /// request - whatever is ready first.
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace.
     pub async fn next(&mut self) -> Option<ClientMessage> {
         select! {
             opt = self.read_streams.next() => {
@@ -203,7 +204,7 @@ impl TcpStealHandler {
                 }
             }
             Some(res) = self.http_response_receiver.recv() => {
-                debug!("TCP steal handler got an HTTP response to be sent to agent: {res:?}");
+                debug!("TCP steal handler got an HTTP response to be sent to agent: {res:?}"); // TODO: trace.
                 Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)))
             }
         }
@@ -213,7 +214,7 @@ impl TcpStealHandler {
     /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
             debug!(
@@ -262,7 +263,7 @@ impl TcpStealHandler {
     /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
     /// The responses from all the http client tasks will arrive together at
     /// [`self.response_receiver`].
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace.
     async fn create_http_connection(
         &mut self,
         http_request: HttpRequest,
@@ -327,6 +328,7 @@ impl TcpStealHandler {
         self.http_request_senders
             .insert(connection_id, request_sender);
 
+        debug!("main task done creating http connection."); // TODO: done.
         Ok(())
     }
 }

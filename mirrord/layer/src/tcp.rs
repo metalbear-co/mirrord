@@ -75,7 +75,7 @@ pub(crate) trait TcpHandler {
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 
     /// Returns true to let caller know to keep running
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {
