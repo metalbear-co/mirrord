@@ -30,7 +30,7 @@ use crate::{
 
 pub(crate) mod http_forwarding;
 
-use mirrord_protocol::tcp::HttpResponse;
+use mirrord_protocol::tcp::{HttpResponse, StealType::FilteredHttp};
 
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
@@ -53,6 +53,9 @@ pub struct TcpStealHandler {
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
 }
+
+// TODO: let user specify http ports.
+const HTTP_PORTS: [Port; 2] = [80, 8080];
 
 impl Default for TcpStealHandler {
     fn default() -> Self {
@@ -149,9 +152,14 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(All(
-            port,
-        ))))
+        let steal_type = if HTTP_PORTS.contains(&port) && let Some(filter) = &self.http_filter {
+            FilteredHttp(port, filter.clone())
+        } else {
+            All(port)
+        };
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+            steal_type,
+        )))
         .await
         .map_err(From::from)
     }
