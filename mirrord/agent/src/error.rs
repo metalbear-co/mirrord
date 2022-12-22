@@ -114,6 +114,9 @@ pub enum AgentError {
 
     #[error("HTTP filter-stealing error: `{0}`")]
     HttpFilterError(#[from] crate::steal::http_traffic::error::HttpTrafficError),
+
+    #[error("Failed to encode a an HTTP response with error: `{0}`")]
+    HttpEncoding(#[from] hyper::http::Error),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
