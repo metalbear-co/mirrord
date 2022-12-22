@@ -9,7 +9,11 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::{handshake, SendRequest};
 use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, StealType::All, TcpClose, TcpData},
+    tcp::{
+        HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        StealType::{All, FilteredHttp},
+        TcpClose, TcpData,
+    },
     ClientMessage, ConnectionId, Port,
 };
 use streammap_ext::StreamMap;
@@ -29,8 +33,6 @@ use crate::{
 };
 
 pub(crate) mod http_forwarding;
-
-use mirrord_protocol::tcp::{HttpResponse, StealType::FilteredHttp};
 
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
