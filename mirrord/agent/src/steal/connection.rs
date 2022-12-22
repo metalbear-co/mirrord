@@ -222,6 +222,8 @@ impl TcpConnectionStealer {
                             }
                         }
                     }
+                    self.http_response_queues.remove(&connection_id);
+                    self.http_request_counters.remove(&connection_id);
                     self.index_allocator.free_index(connection_id);
                 }
                 _ = cancellation_token.cancelled() => {
