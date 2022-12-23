@@ -3,26 +3,26 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::TryFutureExt;
-use http_body_util::BodyExt;
+use futures::{FutureExt, TryFutureExt};
 use hyper::{body::Incoming, client, service::Service, Request, Response};
-use mirrord_protocol::{
-    tcp::{HttpResponse, InternalHttpResponse},
-    ConnectionId, Port, RequestId,
-};
+use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use super::{error::HttpTrafficError, UnmatchedHttpResponse};
-use crate::{steal::MatchedHttpRequest, util::ClientId};
+use crate::{error::AgentError, steal::MatchedHttpRequest, util::ClientId};
 
 pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
 pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
+
+pub(crate) type UnmatchedSender = Sender<Result<UnmatchedHttpResponse, HttpTrafficError>>;
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
     pub(super) matched_tx: Sender<MatchedHttpRequest>,
-    pub(super) unmatched_tx: Sender<UnmatchedHttpResponse>,
+    // pub(super) unmatched_tx: Sender<UnmatchedHttpResponse>,
+    // pub(super) matched_tx: Sender<Result<MatchedHttpRequest, HttpTrafficError>>,
+    pub(super) unmatched_tx: UnmatchedSender,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
     pub(crate) original_destination: SocketAddr,
@@ -32,44 +32,40 @@ pub(super) struct HyperHandler {
 // #[tracing::instrument(level = "debug", skip(tx))]
 fn unmatched_request(
     request: Request<Incoming>,
-    tx: Sender<UnmatchedHttpResponse>,
+    tx: UnmatchedSender,
     original_destination: SocketAddr,
     connection_id: ConnectionId,
     request_id: RequestId,
 ) {
     tokio::spawn(async move {
-        let target_stream = TcpStream::connect(original_destination).await.unwrap();
+        let response = TcpStream::connect(original_destination)
+            .map_err(From::from)
+            .and_then(|target_stream| {
+                client::conn::http1::handshake(target_stream).map_err(From::from)
+            })
+            .and_then(|(mut request_sender, connection)| {
+                tokio::spawn(async move {
+                    if let Err(fail) = connection.await {
+                        // TODO(alex) [low] 2022-12-23: Send the error in the channel.
+                        eprintln!("Error in connection: {}", fail);
+                    }
+                });
 
-        let (mut request_sender, connection) =
-            client::conn::http1::handshake(target_stream).await.unwrap();
+                request_sender.send_request(request).map_err(From::from)
+            })
+            .and_then(|intercepted_response| {
+                HttpResponse::from_hyper_response(
+                    intercepted_response,
+                    original_destination.port(),
+                    connection_id,
+                    request_id,
+                )
+                .map_err(From::from)
+            })
+            .await
+            .map(|response| UnmatchedHttpResponse(response));
 
-        tokio::spawn(async move {
-            if let Err(fail) = connection.await {
-                // TODO(alex) [low] 2022-12-23: Send the error in the channel.
-                eprintln!("Error in connection: {}", fail);
-            }
-        });
-
-        // TODO(alex) [mid] 2022-12-21: Does the host come in with the address of our intercepted
-        // stream, or of the original destination already?
-        //
-        // Doing this only because the local tests are not handled by the stealer mechanism, so the
-        // host comes with the wrong address.
-        // let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
-        // request.headers_mut().insert(HOST, proper_host).unwrap();
-
-        let intercepted_response = request_sender.send_request(request).await.unwrap();
-        let response = HttpResponse::from_hyper_response(
-            intercepted_response,
-            original_destination.port(),
-            connection_id,
-            request_id,
-        )
-        .await
-        .unwrap();
-
-        let response = UnmatchedHttpResponse(response);
-        tx.send(response).map_err(HttpTrafficError::from).await
+        tx.send(response).map_err(AgentError::from).await
     });
 }
 
