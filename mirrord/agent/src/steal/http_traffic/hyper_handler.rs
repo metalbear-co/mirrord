@@ -26,6 +26,11 @@ pub(super) struct HyperHandler {
     pub(crate) request_id: RequestId,
 }
 
+/// Handles the case when no filter matches a header in the request.
+///
+/// 1. Creates a [`hyper::client::conn::Connection`] to the `original_destination`;
+/// 2. Sends the [`Request`] to it, and awaits a [`Response`];
+/// 3. Sends the [`HttpResponse`] to the [`stealer`], via the [`UnmatchedSender`] channel.
 #[tracing::instrument(level = "debug", skip(tx))]
 fn unmatched_request(
     request: Request<Incoming>,
