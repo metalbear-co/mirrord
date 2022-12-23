@@ -28,7 +28,7 @@ pub(super) struct HyperHandler {
     pub(crate) request_id: RequestId,
 }
 
-// #[tracing::instrument(level = "debug", skip(tx))]
+#[tracing::instrument(level = "debug", skip(tx))]
 fn unmatched_request(
     request: Request<Incoming>,
     tx: UnmatchedSender,
