@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::{hyper_handler::UnmatchedSender, MatchedHttpRequest, UnmatchedHttpResponse};
+use super::MatchedHttpRequest;
 
 /// Errors specific to the HTTP traffic feature.
 #[derive(Error, Debug)]
@@ -16,9 +16,4 @@ pub enum HttpTrafficError {
 
     #[error("Failed with Captured `{0}`!")]
     MatchedSender(#[from] tokio::sync::mpsc::error::SendError<MatchedHttpRequest>),
-
-    #[error("Failed with Passthrough `{0}`!")]
-    UnmatchedSender(
-        #[from] tokio::sync::mpsc::error::SendError<Result<UnmatchedHttpResponse, std::io::Error>>,
-    ),
 }

@@ -25,7 +25,9 @@ use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::{
-    http_traffic::{filter::HttpFilter, DefaultReversibleStream},
+    http_traffic::{
+        filter::HttpFilter, DefaultReversibleStream, UnmatchedReceiver, UnmatchedSender,
+    },
     *,
 };
 use crate::{
@@ -114,10 +116,10 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
     /// requests case (when no HTTP filter matches a request).
-    unmatched_tx: Sender<UnmatchedHttpResponse>,
+    unmatched_tx: UnmatchedSender,
 
     /// Channel that receives responses which did not match any HTTP filter.
-    unmatched_rx: Receiver<UnmatchedHttpResponse>,
+    unmatched_rx: UnmatchedReceiver,
 }
 
 impl TcpConnectionStealer {
@@ -233,7 +235,8 @@ impl TcpConnectionStealer {
                 }
 
                 // Handles the responses that were not matched by any HTTP filter.
-                Some(UnmatchedHttpResponse(response)) = self.unmatched_rx.recv() => {
+                Some(response) = self.unmatched_rx.recv() => {
+                    let UnmatchedHttpResponse(response) = response?;
                     self.http_response(response).await?;
                 }
 

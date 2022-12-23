@@ -6,7 +6,10 @@ use std::{net::SocketAddr, sync::Arc};
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId};
-use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{Receiver, Sender},
+};
 
 use self::{
     error::HttpTrafficError,
@@ -19,6 +22,9 @@ pub(crate) mod error;
 pub(super) mod filter;
 mod hyper_handler;
 pub(super) mod reversible_stream;
+
+pub(crate) type UnmatchedSender = Sender<Result<UnmatchedHttpResponse, HttpTrafficError>>;
+pub(crate) type UnmatchedReceiver = Receiver<Result<UnmatchedHttpResponse, HttpTrafficError>>;
 
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
@@ -65,7 +71,7 @@ pub(super) struct HttpFilterManager {
 
     /// We clone this to pass them down to the hyper tasks.
     matched_tx: Sender<MatchedHttpRequest>,
-    unmatched_tx: Sender<UnmatchedHttpResponse>,
+    unmatched_tx: UnmatchedSender,
 }
 
 impl HttpFilterManager {
@@ -78,7 +84,7 @@ impl HttpFilterManager {
         client_id: ClientId,
         filter: Regex,
         matched_tx: Sender<MatchedHttpRequest>,
-        unmatched_tx: Sender<UnmatchedHttpResponse>,
+        unmatched_tx: UnmatchedSender,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters.insert(client_id, filter);

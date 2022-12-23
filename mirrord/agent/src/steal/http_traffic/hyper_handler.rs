@@ -7,14 +7,13 @@ use futures::{FutureExt, TryFutureExt};
 use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tracing::trace;
 
-use super::{error::HttpTrafficError, UnmatchedHttpResponse};
+use super::{error::HttpTrafficError, UnmatchedHttpResponse, UnmatchedSender};
 use crate::{error::AgentError, steal::MatchedHttpRequest, util::ClientId};
 
 pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
 pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
-
-pub(crate) type UnmatchedSender = Sender<Result<UnmatchedHttpResponse, HttpTrafficError>>;
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
@@ -37,6 +36,9 @@ fn unmatched_request(
     connection_id: ConnectionId,
     request_id: RequestId,
 ) {
+    // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
+    // closes a connection, the client could still be wanting to send a request, so we need to
+    // re-connect and send.
     tokio::spawn(async move {
         let response = TcpStream::connect(original_destination)
             .map_err(From::from)
@@ -44,10 +46,13 @@ fn unmatched_request(
                 client::conn::http1::handshake(target_stream).map_err(From::from)
             })
             .and_then(|(mut request_sender, connection)| {
+                let tx = tx.clone();
+
                 tokio::spawn(async move {
                     if let Err(fail) = connection.await {
-                        // TODO(alex) [low] 2022-12-23: Send the error in the channel.
-                        eprintln!("Error in connection: {}", fail);
+                        let _ = tx.send(Err(fail.into())).await.inspect_err(|fail| {
+                            trace!("Sending an `UnmatchedHttpResponse` failed due to {fail:#?}!")
+                        });
                     }
                 });
 
@@ -63,9 +68,11 @@ fn unmatched_request(
                 .map_err(From::from)
             })
             .await
-            .map(|response| UnmatchedHttpResponse(response));
+            .map(UnmatchedHttpResponse);
 
-        tx.send(response).map_err(AgentError::from).await
+        tx.send(response).await.inspect_err(|fail| {
+            trace!("Sending an `UnmatchedHttpResponse` failed due to {fail:#?}!")
+        })
     });
 }
 

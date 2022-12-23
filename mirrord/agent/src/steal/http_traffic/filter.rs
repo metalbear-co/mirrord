@@ -14,7 +14,7 @@ use tracing::error;
 
 use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
-    UnmatchedHttpResponse,
+    UnmatchedSender,
 };
 use crate::{
     steal::{http_traffic::error, MatchedHttpRequest},
@@ -38,7 +38,7 @@ pub(super) struct HttpFilterBuilder {
     connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     matched_tx: Sender<MatchedHttpRequest>,
-    unmatched_tx: Sender<UnmatchedHttpResponse>,
+    unmatched_tx: UnmatchedSender,
 }
 
 /// Used by the stealer handler to:
@@ -74,7 +74,7 @@ impl HttpFilterBuilder {
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
         matched_tx: Sender<MatchedHttpRequest>,
-        unmatched_tx: Sender<UnmatchedHttpResponse>,
+        unmatched_tx: UnmatchedSender,
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 

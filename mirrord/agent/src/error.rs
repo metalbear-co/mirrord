@@ -9,7 +9,13 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-use crate::{sniffer::SnifferCommand, steal::StealerCommand};
+use crate::{
+    sniffer::SnifferCommand,
+    steal::{
+        http_traffic::{error::HttpTrafficError, UnmatchedHttpResponse},
+        StealerCommand,
+    },
+};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
