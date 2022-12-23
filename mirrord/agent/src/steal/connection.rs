@@ -234,12 +234,7 @@ impl TcpConnectionStealer {
 
                 // Handles the responses that were not captured by any HTTP filter.
                 Some(UnmatchedResponse(response)) = self.unmatched_rx.recv() => {
-                    // TODO(alex) [high] 2022-12-22: Convert `response` into bytes.
-                    // Send the bytes to `self.connections.get(connection_id)` stream.
-                    //
-                    // This should probably be put into the same list of the normal requests queue,
-                    // instead of sending directly on a stream.
-                    todo!()
+                    self.http_response(response).await?;
                 }
 
                 _ = cancellation_token.cancelled() => {
@@ -249,11 +244,6 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
-    }
-
-    // TODO(alex) [high] 2022-12-22: Convert `response` into bytes.
-    fn foo(UnmatchedResponse(response): UnmatchedResponse) {
-        let b: Vec<u8> = response.try_into().unwrap();
     }
 
     /// Forward a stolen HTTP request from the http filter to the direction of the layer.
@@ -771,7 +761,6 @@ impl TcpConnectionStealer {
         } else {
             // The response is not the next one that should be sent back, so store in the priority
             // queue until all the earlier responses are available.
-
             if response.request_id > *counter {
                 self.http_response_queues
                     .entry(response.connection_id)

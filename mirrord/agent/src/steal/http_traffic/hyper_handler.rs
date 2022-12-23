@@ -60,6 +60,7 @@ fn intercepted_request(
 
         tokio::spawn(async move {
             if let Err(fail) = connection.await {
+                // TODO(alex) [low] 2022-12-23: Send the error in the channel.
                 eprintln!("Error in connection: {}", fail);
             }
         });
@@ -83,7 +84,6 @@ fn intercepted_request(
         .unwrap();
 
         let response = UnmatchedResponse(response);
-        // TODO(alex) [high] 2022-12-20: Send this response back in the original stream.
         tx.send(response).map_err(HttpTrafficError::from).await
     });
 }
@@ -117,16 +117,21 @@ impl Service<Request<Incoming>> for HyperHandler {
                 })
             })
         {
-            spawn_send(
-                StealerHttpRequest {
-                    port: self.port,
-                    connection_id: self.connection_id,
-                    client_id,
-                    request_id: self.request_id,
-                    request,
-                },
-                self.captured_tx.clone(),
-            );
+            let request = StealerHttpRequest {
+                port: self.port,
+                connection_id: self.connection_id,
+                client_id,
+                request_id: self.request_id,
+                request,
+            };
+
+            let captured_tx = self.captured_tx.clone();
+            tokio::spawn(async move {
+                captured_tx
+                    .send(request)
+                    .map_err(HttpTrafficError::from)
+                    .await
+            });
 
             let response = async { Ok(Response::new("Captured!".to_string())) };
             self.request_id += 1;
