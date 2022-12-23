@@ -1,6 +1,3 @@
-use core::ops::Deref;
-use std::net::SocketAddr;
-
 use pin_project::pin_project;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -41,10 +38,6 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
 
     pub(crate) fn get_header(&mut self) -> &[u8; HEADER_SIZE] {
         &self.header
-    }
-
-    pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.stream.local_addr()
     }
 }
 

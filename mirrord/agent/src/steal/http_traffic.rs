@@ -66,7 +66,7 @@ pub struct UnmatchedHttpResponse(pub(super) HttpResponse);
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
-    port: u16,
+    _port: u16,
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
@@ -90,7 +90,7 @@ impl HttpFilterManager {
         client_filters.insert(client_id, filter);
 
         Self {
-            port,
+            _port: port,
             client_filters,
             matched_tx,
             unmatched_tx,
@@ -226,7 +226,7 @@ mod http_traffic_tests {
         );
 
         let HttpFilter {
-            hyper_task,
+            _hyper_task,
             mut reversible_stream,
             mut interceptor_stream,
         } = http_filter_manager
@@ -271,7 +271,7 @@ mod http_traffic_tests {
         // over.
         drop(interceptor_stream);
 
-        assert!(hyper_task.await.is_ok());
+        assert!(_hyper_task.await.is_ok());
         assert!(request_task.await.is_ok());
     }
 
@@ -358,7 +358,7 @@ mod http_traffic_tests {
         // The filter is created with the original address being the server (the agent "steals" from
         // the server).
         let HttpFilter {
-            hyper_task,
+            _hyper_task,
             mut reversible_stream,
             mut interceptor_stream,
         } = http_filter_manager
@@ -405,7 +405,7 @@ mod http_traffic_tests {
         // over.
         drop(interceptor_stream);
 
-        assert!(hyper_task.await.is_ok());
+        assert!(_hyper_task.await.is_ok());
         assert!(client_task.await.is_ok());
     }
 

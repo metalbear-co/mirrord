@@ -46,7 +46,7 @@ pub(super) struct HttpFilterBuilder {
 /// 1. Read the requests from hyper's channels through [`matched_rx`], and [`passthrough_rx`];
 /// 2. Send the raw bytes we got from the remote connection to hyper through [`interceptor_stream`];
 pub(crate) struct HttpFilter {
-    pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
+    pub(super) _hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
     /// from.
     pub(crate) reversible_stream: DefaultReversibleStream,
@@ -139,7 +139,7 @@ impl HttpFilterBuilder {
                 });
 
                 Ok(Some(HttpFilter {
-                    hyper_task,
+                    _hyper_task: hyper_task,
                     reversible_stream,
                     interceptor_stream,
                 }))
@@ -148,7 +148,7 @@ impl HttpFilterBuilder {
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
             // some more effort to chase some missing implementations.
             HttpVersion::V2 | HttpVersion::NotHttp => {
-                let passhtrough_task = tokio::task::spawn(async move {
+                let _passhtrough_task = tokio::task::spawn(async move {
                     let mut interceptor_to_original =
                         TcpStream::connect(original_destination).await?;
 

@@ -3,14 +3,14 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::{FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tracing::trace;
 
 use super::{error::HttpTrafficError, UnmatchedHttpResponse, UnmatchedSender};
-use crate::{error::AgentError, steal::MatchedHttpRequest, util::ClientId};
+use crate::{steal::MatchedHttpRequest, util::ClientId};
 
 pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
 pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
