@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use pin_project::pin_project;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -15,6 +13,7 @@ use super::error::HttpTrafficError;
 /// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
 ///
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
+// impl deref with pin
 #[derive(Debug)]
 #[pin_project]
 pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
@@ -39,10 +38,6 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
 
     pub(crate) fn get_header(&mut self) -> &[u8; HEADER_SIZE] {
         &self.header
-    }
-
-    pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.stream.local_addr()
     }
 }
 

@@ -84,7 +84,7 @@ pub struct StealerCommand {
 /// A stolen HTTP request. Unlike [`mirrord_protocol::tcp::HttpRequest`], it also contains a
 /// ClientId.
 #[derive(Debug)]
-pub struct StealerHttpRequest {
+pub struct MatchedHttpRequest {
     pub port: Port,
     pub connection_id: ConnectionId,
     pub client_id: ClientId,
@@ -92,7 +92,7 @@ pub struct StealerHttpRequest {
     pub request: Request<Incoming>,
 }
 
-impl StealerHttpRequest {
+impl MatchedHttpRequest {
     async fn into_serializable(self) -> Result<HttpRequest, hyper::Error> {
         let (
             request::Parts {

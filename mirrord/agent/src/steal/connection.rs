@@ -25,13 +25,15 @@ use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::{
-    http_traffic::{filter::HttpFilter, DefaultReversibleStream},
+    http_traffic::{
+        filter::HttpFilter, DefaultReversibleStream, UnmatchedReceiver, UnmatchedSender,
+    },
     *,
 };
 use crate::{
     error::Result,
     steal::{
-        http_traffic::{HttpFilterManager, PassthroughRequest},
+        http_traffic::{HttpFilterManager, UnmatchedHttpResponse},
         StealSubscription::{HttpFiltered, Unfiltered},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
@@ -81,10 +83,10 @@ pub(crate) struct TcpConnectionStealer {
     client_connections: HashMap<ClientId, HashSet<ConnectionId>>,
 
     /// Mspc sender to clone and give http filter managers so that they can send back requests.
-    http_request_sender: Sender<StealerHttpRequest>,
+    http_request_sender: Sender<MatchedHttpRequest>,
 
     /// Receives filtered HTTP requests that need to be forwarded a client.
-    http_request_receiver: Receiver<StealerHttpRequest>,
+    http_request_receiver: Receiver<MatchedHttpRequest>,
 
     /// For sending letting the [`Self::start`] task this connection was closed.
     http_connection_close_sender: Sender<ConnectionId>,
@@ -112,8 +114,12 @@ pub(crate) struct TcpConnectionStealer {
     /// Saves for a connection the request_id of the next response that should be sent.
     http_request_counters: HashMap<ConnectionId, RequestId>,
 
-    // TODO: ?
-    passthrough_sender: Sender<PassthroughRequest>,
+    /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
+    /// requests case (when no HTTP filter matches a request).
+    unmatched_tx: UnmatchedSender,
+
+    /// Channel that receives responses which did not match any HTTP filter.
+    unmatched_rx: UnmatchedReceiver,
 }
 
 impl TcpConnectionStealer {
@@ -134,9 +140,7 @@ impl TcpConnectionStealer {
 
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
-
-        // TODO: ?
-        let (passthrough_sender, passthrough_receive) = channel(1024);
+        let (unmatched_tx, unmatched_rx) = channel(1024);
 
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
@@ -157,7 +161,8 @@ impl TcpConnectionStealer {
             http_response_queues: HashMap::with_capacity(8),
             http_connection_clients: HashMap::with_capacity(8),
             http_request_counters: HashMap::with_capacity(8),
-            passthrough_sender,
+            unmatched_tx,
+            unmatched_rx,
         })
     }
 
@@ -226,6 +231,13 @@ impl TcpConnectionStealer {
                     self.http_request_counters.remove(&connection_id);
                     self.index_allocator.free_index(connection_id);
                 }
+
+                // Handles the responses that were not matched by any HTTP filter.
+                Some(response) = self.unmatched_rx.recv() => {
+                    let UnmatchedHttpResponse(response) = response?;
+                    self.http_response(response).await?;
+                }
+
                 _ = cancellation_token.cancelled() => {
                     break;
                 }
@@ -242,7 +254,7 @@ impl TcpConnectionStealer {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn forward_stolen_http_request(
         &mut self,
-        request: Option<StealerHttpRequest>,
+        request: Option<MatchedHttpRequest>,
     ) -> Result<(), AgentError> {
         if let Some(request) = request {
             if let Some(daemon_tx) = self.clients.get(&request.client_id) {
@@ -517,7 +529,7 @@ impl TcpConnectionStealer {
                             client_id,
                             regex,
                             self.http_request_sender.clone(),
-                            self.passthrough_sender.clone(),
+                            self.unmatched_tx.clone(),
                         ));
                         self.port_subscriptions.insert(port, manager);
                         Ok(port)
@@ -750,7 +762,6 @@ impl TcpConnectionStealer {
         } else {
             // The response is not the next one that should be sent back, so store in the priority
             // queue until all the earlier responses are available.
-
             if response.request_id > *counter {
                 self.http_response_queues
                     .entry(response.connection_id)

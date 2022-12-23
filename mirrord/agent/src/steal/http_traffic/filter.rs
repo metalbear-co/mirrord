@@ -14,10 +14,10 @@ use tracing::error;
 
 use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
-    PassthroughRequest,
+    UnmatchedSender,
 };
 use crate::{
-    steal::{http_traffic::error, StealerHttpRequest},
+    steal::{http_traffic::error, MatchedHttpRequest},
     util::ClientId,
 };
 
@@ -34,19 +34,19 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
     reversible_stream: DefaultReversibleStream,
-    original_address: SocketAddr,
+    original_destination: SocketAddr,
     connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
-    captured_tx: Sender<StealerHttpRequest>,
-    passthrough_tx: Sender<PassthroughRequest>,
+    matched_tx: Sender<MatchedHttpRequest>,
+    unmatched_tx: UnmatchedSender,
 }
 
 /// Used by the stealer handler to:
 ///
-/// 1. Read the requests from hyper's channels through [`captured_rx`], and [`passthrough_rx`];
+/// 1. Read the requests from hyper's channels through [`matched_rx`], and [`passthrough_rx`];
 /// 2. Send the raw bytes we got from the remote connection to hyper through [`interceptor_stream`];
 pub(crate) struct HttpFilter {
-    pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
+    pub(super) _hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
     /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
     /// from.
     pub(crate) reversible_stream: DefaultReversibleStream,
@@ -70,28 +70,28 @@ impl HttpFilterBuilder {
     #[tracing::instrument(level = "debug")]
     pub(super) async fn new(
         stolen_stream: TcpStream,
-        original_address: SocketAddr,
+        original_destination: SocketAddr,
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
-        captured_tx: Sender<StealerHttpRequest>,
-        passthrough_tx: Sender<PassthroughRequest>,
+        matched_tx: Sender<MatchedHttpRequest>,
+        unmatched_tx: UnmatchedSender,
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 
-        match reversible_stream.and_then(|mut stream| {
+        match reversible_stream.map(|mut stream| {
             let http_version =
                 HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
 
-            Ok((stream, http_version))
+            (stream, http_version)
         }) {
             Ok((reversible_stream, http_version)) => Ok(Self {
                 http_version,
                 client_filters: filters,
                 reversible_stream,
-                original_address,
+                original_destination,
                 connection_id,
-                captured_tx,
-                passthrough_tx,
+                matched_tx,
+                unmatched_tx,
             }),
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
@@ -107,14 +107,14 @@ impl HttpFilterBuilder {
         let Self {
             http_version,
             client_filters,
-            captured_tx,
-            passthrough_tx,
+            matched_tx,
+            unmatched_tx,
             mut reversible_stream,
-            original_address,
             connection_id,
+            original_destination,
         } = self;
 
-        let port = original_address.port();
+        let port = original_destination.port();
 
         match http_version {
             HttpVersion::V1 => {
@@ -126,10 +126,11 @@ impl HttpFilterBuilder {
                             hyper_stream,
                             HyperHandler {
                                 filters: client_filters,
-                                captured_tx,
-                                passthrough_tx,
+                                matched_tx,
+                                unmatched_tx,
                                 connection_id,
                                 port,
+                                original_destination,
                                 request_id: 0,
                             },
                         )
@@ -138,7 +139,7 @@ impl HttpFilterBuilder {
                 });
 
                 Ok(Some(HttpFilter {
-                    hyper_task,
+                    _hyper_task: hyper_task,
                     reversible_stream,
                     interceptor_stream,
                 }))
@@ -147,8 +148,9 @@ impl HttpFilterBuilder {
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
             // some more effort to chase some missing implementations.
             HttpVersion::V2 | HttpVersion::NotHttp => {
-                let passhtrough_task = tokio::task::spawn(async move {
-                    let mut interceptor_to_original = TcpStream::connect(original_address).await?;
+                let _passhtrough_task = tokio::task::spawn(async move {
+                    let mut interceptor_to_original =
+                        TcpStream::connect(original_destination).await?;
 
                     copy_bidirectional(&mut reversible_stream, &mut interceptor_to_original)
                         .await?;

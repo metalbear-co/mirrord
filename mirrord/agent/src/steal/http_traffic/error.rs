@@ -1,20 +1,10 @@
 use thiserror::Error;
 
-use super::{PassthroughRequest, StealerHttpRequest};
-use crate::util::ClientId;
+use super::MatchedHttpRequest;
 
 /// Errors specific to the HTTP traffic feature.
 #[derive(Error, Debug)]
 pub enum HttpTrafficError {
-    #[error("Failed parsing HTTP with 0 bytes!")]
-    Empty,
-
-    #[error("Failed client not found `{0}`!")]
-    ClientNotFound(ClientId),
-
-    #[error("Failed parsing HTTP smaller than minimal!")]
-    TooSmall,
-
     #[error("Failed with IO `{0}`!")]
     IO(#[from] std::io::Error),
 
@@ -25,8 +15,5 @@ pub enum HttpTrafficError {
     Hyper(#[from] hyper::Error),
 
     #[error("Failed with Captured `{0}`!")]
-    CapturedSender(#[from] tokio::sync::mpsc::error::SendError<StealerHttpRequest>),
-
-    #[error("Failed with Passthrough `{0}`!")]
-    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<PassthroughRequest>),
+    MatchedSender(#[from] tokio::sync::mpsc::error::SendError<MatchedHttpRequest>),
 }
