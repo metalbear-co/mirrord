@@ -4,8 +4,12 @@ use std::{net::SocketAddr, sync::Arc};
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
+use http_body_util::BodyExt;
 use hyper::{body::Incoming, client, service::Service, Request, Response};
-use mirrord_protocol::{ConnectionId, Port, RequestId};
+use mirrord_protocol::{
+    tcp::{HttpResponse, InternalHttpResponse},
+    ConnectionId, Port, RequestId,
+};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use super::{error::HttpTrafficError, UnmatchedResponse};
@@ -45,6 +49,8 @@ fn intercepted_request(
     request: Request<Incoming>,
     tx: Sender<UnmatchedResponse>,
     original_destination: SocketAddr,
+    connection_id: ConnectionId,
+    request_id: RequestId,
 ) {
     tokio::spawn(async move {
         let target_stream = TcpStream::connect(original_destination).await.unwrap();
@@ -65,9 +71,18 @@ fn intercepted_request(
         // host comes with the wrong address.
         // let proper_host = HeaderValue::from_str(&original_destination.to_string()).unwrap();
         // request.headers_mut().insert(HOST, proper_host).unwrap();
-        let intercepted_response = request_sender.send_request(request).await.unwrap();
 
-        let response = UnmatchedResponse(intercepted_response);
+        let intercepted_response = request_sender.send_request(request).await.unwrap();
+        let response = HttpResponse::from_hyper_response(
+            intercepted_response,
+            original_destination.port(),
+            connection_id,
+            request_id,
+        )
+        .await
+        .unwrap();
+
+        let response = UnmatchedResponse(response);
         // TODO(alex) [high] 2022-12-20: Send this response back in the original stream.
         tx.send(response).map_err(HttpTrafficError::from).await
     });
@@ -121,6 +136,8 @@ impl Service<Request<Incoming>> for HyperHandler {
                 request,
                 self.unmatched_tx.clone(),
                 self.original_destination,
+                self.connection_id,
+                self.request_id,
             );
             self.request_id += 1;
 

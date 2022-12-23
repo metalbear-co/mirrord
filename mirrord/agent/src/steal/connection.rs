@@ -112,8 +112,12 @@ pub(crate) struct TcpConnectionStealer {
     /// Saves for a connection the request_id of the next response that should be sent.
     http_request_counters: HashMap<ConnectionId, RequestId>,
 
-    // TODO: ?
+    /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
+    /// requests case (when no HTTP filter matches a request).
     unmatched_tx: Sender<UnmatchedResponse>,
+
+    /// Channel that receives responses which did not match any HTTP filter.
+    unmatched_rx: Receiver<UnmatchedResponse>,
 }
 
 impl TcpConnectionStealer {
@@ -158,6 +162,7 @@ impl TcpConnectionStealer {
             http_connection_clients: HashMap::with_capacity(8),
             http_request_counters: HashMap::with_capacity(8),
             unmatched_tx,
+            unmatched_rx,
         })
     }
 
@@ -224,6 +229,17 @@ impl TcpConnectionStealer {
                     }
                     self.index_allocator.free_index(connection_id);
                 }
+
+                // Handles the responses that were not captured by any HTTP filter.
+                Some(UnmatchedResponse(response)) = self.unmatched_rx.recv() => {
+                    // TODO(alex) [high] 2022-12-22: Convert `response` into bytes.
+                    // Send the bytes to `self.connections.get(connection_id)` stream.
+                    //
+                    // This should probably be put into the same list of the normal requests queue,
+                    // instead of sending directly on a stream.
+                    todo!()
+                }
+
                 _ = cancellation_token.cancelled() => {
                     break;
                 }
@@ -231,6 +247,11 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
+    }
+
+    // TODO(alex) [high] 2022-12-22: Convert `response` into bytes.
+    fn foo(UnmatchedResponse(response): UnmatchedResponse) {
+        let b: Vec<u8> = response.try_into().unwrap();
     }
 
     /// Forward a stolen HTTP request from the http filter to the direction of the layer.

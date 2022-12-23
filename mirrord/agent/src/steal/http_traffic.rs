@@ -6,7 +6,7 @@ use std::{net::SocketAddr, sync::Arc};
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::{body::Incoming, Response};
-use mirrord_protocol::ConnectionId;
+use mirrord_protocol::{tcp::HttpResponse, ConnectionId};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
@@ -56,12 +56,11 @@ impl HttpVersion {
 }
 
 #[derive(Debug)]
-pub struct UnmatchedResponse(Response<Incoming>);
+pub struct UnmatchedResponse(pub(super) HttpResponse);
 
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
-    // TODO(alex) [low] 2022-12-12: Probably don't need this, adding for debugging right now.
     port: u16,
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
