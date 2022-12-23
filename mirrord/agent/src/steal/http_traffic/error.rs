@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::{StealerHttpRequest, UnmatchedResponse};
+use super::{MatchedHttpRequest, UnmatchedHttpResponse};
 
 /// Errors specific to the HTTP traffic feature.
 #[derive(Error, Debug)]
@@ -15,8 +15,8 @@ pub enum HttpTrafficError {
     Hyper(#[from] hyper::Error),
 
     #[error("Failed with Captured `{0}`!")]
-    CapturedSender(#[from] tokio::sync::mpsc::error::SendError<StealerHttpRequest>),
+    MatchedSender(#[from] tokio::sync::mpsc::error::SendError<MatchedHttpRequest>),
 
     #[error("Failed with Passthrough `{0}`!")]
-    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<UnmatchedResponse>),
+    PassthroughSender(#[from] tokio::sync::mpsc::error::SendError<UnmatchedHttpResponse>),
 }

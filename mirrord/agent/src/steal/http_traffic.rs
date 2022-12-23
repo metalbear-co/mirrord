@@ -5,7 +5,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::{body::Incoming, Response};
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId};
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
@@ -14,7 +13,7 @@ use self::{
     filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
     reversible_stream::ReversibleStream,
 };
-use crate::{steal::StealerHttpRequest, util::ClientId};
+use crate::{steal::MatchedHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;
@@ -56,7 +55,7 @@ impl HttpVersion {
 }
 
 #[derive(Debug)]
-pub struct UnmatchedResponse(pub(super) HttpResponse);
+pub struct UnmatchedHttpResponse(pub(super) HttpResponse);
 
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
@@ -65,8 +64,8 @@ pub(super) struct HttpFilterManager {
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
-    captured_tx: Sender<StealerHttpRequest>,
-    unmatched_tx: Sender<UnmatchedResponse>,
+    matched_tx: Sender<MatchedHttpRequest>,
+    unmatched_tx: Sender<UnmatchedHttpResponse>,
 }
 
 impl HttpFilterManager {
@@ -78,8 +77,8 @@ impl HttpFilterManager {
         port: u16,
         client_id: ClientId,
         filter: Regex,
-        captured_tx: Sender<StealerHttpRequest>,
-        unmatched_tx: Sender<UnmatchedResponse>,
+        matched_tx: Sender<MatchedHttpRequest>,
+        unmatched_tx: Sender<UnmatchedHttpResponse>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters.insert(client_id, filter);
@@ -87,7 +86,7 @@ impl HttpFilterManager {
         Self {
             port,
             client_filters,
-            captured_tx,
+            matched_tx,
             unmatched_tx,
         }
     }
@@ -145,7 +144,7 @@ impl HttpFilterManager {
             original_address,
             connection_id,
             self.client_filters.clone(),
-            self.captured_tx.clone(),
+            self.matched_tx.clone(),
             self.unmatched_tx.clone(),
         )
         .await?
@@ -164,7 +163,9 @@ mod http_traffic_tests {
 
     use bytes::Bytes;
     use http_body_util::{BodyExt, Full};
-    use hyper::{client, server::conn::http1, service::service_fn, Request};
+    use hyper::{
+        body::Incoming, client, server::conn::http1, service::service_fn, Request, Response,
+    };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -173,6 +174,9 @@ mod http_traffic_tests {
     };
 
     use super::*;
+    use crate::steal::http_traffic::hyper_handler::{
+        DUMMY_RESPONSE_MATCHED, DUMMY_RESPONSE_UNMATCHED,
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
@@ -193,7 +197,10 @@ mod http_traffic_tests {
             // Send a request and wait compare the dummy response we get from the filter's hyper
             // handler.
             let response = client.execute(request).await.unwrap();
-            assert_eq!(response.text().await.unwrap(), "Captured!".to_string());
+            assert_eq!(
+                response.text().await.unwrap(),
+                DUMMY_RESPONSE_MATCHED.to_string()
+            );
         });
 
         let (tcp_stream, _) = server.accept().await.expect("Connection success!");
@@ -201,14 +208,14 @@ mod http_traffic_tests {
         let client_id = 1;
         let filter = Regex::new("Hello").expect("Valid regex.");
 
-        let (captured_tx, mut captured_rx) = channel(15000);
+        let (matched_tx, mut matched_rx) = channel(15000);
         let (unmatched_tx, _) = channel(15000);
 
         let http_filter_manager = HttpFilterManager::new(
             tcp_stream.local_addr().unwrap().port(),
             client_id,
             filter,
-            captured_tx,
+            matched_tx,
             unmatched_tx,
         );
 
@@ -237,8 +244,8 @@ mod http_traffic_tests {
                     assert_eq!(wrote, read);
                 }
 
-                // Receives captured requests from the hyper task.
-                Some(_) = captured_rx.recv() => {
+                // Receives matched requests from the hyper task.
+                Some(_) = matched_rx.recv() => {
                     // Send the dummy response from hyper to our client, so it can stop blocking
                     // and exit.
                     let mut response_buffer = vec![0;1500];
@@ -322,7 +329,7 @@ mod http_traffic_tests {
                 .into_body();
 
             let got_body = response_body.collect().await.unwrap().to_bytes();
-            let expected = Bytes::from("Unmatched!".to_string().into_bytes());
+            let expected = Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes());
             assert_eq!(got_body, expected);
         });
 
@@ -331,14 +338,14 @@ mod http_traffic_tests {
         let client_id = 1;
         let filter = Regex::new("Goodbye").expect("Valid regex.");
 
-        let (captured_tx, _) = channel(15000);
+        let (matched_tx, _) = channel(15000);
         let (unmatched_tx, mut unmatched_rx) = channel(15000);
 
         let http_filter_manager = HttpFilterManager::new(
             tcp_stream.local_addr().unwrap().port(),
             client_id,
             filter,
-            captured_tx,
+            matched_tx,
             unmatched_tx,
         );
 
@@ -417,14 +424,14 @@ mod http_traffic_tests {
         let client_id = 1;
         let filter = Regex::new("Hello").expect("Valid regex.");
 
-        let (captured_tx, _) = channel(15000);
+        let (matched_tx, _) = channel(15000);
         let (unmatched_tx, _) = channel(15000);
 
         let http_filter_manager = HttpFilterManager::new(
             tcp_stream.local_addr().unwrap().port(),
             client_id,
             filter,
-            captured_tx,
+            matched_tx,
             unmatched_tx,
         );
 

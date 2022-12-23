@@ -12,42 +12,27 @@ use mirrord_protocol::{
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
-use super::{error::HttpTrafficError, UnmatchedResponse};
-use crate::{steal::StealerHttpRequest, util::ClientId};
+use super::{error::HttpTrafficError, UnmatchedHttpResponse};
+use crate::{steal::MatchedHttpRequest, util::ClientId};
+
+pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
+pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
-    pub(super) captured_tx: Sender<StealerHttpRequest>,
-    pub(super) unmatched_tx: Sender<UnmatchedResponse>,
+    pub(super) matched_tx: Sender<MatchedHttpRequest>,
+    pub(super) unmatched_tx: Sender<UnmatchedHttpResponse>,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
     pub(crate) original_destination: SocketAddr,
     pub(crate) request_id: RequestId,
 }
 
-// TODO(alex) [low] 2022-12-13: Come back to these docs to create a link to where this is in the
-// agent.
-//
-/// Creates a task to send a message (either [`StealerHttpRequest`] or [`PassthroughRequest`]) to
-/// the receiving end that lives in the stealer.
-///
-/// As the [`hyper::service::Service`] trait doesn't support `async fn` for the [`Service::call`]
-/// method, we use this helper function that allows us to send a `value: T` via a `Sender<T>`
-/// without the need to call `await`.
-#[tracing::instrument(level = "debug", skip(tx))]
-fn spawn_send<T>(value: T, tx: Sender<T>)
-where
-    T: Send + 'static + core::fmt::Debug,
-    HttpTrafficError: From<tokio::sync::mpsc::error::SendError<T>>,
-{
-    tokio::spawn(async move { tx.send(value).map_err(HttpTrafficError::from).await });
-}
-
-#[tracing::instrument(level = "debug", skip(tx))]
-fn intercepted_request(
+// #[tracing::instrument(level = "debug", skip(tx))]
+fn unmatched_request(
     request: Request<Incoming>,
-    tx: Sender<UnmatchedResponse>,
+    tx: Sender<UnmatchedHttpResponse>,
     original_destination: SocketAddr,
     connection_id: ConnectionId,
     request_id: RequestId,
@@ -83,7 +68,7 @@ fn intercepted_request(
         .await
         .unwrap();
 
-        let response = UnmatchedResponse(response);
+        let response = UnmatchedHttpResponse(response);
         tx.send(response).map_err(HttpTrafficError::from).await
     });
 }
@@ -117,7 +102,7 @@ impl Service<Request<Incoming>> for HyperHandler {
                 })
             })
         {
-            let request = StealerHttpRequest {
+            let request = MatchedHttpRequest {
                 port: self.port,
                 connection_id: self.connection_id,
                 client_id,
@@ -125,19 +110,23 @@ impl Service<Request<Incoming>> for HyperHandler {
                 request,
             };
 
-            let captured_tx = self.captured_tx.clone();
+            let matched_tx = self.matched_tx.clone();
+
+            // Creates a task to send the matched request (cannot use `await` in the `call`
+            // function, so we have to do this).
             tokio::spawn(async move {
-                captured_tx
+                matched_tx
                     .send(request)
                     .map_err(HttpTrafficError::from)
                     .await
             });
 
-            let response = async { Ok(Response::new("Captured!".to_string())) };
             self.request_id += 1;
+
+            let response = async { Ok(Response::new(DUMMY_RESPONSE_MATCHED.to_string())) };
             Box::pin(response)
         } else {
-            intercepted_request(
+            unmatched_request(
                 request,
                 self.unmatched_tx.clone(),
                 self.original_destination,
@@ -146,7 +135,7 @@ impl Service<Request<Incoming>> for HyperHandler {
             );
             self.request_id += 1;
 
-            let response = async { Ok(Response::new("Unmatched!".to_string())) };
+            let response = async { Ok(Response::new(DUMMY_RESPONSE_UNMATCHED.to_string())) };
             Box::pin(response)
         }
     }

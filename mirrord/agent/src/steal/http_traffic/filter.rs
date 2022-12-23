@@ -14,10 +14,10 @@ use tracing::error;
 
 use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
-    UnmatchedResponse,
+    UnmatchedHttpResponse,
 };
 use crate::{
-    steal::{http_traffic::error, StealerHttpRequest},
+    steal::{http_traffic::error, MatchedHttpRequest},
     util::ClientId,
 };
 
@@ -37,13 +37,13 @@ pub(super) struct HttpFilterBuilder {
     original_destination: SocketAddr,
     connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
-    captured_tx: Sender<StealerHttpRequest>,
-    unmatched_tx: Sender<UnmatchedResponse>,
+    matched_tx: Sender<MatchedHttpRequest>,
+    unmatched_tx: Sender<UnmatchedHttpResponse>,
 }
 
 /// Used by the stealer handler to:
 ///
-/// 1. Read the requests from hyper's channels through [`captured_rx`], and [`passthrough_rx`];
+/// 1. Read the requests from hyper's channels through [`matched_rx`], and [`passthrough_rx`];
 /// 2. Send the raw bytes we got from the remote connection to hyper through [`interceptor_stream`];
 pub(crate) struct HttpFilter {
     pub(super) hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
@@ -73,8 +73,8 @@ impl HttpFilterBuilder {
         original_destination: SocketAddr,
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
-        captured_tx: Sender<StealerHttpRequest>,
-        unmatched_tx: Sender<UnmatchedResponse>,
+        matched_tx: Sender<MatchedHttpRequest>,
+        unmatched_tx: Sender<UnmatchedHttpResponse>,
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 
@@ -90,7 +90,7 @@ impl HttpFilterBuilder {
                 reversible_stream,
                 original_destination,
                 connection_id,
-                captured_tx,
+                matched_tx,
                 unmatched_tx,
             }),
             Err(fail) => {
@@ -107,7 +107,7 @@ impl HttpFilterBuilder {
         let Self {
             http_version,
             client_filters,
-            captured_tx,
+            matched_tx,
             unmatched_tx,
             mut reversible_stream,
             connection_id,
@@ -126,7 +126,7 @@ impl HttpFilterBuilder {
                             hyper_stream,
                             HyperHandler {
                                 filters: client_filters,
-                                captured_tx,
+                                matched_tx,
                                 unmatched_tx,
                                 connection_id,
                                 port,

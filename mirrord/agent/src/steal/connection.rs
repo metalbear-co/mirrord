@@ -31,7 +31,7 @@ use super::{
 use crate::{
     error::Result,
     steal::{
-        http_traffic::{HttpFilterManager, UnmatchedResponse},
+        http_traffic::{HttpFilterManager, UnmatchedHttpResponse},
         StealSubscription::{HttpFiltered, Unfiltered},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
@@ -81,10 +81,10 @@ pub(crate) struct TcpConnectionStealer {
     client_connections: HashMap<ClientId, HashSet<ConnectionId>>,
 
     /// Mspc sender to clone and give http filter managers so that they can send back requests.
-    http_request_sender: Sender<StealerHttpRequest>,
+    http_request_sender: Sender<MatchedHttpRequest>,
 
     /// Receives filtered HTTP requests that need to be forwarded a client.
-    http_request_receiver: Receiver<StealerHttpRequest>,
+    http_request_receiver: Receiver<MatchedHttpRequest>,
 
     /// For sending letting the [`Self::start`] task this connection was closed.
     http_connection_close_sender: Sender<ConnectionId>,
@@ -114,10 +114,10 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
     /// requests case (when no HTTP filter matches a request).
-    unmatched_tx: Sender<UnmatchedResponse>,
+    unmatched_tx: Sender<UnmatchedHttpResponse>,
 
     /// Channel that receives responses which did not match any HTTP filter.
-    unmatched_rx: Receiver<UnmatchedResponse>,
+    unmatched_rx: Receiver<UnmatchedHttpResponse>,
 }
 
 impl TcpConnectionStealer {
@@ -232,8 +232,8 @@ impl TcpConnectionStealer {
                     self.index_allocator.free_index(connection_id);
                 }
 
-                // Handles the responses that were not captured by any HTTP filter.
-                Some(UnmatchedResponse(response)) = self.unmatched_rx.recv() => {
+                // Handles the responses that were not matched by any HTTP filter.
+                Some(UnmatchedHttpResponse(response)) = self.unmatched_rx.recv() => {
                     self.http_response(response).await?;
                 }
 
@@ -253,7 +253,7 @@ impl TcpConnectionStealer {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn forward_stolen_http_request(
         &mut self,
-        request: Option<StealerHttpRequest>,
+        request: Option<MatchedHttpRequest>,
     ) -> Result<(), AgentError> {
         if let Some(request) = request {
             if let Some(daemon_tx) = self.clients.get(&request.client_id) {
