@@ -19,8 +19,6 @@ pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
     pub(super) matched_tx: Sender<MatchedHttpRequest>,
-    // pub(super) unmatched_tx: Sender<UnmatchedHttpResponse>,
-    // pub(super) matched_tx: Sender<Result<MatchedHttpRequest, HttpTrafficError>>,
     pub(super) unmatched_tx: UnmatchedSender,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
