@@ -85,19 +85,20 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     // TODO(alex) [mid] 2022-12-13: Do we care at all about what is sent from here as a response to
     // our client duplex stream?
-    // #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
-        // TODO(alex) [mid] 2022-12-20: The `Incoming` to `Bytes` conversion should be done here
-        // for both cases, as that's what we care about.
         if let Some(client_id) = request
             .headers()
             .iter()
             .map(|(header_name, header_value)| {
-                format!("{}={}", header_name, header_value.to_str().unwrap())
+                header_value
+                    .to_str()
+                    .and_then(|header_value| Ok(format!("{}={}", header_name, header_value)))
             })
             .find_map(|header| {
                 self.filters.iter().find_map(|filter| {
-                    if filter.is_match(&header).unwrap() {
+                    // TODO(alex) [low] 2022-12-23: Remove the `header` unwrap.
+                    if filter.is_match(header.as_ref().unwrap()).unwrap() {
                         Some(filter.key().clone())
                     } else {
                         None

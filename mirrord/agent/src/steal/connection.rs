@@ -140,8 +140,6 @@ impl TcpConnectionStealer {
 
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
-
-        // TODO: ?
         let (unmatched_tx, unmatched_rx) = channel(1024);
 
         Ok(Self {
