@@ -78,11 +78,11 @@ impl HttpFilterBuilder {
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 
-        match reversible_stream.and_then(|mut stream| {
+        match reversible_stream.map(|mut stream| {
             let http_version =
                 HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
 
-            Ok((stream, http_version))
+            (stream, http_version)
         }) {
             Ok((reversible_stream, http_version)) => Ok(Self {
                 http_version,

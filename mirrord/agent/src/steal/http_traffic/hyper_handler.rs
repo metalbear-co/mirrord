@@ -96,13 +96,13 @@ impl Service<Request<Incoming>> for HyperHandler {
             .map(|(header_name, header_value)| {
                 header_value
                     .to_str()
-                    .and_then(|header_value| Ok(format!("{}={}", header_name, header_value)))
+                    .map(|header_value| format!("{}={}", header_name, header_value))
             })
             .find_map(|header| {
                 self.filters.iter().find_map(|filter| {
                     // TODO(alex) [low] 2022-12-23: Remove the `header` unwrap.
                     if filter.is_match(header.as_ref().unwrap()).unwrap() {
-                        Some(filter.key().clone())
+                        Some(*filter.key())
                     } else {
                         None
                     }
