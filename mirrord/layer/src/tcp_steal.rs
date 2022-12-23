@@ -24,7 +24,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::LayerError,
@@ -50,6 +50,9 @@ pub struct TcpStealHandler {
 
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
+
+    /// HTTP client tasks send request that could not be sent successfully to be retried.
+    failed_request_sender: Sender<HttpRequest>,
 }
 
 // TODO: let user specify http ports.
@@ -152,6 +155,7 @@ impl TcpStealHandler {
     pub(crate) fn new(
         http_filter: Option<String>,
         http_response_sender: Sender<HttpResponse>,
+        failed_request_sender: Sender<HttpRequest>,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -160,6 +164,7 @@ impl TcpStealHandler {
             http_request_senders: Default::default(),
             http_response_sender,
             http_filter,
+            failed_request_sender,
         }
     }
 
@@ -186,7 +191,7 @@ impl TcpStealHandler {
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
     #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
-    pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
+    async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
             debug!(
                 "Got an HTTP request from an existing connection, sending it to the client task \
@@ -202,11 +207,25 @@ impl TcpStealHandler {
         Ok(())
     }
 
+    /// The `request` could not be sent in the first try, so maybe the "server" closed the
+    /// connection too soon. Recreate the connection and try again.
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
+    pub(crate) async fn retry_request(&mut self, request: HttpRequest) {
+        // TODO: Only retry once. Have a "retried" bool in HttpRequest?
+        if let Err(err) = self.create_http_connection(request).await {
+            warn!(
+                "Tried to recreate connection in order to resend failed request, but failed with \
+                error: {err:?}"
+            );
+        }
+    }
+
     /// Manage a single tcp connection, forward requests, wait for responses, send responses back.
     async fn connection_task(
         mut request_receiver: Receiver<HttpRequest>,
         mut http_request_sender: SendRequest<Full<Bytes>>,
         response_sender: Sender<HttpResponse>,
+        failed_request_sender: Sender<HttpRequest>,
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<(), HttpForwarderError> {
@@ -215,15 +234,26 @@ impl TcpStealHandler {
             debug!("HTTP client task received a new request to send: {req:?}."); // TODO: trace.
             let request_id = req.request_id;
             // Send to application.
-            let res = http_request_sender.send_request(req.request.into()).await;
-            // TODO: trace.
-            debug!("HTTP client task sent request to local app and got response: {res:#?}.");
-            let res =
-                HttpResponse::from_hyper_response(res?, port, connection_id, request_id).await?;
-            debug!("HTTP client task sending converted response to main task: {res:?}.");
-            // Send response back to forwarder.
-            response_sender.send(res).await?;
-            debug!("HTTP client task done sending converted response to main task.");
+            match http_request_sender
+                .send_request(req.request.clone().into())
+                .await
+            {
+                Err(err) => {
+                    warn!(
+                        "Sending request to local application failed with: {err:?}.
+                        Queueing it to be retried."
+                    );
+                    trace!("The request to be retired: {req:?}.");
+                    failed_request_sender.send(req).await?
+                }
+                Ok(res) => {
+                    let res =
+                        HttpResponse::from_hyper_response(res, port, connection_id, request_id)
+                            .await?;
+                    // Send response back to forwarder.
+                    response_sender.send(res).await?;
+                }
+            }
         }
         Ok(())
     }
@@ -255,7 +285,7 @@ impl TcpStealHandler {
         let connection_id = http_request.connection_id;
         let port = http_request.port;
 
-        // spawn a task to poll the connection and drive the HTTP state
+        // spawn a task to poll the connection.
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 error!(
@@ -268,6 +298,7 @@ impl TcpStealHandler {
         let (request_sender, request_receiver) = channel(1024);
 
         let response_sender = self.http_response_sender.clone();
+        let failed_request_sender = self.failed_request_sender.clone();
 
         tokio::spawn(async move {
             debug!("HTTP client task started."); // TODO: trace.
@@ -275,6 +306,7 @@ impl TcpStealHandler {
                 request_receiver,
                 sender,
                 response_sender,
+                failed_request_sender,
                 port,
                 connection_id,
             )

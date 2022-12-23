@@ -29,7 +29,7 @@ use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    tcp::{HttpResponse, LayerTcpSteal},
+    tcp::{HttpRequest, HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 #[cfg(target_os = "macos")]
@@ -282,6 +282,9 @@ struct Layer {
     pub http_response_receiver: Receiver<HttpResponse>,
 
     steal: bool,
+
+    /// Receives requests that failed to send, to be retried.
+    pub failed_request_receiver: Receiver<HttpRequest>,
 }
 
 impl Layer {
@@ -293,6 +296,7 @@ impl Layer {
     ) -> Layer {
         // TODO: buffer size?
         let (http_response_sender, http_response_receiver) = channel(1024);
+        let (failed_request_sender, failed_request_receiver) = channel(1024);
         Self {
             tx,
             rx,
@@ -302,9 +306,14 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::new(http_filter, http_response_sender),
+            tcp_steal_handler: TcpStealHandler::new(
+                http_filter,
+                http_response_sender,
+                failed_request_sender,
+            ),
             http_response_receiver,
             steal,
+            failed_request_receiver,
         }
     }
 
@@ -456,6 +465,9 @@ async fn thread_loop(
             }
             Some(resposne) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(resposne))).await.unwrap();
+            }
+            Some(request) = layer.failed_request_receiver.recv() => {
+                layer.tcp_steal_handler.retry_request(request).await
             }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
