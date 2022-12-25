@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.14.3
+
+### Fixed
+
+- Create empty release to overcome temporary issue with VS Code marketplace publication
+
 ## 3.14.2
 
 ### Fixed
