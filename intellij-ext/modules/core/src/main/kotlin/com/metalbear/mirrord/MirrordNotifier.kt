@@ -35,7 +35,7 @@ object MirrordNotifier {
 
     fun errorNotification(message: String, project: Project?) {
         ApplicationManager.getApplication().invokeLater {
-            notifier(message, NotificationType.ERROR).addAction(object : NotificationAction("Support Discord") {
+            notifier(message, NotificationType.ERROR).addAction(object : NotificationAction("Get support on Discord") {
                 override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                     BrowserUtil.browse("https://discord.gg/pSKEdmNZcK")
                     notification.expire()
