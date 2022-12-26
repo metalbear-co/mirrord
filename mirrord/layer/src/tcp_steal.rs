@@ -215,11 +215,11 @@ impl TcpStealHandler {
             debug!("HTTP client task received a new request to send: {req:?}."); // TODO: trace.
             let request_id = req.request_id;
             // Send to application.
-            let res = http_request_sender.send_request(req.request.into()).await?;
+            let res = http_request_sender.send_request(req.request.into()).await;
             // TODO: trace.
-            debug!("HTTP client task sent request to local app and got response: {res:?}.");
+            debug!("HTTP client task sent request to local app and got response: {res:#?}.");
             let res =
-                HttpResponse::from_hyper_response(res, port, connection_id, request_id).await?;
+                HttpResponse::from_hyper_response(res?, port, connection_id, request_id).await?;
             debug!("HTTP client task sending converted response to main task: {res:?}.");
             // Send response back to forwarder.
             response_sender.send(res).await?;
