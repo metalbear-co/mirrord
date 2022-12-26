@@ -109,7 +109,16 @@ impl HttpFilterBuilder {
 
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(
+        level = "debug",
+        skip(self),
+        fields(
+            self.http_version = ?self.http_version,
+            self.client_filters = ?self.client_filters,
+            self.connection_id = ?self.connection_id,
+            self.original_destination = ?self.original_destination,
+        )
+    )]
     pub(super) fn start(self) -> Result<Option<HttpFilter>, HttpTrafficError> {
         let Self {
             http_version,

@@ -96,7 +96,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     // TODO(alex) [mid] 2022-12-13: Do we care at all about what is sent from here as a response to
     // our client duplex stream?
-    // #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         if let Some(client_id) = request
             .headers()
