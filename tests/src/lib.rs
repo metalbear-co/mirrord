@@ -669,12 +669,21 @@ mod utils {
         pod
     }
 
-    pub async fn send_requests(url: &str, expect_response: bool) {
+    pub async fn send_requests(
+        url: &str,
+        expect_response: bool,
+        headers: reqwest::header::HeaderMap,
+    ) {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
         let client = reqwest::Client::new();
-        let res = client.get(url).send().await.unwrap();
+        let res = client
+            .get(url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
 
@@ -684,7 +693,13 @@ mod utils {
         }
 
         let client = reqwest::Client::new();
-        let res = client.post(url).body(TEXT).send().await.unwrap();
+        let res = client
+            .post(url)
+            .headers(headers.clone())
+            .body(TEXT)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         let resp = res.bytes().await.unwrap();
@@ -693,7 +708,12 @@ mod utils {
         }
 
         let client = reqwest::Client::new();
-        let res = client.put(url).send().await.unwrap();
+        let res = client
+            .put(url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         let resp = res.bytes().await.unwrap();
@@ -702,7 +722,7 @@ mod utils {
         }
 
         let client = reqwest::Client::new();
-        let res = client.delete(url).send().await.unwrap();
+        let res = client.delete(url).headers(headers).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         // read all data sent back
         let resp = res.bytes().await.unwrap();

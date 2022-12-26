@@ -6,6 +6,7 @@ mod steal {
     use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
     use rstest::*;
 
     #[cfg(target_os = "linux")]
@@ -39,7 +40,7 @@ mod steal {
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests(&url, true).await;
+        send_requests(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -68,18 +69,43 @@ mod steal {
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
+
         let mut client_a = application
-            // TODO(alex) [high] 2022-12-26: Insert env var for stealer filter.
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags.clone()),
+                Some(vec![("MIRRORD_HTTP_FILTER", "client_a")]),
+            )
+            .await;
+
+        let mut client_b = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_FILTER", "client_b")]),
+            )
             .await;
 
         client_a.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests(&url, true).await;
+        client_b.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let mut headers = HeaderMap::default();
+        headers.insert("Mirrord-Header", "client_a".parse().unwrap());
+        send_requests(&url, true, headers).await;
+
         tokio::time::timeout(Duration::from_secs(40), client_a.child.wait())
             .await
             .unwrap()
             .unwrap();
 
+        tokio::time::timeout(Duration::from_secs(40), client_b.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
         application.assert(&client_a);
+        application.assert(&client_b);
     }
 }
