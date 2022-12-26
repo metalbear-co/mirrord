@@ -184,6 +184,39 @@ mod http_traffic_tests {
         DUMMY_RESPONSE_MATCHED, DUMMY_RESPONSE_UNMATCHED,
     };
 
+    async fn client_task(destination: SocketAddr, original: SocketAddr, expected: Bytes) {
+        let client = TcpStream::connect(destination).await.unwrap();
+        let (mut request_sender, connection) =
+            client::conn::http1::handshake(client).await.unwrap();
+
+        tokio::spawn(async move {
+            if let Err(fail) = connection.await {
+                eprintln!("Error in connection: {}", fail);
+            }
+        });
+
+        let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
+        let body = Full::new(body);
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("http://127.0.0.1:{}", original.port()))
+            .header("First-Header", "mirrord")
+            .header("Mirrord-Test", "Hello")
+            .body(body)
+            .unwrap();
+
+        // Send a request and wait compare the dummy response we get from the filter's hyper
+        // handler.
+        let response_body = request_sender
+            .send_request(request)
+            .await
+            .unwrap()
+            .into_body();
+
+        let got_body = response_body.collect().await.unwrap().to_bytes();
+        assert_eq!(got_body, expected);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
         let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 7777).into();
@@ -191,39 +224,11 @@ mod http_traffic_tests {
             .await
             .expect("Bound TcpListener.");
 
-        let client_task = tokio::spawn(async move {
-            let client = TcpStream::connect(server_address).await.unwrap();
-            let (mut request_sender, connection) =
-                client::conn::http1::handshake(client).await.unwrap();
-
-            tokio::spawn(async move {
-                if let Err(fail) = connection.await {
-                    eprintln!("Error in connection: {}", fail);
-                }
-            });
-
-            let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
-            let body = Full::new(body);
-            let request = Request::builder()
-                .method("GET")
-                .uri(format!("http://127.0.0.1:{}", server_address.port()))
-                .header("First-Header", "mirrord")
-                .header("Mirrord-Test", "Hello")
-                .body(body)
-                .unwrap();
-
-            // Send a request and wait compare the dummy response we get from the filter's hyper
-            // handler.
-            let response_body = request_sender
-                .send_request(request)
-                .await
-                .unwrap()
-                .into_body();
-
-            let got_body = response_body.collect().await.unwrap().to_bytes();
-            let expected = Bytes::from(DUMMY_RESPONSE_MATCHED.to_string().into_bytes());
-            assert_eq!(got_body, expected);
-        });
+        let client_task = tokio::spawn(client_task(
+            server_address,
+            server_address,
+            Bytes::from(DUMMY_RESPONSE_MATCHED.to_string().into_bytes()),
+        ));
 
         let (tcp_stream, _) = server.accept().await.expect("Connection success!");
 
@@ -321,39 +326,11 @@ mod http_traffic_tests {
             .expect("Bound TcpListener.");
 
         // The client sends a request to the agent (mimmicking the stealing feature).
-        let client_task = tokio::spawn(async move {
-            let client = TcpStream::connect(agent_address).await.unwrap();
-            let (mut request_sender, connection) =
-                client::conn::http1::handshake(client).await.unwrap();
-
-            tokio::spawn(async move {
-                if let Err(fail) = connection.await {
-                    eprintln!("Error in connection: {}", fail);
-                }
-            });
-
-            let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
-            let body = Full::new(body);
-            let request = Request::builder()
-                .method("GET")
-                .uri(format!("http://127.0.0.1:{}", server_address.port()))
-                .header("First-Header", "mirrord")
-                .header("Mirrord-Test", "Hello")
-                .body(body)
-                .unwrap();
-
-            // Send a request and wait compare the dummy response we get from the filter's hyper
-            // handler.
-            let response_body = request_sender
-                .send_request(request)
-                .await
-                .unwrap()
-                .into_body();
-
-            let got_body = response_body.collect().await.unwrap().to_bytes();
-            let expected = Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes());
-            assert_eq!(got_body, expected);
-        });
+        let client_task = tokio::spawn(client_task(
+            agent_address,
+            server_address,
+            Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes()),
+        ));
 
         let (tcp_stream, _) = agent.accept().await.expect("Connection success!");
 
