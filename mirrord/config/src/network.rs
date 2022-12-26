@@ -38,6 +38,12 @@ pub struct NetworkConfig {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
     pub incoming: IncomingConfig,
 
+    // TODO: Test this field in unit tests.
+    // TODO: Put inside `IncomingConfig::Steal` so that it cannot exist without steal being on?
+    // TODO: Verify regex compiles.
+    #[config(env = "MIRRORD_HTTP_FILTER")]
+    pub http_filter: Option<String>,
+
     /// Tunnel outgoing network operations through mirrord.
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
@@ -61,6 +67,7 @@ impl MirrordToggleableConfig for NetworkFileConfig {
             incoming,
             dns,
             outgoing: OutgoingFileConfig::disabled_config()?,
+            http_filter: None,
         })
     }
 }

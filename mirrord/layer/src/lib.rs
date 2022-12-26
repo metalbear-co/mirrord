@@ -29,6 +29,7 @@ use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
+    tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
 };
 #[cfg(target_os = "macos")]
@@ -44,7 +45,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -277,11 +278,21 @@ struct Layer {
 
     pub tcp_steal_handler: TcpStealHandler,
 
+    /// Receives responses in the layer loop to be forwarded to the agent.
+    pub http_response_receiver: Receiver<HttpResponse>,
+
     steal: bool,
 }
 
 impl Layer {
-    fn new(tx: Sender<ClientMessage>, rx: Receiver<DaemonMessage>, steal: bool) -> Layer {
+    fn new(
+        tx: Sender<ClientMessage>,
+        rx: Receiver<DaemonMessage>,
+        steal: bool,
+        http_filter: Option<String>,
+    ) -> Layer {
+        // TODO: buffer size?
+        let (http_response_sender, http_response_receiver) = channel(1024);
         Self {
             tx,
             rx,
@@ -291,7 +302,8 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::default(),
+            tcp_steal_handler: TcpStealHandler::new(http_filter, http_response_sender),
+            http_response_receiver,
             steal,
         }
     }
@@ -344,7 +356,7 @@ impl Layer {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
@@ -395,8 +407,14 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(tx, rx, config.feature.network.incoming.is_steal());
+    let mut layer = Layer::new(
+        tx,
+        rx,
+        config.feature.network.incoming.is_steal(),
+        config.feature.network.http_filter,
+    );
     loop {
+        info!("thread loop iteration."); // TODO: delete.
         select! {
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
@@ -427,6 +445,7 @@ async fn thread_loop(
                             error!("Error handling daemon message: {:?}", err);
                             break;
                         }
+                        debug!("Done handling daemon message."); // TODO: delete.
                     },
                     None => {
                         error!("agent connection lost");
@@ -436,7 +455,10 @@ async fn thread_loop(
             },
             Some(message) = layer.tcp_steal_handler.next() => {
                 layer.send(message).await.unwrap();
-            },
+            }
+            Some(resposne) = layer.http_response_receiver.recv() => {
+                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(resposne))).await.unwrap();
+            }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();

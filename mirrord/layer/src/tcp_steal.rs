@@ -9,19 +9,22 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::{handshake, SendRequest};
 use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcpSteal, NewTcpConnection, StealType::All, TcpClose, TcpData},
+    tcp::{
+        HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        StealType::{All, FilteredHttp},
+        TcpClose, TcpData,
+    },
     ClientMessage, ConnectionId, Port,
 };
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
-    select,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::{
     error::LayerError,
@@ -29,8 +32,6 @@ use crate::{
 };
 
 pub(crate) mod http_forwarding;
-
-use mirrord_protocol::tcp::HttpResponse;
 
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
@@ -47,23 +48,12 @@ pub struct TcpStealHandler {
     /// This sender is cloned and moved into those tasks.
     http_response_sender: Sender<HttpResponse>,
 
-    /// Receives responses in the main layer task sent from all http client tasks.
-    http_response_receiver: Receiver<HttpResponse>,
+    /// A string with a header regex to filter HTTP requests by.
+    http_filter: Option<String>,
 }
 
-impl Default for TcpStealHandler {
-    fn default() -> Self {
-        let (response_sender, response_receiver) = channel(1024);
-        Self {
-            ports: Default::default(),
-            write_streams: Default::default(),
-            read_streams: Default::default(),
-            http_request_senders: Default::default(),
-            http_response_sender: response_sender,
-            http_response_receiver: response_receiver,
-        }
-    }
-}
+// TODO: let user specify http ports.
+const HTTP_PORTS: [Port; 2] = [80, 8080];
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
@@ -107,7 +97,7 @@ impl TcpHandler for TcpStealHandler {
     }
 
     /// An http request was stolen by the http filter. Pass it to the local application.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         self.forward_request(request).await
     }
@@ -145,38 +135,49 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(All(
-            port,
-        ))))
+        let steal_type = if HTTP_PORTS.contains(&port) && let Some(filter) = &self.http_filter {
+            FilteredHttp(port, filter.clone())
+        } else {
+            All(port)
+        };
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+            steal_type,
+        )))
         .await
         .map_err(From::from)
     }
 }
 
 impl TcpStealHandler {
-    /// Get the available response data, either normal TcpData, or a response to a filtered HTTP
-    /// request - whatever is ready first.
+    pub(crate) fn new(
+        http_filter: Option<String>,
+        http_response_sender: Sender<HttpResponse>,
+    ) -> Self {
+        Self {
+            ports: Default::default(),
+            write_streams: Default::default(),
+            read_streams: Default::default(),
+            http_request_senders: Default::default(),
+            http_response_sender,
+            http_filter,
+        }
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace.
     pub async fn next(&mut self) -> Option<ClientMessage> {
-        select! {
-            opt = self.read_streams.next() => {
-                let (connection_id, value) = opt?;
-                match value {
-                    Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                        connection_id,
-                        bytes: bytes.to_vec(),
-                    }))),
-                    Some(Err(err)) => {
-                        error!("connection id {connection_id:?} read error: {err:?}");
-                        None
-                    }
-                    None => Some(ClientMessage::TcpSteal(
-                        LayerTcpSteal::ConnectionUnsubscribe(connection_id),
-                    )),
-                }
+        let (connection_id, value) = self.read_streams.next().await?;
+        match value {
+            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                connection_id,
+                bytes: bytes.to_vec(),
+            }))),
+            Some(Err(err)) => {
+                error!("connection id {connection_id:?} read error: {err:?}");
+                None
             }
-            Some(res) = self.http_response_receiver.recv() => {
-                Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)))
-            }
+            None => Some(ClientMessage::TcpSteal(
+                LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+            )),
         }
     }
 
@@ -184,8 +185,13 @@ impl TcpStealHandler {
     /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
     pub(crate) async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
+            debug!(
+                "Got an HTTP request from an existing connection, sending it to the client task \
+                to be forwarded to the application."
+            ); // TODO: trace.
             sender
                 .send(request)
                 .await
@@ -206,13 +212,18 @@ impl TcpStealHandler {
     ) -> Result<(), HttpForwarderError> {
         // Listen for more requests in this connection and forward them to app.
         while let Some(req) = request_receiver.recv().await {
+            debug!("HTTP client task received a new request to send: {req:?}."); // TODO: trace.
             let request_id = req.request_id;
             // Send to application.
             let res = http_request_sender.send_request(req.request.into()).await?;
+            // TODO: trace.
+            debug!("HTTP client task sent request to local app and got response: {res:?}.");
             let res =
                 HttpResponse::from_hyper_response(res, port, connection_id, request_id).await?;
+            debug!("HTTP client task sending converted response to main task: {res:?}.");
             // Send response back to forwarder.
             response_sender.send(res).await?;
+            debug!("HTTP client task done sending converted response to main task.");
         }
         Ok(())
     }
@@ -223,6 +234,7 @@ impl TcpStealHandler {
     /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
     /// The responses from all the http client tasks will arrive together at
     /// [`self.response_receiver`].
+    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace.
     async fn create_http_connection(
         &mut self,
         http_request: HttpRequest,
@@ -258,6 +270,7 @@ impl TcpStealHandler {
         let response_sender = self.http_response_sender.clone();
 
         tokio::spawn(async move {
+            debug!("HTTP client task started."); // TODO: trace.
             if let Err(e) = Self::connection_task(
                 request_receiver,
                 sender,
@@ -271,7 +284,8 @@ impl TcpStealHandler {
                     "Error while forwarding http connection {connection_id} (port {port}): {e:?}."
                 )
             } else {
-                trace!(
+                debug!(
+                    // TODO: trace.
                     "Filtered http connection {connection_id} (port {port}) closed without errors."
                 )
             }
@@ -285,6 +299,7 @@ impl TcpStealHandler {
         self.http_request_senders
             .insert(connection_id, request_sender);
 
+        debug!("main task done creating http connection."); // TODO: done.
         Ok(())
     }
 }
