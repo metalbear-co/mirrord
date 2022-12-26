@@ -69,7 +69,7 @@ impl HttpFilterBuilder {
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     #[tracing::instrument(
         level = "debug",
-        skip(matched_tx, unmatched_tx)
+        skip(stolen_stream, matched_tx, unmatched_tx)
         fields(
             local = ?stolen_stream.local_addr(),
             peer = ?stolen_stream.peer_addr()
