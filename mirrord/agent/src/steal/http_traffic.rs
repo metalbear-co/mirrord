@@ -184,6 +184,7 @@ mod http_traffic_tests {
         DUMMY_RESPONSE_MATCHED, DUMMY_RESPONSE_UNMATCHED,
     };
 
+    /// Helper that sends a [`Request`] to `destination` with some custom headers.
     async fn hyper_client_task(destination: SocketAddr, original: SocketAddr, expected: Bytes) {
         let client = TcpStream::connect(destination).await.unwrap();
         let (mut request_sender, connection) =
