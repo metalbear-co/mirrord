@@ -184,7 +184,7 @@ mod http_traffic_tests {
         DUMMY_RESPONSE_MATCHED, DUMMY_RESPONSE_UNMATCHED,
     };
 
-    async fn client_task(destination: SocketAddr, original: SocketAddr, expected: Bytes) {
+    async fn hyper_client_task(destination: SocketAddr, original: SocketAddr, expected: Bytes) {
         let client = TcpStream::connect(destination).await.unwrap();
         let (mut request_sender, connection) =
             client::conn::http1::handshake(client).await.unwrap();
@@ -224,7 +224,7 @@ mod http_traffic_tests {
             .await
             .expect("Bound TcpListener.");
 
-        let client_task = tokio::spawn(client_task(
+        let client_task = tokio::spawn(hyper_client_task(
             server_address,
             server_address,
             Bytes::from(DUMMY_RESPONSE_MATCHED.to_string().into_bytes()),
@@ -326,7 +326,7 @@ mod http_traffic_tests {
             .expect("Bound TcpListener.");
 
         // The client sends a request to the agent (mimmicking the stealing feature).
-        let client_task = tokio::spawn(client_task(
+        let client_task = tokio::spawn(hyper_client_task(
             agent_address,
             server_address,
             Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes()),
