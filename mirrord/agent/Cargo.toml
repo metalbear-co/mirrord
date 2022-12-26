@@ -51,7 +51,6 @@ httparse = "1"
 fancy-regex = { version = "0.10" }
 dashmap = { version = "5" }
 pin-project = "1"
-reqwest = "0.11"
 
 [dev-dependencies]
 mockall = "0.11"

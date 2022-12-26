@@ -191,22 +191,38 @@ mod http_traffic_tests {
             .await
             .expect("Bound TcpListener.");
 
-        let request_task = tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            let request = client
-                .get(format!("http://127.0.0.1:{}", server_address.port()))
+        let client_task = tokio::spawn(async move {
+            let client = TcpStream::connect(server_address).await.unwrap();
+            let (mut request_sender, connection) =
+                client::conn::http1::handshake(client).await.unwrap();
+
+            tokio::spawn(async move {
+                if let Err(fail) = connection.await {
+                    eprintln!("Error in connection: {}", fail);
+                }
+            });
+
+            let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
+            let body = Full::new(body);
+            let request = Request::builder()
+                .method("GET")
+                .uri(format!("http://127.0.0.1:{}", server_address.port()))
                 .header("First-Header", "mirrord")
                 .header("Mirrord-Test", "Hello")
-                .build()
+                .body(body)
                 .unwrap();
 
             // Send a request and wait compare the dummy response we get from the filter's hyper
             // handler.
-            let response = client.execute(request).await.unwrap();
-            assert_eq!(
-                response.text().await.unwrap(),
-                DUMMY_RESPONSE_MATCHED.to_string()
-            );
+            let response_body = request_sender
+                .send_request(request)
+                .await
+                .unwrap()
+                .into_body();
+
+            let got_body = response_body.collect().await.unwrap().to_bytes();
+            let expected = Bytes::from(DUMMY_RESPONSE_MATCHED.to_string().into_bytes());
+            assert_eq!(got_body, expected);
         });
 
         let (tcp_stream, _) = server.accept().await.expect("Connection success!");
@@ -272,7 +288,7 @@ mod http_traffic_tests {
         drop(interceptor_stream);
 
         assert!(_hyper_task.await.is_ok());
-        assert!(request_task.await.is_ok());
+        assert!(client_task.await.is_ok());
     }
 
     /// Replies with a proper `Response` to test the unmatched filter case.
