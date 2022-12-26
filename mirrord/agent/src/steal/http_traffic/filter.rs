@@ -67,7 +67,14 @@ impl HttpFilterBuilder {
     /// Checks if the first available bytes in a stream could be of an http request.
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(
+        level = "debug",
+        skip(matched_tx, unmatched_tx)
+        fields(
+            local = ?stolen_stream.local_addr(),
+            peer = ?stolen_stream.peer_addr()
+        ),
+    )]
     pub(super) async fn new(
         stolen_stream: TcpStream,
         original_destination: SocketAddr,
