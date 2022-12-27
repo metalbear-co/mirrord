@@ -137,7 +137,6 @@ impl HttpFilterBuilder {
         } = self;
 
         let port = original_destination.port();
-        let connection_close_sender = self.connection_close_sender.clone();
 
         match http_version {
             HttpVersion::V1 => {
@@ -157,7 +156,8 @@ impl HttpFilterBuilder {
                             },
                         )
                         .await;
-                    connection_close_sender.send(connection_id);
+
+                    connection_close_sender.send(connection_id).await;
                 });
                 Ok(())
             }

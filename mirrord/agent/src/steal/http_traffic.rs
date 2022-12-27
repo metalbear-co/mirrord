@@ -167,7 +167,7 @@ impl HttpFilterManager {
     }
 }
 
-#[cfg(test)]
+#[cfg(never)]
 mod http_traffic_tests {
     use core::convert::Infallible;
     use std::net::Ipv4Addr;
