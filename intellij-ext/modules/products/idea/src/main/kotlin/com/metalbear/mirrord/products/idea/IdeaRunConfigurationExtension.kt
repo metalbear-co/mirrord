@@ -35,7 +35,7 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
         val project = configuration.project
         val currentEnv = HashMap<String, String>()
         currentEnv.putAll(params.env)
-        
+
         MirrordExecManager.start(wsl, project)?.let {
                 env ->
             for (entry in env.entries.iterator()) {

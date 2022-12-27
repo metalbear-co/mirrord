@@ -9,7 +9,7 @@ import com.jetbrains.python.run.PythonRunConfigurationExtension
 import com.metalbear.mirrord.MirrordExecManager
 
 
-class PyCharmRunConfigurationExtension: PythonRunConfigurationExtension() {
+class PythonRunConfigurationExtension: PythonRunConfigurationExtension() {
     override fun isApplicableFor(configuration: AbstractPythonRunConfiguration<*>): Boolean {
         return true
     }
@@ -28,7 +28,6 @@ class PyCharmRunConfigurationExtension: PythonRunConfigurationExtension() {
         cmdLine: GeneralCommandLine,
         runnerId: String
     ) {
-        // dunno if this works
         val wsl = when {
             SystemInfo.isWindows -> {
                 getDistributionByWindowsUncPath(configuration.projectPathOnTarget)

@@ -1,26 +1,41 @@
 package com.metalbear.mirrord.products.pycharm
 
 import com.intellij.execution.ExecutionException
+import com.intellij.execution.wsl.WslPath
+import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.SystemInfo
 import com.jetbrains.python.run.AbstractPythonRunConfiguration
 import com.jetbrains.python.run.PythonExecution
 import com.jetbrains.python.run.PythonRunParams
 import com.jetbrains.python.run.target.HelpersAwareTargetEnvironmentRequest
 import com.jetbrains.python.run.target.PythonCommandLineTargetEnvironmentProvider
-//import net.ashald.envfile.platform.EnvFileEnvironmentVariables
-//import net.ashald.envfile.platform.ui.EnvFileConfigurationEditor
+import com.metalbear.mirrord.MirrordExecManager
 
 
-class EnvFileProvider : PythonCommandLineTargetEnvironmentProvider {
+class PythonCommandLineProvider : PythonCommandLineTargetEnvironmentProvider {
     override fun extendTargetEnvironment(
         project: Project,
-        helpersAwareTargetEnvironmentRequest: HelpersAwareTargetEnvironmentRequest,
+        helpersAwareTargetRequest: HelpersAwareTargetEnvironmentRequest,
         pythonExecution: PythonExecution,
-        pythonRunParams: PythonRunParams
+        runParams: PythonRunParams
     ) {
-        if (pythonRunParams is AbstractPythonRunConfiguration<*>) { // Copied from EnvFile, not sure it's necessary
+        if (runParams is AbstractPythonRunConfiguration<*>) {
             try {
+                val wsl = helpersAwareTargetRequest.targetEnvironmentRequest.let {
+                    if (it is WslTargetEnvironmentRequest) {
+                        it.configuration.distribution
+                    } else {
+                        null
+                    }
+                }
 
+                MirrordExecManager.start(wsl, project)?.let {
+                        env ->
+                    for (entry in env.entries.iterator()) {
+                        pythonExecution.addEnvironmentVariable(entry.key, entry.value)
+                    }
+                }
             } catch (e: ExecutionException) {
                 throw RuntimeException(e)
             }
