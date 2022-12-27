@@ -1,16 +1,21 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use http_body_util::BodyExt;
+use bytes::Bytes;
+use http_body_util::{BodyExt, Collected, Full};
 use hyper::{
     body::Incoming,
     http::{request, response},
-    Request,
+    Request, Response,
 };
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
     ConnectionId, Port, RequestId,
 };
-use tokio::{net::TcpListener, select, sync::mpsc::Sender};
+use tokio::{
+    net::TcpListener,
+    select,
+    sync::{mpsc::Sender, oneshot},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -79,6 +84,18 @@ pub struct StealerCommand {
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
+}
+
+/// A struct that the [`HyperHandler::call`] sends [`TcpConnectionStealer::start`], with a request
+/// that matched a filter and should be forwarded to a layer, and sender in which the response to
+/// that request can be sent back.
+#[derive(Debug)]
+pub struct HandlerHttpRequest {
+    pub request: MatchedHttpRequest,
+
+    /// For sending the response from the stealer task back to the hyper service.
+    /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
+    pub response_tx: oneshot::Sender<Response<Full<Bytes>>>,
 }
 
 /// A stolen HTTP request. Unlike [`mirrord_protocol::tcp::HttpRequest`], it also contains a

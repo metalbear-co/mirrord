@@ -1,19 +1,28 @@
 use core::{future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 
+use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
+use http_body_util::Full;
 use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{error::SendError, Sender},
+    sync::{
+        mpsc::{error::SendError, Sender},
+        oneshot,
+        oneshot::error::RecvError,
+    },
 };
 use tracing::trace;
 
 use super::{error::HttpTrafficError, UnmatchedHttpResponse, UnmatchedSender};
-use crate::{steal::MatchedHttpRequest, util::ClientId};
+use crate::{
+    steal::{HandlerHttpRequest, MatchedHttpRequest},
+    util::ClientId,
+};
 
 pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
 pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
@@ -21,7 +30,7 @@ pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
-    pub(super) matched_tx: Sender<MatchedHttpRequest>,
+    pub(super) matched_tx: Sender<HandlerHttpRequest>,
     pub(super) unmatched_tx: UnmatchedSender,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
@@ -32,8 +41,8 @@ pub(super) struct HyperHandler {
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
 #[tracing::instrument(level = "debug", skip(tx))]
 async fn matched_request(
-    request: MatchedHttpRequest,
-    tx: Sender<MatchedHttpRequest>,
+    request: HandlerHttpRequest,
+    tx: Sender<HandlerHttpRequest>,
 ) -> Result<(), HttpTrafficError> {
     tx.send(request).map_err(HttpTrafficError::from).await
 }
@@ -125,13 +134,21 @@ impl Service<Request<Incoming>> for HyperHandler {
                 request_id: self.request_id,
                 request,
             };
-            let tx = self.matched_tx.clone();
 
-            let response = async move {
-                matched_request(req, tx).await?;
-
-                Ok(Response::new(DUMMY_RESPONSE_MATCHED.to_string()))
+            let (response_tx, response_rx) = oneshot::channel();
+            let handler_request = HandlerHttpRequest {
+                request: req,
+                response_tx,
             };
+
+            let request_tx = self.matched_tx.clone();
+            async move {
+                // TODO: NO UNWRAP!
+                matched_request(handler_request, request_tx).await.unwrap();
+            };
+
+            // TODO: NO UNWRAP!
+            let response = response_rx.blocking_recv().unwrap();
 
             Box::pin(response)
         } else {

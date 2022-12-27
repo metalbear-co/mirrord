@@ -16,7 +16,10 @@ use self::{
     filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
     reversible_stream::ReversibleStream,
 };
-use crate::{steal::MatchedHttpRequest, util::ClientId};
+use crate::{
+    steal::{HandlerHttpRequest, MatchedHttpRequest},
+    util::ClientId,
+};
 
 pub(crate) mod error;
 pub(super) mod filter;
@@ -70,7 +73,7 @@ pub(super) struct HttpFilterManager {
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
-    matched_tx: Sender<MatchedHttpRequest>,
+    matched_tx: Sender<HandlerHttpRequest>,
     unmatched_tx: UnmatchedSender,
 }
 
@@ -83,7 +86,7 @@ impl HttpFilterManager {
         port: u16,
         client_id: ClientId,
         filter: Regex,
-        matched_tx: Sender<MatchedHttpRequest>,
+        matched_tx: Sender<HandlerHttpRequest>,
         unmatched_tx: UnmatchedSender,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
@@ -144,7 +147,8 @@ impl HttpFilterManager {
         original_stream: TcpStream,
         original_address: SocketAddr,
         connection_id: ConnectionId,
-    ) -> Result<Option<HttpFilter>, HttpTrafficError> {
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError> {
         HttpFilterBuilder::new(
             original_stream,
             original_address,
@@ -152,6 +156,7 @@ impl HttpFilterManager {
             self.client_filters.clone(),
             self.matched_tx.clone(),
             self.unmatched_tx.clone(),
+            connection_close_sender,
         )
         .await?
         .start()

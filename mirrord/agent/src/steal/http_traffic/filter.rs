@@ -17,7 +17,7 @@ use super::{
     UnmatchedSender,
 };
 use crate::{
-    steal::{http_traffic::error, MatchedHttpRequest},
+    steal::{http_traffic::error, HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
 
@@ -37,8 +37,11 @@ pub(super) struct HttpFilterBuilder {
     original_destination: SocketAddr,
     connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
-    matched_tx: Sender<MatchedHttpRequest>,
+    matched_tx: Sender<HandlerHttpRequest>,
     unmatched_tx: UnmatchedSender,
+
+    /// For informing the stealer task that the connection was closed.
+    connection_close_sender: Sender<ConnectionId>,
 }
 
 /// Used by the stealer handler to:
@@ -80,8 +83,9 @@ impl HttpFilterBuilder {
         original_destination: SocketAddr,
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
-        matched_tx: Sender<MatchedHttpRequest>,
+        matched_tx: Sender<HttpHandlerRequest>,
         unmatched_tx: UnmatchedSender,
+        connection_close_sender: Sender<ConnectionId>,
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
 
@@ -99,6 +103,7 @@ impl HttpFilterBuilder {
                 connection_id,
                 matched_tx,
                 unmatched_tx,
+                connection_close_sender,
             }),
             Err(fail) => {
                 error!("Something went wrong in http filter {fail:#?}");
@@ -119,7 +124,7 @@ impl HttpFilterBuilder {
             self.original_destination = ?self.original_destination,
         )
     )]
-    pub(super) fn start(self) -> Result<Option<HttpFilter>, HttpTrafficError> {
+    pub(super) fn start(self) -> Result<(), HttpTrafficError> {
         let Self {
             http_version,
             client_filters,
@@ -128,18 +133,19 @@ impl HttpFilterBuilder {
             mut reversible_stream,
             connection_id,
             original_destination,
+            connection_close_sender,
         } = self;
 
         let port = original_destination.port();
+        let connection_close_sender = self.connection_close_sender.clone();
 
         match http_version {
             HttpVersion::V1 => {
-                let (hyper_stream, interceptor_stream) = duplex(15000);
-
-                let hyper_task = tokio::task::spawn(async move {
-                    http1::Builder::new()
+                tokio::task::spawn(async move {
+                    // TODO: do we need to do something with this result?
+                    let _res = http1::Builder::new()
                         .serve_connection(
-                            hyper_stream,
+                            reversible_stream,
                             HyperHandler {
                                 filters: client_filters,
                                 matched_tx,
@@ -150,15 +156,10 @@ impl HttpFilterBuilder {
                                 request_id: 0,
                             },
                         )
-                        .await
-                        .map_err(From::from)
+                        .await;
+                    connection_close_sender.send(connection_id);
                 });
-
-                Ok(Some(HttpFilter {
-                    _hyper_task: hyper_task,
-                    reversible_stream,
-                    interceptor_stream,
-                }))
+                Ok(())
             }
             // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
             // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough), and
@@ -173,7 +174,7 @@ impl HttpFilterBuilder {
                     Ok::<_, error::HttpTrafficError>(())
                 });
 
-                Ok(None)
+                Ok(())
             }
         }
     }
