@@ -38,9 +38,12 @@ object MirrordExecManager {
         }
         var target: String? = null;
         if (!MirrordConfigAPI.isTargetSet(project)) {
-            ApplicationManager.getApplication().invokeAndWait {
-                target = chooseTarget(wslDistribution, project);
-            }
+            ApplicationManager.getApplication().executeOnPooledThread {
+                ApplicationManager.getApplication().invokeAndWait() {
+                    target = chooseTarget(wslDistribution, project);
+                }
+            }.get()
+
         }
 
         var env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)

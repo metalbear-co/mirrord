@@ -5,7 +5,6 @@ import com.goide.execution.GoRunningState
 import com.goide.execution.extension.GoRunConfigurationExtension
 import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
-import com.intellij.execution.target.TargetEnvironmentRequest
 import com.intellij.execution.target.TargetedCommandLineBuilder
 import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo

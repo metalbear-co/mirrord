@@ -17,10 +17,12 @@ tasks {
 }
 
 intellij {
+
     version.set(properties("platformVersion"))
     plugins.set(listOf("java", "gradle", "maven", "org.intellij.scala:2022.3.8"))
 }
 
 dependencies {
     implementation(project(":mirrord-core"))
+
 }

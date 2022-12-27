@@ -33,6 +33,14 @@ class MirrordEnabler : ToggleAction() {
      */
     private fun telemetryConsent(project: Project?) {
         ApplicationManager.getApplication().invokeLater {
+            val allowAction = object : NotificationAction("Allow") {
+                override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                    MirrordSettingsState.telemetryEnabled = true
+                    MirrordSettingsState.versionCheckEnabled = true
+                    notification.expire()
+                }
+            }
+
             MirrordNotifier.notifier(
                 "Allow mirrord to send telemetries",
                 NotificationType.INFORMATION
@@ -44,13 +52,7 @@ class MirrordEnabler : ToggleAction() {
                         notification.expire()
                     }
                 })
-                .addAction(object : NotificationAction("Allow") {
-                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        MirrordSettingsState.telemetryEnabled = true
-                        MirrordSettingsState.versionCheckEnabled = true
-                        notification.expire()
-                    }
-                })
+                .addAction(allowAction)
                 .addAction(object : NotificationAction("More info") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                         BrowserUtil.browse("https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md")
