@@ -17,4 +17,7 @@ pub enum HttpTrafficError {
 
     #[error("Failed with Captured `{0}`!")]
     MatchedSender(#[from] tokio::sync::mpsc::error::SendError<HandlerHttpRequest>),
+
+    #[error("Failed with Captured `{0}`!")]
+    ResponseReceiver(#[from] tokio::sync::oneshot::error::RecvError),
 }

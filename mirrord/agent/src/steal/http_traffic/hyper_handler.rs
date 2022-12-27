@@ -5,10 +5,10 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use http_body_util::{combinators::BoxBody, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
     body::{Body, Incoming},
-    client,
+    client, http,
     service::Service,
     Request, Response,
 };
@@ -17,8 +17,7 @@ use tokio::{
     net::TcpStream,
     sync::{
         mpsc::{error::SendError, Sender},
-        oneshot,
-        oneshot::error::RecvError,
+        oneshot::{self, error::RecvError, Receiver},
     },
 };
 use tracing::trace;
@@ -45,12 +44,22 @@ pub(super) struct HyperHandler {
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
-#[tracing::instrument(level = "debug", skip(tx))]
+#[tracing::instrument(level = "debug", skip(matched_tx, response_rx))]
 async fn matched_request(
     request: HandlerHttpRequest,
-    tx: Sender<HandlerHttpRequest>,
-) -> Result<(), HttpTrafficError> {
-    tx.send(request).map_err(HttpTrafficError::from).await
+    matched_tx: Sender<HandlerHttpRequest>,
+    response_rx: Receiver<Response<Full<Bytes>>>,
+) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    matched_tx
+        .send(request)
+        .map_err(HttpTrafficError::from)
+        .await?;
+
+    let (mut parts, body) = response_rx.await?.into_parts();
+    parts.headers.remove(http::header::CONTENT_LENGTH);
+    parts.headers.remove(http::header::CONTENT_ENCODING);
+
+    Ok(Response::from_parts(parts, body))
 }
 
 /// Handles the case when no filter matches a header in the request.
@@ -62,27 +71,30 @@ async fn matched_request(
 async fn unmatched_request(
     request: Request<Incoming>,
     original_destination: SocketAddr,
-) -> Result<Response<Incoming>, hyper::Error> {
+) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
-    TcpStream::connect(original_destination)
-        .map_err(From::from)
-        .and_then(|target_stream| client::conn::http1::handshake(target_stream).map_err(From::from))
-        .and_then(|(mut request_sender, connection)| {
-            tokio::spawn(async move {
-                if let Err(fail) = connection.await {
-                    trace!("HTTP connection for unmatched request failed: {fail:#?}!");
-                }
-            });
+    let tcp_stream = TcpStream::connect(original_destination).await?;
+    let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream).await?;
 
-            request_sender.send_request(request).map_err(From::from)
-        })
-        .await
+    tokio::spawn(async move {
+        if let Err(fail) = connection.await {
+            trace!("HTTP connection for unmatched request failed: {fail:#?}!");
+        }
+    });
+
+    let (mut parts, body) = request_sender.send_request(request).await?.into_parts();
+    let body = body.collect().await?.to_bytes();
+
+    parts.headers.remove(http::header::CONTENT_LENGTH);
+    parts.headers.remove(http::header::CONTENT_ENCODING);
+
+    Ok(Response::from_parts(parts, body.into()))
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
-    type Response = Response<String>;
+    type Response = Response<Full<Bytes>>;
 
     type Error = HttpTrafficError;
 
@@ -126,24 +138,15 @@ impl Service<Request<Incoming>> for HyperHandler {
                 response_tx,
             };
 
-            let request_tx = self.matched_tx.clone();
-            let response = async move {
-                // TODO: NO UNWRAP!
-                matched_request(handler_request, request_tx).await.unwrap();
-
-                // TODO: NO UNWRAP!
-                response_rx.await.unwrap()
-            };
-
-            Box::pin(response)
+            Box::pin(matched_request(
+                handler_request,
+                self.matched_tx.clone(),
+                response_rx,
+            ))
         } else {
             self.request_id += 1;
 
-            let original_destination = self.original_destination;
-
-            let response = async move { unmatched_request(request, original_destination).await? };
-
-            Box::pin(response)
+            Box::pin(unmatched_request(request, self.original_destination))
         }
     }
 }
