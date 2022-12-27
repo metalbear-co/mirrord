@@ -37,6 +37,13 @@ class MirrordEnabler : ToggleAction() {
                 "Allow mirrord to send telemetries",
                 NotificationType.INFORMATION
             )
+                .addAction(object : NotificationAction("Deny (will disable version check as well)") {
+                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                        MirrordSettingsState.telemetryEnabled = false
+                        MirrordSettingsState.versionCheckEnabled = false
+                        notification.expire()
+                    }
+                })
                 .addAction(object : NotificationAction("Allow") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                         MirrordSettingsState.telemetryEnabled = true
@@ -49,13 +56,7 @@ class MirrordEnabler : ToggleAction() {
                         BrowserUtil.browse("https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md")
                     }
                 })
-                .addAction(object : NotificationAction("Deny (will disable version check as well)") {
-                    override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        MirrordSettingsState.telemetryEnabled = false
-                        MirrordSettingsState.versionCheckEnabled = false
-                        notification.expire()
-                    }
-                }).notify(project)
+                .notify(project)
         }
     }
 }
