@@ -14,10 +14,9 @@ use tracing::error;
 
 use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
-    UnmatchedSender,
 };
 use crate::{
-    steal::{http_traffic::error, HandlerHttpRequest, MatchedHttpRequest},
+    steal::{http_traffic::error, HandlerHttpRequest},
     util::ClientId,
 };
 
@@ -38,7 +37,6 @@ pub(super) struct HttpFilterBuilder {
     connection_id: ConnectionId,
     client_filters: Arc<DashMap<ClientId, Regex>>,
     matched_tx: Sender<HandlerHttpRequest>,
-    unmatched_tx: UnmatchedSender,
 
     /// For informing the stealer task that the connection was closed.
     connection_close_sender: Sender<ConnectionId>,
@@ -72,7 +70,7 @@ impl HttpFilterBuilder {
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     #[tracing::instrument(
         level = "debug",
-        skip(stolen_stream, matched_tx, unmatched_tx)
+        skip_all
         fields(
             local = ?stolen_stream.local_addr(),
             peer = ?stolen_stream.peer_addr()
@@ -84,7 +82,6 @@ impl HttpFilterBuilder {
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
         matched_tx: Sender<HandlerHttpRequest>,
-        unmatched_tx: UnmatchedSender,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<Self, HttpTrafficError> {
         let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
@@ -102,7 +99,6 @@ impl HttpFilterBuilder {
                 original_destination,
                 connection_id,
                 matched_tx,
-                unmatched_tx,
                 connection_close_sender,
             }),
             Err(fail) => {
@@ -129,7 +125,6 @@ impl HttpFilterBuilder {
             http_version,
             client_filters,
             matched_tx,
-            unmatched_tx,
             mut reversible_stream,
             connection_id,
             original_destination,
@@ -148,7 +143,6 @@ impl HttpFilterBuilder {
                             HyperHandler {
                                 filters: client_filters,
                                 matched_tx,
-                                unmatched_tx,
                                 connection_id,
                                 port,
                                 original_destination,

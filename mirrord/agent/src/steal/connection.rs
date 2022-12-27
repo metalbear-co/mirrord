@@ -1,13 +1,13 @@
 use std::{
-    collections::{BinaryHeap, HashSet},
+    collections::HashSet,
     io,
     net::{Ipv4Addr, SocketAddr},
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use fancy_regex::Regex;
 use http_body_util::Full;
-use hyper::{body::Body, Response, Version};
+use hyper::Response;
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -16,24 +16,19 @@ use mirrord_protocol::{
 };
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{copy, sink, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error};
+use tracing::error;
 
-use super::{
-    http_traffic::{
-        filter::HttpFilter, DefaultReversibleStream, UnmatchedReceiver, UnmatchedSender,
-    },
-    *,
-};
+use super::*;
 use crate::{
     error::Result,
     steal::{
-        http_traffic::{HttpFilterManager, UnmatchedHttpResponse},
+        http_traffic::HttpFilterManager,
         StealSubscription::{HttpFiltered, Unfiltered},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
@@ -103,13 +98,6 @@ pub(crate) struct TcpConnectionStealer {
     /// connection.
     http_connection_clients: HashMap<ConnectionId, HashSet<ClientId>>,
 
-    /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
-    /// requests case (when no HTTP filter matches a request).
-    unmatched_tx: UnmatchedSender,
-
-    /// Channel that receives responses which did not match any HTTP filter.
-    unmatched_rx: UnmatchedReceiver,
-
     /// Maps each pending request id to the sender into the channel with the hyper service that
     /// received that requests and is waiting for the response.
     http_response_senders: HashMap<RequestId, oneshot::Sender<Response<Full<Bytes>>>>,
@@ -133,7 +121,6 @@ impl TcpConnectionStealer {
 
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
-        let (unmatched_tx, unmatched_rx) = channel(1024);
 
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
@@ -151,8 +138,6 @@ impl TcpConnectionStealer {
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
             http_connection_clients: HashMap::with_capacity(8),
-            unmatched_tx,
-            unmatched_rx,
             http_response_senders: HashMap::with_capacity(8),
         })
     }
@@ -218,12 +203,6 @@ impl TcpConnectionStealer {
                         }
                     }
                     self.index_allocator.free_index(connection_id);
-                }
-
-                // Handles the responses that were not matched by any HTTP filter.
-                Some(response) = self.unmatched_rx.recv() => {
-                    let UnmatchedHttpResponse(response) = response?;
-                    self.http_response(response).await?;
                 }
 
                 _ = cancellation_token.cancelled() => {
@@ -458,7 +437,6 @@ impl TcpConnectionStealer {
                             client_id,
                             regex,
                             self.http_request_sender.clone(),
-                            self.unmatched_tx.clone(),
                         ));
                         self.port_subscriptions.insert(port, manager);
                         Ok(port)
@@ -585,7 +563,11 @@ impl TcpConnectionStealer {
     ///                         _______________agent_______________
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
-    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
+    #[tracing::instrument(
+        level = "debug",
+        skip(self),
+        fields(response_senders = ?self.http_response_senders.keys()),
+    )] // TODO: trace
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
         match self.http_response_senders.remove(&response.request_id) {
             None => {

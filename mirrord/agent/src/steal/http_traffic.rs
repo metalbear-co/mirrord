@@ -5,15 +5,12 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use mirrord_protocol::{tcp::HttpResponse, ConnectionId};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
-};
+use mirrord_protocol::ConnectionId;
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
-    filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
+    filter::{HttpFilterBuilder, MINIMAL_HEADER_SIZE},
     reversible_stream::ReversibleStream,
 };
 use crate::{
@@ -25,9 +22,6 @@ pub(crate) mod error;
 pub(super) mod filter;
 mod hyper_handler;
 pub(super) mod reversible_stream;
-
-pub(crate) type UnmatchedSender = Sender<Result<UnmatchedHttpResponse, HttpTrafficError>>;
-pub(crate) type UnmatchedReceiver = Receiver<Result<UnmatchedHttpResponse, HttpTrafficError>>;
 
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
@@ -63,9 +57,6 @@ impl HttpVersion {
     }
 }
 
-#[derive(Debug)]
-pub struct UnmatchedHttpResponse(pub(super) HttpResponse);
-
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
@@ -74,7 +65,6 @@ pub(super) struct HttpFilterManager {
 
     /// We clone this to pass them down to the hyper tasks.
     matched_tx: Sender<HandlerHttpRequest>,
-    unmatched_tx: UnmatchedSender,
 }
 
 impl HttpFilterManager {
@@ -87,7 +77,6 @@ impl HttpFilterManager {
         client_id: ClientId,
         filter: Regex,
         matched_tx: Sender<HandlerHttpRequest>,
-        unmatched_tx: UnmatchedSender,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters.insert(client_id, filter);
@@ -96,7 +85,6 @@ impl HttpFilterManager {
             _port: port,
             client_filters,
             matched_tx,
-            unmatched_tx,
         }
     }
 
@@ -155,7 +143,6 @@ impl HttpFilterManager {
             connection_id,
             self.client_filters.clone(),
             self.matched_tx.clone(),
-            self.unmatched_tx.clone(),
             connection_close_sender,
         )
         .await?

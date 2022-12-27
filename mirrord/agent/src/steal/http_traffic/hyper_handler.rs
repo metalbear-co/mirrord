@@ -15,16 +15,16 @@ use hyper::{
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
+    select,
     sync::{
         mpsc::{error::SendError, Sender},
         oneshot::{self, error::RecvError, Receiver},
     },
 };
-use tracing::trace;
+use tracing::{error, info, trace, warn};
 
-use super::{error::HttpTrafficError, UnmatchedHttpResponse, UnmatchedSender};
+use super::error::HttpTrafficError;
 use crate::{
-    error::AgentError,
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
@@ -37,7 +37,6 @@ pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
     pub(super) matched_tx: Sender<HandlerHttpRequest>,
-    pub(super) unmatched_tx: UnmatchedSender,
     pub(crate) connection_id: ConnectionId,
     pub(crate) port: Port,
     pub(crate) original_destination: SocketAddr,
@@ -58,7 +57,7 @@ async fn matched_request(
 
     let (mut parts, body) = response_rx.await?.into_parts();
     parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::CONTENT_ENCODING);
+    parts.headers.remove(http::header::TRANSFER_ENCODING);
 
     Ok(Response::from_parts(parts, body))
 }
@@ -76,22 +75,46 @@ async fn unmatched_request(
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
+
+    // TODO(alex) [high] 2022-12-27: We end up with an infinite loop here, as we try to connect to
+    // `original_destination`, which is a port we're stealing from, so we steal the connection we're
+    // sending here, re-stealing the request, and on and on.
+    //
+    // https://tetrate.io/blog/traffic-types-and-iptables-rules-in-istio-sidecar-explained/
+    //
+    // better:
+    // https://linkerd.io/2021/09/23/how-linkerd-uses-iptables-to-transparently-route-kubernetes-traffic/
+    info!("unmatched");
     let tcp_stream = TcpStream::connect(original_destination).await?;
     let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream).await?;
+    info!("result of handshake {connection:#?}");
 
+    // let (connection_tx, mut connection_rx) = tokio::sync::mpsc::channel(1500);
+    // tokio::spawn(async move { connection_tx.send(connection.await).await });
     tokio::spawn(async move {
         if let Err(fail) = connection.await {
-            trace!("HTTP connection for unmatched request failed: {fail:#?}!");
+            error!("Connection failed in unmatched with {fail:#?}");
         }
     });
 
+    // Connection failed?
+    // connection_rx.recv().await.transpose()?;
+    // connection.await?;
+    // info!("awaited on connection");
+
     let (mut parts, body) = request_sender.send_request(request).await?.into_parts();
+    info!("parts {parts:#?} and body {body:#?}");
     let body = body.collect().await?.to_bytes();
+    info!("colected body {body:#?}");
 
     parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::CONTENT_ENCODING);
+    parts.headers.remove(http::header::TRANSFER_ENCODING);
 
-    Ok(Response::from_parts(parts, body.into()))
+    info!("removed stuff from parts {parts:#?}");
+
+    let response = Response::from_parts(parts, body.into());
+    info!("the response is {response:#?}");
+    Ok(response)
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
@@ -105,6 +128,11 @@ impl Service<Request<Incoming>> for HyperHandler {
     // our client duplex stream?
     // #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
+        // TODO(alex) [high] 2022-12-27: Need to increment this in a proper place, if we do it
+        // here, then the `request` will go with value `1`, when it should be `0`, resulting in
+        // a "No requests to send" issue in `connection`. response to
+        self.request_id += 1;
+
         if let Some(client_id) = request
             .headers()
             .iter()
@@ -124,12 +152,11 @@ impl Service<Request<Incoming>> for HyperHandler {
                 })
             })
         {
-            self.request_id += 1;
             let req = MatchedHttpRequest {
                 port: self.port,
                 connection_id: self.connection_id,
                 client_id,
-                request_id: self.request_id,
+                request_id: self.request_id - 1,
                 request,
             };
 
@@ -145,8 +172,6 @@ impl Service<Request<Incoming>> for HyperHandler {
                 response_rx,
             ))
         } else {
-            self.request_id += 1;
-
             Box::pin(unmatched_request(request, self.original_destination))
         }
     }
