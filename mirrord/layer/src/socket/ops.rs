@@ -486,10 +486,9 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    // Bypass when any of these type conversions fail.
     let node = rawish_node
-        .map(CStr::to_str)
-        .transpose()
+        .bypass(Bypass::NullNode)?
+        .to_str()
         .map_err(|fail| {
             warn!(
                 "Failed converting `rawish_node` from `CStr` with {:#?}",
@@ -497,9 +496,7 @@ pub(super) fn getaddrinfo(
             );
 
             Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .or_else(|| Some(String::from("localhost")));
+        })?;
 
     let service = rawish_service
         .map(CStr::to_str)
