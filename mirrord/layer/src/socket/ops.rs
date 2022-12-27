@@ -496,7 +496,8 @@ pub(super) fn getaddrinfo(
             );
 
             Bypass::CStrConversion
-        })?;
+        })?
+        .into();
 
     let service = rawish_service
         .map(CStr::to_str)
