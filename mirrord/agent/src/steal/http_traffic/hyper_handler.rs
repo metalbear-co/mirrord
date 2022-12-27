@@ -5,8 +5,13 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use http_body_util::Full;
-use hyper::{body::Incoming, client, service::Service, Request, Response};
+use http_body_util::{combinators::BoxBody, Full};
+use hyper::{
+    body::{Body, Incoming},
+    client,
+    service::Service,
+    Request, Response,
+};
 use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
@@ -20,6 +25,7 @@ use tracing::trace;
 
 use super::{error::HttpTrafficError, UnmatchedHttpResponse, UnmatchedSender};
 use crate::{
+    error::AgentError,
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
@@ -52,48 +58,27 @@ async fn matched_request(
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
 /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
 /// 3. Sends the [`HttpResponse`] to the stealer, via the [`UnmatchedSender`] channel.
-#[tracing::instrument(level = "debug", skip(tx))]
+#[tracing::instrument(level = "debug")]
 async fn unmatched_request(
     request: Request<Incoming>,
-    tx: UnmatchedSender,
     original_destination: SocketAddr,
-    connection_id: ConnectionId,
-    request_id: RequestId,
-) -> Result<(), SendError<Result<UnmatchedHttpResponse, HttpTrafficError>>> {
+) -> Result<Response<Incoming>, hyper::Error> {
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
-    let response = TcpStream::connect(original_destination)
+    TcpStream::connect(original_destination)
         .map_err(From::from)
         .and_then(|target_stream| client::conn::http1::handshake(target_stream).map_err(From::from))
         .and_then(|(mut request_sender, connection)| {
-            let tx = tx.clone();
-
             tokio::spawn(async move {
                 if let Err(fail) = connection.await {
-                    let _ = tx.send(Err(fail.into())).await.inspect_err(|fail| {
-                        trace!("Sending an `UnmatchedHttpResponse` failed due to {fail:#?}!")
-                    });
+                    trace!("HTTP connection for unmatched request failed: {fail:#?}!");
                 }
             });
 
             request_sender.send_request(request).map_err(From::from)
         })
-        .and_then(|intercepted_response| {
-            HttpResponse::from_hyper_response(
-                intercepted_response,
-                original_destination.port(),
-                connection_id,
-                request_id,
-            )
-            .map_err(From::from)
-        })
         .await
-        .map(UnmatchedHttpResponse);
-
-    tx.send(response)
-        .await
-        .inspect_err(|fail| trace!("Sending an `UnmatchedHttpResponse` failed due to {fail:#?}!"))
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
@@ -105,7 +90,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     // TODO(alex) [mid] 2022-12-13: Do we care at all about what is sent from here as a response to
     // our client duplex stream?
-    #[tracing::instrument(level = "debug", skip(self))]
+    // #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         if let Some(client_id) = request
             .headers()
@@ -142,33 +127,21 @@ impl Service<Request<Incoming>> for HyperHandler {
             };
 
             let request_tx = self.matched_tx.clone();
-            async move {
+            let response = async move {
                 // TODO: NO UNWRAP!
                 matched_request(handler_request, request_tx).await.unwrap();
-            };
 
-            // TODO: NO UNWRAP!
-            let response = response_rx.blocking_recv().unwrap();
+                // TODO: NO UNWRAP!
+                response_rx.await.unwrap()
+            };
 
             Box::pin(response)
         } else {
             self.request_id += 1;
 
-            let tx = self.unmatched_tx.clone();
             let original_destination = self.original_destination;
-            let connection_id = self.connection_id;
-            let request_id = self.request_id;
 
-            let response = async move {
-                if let Err(fail) =
-                    unmatched_request(request, tx, original_destination, connection_id, request_id)
-                        .await
-                {
-                    fail.0?;
-                };
-
-                Ok(Response::new(DUMMY_RESPONSE_UNMATCHED.to_string()))
-            };
+            let response = async move { unmatched_request(request, original_destination).await? };
 
             Box::pin(response)
         }

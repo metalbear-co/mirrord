@@ -83,7 +83,7 @@ impl HttpFilterBuilder {
         original_destination: SocketAddr,
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, Regex>>,
-        matched_tx: Sender<HttpHandlerRequest>,
+        matched_tx: Sender<HandlerHttpRequest>,
         unmatched_tx: UnmatchedSender,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<Self, HttpTrafficError> {
