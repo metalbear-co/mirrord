@@ -25,7 +25,7 @@ data class ConfigData (
  */
 object MirrordConfigAPI {
 
-    const val defaultConfig = """// See documentation here https://mirrord.dev/docs/overview/configuration
+    const val defaultConfig = """
 {
     "accept_invalid_certificates": false,
     "feature": {
