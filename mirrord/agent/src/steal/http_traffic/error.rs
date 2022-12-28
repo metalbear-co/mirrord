@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-use super::MatchedHttpRequest;
 use crate::steal::HandlerHttpRequest;
 
 /// Errors specific to the HTTP traffic feature.

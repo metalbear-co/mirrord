@@ -5,33 +5,23 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::{
-    body::{Body, Incoming},
-    client, http,
-    service::Service,
-    Request, Response,
-};
-use mirrord_protocol::{tcp::HttpResponse, ConnectionId, Port, RequestId};
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Incoming, client, http, service::Service, Request, Response};
+use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
-    select,
     sync::{
-        mpsc::{error::SendError, Sender},
-        oneshot::{self, error::RecvError, Receiver},
+        mpsc::Sender,
+        oneshot::{self, Receiver},
     },
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info};
 
 use super::error::HttpTrafficError;
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
-
-// TODO(alex) [low] 2022-12-27: Remove these!
-pub(super) const DUMMY_RESPONSE_MATCHED: &str = "Matched!";
-pub(super) const DUMMY_RESPONSE_UNMATCHED: &str = "Unmatched!";
 
 #[derive(Debug)]
 pub(super) struct HyperHandler {

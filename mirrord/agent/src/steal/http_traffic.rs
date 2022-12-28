@@ -13,10 +13,7 @@ use self::{
     filter::{HttpFilterBuilder, MINIMAL_HEADER_SIZE},
     reversible_stream::ReversibleStream,
 };
-use crate::{
-    steal::{HandlerHttpRequest, MatchedHttpRequest},
-    util::ClientId,
-};
+use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;

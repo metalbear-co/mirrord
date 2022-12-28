@@ -4,12 +4,7 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
-use tokio::{
-    io::{copy_bidirectional, duplex, DuplexStream},
-    net::TcpStream,
-    sync::mpsc::Sender,
-    task::JoinHandle,
-};
+use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::error;
 
 use super::{
@@ -40,26 +35,6 @@ pub(super) struct HttpFilterBuilder {
 
     /// For informing the stealer task that the connection was closed.
     connection_close_sender: Sender<ConnectionId>,
-}
-
-/// Used by the stealer handler to:
-///
-/// 1. Read the requests from hyper's channels through [`matched_rx`], and [`passthrough_rx`];
-/// 2. Send the raw bytes we got from the remote connection to hyper through [`interceptor_stream`];
-pub(crate) struct HttpFilter {
-    pub(super) _hyper_task: JoinHandle<Result<(), HttpTrafficError>>,
-    /// The original [`TcpStream`] that is connected to us, this is where we receive the requests
-    /// from.
-    pub(crate) reversible_stream: DefaultReversibleStream,
-
-    /// A stream that we use to communicate with the hyper task.
-    ///
-    /// Don't ever [`DuplexStream::read`] anything from it, as the hyper task only responds with
-    /// garbage (treat the `read` side as `/dev/null`).
-    ///
-    /// We use [`DuplexStream::write`] to write the bytes we have `read` from [`original_stream`]
-    /// to the hyper task, acting as a "client".
-    pub(crate) interceptor_stream: DuplexStream,
 }
 
 impl HttpFilterBuilder {
