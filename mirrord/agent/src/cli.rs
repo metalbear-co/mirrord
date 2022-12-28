@@ -35,6 +35,10 @@ pub struct Args {
     /// Pause the target container while clients are connected.
     #[arg(short = 'p', long, default_value_t = false)]
     pub pause: bool,
+
+    /// Override container socket path
+    #[arg(short = 's', long)]
+    pub container_socket_path: Option<String>,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";
