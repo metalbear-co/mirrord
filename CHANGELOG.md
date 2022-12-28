@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- cli: Add `--agent-container-socket` to support diffrent runtime socket paths like for k3s: /var/run/k3s/containerd/containerd.sock
+
 ## 3.14.3
 
 ### Fixed
