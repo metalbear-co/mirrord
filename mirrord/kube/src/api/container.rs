@@ -193,7 +193,7 @@ impl ContainerApi for JobContainer {
                             {
                                 "name": "sockpath",
                                 "hostPath": {
-                                    "path": agent.container_socket.as_deref().unwrap_or(runtime_data.container_runtime.mount_path())
+                                    "path": agent.container_socket.as_deref().unwrap_or_else(|| runtime_data.container_runtime.mount_path())
                                 }
                             }
                         ],
@@ -207,7 +207,7 @@ impl ContainerApi for JobContainer {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": agent.container_socket.as_deref().unwrap_or(runtime_data.container_runtime.mount_path()),
+                                        "mountPath": agent.container_socket.as_deref().unwrap_or_else(|| runtime_data.container_runtime.mount_path()),
                                         "name": "sockpath"
                                     }
                                 ],

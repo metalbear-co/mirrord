@@ -333,6 +333,7 @@ mod tests {
                 startup_timeout: None,
                 network_interface: None,
                 pause: Some(false),
+                container_socket: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),
