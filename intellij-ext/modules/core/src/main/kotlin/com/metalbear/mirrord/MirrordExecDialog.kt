@@ -43,6 +43,7 @@ object MirrordExecDialog {
             add(JBScrollPane(items).apply {
                 alignmentX = JBScrollPane.LEFT_ALIGNMENT
                 preferredSize = Dimension(250, 350)
+                size = Dimension(250, 350)
             })
         }
 
