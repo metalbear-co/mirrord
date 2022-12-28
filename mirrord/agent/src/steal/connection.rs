@@ -100,7 +100,8 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Maps each pending request id to the sender into the channel with the hyper service that
     /// received that requests and is waiting for the response.
-    http_response_senders: HashMap<RequestId, oneshot::Sender<Response<Full<Bytes>>>>,
+    http_response_senders:
+        HashMap<(ConnectionId, RequestId), oneshot::Sender<Response<Full<Bytes>>>>,
 }
 
 impl TcpConnectionStealer {
@@ -235,7 +236,7 @@ impl TcpConnectionStealer {
                 .or_insert_with(|| HashSet::with_capacity(2))
                 .insert(request.client_id);
             self.http_response_senders
-                .insert(request.request_id, response_tx);
+                .insert((request.connection_id, request.request_id), response_tx);
             Ok(daemon_tx
                 .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
                 .await?)
@@ -569,11 +570,12 @@ impl TcpConnectionStealer {
         fields(response_senders = ?self.http_response_senders.keys()),
     )] // TODO: trace
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
-        match self.http_response_senders.remove(&response.request_id) {
+        match self
+            .http_response_senders
+            .remove(&(response.connection_id, response.request_id))
+        {
             None => {
-                warn!(
-                    "Got an http response in a connection for which no tcp stream is present. Not forwarding.",
-                );
+                warn!("Got unexpected http response. Not forwarding.");
                 Ok(())
             }
             Some(response_tx) => {

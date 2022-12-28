@@ -151,7 +151,13 @@ impl HttpFilterBuilder {
                         )
                         .await;
 
-                    connection_close_sender.send(connection_id).await;
+                    let _res = connection_close_sender
+                        .send(connection_id)
+                        .await
+                        .inspect_err(|connection_id| {
+                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
+                            Cannot report the closing of connection {connection_id}.");
+                        });
                 });
                 Ok(())
             }

@@ -133,8 +133,8 @@ impl MatchedHttpRequest {
         Ok(HttpRequest {
             port: self.port,
             connection_id: self.connection_id,
+            request_id: self.request_id,
             request: internal_req,
-            request_id: 0, // TODO: Use a real request_id!
         })
     }
 }

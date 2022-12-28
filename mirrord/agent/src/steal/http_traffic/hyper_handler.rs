@@ -156,7 +156,7 @@ impl Service<Request<Incoming>> for HyperHandler {
                 port: self.port,
                 connection_id: self.connection_id,
                 client_id,
-                request_id: self.request_id - 1,
+                request_id: self.request_id,
                 request,
             };
 
