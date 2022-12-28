@@ -383,6 +383,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
         libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_close => close_detour(param1 as _) as i64,
+        libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
 
         _ if FILE_MODE
             .get()
