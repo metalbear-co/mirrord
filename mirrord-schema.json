@@ -177,6 +177,13 @@
           "format": "uint16",
           "minimum": 0.0
         },
+        "container_socket": {
+          "description": "Override container runtime socket path eg. \"/run/containerd/containerd.sock\" for containerd",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "ephemeral": {
           "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)",
           "type": [
