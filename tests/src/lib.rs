@@ -192,14 +192,8 @@ mod utils {
     }
 
     impl Application {
-        pub async fn run(
-            &self,
-            target: &str,
-            namespace: Option<&str>,
-            args: Option<Vec<&str>>,
-            env: Option<Vec<(&str, &str)>>,
-        ) -> TestProcess {
-            let process_cmd = match self {
+        pub fn get_cmd(&self) -> Vec<&str> {
+            match self {
                 Application::PythonFlaskHTTP => {
                     vec!["python3", "-u", "python-e2e/app_flask.py"]
                 }
@@ -215,8 +209,17 @@ mod utils {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
-            };
-            run_exec(process_cmd, target, namespace, args, env).await
+            }
+        }
+
+        pub async fn run(
+            &self,
+            target: &str,
+            namespace: Option<&str>,
+            args: Option<Vec<&str>>,
+            env: Option<Vec<(&str, &str)>>,
+        ) -> TestProcess {
+            run_exec(self.get_cmd(), target, namespace, args, env).await
         }
 
         pub fn assert(&self, process: &TestProcess) {

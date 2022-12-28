@@ -9,10 +9,9 @@ mod steal {
     use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
     use rstest::*;
 
-    #[cfg(target_os = "linux")]
-    use crate::utils::{get_service_url, send_requests, Agent, Application};
     use crate::utils::{
-        kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
+        get_service_url, kube_client, run_exec, send_requests, service, udp_logger_service, Agent,
+        Application, KubeService, CONTAINER_NAME,
     };
 
     #[cfg(target_os = "linux")]
@@ -49,6 +48,48 @@ mod steal {
         application.assert(&process);
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn test_filter_with_single_client_and_only_matching_requests(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::NodeHTTP
+        )]
+        application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+
+        let mut client = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                agent.flag().clone(),
+                Some(vec![("MIRRORD_HTTP_FILTER", "x-filter=yes")]),
+            )
+            .await;
+
+        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap());
+        send_requests(&url, false, headers).await;
+
+        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
+        application.assert(&client);
+    }
+
+    #[ignore] // TODO: un-ignore.
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
