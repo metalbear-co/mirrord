@@ -356,7 +356,7 @@ impl Layer {
         }
     }
 
-    #[tracing::instrument(level = "debug", skip(self))] // TODO: trace
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
@@ -414,7 +414,6 @@ async fn thread_loop(
         config.feature.network.http_filter,
     );
     loop {
-        info!("thread loop iteration."); // TODO: delete.
         select! {
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
@@ -445,7 +444,6 @@ async fn thread_loop(
                             error!("Error handling daemon message: {:?}", err);
                             break;
                         }
-                        debug!("Done handling daemon message."); // TODO: delete.
                     },
                     None => {
                         error!("agent connection lost");
