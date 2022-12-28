@@ -169,10 +169,6 @@ pub(super) struct ExecArgs {
     /// Create a trace file of errors for debugging.
     #[arg(long)]
     pub capture_error_trace: bool,
-
-    /// Overide container runtime socket path for agent
-    #[arg(long)]
-    pub agent_container_socket: Option<String>,
 }
 
 #[derive(Args, Debug)]

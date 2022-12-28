@@ -101,12 +101,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
             agent_startup_timeout.to_string(),
         );
     }
-    if let Some(agent_container_socket) = &args.agent_container_socket {
-        std::env::set_var(
-            "MIRRORD_AGENT_CONTAINER_SOCKET",
-            agent_container_socket.clone(),
-        );
-    }
 
     if args.enable_rw_fs && args.no_fs {
         warn!("use --fs-mode=write or --fs-mode=readonly please");

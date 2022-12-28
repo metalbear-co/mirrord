@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
+use bollard::{container::InspectContainerOptions, Docker};
 use containerd_client::{
     connect,
     services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest},
@@ -20,6 +20,7 @@ use crate::error::{AgentError, Result};
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
+const CONTAINERD_K3S_SOCK_PATH: &str = "/var/run/k3s/containerd";
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
@@ -45,20 +46,17 @@ pub(crate) enum Container {
 pub(crate) async fn get_container(
     container_id_opt: Option<&String>,
     container_runtime_opt: Option<&String>,
-    container_socket_path_opt: Option<&String>,
 ) -> Result<Option<Container>> {
     if let (Some(container_id), Some(container_runtime)) = (container_id_opt, container_runtime_opt)
     {
         let container_id = container_id.to_string();
         match container_runtime.as_str() {
-            "docker" => Ok(Some(Container::Docker(DockerContainer::new(
+            "docker" => Ok(Some(Container::Docker(DockerContainer::from_id(
                 container_id,
-                container_socket_path_opt,
             )?))),
-            "containerd" => Ok(Some(Container::Containerd(ContainerdContainer::new(
+            "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
                 container_id,
-                container_socket_path_opt.cloned(),
-            )))),
+            }))),
             _ => Err(AgentError::NotFound(format!(
                 "Unknown runtime {:?}",
                 container_runtime
@@ -76,15 +74,10 @@ pub(crate) struct DockerContainer {
 }
 
 impl DockerContainer {
-    fn new(container_id: String, container_socket_path: Option<&String>) -> Result<Self> {
+    fn from_id(container_id: String) -> Result<Self> {
         Ok(DockerContainer {
             container_id,
-            client: match container_socket_path {
-                Some(container_socket_path) => {
-                    Docker::connect_with_socket(container_socket_path, 120, API_DEFAULT_VERSION)?
-                }
-                None => Docker::connect_with_local_defaults()?,
-            },
+            client: Docker::connect_with_local_defaults()?,
         })
     }
 }
@@ -124,23 +117,15 @@ impl ContainerRuntime for DockerContainer {
 #[derive(Debug)]
 pub(crate) struct ContainerdContainer {
     container_id: String,
-    container_socket_path: Option<String>,
 }
 
 impl ContainerdContainer {
-    fn new(container_id: String, container_socket_path: Option<String>) -> Self {
-        ContainerdContainer {
-            container_id,
-            container_socket_path,
-        }
-    }
-
-    async fn get_client(&self) -> Result<TasksClient<Channel>> {
-        let channel = match &self.container_socket_path {
-            Some(container_socket_path) => connect(container_socket_path).await?,
-            None => match connect(CONTAINERD_SOCK_PATH).await {
+    async fn get_client() -> Result<TasksClient<Channel>> {
+        let channel = match connect(CONTAINERD_SOCK_PATH).await {
+            Ok(channel) => channel,
+            Err(_) => match connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await {
                 Ok(channel) => channel,
-                Err(_) => connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await?,
+                Err(_) => connect(CONTAINERD_K3S_SOCK_PATH).await?,
             },
         };
         Ok(TasksClient::new(channel))
@@ -150,7 +135,7 @@ impl ContainerdContainer {
 #[async_trait]
 impl ContainerRuntime for ContainerdContainer {
     async fn get_pid(&self) -> Result<u64> {
-        let mut client = self.get_client().await?;
+        let mut client = Self::get_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
             container_id,
@@ -168,7 +153,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn pause(&self) -> Result<()> {
-        let mut client = self.get_client().await?;
+        let mut client = Self::get_client().await?;
         let container_id = self.container_id.to_string();
         let request = PauseTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
@@ -177,7 +162,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn unpause(&self) -> Result<()> {
-        let mut client = self.get_client().await?;
+        let mut client = Self::get_client().await?;
         let container_id = self.container_id.to_string();
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);

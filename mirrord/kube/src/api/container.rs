@@ -152,16 +152,12 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
         }
-        if let Some(container_socket) = &agent.container_socket {
-            agent_command_line.push("-s".to_owned());
-            agent_command_line.push(container_socket.clone());
-        }
         if agent.pause {
             agent_command_line.push("--pause".to_owned());
         }
 
-        let agent_pod: Job = serde_json::from_value(
-            json!({ // Only Jobs support self deletion after completion
+        let agent_pod: Job =
+            serde_json::from_value(json!({ // Only Jobs support self deletion after completion
                     "metadata": {
                         "name": mirrord_agent_job_name,
                         "labels": {
@@ -191,9 +187,15 @@ impl ContainerApi for JobContainer {
                         "restartPolicy": "Never",
                         "volumes": [
                             {
-                                "name": "sockpath",
+                                "name": "host_var",
                                 "hostPath": {
-                                    "path": agent.container_socket.as_deref().unwrap_or_else(|| runtime_data.container_runtime.mount_path())
+                                    "path": "/var/run"
+                                }
+                            },
+                            {
+                                "name": "host_run",
+                                "hostPath": {
+                                    "path": "/run"
                                 }
                             }
                         ],
@@ -207,8 +209,12 @@ impl ContainerApi for JobContainer {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": agent.container_socket.as_deref().unwrap_or_else(|| runtime_data.container_runtime.mount_path()),
-                                        "name": "sockpath"
+                                        "mountPath": "/var/run",
+                                        "name": "host_var"
+                                    },
+                                    {
+                                        "mountPath": "/run",
+                                        "name": "host_run"
                                     }
                                 ],
                                 "command": agent_command_line,
@@ -227,8 +233,7 @@ impl ContainerApi for JobContainer {
                 }
             }
                 }
-            ),
-        )?;
+            ))?;
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api

@@ -69,12 +69,8 @@ impl State {
     /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
     /// the container info (runtime and id) was not.
     pub async fn new(args: &Args) -> Result<State> {
-        let container = get_container(
-            args.container_id.as_ref(),
-            args.container_runtime.as_ref(),
-            args.container_socket_path.as_ref(),
-        )
-        .await?;
+        let container =
+            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
         if container.is_none() && args.pause {
             return Err(AgentError::MissingContainerInfo);
         }
