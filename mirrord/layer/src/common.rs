@@ -26,7 +26,7 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 #[derive(Debug)]
 pub struct GetAddrInfoHook {
-    pub(crate) node: Option<String>,
+    pub(crate) node: String,
     pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
 }
 
