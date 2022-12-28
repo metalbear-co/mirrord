@@ -17,7 +17,7 @@ object MirrordPathManager {
             val os = when {
             SystemInfo.isLinux -> "linux"
             SystemInfo.isMac -> "macos"
-            SystemInfo.isWindows -> "windows"
+            SystemInfo.isWindows -> "linux"
             else -> return null
         }
 

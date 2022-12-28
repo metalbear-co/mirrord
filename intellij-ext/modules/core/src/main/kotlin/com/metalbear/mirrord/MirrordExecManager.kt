@@ -3,6 +3,7 @@ package com.metalbear.mirrord
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.io.exists
 import kotlinx.collections.immutable.toImmutableMap
 
@@ -36,6 +37,11 @@ object MirrordExecManager {
         if (!enabled) {
             return null
         }
+        if (SystemInfo.isWindows && wslDistribution == null) {
+            MirrordNotifier.errorNotification("Can't use mirrord on Windows without WSL", project)
+            return null
+        }
+
         var target: String? = null;
         if (!MirrordConfigAPI.isTargetSet(project)) {
             ApplicationManager.getApplication().executeOnPooledThread {
