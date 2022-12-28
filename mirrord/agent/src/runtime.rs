@@ -20,6 +20,7 @@ use crate::error::{AgentError, Result};
 
 const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
+const CONTAINERD_K3S_SOCK_PATH: &str = "/var/run/k3s/containerd";
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
@@ -122,7 +123,10 @@ impl ContainerdContainer {
     async fn get_client() -> Result<TasksClient<Channel>> {
         let channel = match connect(CONTAINERD_SOCK_PATH).await {
             Ok(channel) => channel,
-            Err(_) => connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await?,
+            Err(_) => match connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await {
+                Ok(channel) => channel,
+                Err(_) => connect(CONTAINERD_K3S_SOCK_PATH).await?,
+            },
         };
         Ok(TasksClient::new(channel))
     }
