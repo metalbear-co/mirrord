@@ -140,24 +140,28 @@ impl ContainerApi for JobContainer {
         let mirrord_agent_job_name = get_agent_name();
 
         let mut agent_command_line = vec![
-            "./mirrord-agent".to_string(),
-            "--container-id".to_string(),
+            "./mirrord-agent".to_owned(),
+            "--container-id".to_owned(),
             runtime_data.container_id,
-            "--container-runtime".to_string(),
+            "--container-runtime".to_owned(),
             runtime_data.container_runtime.to_string(),
-            "-l".to_string(),
+            "-l".to_owned(),
             connection_port.to_string(),
         ];
         if let Some(timeout) = agent.communication_timeout {
-            agent_command_line.push("-t".to_string());
+            agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
         }
+        if let Some(container_socket) = &agent.container_socket {
+            agent_command_line.push("-s".to_owned());
+            agent_command_line.push(container_socket.clone());
+        }
         if agent.pause {
-            agent_command_line.push("--pause".to_string());
+            agent_command_line.push("--pause".to_owned());
         }
 
-        let agent_pod: Job =
-            serde_json::from_value(json!({ // Only Jobs support self deletion after completion
+        let agent_pod: Job = serde_json::from_value(
+            json!({ // Only Jobs support self deletion after completion
                     "metadata": {
                         "name": mirrord_agent_job_name,
                         "labels": {
@@ -189,7 +193,7 @@ impl ContainerApi for JobContainer {
                             {
                                 "name": "sockpath",
                                 "hostPath": {
-                                    "path": runtime_data.container_runtime.mount_path()
+                                    "path": agent.container_socket.as_deref().unwrap_or(runtime_data.container_runtime.mount_path())
                                 }
                             }
                         ],
@@ -203,7 +207,7 @@ impl ContainerApi for JobContainer {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": runtime_data.container_runtime.mount_path(),
+                                        "mountPath": agent.container_socket.as_deref().unwrap_or(runtime_data.container_runtime.mount_path()),
                                         "name": "sockpath"
                                     }
                                 ],
@@ -223,7 +227,8 @@ impl ContainerApi for JobContainer {
                 }
             }
                 }
-            ))?;
+            ),
+        )?;
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api

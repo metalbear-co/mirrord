@@ -74,6 +74,10 @@ pub struct AgentConfig {
     /// the agent.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
+
+    /// Override container runtime socket path eg. "/run/containerd/containerd.sock" for containerd
+    #[config(env = "MIRRORD_AGENT_CONTAINER_SOCKET", default = false, unstable)]
+    pub container_socket: Option<String>,
 }
 
 #[cfg(test)]
