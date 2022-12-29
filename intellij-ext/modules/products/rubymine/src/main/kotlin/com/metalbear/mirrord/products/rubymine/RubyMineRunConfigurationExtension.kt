@@ -1,4 +1,4 @@
-package com.metalbear.mirrord.products.pycharm
+package com.metalbear.mirrord.products.rubymine
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.configurations.RunnerSettings
@@ -6,26 +6,25 @@ import com.intellij.execution.target.createEnvironmentRequest
 import com.intellij.execution.wsl.WslPath.Companion.getDistributionByWindowsUncPath
 import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo
-import com.jetbrains.python.run.AbstractPythonRunConfiguration
-import com.jetbrains.python.run.PythonRunConfigurationExtension
 import com.metalbear.mirrord.MirrordExecManager
+import org.jetbrains.plugins.ruby.ruby.run.configuration.AbstractRubyRunConfiguration
+import org.jetbrains.plugins.ruby.ruby.run.configuration.RubyRunConfigurationExtension
 
 
-class PythonRunConfigurationExtension: PythonRunConfigurationExtension() {
-    override fun isApplicableFor(configuration: AbstractPythonRunConfiguration<*>): Boolean {
+class RubyMineRunConfigurationExtension: RubyRunConfigurationExtension() {
+    override fun isApplicableFor(configuration: AbstractRubyRunConfiguration<*>): Boolean {
         return true
     }
 
     override fun isEnabledFor(
-        applicableConfiguration: AbstractPythonRunConfiguration<*>,
+        applicableConfiguration: AbstractRubyRunConfiguration<*>,
         runnerSettings: RunnerSettings?
     ): Boolean {
         return true
     }
 
-
     override fun patchCommandLine(
-        configuration: AbstractPythonRunConfiguration<*>,
+        configuration: AbstractRubyRunConfiguration<*>,
         runnerSettings: RunnerSettings?,
         cmdLine: GeneralCommandLine,
         runnerId: String
@@ -36,7 +35,7 @@ class PythonRunConfigurationExtension: PythonRunConfigurationExtension() {
         }
 
         val project = configuration.project
-        val currentEnv = cmdLine.environment
+        val currentEnv = configuration.envs
 
         MirrordExecManager.start(wsl, project)?.let {
                 env ->
@@ -44,6 +43,8 @@ class PythonRunConfigurationExtension: PythonRunConfigurationExtension() {
                 currentEnv[entry.key] =  entry.value
             }
         }
+
+
     }
 
 }

@@ -5,7 +5,10 @@ import com.intellij.execution.RunConfigurationExtension
 import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunnerSettings
+import com.intellij.execution.target.createEnvironmentRequest
+import com.intellij.execution.target.getEffectiveTargetName
 import com.intellij.execution.wsl.WslPath.Companion.getDistributionByWindowsUncPath
+import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo
 import com.metalbear.mirrord.MirrordExecManager
 
@@ -24,10 +27,8 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
 
 
     private fun < T: RunConfigurationBase<*>> patchEnv (configuration: T, params: JavaParameters) {
-        val wsl = when {
-            (configuration.projectPathOnTarget != null) && SystemInfo.isWindows -> {
-                getDistributionByWindowsUncPath(configuration.projectPathOnTarget)
-            }
+        val wsl = when (val request = createEnvironmentRequest(configuration, configuration.project)) {
+            is WslTargetEnvironmentRequest -> request.configuration.distribution!!
             else -> null
         }
 
