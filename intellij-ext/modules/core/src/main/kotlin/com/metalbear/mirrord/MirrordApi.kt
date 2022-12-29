@@ -33,10 +33,17 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
-    private fun cliPath(): String = MirrordPathManager.getBinary(cliBinary, true)!!
+
+    private fun cliPath(wslDistribution: WSLDistribution?): String {
+        val path = MirrordPathManager.getBinary(cliBinary, true)!!
+        wslDistribution?.let {
+            return it.getWslPath(path)!!
+        }
+        return path
+    }
 
     fun listPods(namespace: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
-        var commandLine = GeneralCommandLine(cliPath(), "ls", "-o", "json")
+        var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         namespace?.let {
             commandLine.addParameter("-n")
             commandLine.addParameter(namespace)
@@ -63,7 +70,7 @@ object MirrordApi {
     }
 
     fun exec(target: String?, configFile: String?, project: Project?, wslDistribution: WSLDistribution?): MutableMap<String, String> {
-        var commandLine = GeneralCommandLine(cliPath(), "ext")
+        var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext")
 
         target?.let {
             commandLine.addParameter("-t")
