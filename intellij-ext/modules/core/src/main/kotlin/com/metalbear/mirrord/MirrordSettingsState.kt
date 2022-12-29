@@ -1,22 +1,31 @@
 package com.metalbear.mirrord
 
-import com.intellij.openapi.components.PersistentStateComponent
-import com.intellij.util.xmlb.XmlSerializerUtil
-import com.intellij.openapi.components.State
-import com.intellij.openapi.components.Storage
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.*
 
 
 @State(name = "MirrordSettingsState", storages = [Storage("mirrord.xml")])
-object MirrordSettingsState : PersistentStateComponent<MirrordSettingsState> {
-    var telemetryEnabled: Boolean? = null
-    var versionCheckEnabled: Boolean = false
-
-    override fun getState(): MirrordSettingsState {
-        return this
+open class MirrordSettingsState : PersistentStateComponent<MirrordSettingsState.MirrordState> {
+    companion object {
+        val instance: MirrordSettingsState
+            get() = ApplicationManager.getApplication().getService(MirrordSettingsState::class.java)
     }
 
-    override fun loadState(state: MirrordSettingsState) {
-        XmlSerializerUtil.copyBean(state, this)
+    var mirrordState: MirrordState = MirrordState()
+
+    override fun getState(): MirrordState {
+        return mirrordState
     }
 
+    // after automatically loading our save state,  we will keep reference to it
+    override fun loadState(state: MirrordState) {
+        mirrordState = state
+    }
+
+
+    class MirrordState {
+        var telemetryEnabled: Boolean? = null
+        var versionCheckEnabled: Boolean = false
+
+    }
 }

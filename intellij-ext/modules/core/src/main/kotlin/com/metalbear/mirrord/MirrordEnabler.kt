@@ -23,7 +23,7 @@ class MirrordEnabler : ToggleAction() {
             MirrordNotifier.notify("mirrord disabled", NotificationType.INFORMATION, e.project)
         }
         MirrordExecManager.enabled = state
-        if (MirrordSettingsState.telemetryEnabled == null ) {
+        if (MirrordSettingsState.instance.mirrordState.telemetryEnabled == null ) {
             telemetryConsent(e.project)
         }
     }
@@ -40,8 +40,8 @@ class MirrordEnabler : ToggleAction() {
             )
                 .addAction(object : NotificationAction("Deny (will disable version check as well)") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        MirrordSettingsState.telemetryEnabled = false
-                        MirrordSettingsState.versionCheckEnabled = false
+                        MirrordSettingsState.instance.mirrordState.telemetryEnabled = false
+                        MirrordSettingsState.instance.mirrordState.versionCheckEnabled = false
                         notification.expire()
                     }
                 })
@@ -52,8 +52,8 @@ class MirrordEnabler : ToggleAction() {
                 })
                 .addAction(object : NotificationAction("Allow") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                        MirrordSettingsState.telemetryEnabled = true
-                        MirrordSettingsState.versionCheckEnabled = true
+                        MirrordSettingsState.instance.mirrordState.telemetryEnabled = true
+                        MirrordSettingsState.instance.mirrordState.versionCheckEnabled = true
                         notification.expire()
                     }
                 }).setCollapseDirection(Notification.CollapseActionsDirection.KEEP_RIGHTMOST)

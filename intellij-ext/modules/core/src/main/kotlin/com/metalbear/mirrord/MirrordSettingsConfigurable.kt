@@ -21,20 +21,20 @@ class MirrordSettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean
         {
-            val settings = MirrordSettingsState
+            val settings = MirrordSettingsState.instance.mirrordState
             var modified = (mySettingsComponent!!.telemetryEnabledStatus != settings.telemetryEnabled)
             modified = modified || (mySettingsComponent!!.versionCheckEnabledStatus != settings.versionCheckEnabled)
             return modified
         }
 
     override fun apply() {
-        val settings = MirrordSettingsState
+        val settings = MirrordSettingsState.instance.mirrordState
         settings.telemetryEnabled = mySettingsComponent!!.telemetryEnabledStatus
         settings.versionCheckEnabled = mySettingsComponent!!.versionCheckEnabledStatus
     }
 
     override fun reset() {
-        val settings = MirrordSettingsState
+        val settings = MirrordSettingsState.instance.mirrordState
         mySettingsComponent!!.telemetryEnabledStatus = settings.telemetryEnabled ?: false
         mySettingsComponent!!.versionCheckEnabledStatus = settings.versionCheckEnabled
     }

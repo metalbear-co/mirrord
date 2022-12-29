@@ -40,7 +40,7 @@ object MirrordVersionCheck {
         val remoteVersion = Version.valueOf(URL(versionCheckEndpoint).readText())
 
         // Don't show user anything
-        if (!MirrordSettingsState.versionCheckEnabled) {
+        if (!MirrordSettingsState.instance.mirrordState.versionCheckEnabled) {
             return
         }
 
@@ -64,7 +64,7 @@ object MirrordVersionCheck {
                     })
                     .addAction(object : NotificationAction("Don't show again") {
                         override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                            MirrordSettingsState.versionCheckEnabled = false
+                            MirrordSettingsState.instance.mirrordState.versionCheckEnabled = false
                             notification.expire()
                         }
                     }).notify(project)
