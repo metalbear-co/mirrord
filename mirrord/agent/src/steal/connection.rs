@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     io,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
 use bytes::Bytes;
@@ -341,8 +341,10 @@ impl TcpConnectionStealer {
         &mut self,
         (stream, address): (TcpStream, SocketAddr),
     ) -> Result<()> {
-        let real_address = orig_dst::orig_dst_addr(&stream)?;
-
+        let mut real_address = orig_dst::orig_dst_addr(&stream)?;
+        // If we use the original IP we would go through prerouting and hit a loop.
+        // localhost should always work.
+        real_address.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
         match self.port_subscriptions.get(&real_address.port()) {
             // We got an incoming connection in a port that is being stolen in its whole by a single
             // client.

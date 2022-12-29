@@ -1,5 +1,5 @@
 use core::{future::Future, pin::Pin};
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -19,6 +19,7 @@ use tracing::{error, info};
 
 use super::error::HttpTrafficError;
 use crate::{
+    runtime::set_namespace,
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
@@ -62,6 +63,9 @@ async fn unmatched_request(
     request: Request<Incoming>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    set_namespace(PathBuf::from("/proc").join("3831").join("ns").join("net"))
+        .inspect_err(|fail| error!("Failed joining net ns {fail:#?}"))
+        .unwrap();
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
@@ -74,28 +78,35 @@ async fn unmatched_request(
     //
     // better:
     // https://linkerd.io/2021/09/23/how-linkerd-uses-iptables-to-transparently-route-kubernetes-traffic/
-    info!("unmatched");
-    let tcp_stream = TcpStream::connect(original_destination).await?;
-    let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream).await?;
-    info!("result of handshake {connection:#?}");
+    info!("> UNMATCHED!!!");
+    let tcp_stream = TcpStream::connect(original_destination)
+        .await
+        .inspect_err(|fail| error!("Failed connecting to original_destination with {fail:#?}"))?;
+    info!("> CONNECTED!!!");
 
-    // let (connection_tx, mut connection_rx) = tokio::sync::mpsc::channel(1500);
-    // tokio::spawn(async move { connection_tx.send(connection.await).await });
+    let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream)
+        .await
+        .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
+
+    // dont get here!
+    info!("> result of handshake {connection:#?}");
+
     tokio::spawn(async move {
         if let Err(fail) = connection.await {
             error!("Connection failed in unmatched with {fail:#?}");
         }
     });
 
-    // Connection failed?
-    // connection_rx.recv().await.transpose()?;
-    // connection.await?;
-    // info!("awaited on connection");
+    info!("> CONNECTION progressed");
 
-    let (mut parts, body) = request_sender.send_request(request).await?.into_parts();
-    info!("parts {parts:#?} and body {body:#?}");
+    let (mut parts, body) = request_sender
+        .send_request(request)
+        .await
+        .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
+        .into_parts();
+    info!("> parts {parts:#?} and body {body:#?}");
     let body = body.collect().await?.to_bytes();
-    info!("colected body {body:#?}");
+    info!("> colected body {body:#?}");
 
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
