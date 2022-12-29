@@ -38,7 +38,7 @@ class MirrordEnabler : ToggleAction() {
                 "Allow mirrord to send telemetries",
                 NotificationType.INFORMATION
             )
-                .addAction(object : NotificationAction("Deny (will disable version check as well)") {
+                .addAction(object : NotificationAction("Deny (disables version check)") {
                     override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                         MirrordSettingsState.instance.mirrordState.telemetryEnabled = false
                         MirrordSettingsState.instance.mirrordState.versionCheckEnabled = false

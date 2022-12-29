@@ -110,8 +110,8 @@ object MirrordApi {
                     MirrordNotifier.progress("mirrord started!", project)
                     return executionInfo.environment
                 } else {
-                    MirrordNotifier.errorNotification("mirrord failed launching", project)
-                    throw Error("failed launching")
+                    MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                    throw Error("failed launch")
                 }
             }
 
@@ -124,8 +124,8 @@ object MirrordApi {
         }
 
 
-        MirrordNotifier.errorNotification("mirrord failed launching", project)
-        throw Error("failed launching")
+        MirrordNotifier.errorNotification("mirrord failed to launch", project)
+        throw Error("failed launch")
 
     }
 }
