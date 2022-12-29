@@ -53,6 +53,9 @@ async fn matched_request(
     Ok(Response::from_parts(parts, body))
 }
 
+// TODO(alex) [mid] 2022-12-29: The complete passthrough case might need the `set_namespace`
+// mechanism? Need to test it before.
+
 /// Handles the case when no filter matches a header in the request.
 ///
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
@@ -63,6 +66,11 @@ async fn unmatched_request(
     request: Request<Incoming>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    // TODO(alex) [high] 2022-12-29: Need a better mechanism for this. Aviram suggested changing how
+    // we do the `run_thread` piece, we should call `set_namespace` on each new thread for the
+    // stealer.
+    //
+    // https://discord.com/channels/933706914808889356/1049265406461870111/1058115382461874346
     set_namespace(PathBuf::from("/proc").join("3831").join("ns").join("net"))
         .inspect_err(|fail| error!("Failed joining net ns {fail:#?}"))
         .unwrap();
@@ -70,7 +78,7 @@ async fn unmatched_request(
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
 
-    // TODO(alex) [high] 2022-12-27: We end up with an infinite loop here, as we try to connect to
+    // TODO(alex) [mid] 2022-12-27: We end up with an infinite loop here, as we try to connect to
     // `original_destination`, which is a port we're stealing from, so we steal the connection we're
     // sending here, re-stealing the request, and on and on.
     //
@@ -78,6 +86,9 @@ async fn unmatched_request(
     //
     // better:
     // https://linkerd.io/2021/09/23/how-linkerd-uses-iptables-to-transparently-route-kubernetes-traffic/
+    //
+    // ADD(alex) [mid] 2022-12-29: Loop solved by using `localhost` address (only the port is from
+    // the `original_address`). But this solution might not be enough for MESH networks.
     info!("> UNMATCHED!!!");
     let tcp_stream = TcpStream::connect(original_destination)
         .await
