@@ -25,7 +25,7 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
 
     private fun < T: RunConfigurationBase<*>> patchEnv (configuration: T, params: JavaParameters) {
         val wsl = when {
-            SystemInfo.isWindows -> {
+            (configuration.projectPathOnTarget != null) && SystemInfo.isWindows -> {
                 getDistributionByWindowsUncPath(configuration.projectPathOnTarget)
             }
             else -> null
