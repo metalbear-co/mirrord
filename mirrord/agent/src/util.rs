@@ -147,8 +147,11 @@ where
 ///
 /// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
 /// caller's runtime.
+///
+/// These tasks will execute `on_start_fn` to change namespace (see [`enter_namespace`] for more
+/// details).
 #[tracing::instrument(level = "trace", skip_all)]
-pub fn run_thread<F, StartFn>(
+pub(crate) fn run_thread<F, StartFn>(
     future: F,
     thread_name: String,
     on_start_fn: StartFn,
@@ -171,6 +174,10 @@ where
     })
 }
 
+/// Used to enter a different (so far only used for "net") namespace for a task.
+///
+/// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to
+/// work.
 #[tracing::instrument(level = "debug")]
 pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
     if let Some(pid) = pid {
