@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, thread, time::Duration};
+use std::{collections::HashMap, thread, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
@@ -21,7 +21,6 @@ use tracing::{trace, warn};
 
 use crate::{
     error::{AgentError, Result},
-    runtime::set_namespace,
     util::{enter_namespace, run_thread, IndexAllocator},
 };
 
@@ -132,7 +131,7 @@ impl TcpOutgoingApi {
             Self::interceptor_task(layer_rx, daemon_tx),
             "TcpOutgoing".to_string(),
             move || {
-                enter_namespace(pid, "net");
+                enter_namespace(pid, "net").expect("Failed setting namespace!");
             },
         );
 

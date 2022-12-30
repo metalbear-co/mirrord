@@ -11,7 +11,7 @@ use tokio::sync::{mpsc::Receiver, oneshot::Sender};
 use tracing::{error, trace};
 use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
-use crate::{error::Result, runtime::set_namespace};
+use crate::error::Result;
 
 #[derive(Debug)]
 pub struct DnsRequest {

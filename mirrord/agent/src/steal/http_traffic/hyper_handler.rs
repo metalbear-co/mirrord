@@ -1,5 +1,5 @@
 use core::{future::Future, pin::Pin};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -19,11 +19,11 @@ use tracing::{error, info};
 
 use super::error::HttpTrafficError;
 use crate::{
-    runtime::set_namespace,
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
 };
 
+/// Used to pass data to the [`Service`] implementation.
 #[derive(Debug)]
 pub(super) struct HyperHandler {
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,

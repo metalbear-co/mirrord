@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -18,7 +18,6 @@ use tracing::warn;
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    runtime::set_namespace,
     steal::http_traffic::HttpFilterManager,
     util::{ClientId, IndexAllocator},
 };

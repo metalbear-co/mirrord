@@ -349,7 +349,7 @@ async fn start_agent() -> Result<()> {
         dns_worker(dns_receiver, pid),
         "DNS worker".to_string(),
         move || {
-            enter_namespace(pid, "net");
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
         },
     );
 
@@ -359,7 +359,7 @@ async fn start_agent() -> Result<()> {
             .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
         "Sniffer".to_string(),
         move || {
-            enter_namespace(pid, "net");
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
         },
     );
 
@@ -369,7 +369,7 @@ async fn start_agent() -> Result<()> {
             .and_then(|stealer| stealer.start(stealer_cancellation_token)),
         "Stealer".to_string(),
         move || {
-            enter_namespace(pid, "net");
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
         },
     );
 

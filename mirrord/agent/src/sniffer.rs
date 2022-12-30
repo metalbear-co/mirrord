@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
 };
 
 use mirrord_protocol::{
@@ -28,7 +27,6 @@ use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::AgentError,
-    runtime::set_namespace,
     util::{ClientId, IndexAllocator, Subscriptions},
 };
 

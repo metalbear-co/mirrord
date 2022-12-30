@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
     sync::LazyLock,
     thread,
 };
@@ -29,7 +28,6 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     error::{AgentError, Result},
-    runtime::set_namespace,
     util::{enter_namespace, run_thread, IndexAllocator},
 };
 
@@ -106,7 +104,7 @@ impl UdpOutgoingApi {
             Self::interceptor_task(layer_rx, daemon_tx),
             "UdpOutgoing".to_string(),
             move || {
-                enter_namespace(pid, "net");
+                enter_namespace(pid, "net").expect("Failed setting namespace!");
             },
         );
 
