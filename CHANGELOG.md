@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- agent: Add support for k3s envs
+
 ## 3.14.3
 
 ### Fixed

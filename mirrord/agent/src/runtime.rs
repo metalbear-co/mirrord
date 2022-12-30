@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bollard::{container::InspectContainerOptions, Docker};
+use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
     services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest},
@@ -18,8 +18,9 @@ use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
-const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
-const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
+const CONTAINERD_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
+const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
+const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd";
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
@@ -76,7 +77,7 @@ impl DockerContainer {
     fn from_id(container_id: String) -> Result<Self> {
         Ok(DockerContainer {
             container_id,
-            client: Docker::connect_with_local_defaults()?,
+            client: Docker::connect_with_unix("/host/run/docker.sock", 10, API_DEFAULT_VERSION)?,
         })
     }
 }
@@ -122,7 +123,10 @@ impl ContainerdContainer {
     async fn get_client() -> Result<TasksClient<Channel>> {
         let channel = match connect(CONTAINERD_SOCK_PATH).await {
             Ok(channel) => channel,
-            Err(_) => connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await?,
+            Err(_) => match connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await {
+                Ok(channel) => channel,
+                Err(_) => connect(CONTAINERD_K3S_SOCK_PATH).await?,
+            },
         };
         Ok(TasksClient::new(channel))
     }

@@ -140,20 +140,20 @@ impl ContainerApi for JobContainer {
         let mirrord_agent_job_name = get_agent_name();
 
         let mut agent_command_line = vec![
-            "./mirrord-agent".to_string(),
-            "--container-id".to_string(),
+            "./mirrord-agent".to_owned(),
+            "--container-id".to_owned(),
             runtime_data.container_id,
-            "--container-runtime".to_string(),
+            "--container-runtime".to_owned(),
             runtime_data.container_runtime.to_string(),
-            "-l".to_string(),
+            "-l".to_owned(),
             connection_port.to_string(),
         ];
         if let Some(timeout) = agent.communication_timeout {
-            agent_command_line.push("-t".to_string());
+            agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
         }
         if agent.pause {
-            agent_command_line.push("--pause".to_string());
+            agent_command_line.push("--pause".to_owned());
         }
 
         let agent_pod: Job =
@@ -187,9 +187,9 @@ impl ContainerApi for JobContainer {
                         "restartPolicy": "Never",
                         "volumes": [
                             {
-                                "name": "sockpath",
+                                "name": "hostrun",
                                 "hostPath": {
-                                    "path": runtime_data.container_runtime.mount_path()
+                                    "path": "/run"
                                 }
                             }
                         ],
@@ -203,8 +203,8 @@ impl ContainerApi for JobContainer {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": runtime_data.container_runtime.mount_path(),
-                                        "name": "sockpath"
+                                        "mountPath": "/host/run",
+                                        "name": "hostrun"
                                     }
                                 ],
                                 "command": agent_command_line,
