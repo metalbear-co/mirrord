@@ -108,18 +108,7 @@ impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
     /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(
-        command_rx: Receiver<StealerCommand>,
-        pid: Option<u64>,
-    ) -> Result<Self, AgentError> {
-        if let Some(pid) = pid {
-            let namespace = PathBuf::from("/proc")
-                .join(PathBuf::from(pid.to_string()))
-                .join(PathBuf::from("ns/net"));
-
-            set_namespace(namespace).unwrap();
-        }
-
+    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
 

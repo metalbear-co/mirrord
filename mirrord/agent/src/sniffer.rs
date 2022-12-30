@@ -325,17 +325,8 @@ impl TcpConnectionSniffer {
     #[tracing::instrument(level = "trace")]
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
-        pid: Option<u64>,
         network_interface: Option<String>,
     ) -> Result<Self, AgentError> {
-        if let Some(pid) = pid {
-            let namespace = PathBuf::from("/proc")
-                .join(PathBuf::from(pid.to_string()))
-                .join(PathBuf::from("ns/net"));
-
-            set_namespace(namespace).unwrap();
-        }
-
         let raw_capture = prepare_sniffer(network_interface).await?;
 
         Ok(Self {

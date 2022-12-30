@@ -22,7 +22,7 @@ use tracing::{trace, warn};
 use crate::{
     error::{AgentError, Result},
     runtime::set_namespace,
-    util::{run_thread, IndexAllocator},
+    util::{enter_namespace, run_thread, IndexAllocator},
 };
 
 pub(crate) mod udp;
@@ -128,7 +128,13 @@ impl TcpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task = run_thread(Self::interceptor_task(pid, layer_rx, daemon_tx));
+        let task = run_thread(
+            Self::interceptor_task(layer_rx, daemon_tx),
+            "TcpOutgoing".to_string(),
+            move || {
+                enter_namespace(pid, "net");
+            },
+        );
 
         Self {
             _task: task,
@@ -140,18 +146,9 @@ impl TcpOutgoingApi {
     /// Does the actual work for `Request`s and prepares the `Responses:
     #[tracing::instrument(level = "trace", skip(layer_rx, daemon_tx))]
     async fn interceptor_task(
-        pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
     ) -> Result<()> {
-        if let Some(pid) = pid {
-            let namespace = PathBuf::from("/proc")
-                .join(PathBuf::from(pid.to_string()))
-                .join(PathBuf::from("ns/net"));
-
-            set_namespace(namespace)?;
-        }
-
         let mut allocator: IndexAllocator<ConnectionId> = IndexAllocator::new();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using

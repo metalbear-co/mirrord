@@ -3,10 +3,14 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     hash::Hash,
+    path::PathBuf,
     thread::JoinHandle,
 };
 
 use num_traits::{zero, CheckedAdd, Num, NumCast};
+use tracing::error;
+
+use crate::{error::AgentError, runtime::set_namespace};
 
 /// Struct that helps you manage topic -> subscribers
 ///
@@ -143,19 +147,41 @@ where
 ///
 /// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
 /// caller's runtime.
-#[tracing::instrument(level = "trace", skip(future))]
-pub fn run_thread<T>(future: T) -> JoinHandle<T::Output>
+#[tracing::instrument(level = "trace", skip_all)]
+pub fn run_thread<F, StartFn>(
+    future: F,
+    thread_name: String,
+    on_start_fn: StartFn,
+) -> JoinHandle<F::Output>
 where
-    T: Future + Send + 'static,
-    T::Output: Send + 'static,
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+    StartFn: Fn() + Send + Sync + 'static,
 {
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
+            .thread_name(thread_name)
+            // .on_thread_start(on_start_fn)
             .build()
             .unwrap();
-        rt.block_on(future)
+        rt.block_on(async {
+            on_start_fn();
+            future.await
+        })
     })
+}
+
+#[tracing::instrument(level = "debug")]
+pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
+    if let Some(pid) = pid {
+        let path = PathBuf::from("/proc").join(pid.to_string()).join("ns");
+
+        Ok(set_namespace(path.join(namespace))
+            .inspect_err(|fail| error!("Failed setting namespace {fail:#?}"))?)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

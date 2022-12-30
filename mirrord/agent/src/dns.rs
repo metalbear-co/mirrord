@@ -59,13 +59,6 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
 /// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
 /// `DnsRequest::tx`.
 pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
-    if let Some(pid) = pid {
-        let namespace = PathBuf::from("/proc")
-            .join(PathBuf::from(pid.to_string()))
-            .join(PathBuf::from("ns"));
-        set_namespace(namespace.join(PathBuf::from("net")))?;
-    }
-
     let root_path = pid
         .map(|pid| PathBuf::from("/proc").join(pid.to_string()).join("root"))
         .unwrap_or_else(|| PathBuf::from("/"));

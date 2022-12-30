@@ -71,9 +71,9 @@ async fn unmatched_request(
     // stealer.
     //
     // https://discord.com/channels/933706914808889356/1049265406461870111/1058115382461874346
-    set_namespace(PathBuf::from("/proc").join("3831").join("ns").join("net"))
-        .inspect_err(|fail| error!("Failed joining net ns {fail:#?}"))
-        .unwrap();
+    // set_namespace(PathBuf::from("/proc").join("3831").join("ns").join("net"))
+    //     .inspect_err(|fail| error!("Failed joining net ns {fail:#?}"))
+    //     .unwrap();
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
