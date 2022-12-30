@@ -159,16 +159,15 @@ where
     StartFn: Fn() + Send + Sync + 'static,
 {
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        on_start_fn();
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name(thread_name)
-            // .on_thread_start(on_start_fn)
+            .on_thread_start(on_start_fn)
             .build()
             .unwrap();
-        rt.block_on(async {
-            on_start_fn();
-            future.await
-        })
+        rt.block_on(future)
     })
 }
 
