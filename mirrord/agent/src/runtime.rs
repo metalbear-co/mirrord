@@ -18,9 +18,9 @@ use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
-const CONTAINERD_SOCK_PATH: &str = "/run/containerd/containerd.sock";
-const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/run/dockershim.sock";
-const CONTAINERD_K3S_SOCK_PATH: &str = "/var/run/k3s/containerd";
+const CONTAINERD_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
+const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
+const CONTAINERD_K3S_SOCK_PATH: &str = "/host/var/run/k3s/containerd";
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 

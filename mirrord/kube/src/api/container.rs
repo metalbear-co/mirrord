@@ -209,11 +209,11 @@ impl ContainerApi for JobContainer {
                                 },
                                 "volumeMounts": [
                                     {
-                                        "mountPath": "/var/run",
+                                        "mountPath": "/host/var/run",
                                         "name": "host_var"
                                     },
                                     {
-                                        "mountPath": "/run",
+                                        "mountPath": "/host/run",
                                         "name": "host_run"
                                     }
                                 ],
