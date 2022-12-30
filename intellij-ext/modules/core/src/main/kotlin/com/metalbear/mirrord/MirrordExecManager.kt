@@ -44,6 +44,9 @@ object MirrordExecManager {
 
         var target: String? = null;
         if (!MirrordConfigAPI.isTargetSet(project)) {
+            // In some cases, we're executing from a `ReadAction` context, which means we 
+            // can't block and wait for a WriteAction (such as invokeAndWait).
+            // Executing it in a thread pool seems to fix, fml.
             ApplicationManager.getApplication().executeOnPooledThread {
                 ApplicationManager.getApplication().invokeAndWait() {
                     target = chooseTarget(wslDistribution, project);

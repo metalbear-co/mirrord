@@ -36,7 +36,7 @@
 
             <action id="com.metalbear.mirrord.MirrordEnabler"
                     class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
-                    description="Toggle the mirrord plugin"
+                    description="Toggles the mirrord plugin"
                     icon="MirrordIcons.mirrordIcon"/>
             <action id="MirrordGotoConfig" class="com.metalbear.mirrord.MirrordGotoConfigAction"
                     text="Open mirrord configuration file"

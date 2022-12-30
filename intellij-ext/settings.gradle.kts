@@ -9,6 +9,7 @@ include (
     "modules/products/rubymine",
 )
 
+// Rename modules to mirrord-<module>, I think this is required IntelliJ wise.
 rootProject.children.forEach {
     it.name = (it.name.replaceFirst("modules/", "mirrord/").replace("/", "-"))
 }

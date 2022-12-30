@@ -288,8 +288,10 @@ jobs:
       - run: |
           mkdir -p intellij-ext/bin/linux/arm64
           mkdir -p intellij-ext/bin/linux/x86-64
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so intellij-ext/
-      - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib intellij-ext/
+          mkdir -p intellij-ext/bin/macos
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/x86-64/mirrord
+      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/arm64/mirrord
+      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord intellij-ext/bin/macos/mirrord
       - name: Build Plugin
         run: |
           cd intellij-ext
