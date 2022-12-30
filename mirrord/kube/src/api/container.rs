@@ -38,6 +38,7 @@ pub trait ContainerApi {
         runtime_data: RuntimeData,
         connection_port: u16,
         progress: &P,
+        agent_gid: u16,
     ) -> Result<String>
     where
         P: Progress + Send + Sync;
@@ -131,6 +132,7 @@ impl ContainerApi for JobContainer {
         runtime_data: RuntimeData,
         connection_port: u16,
         progress: &P,
+        agent_gid: u16,
     ) -> Result<String>
     where
         P: Progress + Send + Sync,
@@ -199,6 +201,7 @@ impl ContainerApi for JobContainer {
                                 "image": agent_image,
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "securityContext": {
+                                    "runAsGroup": agent_gid,
                                     "privileged": true,
                                 },
                                 "volumeMounts": [
@@ -283,6 +286,7 @@ impl ContainerApi for EphemeralContainer {
         runtime_data: RuntimeData,
         connection_port: u16,
         progress: &P,
+        agent_gid: u16,
     ) -> Result<String>
     where
         P: Progress + Send + Sync,
@@ -310,6 +314,7 @@ impl ContainerApi for EphemeralContainer {
             "name": mirrord_agent_name,
             "image": agent_image,
             "securityContext": {
+                "runAsGroup": agent_gid,
                 "capabilities": {
                     "add": ["NET_RAW", "NET_ADMIN"],
                 },

@@ -1,5 +1,7 @@
 use mirrord_protocol::Port;
+use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
+use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
@@ -104,6 +106,24 @@ where
             &self.formatter.redirect_rule(redirected_port, target_port),
         )
     }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn add_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.insert_rule(&self.chain_name, &rule, 1)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn remove_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.remove_rule(&self.chain_name, &rule)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl<IPT> Drop for SafeIpTables<IPT>
@@ -130,8 +150,10 @@ enum IPTableFormatter {
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
+        debug!("> Output is {output:#?}");
 
         if output.iter().any(|rule| {
             IPTableFormatter::MESH_OUTPUTS
@@ -161,6 +183,16 @@ impl IPTableFormatter {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
                 format!("-o lo {}", redirect_rule)
+            }
+        }
+    }
+
+    fn bypass_own_packets_rule(&self) -> Option<String> {
+        match self {
+            IPTableFormatter::Normal => None,
+            IPTableFormatter::Mesh => {
+                let gid = getgid();
+                Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
         }
     }
