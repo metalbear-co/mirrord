@@ -187,7 +187,7 @@ impl ContainerApi for JobContainer {
                         "restartPolicy": "Never",
                         "volumes": [
                             {
-                                "name": "hostRun",
+                                "name": "hostrun",
                                 "hostPath": {
                                     "path": "/run"
                                 }
@@ -204,7 +204,7 @@ impl ContainerApi for JobContainer {
                                 "volumeMounts": [
                                     {
                                         "mountPath": "/host/run",
-                                        "name": "hostRun"
+                                        "name": "hostrun"
                                     }
                                 ],
                                 "command": agent_command_line,
