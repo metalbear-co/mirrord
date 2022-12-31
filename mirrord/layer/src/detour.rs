@@ -79,6 +79,7 @@ pub(crate) enum Bypass {
     EmptyBuffer,
     EmptyOption,
     NullNode,
+    StatVersion(i32),
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
     #[cfg(target_os = "macos")]
