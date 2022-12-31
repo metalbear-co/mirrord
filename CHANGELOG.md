@@ -7,9 +7,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.15.0
+
 ### Added
 
 - agent: Add support for k3s envs
+- IntelliJ plugin - refactor, uses cli like vs code.
+
+### Changed
+
+- cli now loads env, removes go env stuff at load, might fix some bugs there.
+
 
 ## 3.14.3
 
