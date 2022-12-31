@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes[#858](https://github.com/metalbear-co/mirrord/issues/858) and [#848](https://github.com/metalbear-co/mirrord/issues/848)
+- agent: Add support for k3s envs
 
 ## 3.14.3
 
