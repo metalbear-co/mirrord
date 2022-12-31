@@ -9,11 +9,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- Add `__xstat` hook, fixes #867
+- Add `__xstat` hook, fixes [#867]((https://github.com/metalbear-co/mirrord/issues/867))
 
 ### Fixed
 
-- getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes#858 and #848
+- getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes[#858](https://github.com/metalbear-co/mirrord/issues/858) and [#848](https://github.com/metalbear-co/mirrord/issues/848)
 
 ## 3.14.3
 
