@@ -40,8 +40,6 @@ intellij {
     val platformType = System.getenv("PLATFORMTYPE")
     if (platformType != null) {
         type.set(platformType)
-    } else {
-        type.set(properties("platformType"))
     }
 
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
