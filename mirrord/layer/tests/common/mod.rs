@@ -148,27 +148,12 @@ pub struct LayerConnection {
 }
 
 impl LayerConnection {
-    /// Accept a connection from the libraries and verify the first message it is supposed to send
-    /// to the agent - GetEnvVarsRequest. Send back a response.
+    /// Accept a connection from the layer
     /// Return the codec of the accepted stream.
     async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
         let (stream, _) = listener.accept().await.unwrap();
         println!("Got connection from library.");
-        let mut codec = Framed::new(stream, DaemonCodec::new());
-        let msg = codec.next().await.unwrap().unwrap();
-        println!("Got first message from library.");
-        if let ClientMessage::GetEnvVarsRequest(request) = msg {
-            assert!(request.env_vars_filter.is_empty());
-            assert_eq!(request.env_vars_select.len(), 1);
-            assert!(request.env_vars_select.contains("*"));
-        } else {
-            panic!("unexpected request {:?}", msg)
-        }
-        codec
-            .send(DaemonMessage::GetEnvVarsResponse(Ok(HashMap::new())))
-            .await
-            .unwrap();
-        codec
+        Framed::new(stream, DaemonCodec::new())
     }
 
     /// Accept the library's connection and verify initial ENV message

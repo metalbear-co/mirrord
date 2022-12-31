@@ -272,8 +272,10 @@ jobs:
         id: version
       - name: get custom delve
         run: |
-          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_arm64 -O intellij-ext/dlv_aarch64
-          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_amd64 -O intellij-ext/dlv_amd64
+          mkdir -p intellij-ext/bin/macos/arm64
+          mkdir -p intellij-ext/bin/macos/x86-64
+          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_arm64 -O intellij-ext/bin/macos/arm64/dlv
+          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_amd64 -O intellij-ext/bin/macos/x86-64/dlv
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
@@ -283,8 +285,13 @@ jobs:
           distribution: zulu
           java-version: 11
       - run: cp LICENSE CHANGELOG.md intellij-ext/
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so intellij-ext/
-      - run: cp /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib intellij-ext/
+      - run: |
+          mkdir -p intellij-ext/bin/linux/arm64
+          mkdir -p intellij-ext/bin/linux/x86-64
+          mkdir -p intellij-ext/bin/macos
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/x86-64/mirrord
+      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/arm64/mirrord
+      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord intellij-ext/bin/macos/mirrord
       - name: Build Plugin
         run: |
           cd intellij-ext

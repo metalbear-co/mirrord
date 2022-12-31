@@ -1,4 +1,4 @@
-package com.metalbear.mirrord
+package com.metalbear.mirrord.products.goland
 
 import com.goide.execution.GoRunConfigurationBase
 import com.goide.execution.GoRunningState
@@ -6,21 +6,13 @@ import com.goide.execution.extension.GoRunConfigurationExtension
 import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
-import com.intellij.openapi.application.PathManager
+import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
+import com.intellij.openapi.util.SystemInfo
+import com.metalbear.mirrord.MirrordExecManager
+import com.metalbear.mirrord.MirrordPathManager
 import java.nio.file.Paths
 
-class GoRunConfig : GoRunConfigurationExtension() {
-    companion object {
-        fun clearGoEnv() {
-            for (key in MirrordListener.mirrordEnv.keys) {
-                if (goCmdLine?.getEnvironmentVariable(key) != null) {
-                    goCmdLine?.removeEnvironmentVariable(key)
-                }
-            }
-        }
-
-        var goCmdLine: TargetedCommandLineBuilder? = null
-    }
+class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
 
     override fun isApplicableFor(configuration: GoRunConfigurationBase<*>): Boolean {
         return true
@@ -41,14 +33,25 @@ class GoRunConfig : GoRunConfigurationExtension() {
         state: GoRunningState<out GoRunConfigurationBase<*>>,
         commandLineType: GoRunningState.CommandLineType
     ) {
-        if (commandLineType == GoRunningState.CommandLineType.RUN && MirrordListener.enabled && !MirrordListener.envSet) {
-            goCmdLine = cmdLine
-            MirrordListener.mirrordEnv["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver"
+        if (commandLineType == GoRunningState.CommandLineType.RUN) {
 
-            for ((key, value) in MirrordListener.mirrordEnv) {
-                cmdLine.addEnvironmentVariable(key, value)
+            val wsl = state.targetEnvironmentRequest?.let {
+                if (it is WslTargetEnvironmentRequest) {
+                    it.configuration.distribution
+                } else {
+                    null
+                }
             }
-            MirrordListener.envSet = true
+            val project = configuration.getProject()
+
+            MirrordExecManager.start(wsl, project)?.let {
+                env ->
+                for (entry in env.entries.iterator()) {
+                    cmdLine.addEnvironmentVariable(entry.key, entry.value)
+                }
+                cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
+            }
+
         }
         super.patchCommandLine(configuration, runnerSettings, cmdLine, runnerId, state, commandLineType)
     }
@@ -62,12 +65,11 @@ class GoRunConfig : GoRunConfigurationExtension() {
         commandLineType: GoRunningState.CommandLineType
     ) {
         if (commandLineType == GoRunningState.CommandLineType.RUN &&
-            MirrordListener.enabled && !MirrordListener.envSet &&
-            System.getProperty("os.name").toLowerCase().startsWith("mac") &&
-            !MirrordListener.defaultFlow
+            MirrordExecManager.enabled &&
+            SystemInfo.isMac &&
+            state.isDebug
         ) {
-            val arch = System.getProperty("os.arch")
-            val delvePath = getCustomDelvePath(arch)
+            val delvePath = getCustomDelvePath()
             // convert the delve file to an executable
             val delveExecutable = Paths.get(delvePath).toFile()
             if (delveExecutable.exists()) {
@@ -80,7 +82,7 @@ class GoRunConfig : GoRunConfigurationExtension() {
         super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
     }
 
-    private fun getCustomDelvePath(arch: String): String {
-        return Paths.get(PathManager.getPluginsPath(), "mirrord", "dlv_$arch").toString()
+    private fun getCustomDelvePath(): String {
+        return MirrordPathManager.getBinary("dlv", false)!!
     }
 }

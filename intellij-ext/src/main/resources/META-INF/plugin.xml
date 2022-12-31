@@ -17,21 +17,43 @@
         <notificationGroup id="mirrord Notification Handler"
                            displayType="BALLOON"/>
     </extensions>
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+                serviceImplementation="com.metalbear.mirrord.MirrordSettingsState"/>
+    </extensions>
 
-    <projectListeners>
-        <listener class="com.metalbear.mirrord.MirrordListener"
-                  topic="com.intellij.execution.ExecutionListener"/>
-    </projectListeners>
 
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.metalbear.mirrord.MirrordSettingsConfigurable"
+                id="com.metalbear.mirrord.MirrordSettingsConfigurable"
+                displayName="mirrord"/>
+    </extensions>
     <actions>
-        <action id="com.metalbear.mirrord.MirrordEnabler"
-                class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
-                description="Toggle the mirrord plugin"
-                icon="MirrordIcons.mirrordIcon">
+        <group id="mirrord">
+            <separator/>
+
+            <action id="com.metalbear.mirrord.MirrordEnabler"
+                    class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
+                    description="Toggles the mirrord plugin"
+                    icon="MirrordIcons.mirrordIcon"/>
+            <action id="MirrordGotoConfig" class="com.metalbear.mirrord.MirrordGotoConfigAction"
+                    text="Open mirrord configuration file"
+                    description="Opens/creates the default mirrord configuration file"
+                    icon="AllIcons.General.GearPlain"/>
+            <separator/>
+
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
-        </action>
+        </group>
+
+
     </actions>
 
-    <depends optional="true" config-file="go-plugin.xml">org.jetbrains.plugins.go</depends>
+
+    <depends optional="true" config-file="mirrord-idea.xml">com.intellij.modules.java</depends>
+    <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>
+    <depends optional="true" config-file="mirrord-rubymine.xml">com.intellij.modules.ruby</depends>
+    <depends optional="true" config-file="mirrord-goland.xml">org.jetbrains.plugins.go</depends>
 
 </idea-plugin>
