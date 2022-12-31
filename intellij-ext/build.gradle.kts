@@ -79,6 +79,7 @@ qodana {
 }
 
 tasks {
+    // Removing this makes build stop working, not sure why.
     buildSearchableOptions {
         enabled = false
     }
