@@ -18,7 +18,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - cli now loads env, removes go env stuff at load, might fix some bugs there.
 
-
 ## 3.14.3
 
 ### Fixed
