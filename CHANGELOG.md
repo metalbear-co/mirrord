@@ -7,9 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.15.1
+
 ### Added
 
 - Add `__xstat` hook, fixes [#867]((https://github.com/metalbear-co/mirrord/issues/867))
+
+### Fixed
+
+- Fix build scripts for the refactored IntelliJ plugin
 
 ## 3.15.0
 
