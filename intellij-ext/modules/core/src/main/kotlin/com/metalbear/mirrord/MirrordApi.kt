@@ -4,8 +4,12 @@ import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
+import com.intellij.idea.LoggerFactory
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.intellij.util.io.runClosingOnFailure
 import java.util.concurrent.TimeUnit
 
 
@@ -33,7 +37,7 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
-
+    private val logger = Logger.getInstance("mirrord")
     private fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
         wslDistribution?.let {
@@ -90,6 +94,7 @@ object MirrordApi {
             it.patchCommandLine(commandLine, project, wslOptions)
         }
 
+        logger.info("running mirrord with following commandline: %s".format(commandLine.commandLineString))
 
         val process = commandLine.toProcessBuilder()
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
@@ -99,6 +104,7 @@ object MirrordApi {
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson();
         for (line in bufferedReader.lines()) {
+            logger.info("mirrord output: %s".format(line))
             val message = gson.fromJson(line, Message::class.java)
             // See if it's the final message
             if (message.name == "mirrord preparing to launch"
@@ -111,7 +117,6 @@ object MirrordApi {
                     return executionInfo.environment
                 } else {
                     MirrordNotifier.errorNotification("mirrord failed to launch", project)
-                    throw Error("failed launch")
                 }
             }
 
@@ -124,6 +129,7 @@ object MirrordApi {
         }
 
 
+        logger.error("mirrord stderr: %s".format(process.errorStream.reader().toString()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
         throw Error("failed launch")
 
