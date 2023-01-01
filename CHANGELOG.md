@@ -12,7 +12,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Crash when mirroring and state is different between local and remote (happens in Mesh).
   We now ignore messages that are not in the expected state. (as we can't do anything about it).
 
-
 ## 3.15.1
 
 ### Added
