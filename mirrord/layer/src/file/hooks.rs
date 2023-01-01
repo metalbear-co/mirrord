@@ -435,7 +435,7 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(None, Some(path), None, false)
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -450,7 +450,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    let (Ok(result) | Err(result)) = xstat(None, None, Some(fd), true)
+    let (Ok(result) | Err(result)) = xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -466,7 +466,7 @@ unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(None, Some(path), None, true)
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -485,8 +485,11 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
+    if ver != 1 {
+        return FN___XSTAT(ver, raw_path, out_stat);
+    }
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(Some(ver), Some(path), None, true)
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -507,7 +510,7 @@ unsafe extern "C" fn fstatat_detour(
 ) -> c_int {
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(None, Some(path), Some(fd), follow_symlink)
+    let (Ok(result) | Err(result)) = xstat(Some(path), Some(fd), follow_symlink)
         .map(|res| {
             trace!("res: {:?}", res);
             let res = res.metadata;

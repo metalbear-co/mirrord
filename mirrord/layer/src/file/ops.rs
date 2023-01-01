@@ -431,16 +431,10 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
 /// `ver` is only relevant for __xstat
 #[tracing::instrument(level = "trace")]
 pub(crate) fn xstat(
-    ver: Option<c_int>,
     rawish_path: Option<Option<&CStr>>,
     fd: Option<RawFd>,
     follow_symlink: bool,
 ) -> Detour<XstatResponse> {
-    if let Some(ver) = ver {
-        if ver != 1 {
-            return Detour::Bypass(Bypass::StatVersion(ver));
-        }
-    }
     // Can't use map because we need to propagate captured error
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
