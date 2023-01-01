@@ -8,8 +8,7 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
-    file::{MetadataInternal, XstatResponse},
-    OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+    file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::trace;
