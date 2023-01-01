@@ -406,6 +406,20 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 libc::SYS_faccessat => {
                     faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
                 }
+                // Stat hooks:
+                // - SYS_stat: maps to fstatat with AT_FDCWD in go - no additional hook needed
+                // |-- fstatat(_AT_FDCWD, path, stat, 0)
+                // - SYS_fstat will use fstat_detour, maps to the same syscall number i.e. SYS_FSTAT
+                //   (5)
+                // - SYS_newfstatat will use fstatat_detour, maps to the same syscall number i.e.
+                //   SYS_NEWFSTATAT (262)
+                // - SYS_lstat: maps to fstatat with AT_FDCWD and AT_SYMLINK_NOFOLLOW in go - no
+                //   additional hook needed
+                // - SYS_statx: not supported in go
+                libc::SYS_newfstatat => {
+                    fstatat_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                }
+                libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 _ => {
                     let syscall_res =

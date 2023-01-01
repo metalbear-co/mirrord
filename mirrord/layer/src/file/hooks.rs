@@ -449,7 +449,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
-unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
     let (Ok(result) | Err(result)) = xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
@@ -502,7 +502,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
 
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
-unsafe extern "C" fn fstatat_detour(
+pub(crate) unsafe extern "C" fn fstatat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     out_stat: *mut stat,
