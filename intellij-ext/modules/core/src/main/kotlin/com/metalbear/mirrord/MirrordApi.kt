@@ -129,7 +129,7 @@ object MirrordApi {
         }
 
 
-        logger.error("mirrord stderr: %s".format(process.errorStream.reader().toString()))
+        logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
         throw Error("failed launch")
 
