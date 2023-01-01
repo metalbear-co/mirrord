@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Crash when mirroring and state is different between local and remote (happens in Mesh).
   We now ignore messages that are not in the expected state. (as we can't do anything about it).
 - agent: Fix typo in socket path for k3s environments
+- intellij-plugin: fix missing telemetry/version check
 
 ## 3.15.1
 

@@ -42,6 +42,8 @@ object MirrordExecManager {
             return null
         }
 
+        MirrordVersionCheck.checkVersion(project)
+
         var target: String? = null;
         if (!MirrordConfigAPI.isTargetSet(project)) {
             // In some cases, we're executing from a `ReadAction` context, which means we 
