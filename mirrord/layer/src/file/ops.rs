@@ -428,7 +428,6 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
 /// that.
 /// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
 /// and non existing argument (For error handling)
-/// `ver` is only relevant for __xstat
 #[tracing::instrument(level = "trace")]
 pub(crate) fn xstat(
     rawish_path: Option<Option<&CStr>>,

@@ -512,7 +512,6 @@ unsafe extern "C" fn fstatat_detour(
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let (Ok(result) | Err(result)) = xstat(Some(path), Some(fd), follow_symlink)
         .map(|res| {
-            trace!("res: {:?}", res);
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
