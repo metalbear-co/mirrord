@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Logging for IntelliJ plugin for debugging/bug reports.
 
+### Fixed
+
+- agent: Fix typo in socket path for k3s environments
+
 ## 3.15.1
 
 ### Added
