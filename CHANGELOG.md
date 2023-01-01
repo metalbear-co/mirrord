@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Logging for IntelliJ plugin for debugging/bug reports.
+
 ### Fixed
 
 - Crash when mirroring and state is different between local and remote (happens in Mesh).
