@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.15.2
+
 ### Added
 
 - Logging for IntelliJ plugin for debugging/bug reports.
