@@ -478,6 +478,28 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
     result
 }
 
+/// Hook for libc's stat syscall wrapper.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn __xstat_detour(
+    ver: c_int,
+    raw_path: *const c_char,
+    out_stat: *mut stat,
+) -> c_int {
+    if ver != 1 {
+        return FN___XSTAT(ver, raw_path, out_stat);
+    }
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat, &res);
+            0
+        })
+        .bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
+        .map_err(From::from);
+    result
+}
+
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
 unsafe extern "C" fn fstatat_detour(
@@ -583,6 +605,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     // }
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
     {
+        replace!(
+            hook_manager,
+            "__xstat",
+            __xstat_detour,
+            Fn__xstat,
+            FN___XSTAT
+        );
         replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
         replace!(hook_manager, "fstat", fstat_detour, FnFstat, FN_FSTAT);
         replace!(hook_manager, "stat", stat_detour, FnStat, FN_STAT);
