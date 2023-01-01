@@ -8,7 +8,8 @@ use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
-    file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+    file::{MetadataInternal, XstatResponse},
+    OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::trace;
@@ -16,7 +17,7 @@ use tracing::trace;
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_layer_fd,
-    detour::DetourGuard,
+    detour::{Detour, DetourGuard},
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -500,6 +501,21 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     result
 }
 
+pub(crate) unsafe fn fstatat_logic(
+    fd: RawFd,
+    raw_path: *const c_char,
+    out_stat: *mut stat,
+    flag: c_int,
+) -> Detour<i32> {
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    xstat(Some(path), Some(fd), follow_symlink).map(|res| {
+        let res = res.metadata;
+        fill_stat(out_stat, &res);
+        0
+    })
+}
+
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstatat_detour(
@@ -508,14 +524,7 @@ pub(crate) unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
-    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(Some(path), Some(fd), follow_symlink)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
+    let (Ok(result) | Err(result)) = fstatat_logic(fd, raw_path, out_stat, flag)
         .bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
         .map_err(From::from);
 

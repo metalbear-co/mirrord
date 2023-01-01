@@ -4,8 +4,8 @@ use errno::errno;
 use tracing::trace;
 
 use crate::{
-    close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
-    FILE_MODE,
+    close_detour, detour::Detour, file::hooks::*, hooks::HookManager, macros::hook_symbol,
+    socket::hooks::*, FILE_MODE,
 };
 /*
  * Reference for which syscalls are managed by the handlers:
@@ -417,21 +417,17 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 //   additional hook needed
                 // - SYS_statx: not supported in go
                 libc::SYS_newfstatat => {
-                    fstatat_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                    match fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _) {
+                        Detour::Success(res) => res as i64,
+                        _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
+                    }
                 }
                 libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
-                _ => {
-                    let syscall_res =
-                        syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-                    return syscall_res;
-                }
+                _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
             }
         }
-        _ => {
-            let syscall_res = syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-            return syscall_res;
-        }
+        _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
     };
     match res {
         -1 => -errno().0 as i64,
