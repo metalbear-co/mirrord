@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Error on specifying namespace in configuration without path (pod/container/deployment). Closes [#830](https://github.com/metalbear-co/mirrord/issues/830)
+
 ## 3.15.2
 
 ### Added
