@@ -77,6 +77,7 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find export for name `{0}`!")]
     NoExportName(String),
 
+    #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Failed to find symbol for name `{0}`!")]
     NoSymbolName(String),
 

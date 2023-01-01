@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.15.0
+
 ### Added
 
 - Add `__xstat` hook, fixes [#867]((https://github.com/metalbear-co/mirrord/issues/867))
@@ -15,6 +17,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes[#858](https://github.com/metalbear-co/mirrord/issues/858) and [#848](https://github.com/metalbear-co/mirrord/issues/848)
 - agent: Add support for k3s envs
+- IntelliJ plugin - refactor, uses cli like vs code.
+
+### Changed
+
+- cli now loads env, removes go env stuff at load, might fix some bugs there.
 
 ## 3.14.3
 
