@@ -54,11 +54,11 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
         patchEnv(configuration, params)
     }
 
-    override fun <T : RunConfigurationBase<*>?> updateJavaParameters(
+    override fun <T : RunConfigurationBase<*>> updateJavaParameters(
         configuration: T,
         params: JavaParameters,
         runnerSettings: RunnerSettings?
     ) {
-        patchEnv(configuration!!, params)
+        patchEnv(configuration, params)
     }
 }

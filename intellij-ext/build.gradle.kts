@@ -13,8 +13,6 @@ plugins {
     id("org.jetbrains.intellij") version "1.11.0"
     // Gradle Changelog Plugin
     id("org.jetbrains.changelog") version "1.3.1"
-    // Gradle Qodana Plugin
-    id("org.jetbrains.qodana") version "0.1.13"
 }
 
 group = properties("pluginGroup")
@@ -68,13 +66,21 @@ allprojects {
 
 }
 
-// Configure Gradle Qodana Plugin - read more: https://github.com/JetBrains/gradle-qodana-plugin
-qodana {
-    cachePath.set(projectDir.resolve(".qodana").canonicalPath)
-    reportPath.set(projectDir.resolve("build/reports/inspections").canonicalPath)
-    saveReport.set(true)
-    showReport.set(System.getenv("QODANA_SHOW_REPORT")?.toBoolean() ?: false)
-}
+gradle.taskGraph.whenReady(closureOf<TaskExecutionGraph> {
+    val ignoreSubprojectTasks = listOf(
+        "buildSearchableOptions", "listProductsReleases", "patchPluginXml", "publishPlugin", "runIde", "runPluginVerifier",
+        "verifyPlugin"
+    )
+
+    // Don't run some tasks for subprojects
+    for (task in allTasks) {
+        if (task.project != task.project.rootProject) {
+            when (task.name) {
+                in ignoreSubprojectTasks -> task.enabled = false
+            }
+        }
+    }
+})
 
 tasks {
     // Removing this makes build stop working, not sure why.
