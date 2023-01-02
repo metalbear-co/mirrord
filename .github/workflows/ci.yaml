@@ -292,6 +292,9 @@ jobs:
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
       - run: |
+          cd mirrord/layer/tests/apps/fileops/go
+          go build -o fileops        
+      - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
@@ -325,7 +328,7 @@ jobs:
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
           cd ../app_go
-          go build -o 19
+          go build -o 19      
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build

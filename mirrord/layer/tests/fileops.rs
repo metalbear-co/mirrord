@@ -355,3 +355,77 @@ async fn test_node_close(
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
 }
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+#[cfg(target_os = "linux")]
+async fn test_go_stat(
+    #[values(Application::GoFileOps)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/test_file.txt".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: false,
+                write: true,
+                append: false,
+                truncate: false,
+                create: true,
+                create_new: false,
+            },
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+            path: Some("/tmp/test_file.txt".to_string().into()),
+            fd: None,
+            follow_symlink: true
+        }))
+    );
+
+    let metadata = MetadataInternal {
+        device_id: 0,
+        size: 0,
+        user_id: 2,
+        blocks: 3,
+        ..Default::default()
+    };
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            XstatResponse { metadata: metadata },
+        ))))
+        .await
+        .unwrap();
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+}

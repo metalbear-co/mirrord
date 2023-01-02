@@ -342,6 +342,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             libc::SYS_faccessat => {
                 faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
             }
+            libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
             _ => {
                 let syscall_res = syscall_3(syscall, param1, param2, param3);
                 return syscall_res;
@@ -406,18 +407,30 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 libc::SYS_faccessat => {
                     faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
                 }
-                libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
-                _ => {
-                    let syscall_res =
-                        syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-                    return syscall_res;
+                // Stat hooks:
+                // - SYS_stat: maps to fstatat with AT_FDCWD in go - no additional hook needed
+                // |-- fstatat(_AT_FDCWD, path, stat, 0)
+                // - SYS_fstat will use fstat_detour, maps to the same syscall number i.e. SYS_FSTAT
+                //   (5)
+                // - SYS_newfstatat will use fstatat_detour, maps to the same syscall number i.e.
+                //   SYS_NEWFSTATAT (262)
+                // - SYS_lstat: maps to fstatat with AT_FDCWD and AT_SYMLINK_NOFOLLOW in go - no
+                //   additional hook needed
+                // - SYS_statx: not supported in go
+                libc::SYS_newfstatat => {
+                    let (Ok(result) | Err(result)) =
+                        fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
+                            .bypass_with(|_| {
+                                syscall_6(syscall, param1, param2, param3, param4, param5, param6)
+                            })
+                            .map_err(From::from);
+                    result
                 }
+                libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
             }
         }
-        _ => {
-            let syscall_res = syscall_6(syscall, param1, param2, param3, param4, param5, param6);
-            return syscall_res;
-        }
+        _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
     };
     match res {
         -1 => -errno().0 as i64,
