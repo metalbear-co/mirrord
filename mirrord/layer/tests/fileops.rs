@@ -359,6 +359,7 @@ async fn test_node_close(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
+#[cfg(target_os = "linux")]
 async fn test_go_stat(
     #[values(Application::GoFileOps)] application: Application,
     dylib_path: &PathBuf,
@@ -426,7 +427,32 @@ async fn test_go_stat(
         ))))
         .await
         .unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
 
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 0,
+            user_id: 2,
+            blocks: 3,
+            ..Default::default()
+        };
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+    }
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
