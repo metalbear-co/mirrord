@@ -35,11 +35,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) ->
         open_options
     );
 
-    let (Ok(result) | Err(result)) = open(rawish_path, open_options)
-        .bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
-        .map_err(From::from);
-
-    result
+    open(rawish_path, open_options).unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
 }
 
 /// Hook for `libc::open`.
@@ -71,11 +67,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
-    let (Ok(result) | Err(result)) = fopen(rawish_path, rawish_mode)
-        .bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
-        .map_err(From::from);
-
-    result
+    fopen(rawish_path, rawish_mode).unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
 }
 
 /// Hook for `libc::fdopen`.
@@ -86,10 +78,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
     let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
-    let (Ok(result) | Err(result)) = fdopen(fd, rawish_mode)
-        .bypass_with(|_| FN_FDOPEN(fd, raw_mode))
-        .map_err(From::from);
-    result
+    fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -106,11 +95,8 @@ pub(crate) unsafe extern "C" fn openat_detour(
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
 
-    let (Ok(result) | Err(result)) = openat(fd, rawish_path, open_options)
-        .bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
-        .map_err(From::from);
-
-    result
+    openat(fd, rawish_path, open_options)
+        .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
 }
 
 /// Hook for `libc::read`.
@@ -122,7 +108,7 @@ pub(crate) unsafe extern "C" fn read_detour(
     out_buffer: *mut c_void,
     count: size_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = read(fd, count as u64)
+    read(fd, count as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -138,10 +124,7 @@ pub(crate) unsafe extern "C" fn read_detour(
             // `read` call being repeated.
             ssize_t::try_from(read_amount).unwrap()
         })
-        .bypass_with(|_| FN_READ(fd, out_buffer, count))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_READ(fd, out_buffer, count))
 }
 
 /// Hook for `libc::fread`.
@@ -159,7 +142,7 @@ pub(crate) unsafe extern "C" fn fread_detour(
     let fd = fileno_logic(file_stream);
     let read_amount = (element_size * number_of_elements) as u64;
 
-    let (Ok(result) | Err(result)) = read(fd, read_amount)
+    read(fd, read_amount)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -175,10 +158,9 @@ pub(crate) unsafe extern "C" fn fread_detour(
             // and callers must use feof(3) and ferror(3) to determine which occurred.
             read_amount as usize
         })
-        .bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| {
+            FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
+        })
 }
 
 /// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,
@@ -197,7 +179,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     // `capacity` here.
     let buffer_size = capacity - 1;
 
-    let (Ok(result) | Err(result)) = fgets(fd, buffer_size as usize)
+    fgets(fd, buffer_size as usize)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -219,10 +201,7 @@ pub(crate) unsafe extern "C" fn fgets_detour(
                 ptr::null_mut()
             }
         })
-        .bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
 }
 
 #[hook_guard_fn]
@@ -232,7 +211,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    let (Ok(result) | Err(result)) = pread(fd, amount_to_read as u64, offset as u64)
+    pread(fd, amount_to_read as u64, offset as u64)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = (amount_to_read as u64).min(read_amount);
@@ -248,10 +227,7 @@ pub(crate) unsafe extern "C" fn pread_detour(
             }
             fixed_read as ssize_t
         })
-        .bypass_with(|_| FN_PREAD(fd, out_buffer, amount_to_read, offset))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_PREAD(fd, out_buffer, amount_to_read, offset))
 }
 
 #[hook_guard_fn]
@@ -264,15 +240,12 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
     // Convert the given buffer into a u8 slice, upto the amount to write.
     let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
 
-    let (Ok(result) | Err(result)) = pwrite(fd, casted_in_buffer, offset as u64)
+    pwrite(fd, casted_in_buffer, offset as u64)
         .map(|write_response| {
             let WriteFileResponse { written_amount } = write_response;
             written_amount as ssize_t
         })
-        .bypass_with(|_| FN_PWRITE(fd, in_buffer, amount_to_write, offset))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_PWRITE(fd, in_buffer, amount_to_write, offset))
 }
 
 /// Hook for `libc::lseek`.
@@ -280,12 +253,9 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
-    let (Ok(result) | Err(result)) = lseek(fd, offset, whence)
+    lseek(fd, offset, whence)
         .map(|offset| i64::try_from(offset).unwrap())
-        .bypass_with(|_| FN_LSEEK(fd, offset, whence))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_LSEEK(fd, offset, whence))
 }
 
 /// Implementation of write_detour, used in  write_detour
@@ -299,11 +269,7 @@ pub(crate) unsafe extern "C" fn write_logic(
     let write_bytes =
         (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
 
-    let (Ok(result) | Err(result)) = write(fd, write_bytes)
-        .bypass_with(|_| FN_WRITE(fd, buffer, count))
-        .map_err(From::from);
-
-    result
+    write(fd, write_bytes).unwrap_or_bypass_with(|_| FN_WRITE(fd, buffer, count))
 }
 
 /// Hook for `libc::write`.
@@ -322,11 +288,7 @@ pub(crate) unsafe extern "C" fn write_detour(
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
 
-    let (Ok(result) | Err(result)) = access(rawish_path, mode as u8)
-        .bypass_with(|_| FN_ACCESS(raw_path, mode))
-        .map_err(From::from);
-
-    result
+    access(rawish_path, mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
 }
 
 /// Hook for `libc::access`.
@@ -435,47 +397,38 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(Some(path), None, false)
+    xstat(Some(path), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .bypass_with(|_| FN_LSTAT(raw_path, out_stat))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat))
 }
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    let (Ok(result) | Err(result)) = xstat(None, Some(fd), true)
+    xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .bypass_with(|_| FN_FSTAT(fd, out_stat))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat))
 }
 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
+    xstat(Some(path), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .bypass_with(|_| FN_STAT(raw_path, out_stat))
-        .map_err(From::from);
-
-    result
+        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat))
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -489,15 +442,13 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         return FN___XSTAT(ver, raw_path, out_stat);
     }
     let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let (Ok(result) | Err(result)) = xstat(Some(path), None, true)
+    xstat(Some(path), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
-        .map_err(From::from);
-    result
+        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
@@ -524,11 +475,8 @@ unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
-    let (Ok(result) | Err(result)) = fstatat_logic(fd, raw_path, out_stat, flag)
-        .bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
-        .map_err(From::from);
-
-    result
+    fstatat_logic(fd, raw_path, out_stat, flag)
+        .unwrap_or_bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
 }
 
 // this requires newer libc which we don't link with to support old libc..
@@ -576,7 +524,7 @@ unsafe extern "C" fn fstatat_detour(
 //             out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
 //             0
 //         })
-//         .bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
+//         .unwrap_or_bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
 //         .map_err(From::from);
 
 //     result

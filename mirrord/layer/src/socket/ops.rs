@@ -449,24 +449,21 @@ pub(super) fn accept(
 }
 
 #[tracing::instrument(level = "trace")]
-pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Detour<()> {
+pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
-        _ => Detour::Success(()),
+        _ => Ok(()),
     }
 }
 
 #[tracing::instrument(level = "trace")]
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Detour<()> {
-    let dup_socket = SOCKETS
-        .lock()?
-        .get(&fd)
-        .bypass(Bypass::LocalFdNotFound(fd))?
-        .clone();
+pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
+    let mut sockets = SOCKETS.lock()?;
+    if let Some(socket) = sockets.get(&fd).cloned() {
+        sockets.insert(dup_fd as RawFd, socket);
+    }
 
-    SOCKETS.lock()?.insert(dup_fd as RawFd, dup_socket);
-
-    Detour::Success(())
+    Ok(())
 }
 
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),

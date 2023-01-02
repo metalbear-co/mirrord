@@ -19,6 +19,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - IntelliJ plugin with new UI enabled now shows buttons. Closes [#881](https://github.com/metalbear-co/mirrord/issues/881)
 - Fix deprecation warnings (partially), update checkout action to version 3.
 
+### Changed
+
+- Refactored detours to use new helper function `Result::as_hook` to simplify flow. (no change in behavior)
+
 ## 3.15.2
 
 ### Added
