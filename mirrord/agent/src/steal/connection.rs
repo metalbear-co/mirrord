@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::*;
 use crate::{
@@ -378,11 +378,13 @@ impl TcpConnectionStealer {
     }
 
     /// Add port redirection to iptables to steal `port`.
+    #[tracing::instrument(level = "debug", skip(self))]
     fn add_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
-        self.iptables()?.add_bypass_own_packets()?;
-
         self.iptables()?
-            .add_redirect(port, self.stealer.local_addr()?.port())
+            .add_redirect(port, self.stealer.local_addr()?.port())?;
+        debug!("> rules {:#?}", self.iptables()?.list_rules());
+
+        self.iptables()?.add_bypass_own_packets()
     }
 
     fn remove_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {

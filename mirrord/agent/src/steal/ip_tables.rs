@@ -91,6 +91,11 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn list_rules(&self) -> Result<Vec<String>> {
+        self.inner.list_rules(&self.chain_name)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
@@ -160,6 +165,7 @@ impl IPTableFormatter {
                 .iter()
                 .any(|mesh_output| rule.contains(mesh_output))
         }) {
+            debug!("> We're in a MESH folks!");
             Ok(IPTableFormatter::Mesh)
         } else {
             Ok(IPTableFormatter::Normal)
