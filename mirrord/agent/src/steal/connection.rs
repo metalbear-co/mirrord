@@ -1,13 +1,13 @@
 use std::{
-    collections::{BinaryHeap, HashSet},
+    collections::HashSet,
     io,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use fancy_regex::Regex;
 use http_body_util::Full;
-use hyper::{body::Body, Response, Version};
+use hyper::Response;
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -16,24 +16,19 @@ use mirrord_protocol::{
 };
 use streammap_ext::StreamMap;
 use tokio::{
-    io::{copy, sink, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::error;
+use tracing::{debug, error};
 
-use super::{
-    http_traffic::{
-        filter::HttpFilter, DefaultReversibleStream, UnmatchedReceiver, UnmatchedSender,
-    },
-    *,
-};
+use super::*;
 use crate::{
     error::Result,
     steal::{
-        http_traffic::{HttpFilterManager, UnmatchedHttpResponse},
+        http_traffic::HttpFilterManager,
         StealSubscription::{HttpFiltered, Unfiltered},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
@@ -83,24 +78,16 @@ pub(crate) struct TcpConnectionStealer {
     client_connections: HashMap<ClientId, HashSet<ConnectionId>>,
 
     /// Mspc sender to clone and give http filter managers so that they can send back requests.
-    http_request_sender: Sender<MatchedHttpRequest>,
+    http_request_sender: Sender<HandlerHttpRequest>,
 
     /// Receives filtered HTTP requests that need to be forwarded a client.
-    http_request_receiver: Receiver<MatchedHttpRequest>,
+    http_request_receiver: Receiver<HandlerHttpRequest>,
 
     /// For sending letting the [`Self::start`] task this connection was closed.
     http_connection_close_sender: Sender<ConnectionId>,
 
     /// [`Self::start`] listens to this, removes the connection and frees the index.
     http_connection_close_receiver: Receiver<ConnectionId>,
-
-    /// Used to send http responses back to the original remote connection.
-    http_write_streams: HashMap<ConnectionId, WriteHalf<DefaultReversibleStream>>,
-
-    /// For a connection with pending requests, a priority queue with responses that were already
-    /// returned, but that cannot be sent yet because there are earlier responses that are not
-    /// available yet.
-    http_response_queues: HashMap<ConnectionId, BinaryHeap<HttpResponse>>,
 
     /// Keep track of the clients that already received an http request out of a connection.
     /// This is used to inform them when the connection is closed.
@@ -111,36 +98,19 @@ pub(crate) struct TcpConnectionStealer {
     /// connection.
     http_connection_clients: HashMap<ConnectionId, HashSet<ClientId>>,
 
-    /// Saves for a connection the request_id of the next response that should be sent.
-    http_request_counters: HashMap<ConnectionId, RequestId>,
-
-    /// Send this channel to the [`HyperHandler`], where it's used to handle the unmatched HTTP
-    /// requests case (when no HTTP filter matches a request).
-    unmatched_tx: UnmatchedSender,
-
-    /// Channel that receives responses which did not match any HTTP filter.
-    unmatched_rx: UnmatchedReceiver,
+    /// Maps each pending request id to the sender into the channel with the hyper service that
+    /// received that requests and is waiting for the response.
+    http_response_senders:
+        HashMap<(ConnectionId, RequestId), oneshot::Sender<Response<Full<Bytes>>>>,
 }
 
 impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
     /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(
-        command_rx: Receiver<StealerCommand>,
-        pid: Option<u64>,
-    ) -> Result<Self, AgentError> {
-        if let Some(pid) = pid {
-            let namespace = PathBuf::from("/proc")
-                .join(PathBuf::from(pid.to_string()))
-                .join(PathBuf::from("ns/net"));
-
-            set_namespace(namespace).unwrap();
-        }
-
+    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
-        let (unmatched_tx, unmatched_rx) = channel(1024);
 
         Ok(Self {
             port_subscriptions: HashMap::with_capacity(4),
@@ -157,12 +127,8 @@ impl TcpConnectionStealer {
             http_request_receiver,
             http_connection_close_sender: connection_close_sender,
             http_connection_close_receiver: connection_close_receiver,
-            http_write_streams: HashMap::with_capacity(8),
-            http_response_queues: HashMap::with_capacity(8),
             http_connection_clients: HashMap::with_capacity(8),
-            http_request_counters: HashMap::with_capacity(8),
-            unmatched_tx,
-            unmatched_rx,
+            http_response_senders: HashMap::with_capacity(8),
         })
     }
 
@@ -215,7 +181,6 @@ impl TcpConnectionStealer {
                     }
                 }
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
-                    self.http_write_streams.remove(&connection_id);
                     // Send a close message to all clients that were subscribed to the connection.
                     if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
                         // TODO: is this too much to do in an iteration of the select loop?
@@ -227,15 +192,7 @@ impl TcpConnectionStealer {
                             }
                         }
                     }
-                    self.http_response_queues.remove(&connection_id);
-                    self.http_request_counters.remove(&connection_id);
                     self.index_allocator.free_index(connection_id);
-                }
-
-                // Handles the responses that were not matched by any HTTP filter.
-                Some(response) = self.unmatched_rx.recv() => {
-                    let UnmatchedHttpResponse(response) = response?;
-                    self.http_response(response).await?;
                 }
 
                 _ = cancellation_token.cancelled() => {
@@ -254,29 +211,31 @@ impl TcpConnectionStealer {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn forward_stolen_http_request(
         &mut self,
-        request: Option<MatchedHttpRequest>,
+        request: Option<HandlerHttpRequest>,
     ) -> Result<(), AgentError> {
-        if let Some(request) = request {
-            if let Some(daemon_tx) = self.clients.get(&request.client_id) {
-                // Note down: client_id got a request out of connection_id.
-                self.http_connection_clients
-                    .entry(request.connection_id)
-                    .or_insert_with(|| HashSet::with_capacity(2))
-                    .insert(request.client_id);
-                Ok(daemon_tx
-                    .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
-                    .await?)
-            } else {
-                // TODO: can this happen when a client unsubscribes?
-                warn!(
-                    "Got stolen request for client {:?} that is not, or no longer, subscribed.",
-                    request.client_id
-                );
-                Ok(())
-            }
+        let HandlerHttpRequest {
+            request,
+            response_tx,
+        } = request.ok_or(HttpRequestReceiverClosed)?;
+
+        if let Some(daemon_tx) = self.clients.get(&request.client_id) {
+            // Note down: client_id got a request out of connection_id.
+            self.http_connection_clients
+                .entry(request.connection_id)
+                .or_insert_with(|| HashSet::with_capacity(2))
+                .insert(request.client_id);
+            self.http_response_senders
+                .insert((request.connection_id, request.request_id), response_tx);
+            Ok(daemon_tx
+                .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
+                .await?)
         } else {
-            // This shouldn't ever happen, as `self` also holds a sender of that channel.
-            Err(HttpRequestReceiverClosed)
+            // TODO: can this happen when a client unsubscribes?
+            warn!(
+                "Got stolen request for client {:?} that is not, or no longer, subscribed.",
+                request.client_id
+            );
+            Ok(())
         }
     }
 
@@ -358,60 +317,6 @@ impl TcpConnectionStealer {
         }
     }
 
-    /// Create a task that copies all data incoming from [`stream_with_browser`] into
-    /// [`stream_with_filter`], drains whatever comes back from [`stream_with_filter`], and hold on
-    /// to the writing half of [`stream_with_browser`] in [`self.http_write_streams`], for sending
-    /// back responses.
-    async fn forward_filter_stream(
-        &mut self,
-        stream_with_browser: DefaultReversibleStream,
-        stream_with_filter: DuplexStream,
-        connection_id: ConnectionId,
-    ) {
-        // In `browser2stealer` the stealer reads incoming data from the outside - from the browser.
-        // In `stealer2browser` the stealer writes the responses back to the browser. The responses
-        // are either originated in the local application and forwarded by the layer, or if the
-        // request was not matched by any filter, the response is originated in the remote app.
-        let (mut browser2stealer, stealer2browser) = split(stream_with_browser);
-
-        // `filter2nowhere` is an incoming stream of http responses that the filter (specifically
-        // hyper) generates and we ignore.
-        // `stealer2filter` is an outgoing stream where we send to the stealer the incoming data
-        // from `browser2stealer`.
-        let (mut filter2nowhere, mut stealer2filter) = split(stream_with_filter);
-
-        // Hold on to the `stealer2browser` for sending http responses.
-        self.http_write_streams
-            .insert(connection_id, stealer2browser);
-
-        // Dump all the responses by hyper down a sink.
-        // The responses that hyper sends are meaningless, the real responses that will be
-        // forwarded come from the layer (or from the deployed application in the case of a
-        // passthrough).
-        tokio::spawn(async move {
-            let mut hyper_response_sink = sink();
-            if let Err(err) = copy(&mut filter2nowhere, &mut hyper_response_sink).await {
-                error!(
-                    "Encountered error: \"{err:?}\" while dumping hyper responses down the sink."
-                )
-            };
-        });
-
-        // With this sender the forwarding task will let the "main task" (`start`) know that the
-        // connection is closed and the response stream can be removed.
-        let connection_close_sender = self.http_connection_close_sender.clone();
-
-        // Forward all incoming data from browser onwards to the filter.
-        tokio::spawn(async move {
-            if let Err(err) = copy(&mut browser2stealer, &mut stealer2filter).await {
-                error!("Encountered error: \"{err:?}\" while forwarding incoming stream to filter.")
-            }
-            if let Err(err) = connection_close_sender.send(connection_id).await {
-                error!("Stream forwarding task could not communicate stream close to main task: {err:?}.");
-            }
-        });
-    }
-
     /// Handles a new remote connection that was accepted on the [`TcpConnectionStealer::stealer`]
     /// listener.
     ///
@@ -425,8 +330,10 @@ impl TcpConnectionStealer {
         &mut self,
         (stream, address): (TcpStream, SocketAddr),
     ) -> Result<()> {
-        let real_address = orig_dst::orig_dst_addr(&stream)?;
-
+        let mut real_address = orig_dst::orig_dst_addr(&stream)?;
+        // If we use the original IP we would go through prerouting and hit a loop.
+        // localhost should always work.
+        real_address.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
         match self.port_subscriptions.get(&real_address.port()) {
             // We got an incoming connection in a port that is being stolen in its whole by a single
             // client.
@@ -440,21 +347,14 @@ impl TcpConnectionStealer {
             Some(HttpFiltered(manager)) => {
                 let connection_id = self.index_allocator.next_index().unwrap();
 
-                if let Some(HttpFilter {
-                    reversible_stream,
-                    interceptor_stream,
-                    ..
-                }) = manager
-                    .new_connection(stream, real_address, connection_id)
-                    .await?
-                {
-                    self.forward_filter_stream(
-                        reversible_stream,
-                        interceptor_stream,
+                manager
+                    .new_connection(
+                        stream,
+                        real_address,
                         connection_id,
+                        self.http_connection_close_sender.clone(),
                     )
-                    .await;
-                }
+                    .await?;
 
                 Ok(())
             }
@@ -478,12 +378,18 @@ impl TcpConnectionStealer {
     }
 
     /// Add port redirection to iptables to steal `port`.
-    fn redirect_port(&mut self, port: Port) -> Result<()> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    fn add_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
         self.iptables()?
-            .add_redirect(port, self.stealer.local_addr()?.port())
+            .add_redirect(port, self.stealer.local_addr()?.port())?;
+        debug!("> rules {:#?}", self.iptables()?.list_rules());
+
+        self.iptables()?.add_bypass_own_packets()
     }
 
-    fn stop_redirecting_port(&mut self, port: Port) -> Result<()> {
+    fn remove_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
+        self.iptables()?.remove_bypass_own_packets()?;
+
         self.iptables()?
             .remove_redirect(port, self.stealer.local_addr()?.port())
     }
@@ -529,7 +435,6 @@ impl TcpConnectionStealer {
                             client_id,
                             regex,
                             self.http_request_sender.clone(),
-                            self.unmatched_tx.clone(),
                         ));
                         self.port_subscriptions.insert(port, manager);
                         Ok(port)
@@ -540,7 +445,7 @@ impl TcpConnectionStealer {
         };
         if first_subscriber {
             if let Ok(port) = res {
-                self.redirect_port(port)?;
+                self.add_stealer_iptables_rules(port)?;
             }
         }
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
@@ -566,7 +471,7 @@ impl TcpConnectionStealer {
         };
         if port_unsubscribed {
             // No remaining subscribers on this port.
-            self.stop_redirecting_port(port)?;
+            self.remove_stealer_iptables_rules(port)?;
             self.port_subscriptions.remove(&port);
             if self.port_subscriptions.is_empty() {
                 // Was this the last client?
@@ -643,64 +548,6 @@ impl TcpConnectionStealer {
         }
     }
 
-    // TODO: make this correct.
-    async fn response_to_bytes(response: Response<Full<Bytes>>) -> Vec<u8> {
-        let (
-            response::Parts {
-                status,
-                version,
-                headers,
-                extensions: _, // TODO: should we be using this?
-                ..
-            },
-            body,
-        ) = response.into_parts();
-
-        // Enough for body + headers of length 64 each + 64 bytes for status line.
-        // This will probably be more than enough most of the time.
-        let mut bytes =
-            BytesMut::with_capacity(body.size_hint().lower() as usize + 64 * headers.len() + 64);
-
-        let version = match version {
-            Version::HTTP_09 => "HTTP/0.9",
-            Version::HTTP_10 => "HTTP/1.0",
-            Version::HTTP_11 => "HTTP/1.1",
-            Version::HTTP_2 => "HTTP/2",
-            Version::HTTP_3 => "HTTP/3",
-            _ => "HTTP/1.1", // TODO: What should happen here?
-        };
-
-        // Status line.
-        bytes.put(version.as_bytes()); // HTTP/1.1
-        bytes.put(&b" "[..]);
-        bytes.put(status.as_str().as_bytes()); // 200
-        bytes.put(&b" "[..]);
-        if let Some(reason) = status.canonical_reason() {
-            bytes.put(reason.as_bytes()); // OK
-        } else {
-            bytes.put(&b"LOL"[..]);
-        }
-
-        // Headers.
-        for (name, value) in headers.into_iter() {
-            if let Some(name) = name {
-                bytes.put(&b"\r\n"[..]);
-                bytes.put(name.as_str().as_bytes());
-                bytes.put(&b": "[..]);
-            } else {
-                // TODO: are multiple values for the same header comma delimited?
-                bytes.put(&b","[..])
-            }
-            bytes.put(value.as_bytes())
-        }
-        bytes.put(&b"\r\n\r\n"[..]);
-
-        // Body.
-        bytes.put(body.collect().await.unwrap().to_bytes()); // Unwrap Infallible.
-
-        bytes.to_vec()
-    }
-
     fn handle_response_reconstruction_fail(err: hyper::http::Error) -> hyper::http::Error {
         error!("Could not reconstruct http response: {err:?}");
         // TODO: What should happen? Currently just skipping that response, which would
@@ -714,67 +561,36 @@ impl TcpConnectionStealer {
     ///                         _______________agent_______________
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
+    #[tracing::instrument(
+        level = "debug",
+        skip(self),
+        fields(response_senders = ?self.http_response_senders.keys()),
+    )] // TODO: trace
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
-        let http_tx = if let Some(stream) = self.http_write_streams.get_mut(&response.connection_id)
+        match self
+            .http_response_senders
+            .remove(&(response.connection_id, response.request_id))
         {
-            stream
-        } else {
-            warn!(
-                "Got an http response in a connection for which no tcp stream is present. Not forwarding.",
-            );
-            return Ok(());
-        };
-        let counter = self
-            .http_request_counters
-            .entry(response.connection_id)
-            .or_insert(0);
-        if response.request_id == *counter {
-            if let Ok(response) = response
-                .response
-                .try_into()
-                .map_err(Self::handle_response_reconstruction_fail)
-            {
-                http_tx
-                    .write_all(&Self::response_to_bytes(response).await)
-                    .await?; // TODO: handle error?
+            None => {
+                warn!("Got unexpected http response. Not forwarding.");
+                Ok(())
             }
-            *counter += 1;
-            if let Some(queue) = self.http_response_queues.get_mut(&response.connection_id) {
-                while queue
-                    .peek()
-                    .is_some_and(|response| response.request_id == *counter)
-                {
-                    // The next response arrived before the one that just arrived and was waiting
-                    // in the queue for all earlier responses to be sent.
-                    let response = queue.pop().unwrap();
-                    if let Ok(response) = response
+            Some(response_tx) => {
+                if let Err(resp) = response_tx.send(
+                    response
                         .response
                         .try_into()
-                        .map_err(Self::handle_response_reconstruction_fail)
-                    {
-                        http_tx
-                            .write_all(&Self::response_to_bytes(response).await)
-                            .await?; // TODO: handle error?
-                    }
-                    *counter += 1;
+                        .map_err(Self::handle_response_reconstruction_fail)?,
+                ) {
+                    warn!(
+                        "Hyper service has dropped the response receiver before receiving the \
+                    response {:?}.",
+                        resp
+                    );
                 }
-            }
-        } else {
-            // The response is not the next one that should be sent back, so store in the priority
-            // queue until all the earlier responses are available.
-            if response.request_id > *counter {
-                self.http_response_queues
-                    .entry(response.connection_id)
-                    .or_insert_with(|| BinaryHeap::with_capacity(8))
-                    .push(response);
-            } else {
-                error!(
-                    "Got an http response with a request_id that was already received and sent to \
-                    the browser for this connection. Dropping the duplicate response."
-                );
+                Ok(())
             }
         }
-        Ok(())
     }
 
     /// Removes the ([`ReadHalf`], [`WriteHalf`]) pair of streams, disconnecting the remote

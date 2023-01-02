@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::MatchedHttpRequest;
+use crate::steal::HandlerHttpRequest;
 
 /// Errors specific to the HTTP traffic feature.
 #[derive(Error, Debug)]
@@ -15,5 +15,8 @@ pub enum HttpTrafficError {
     Hyper(#[from] hyper::Error),
 
     #[error("Failed with Captured `{0}`!")]
-    MatchedSender(#[from] tokio::sync::mpsc::error::SendError<MatchedHttpRequest>),
+    MatchedSender(#[from] tokio::sync::mpsc::error::SendError<HandlerHttpRequest>),
+
+    #[error("Failed with Captured `{0}`!")]
+    ResponseReceiver(#[from] tokio::sync::oneshot::error::RecvError),
 }

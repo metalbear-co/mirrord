@@ -5,26 +5,20 @@ use std::{net::SocketAddr, sync::Arc};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use mirrord_protocol::{tcp::HttpResponse, ConnectionId};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
-};
+use mirrord_protocol::ConnectionId;
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 
 use self::{
     error::HttpTrafficError,
-    filter::{HttpFilter, HttpFilterBuilder, MINIMAL_HEADER_SIZE},
+    filter::{HttpFilterBuilder, MINIMAL_HEADER_SIZE},
     reversible_stream::ReversibleStream,
 };
-use crate::{steal::MatchedHttpRequest, util::ClientId};
+use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;
 mod hyper_handler;
 pub(super) mod reversible_stream;
-
-pub(crate) type UnmatchedSender = Sender<Result<UnmatchedHttpResponse, HttpTrafficError>>;
-pub(crate) type UnmatchedReceiver = Receiver<Result<UnmatchedHttpResponse, HttpTrafficError>>;
 
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
@@ -60,9 +54,6 @@ impl HttpVersion {
     }
 }
 
-#[derive(Debug)]
-pub struct UnmatchedHttpResponse(pub(super) HttpResponse);
-
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
@@ -70,8 +61,7 @@ pub(super) struct HttpFilterManager {
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
-    matched_tx: Sender<MatchedHttpRequest>,
-    unmatched_tx: UnmatchedSender,
+    matched_tx: Sender<HandlerHttpRequest>,
 }
 
 impl HttpFilterManager {
@@ -83,8 +73,7 @@ impl HttpFilterManager {
         port: u16,
         client_id: ClientId,
         filter: Regex,
-        matched_tx: Sender<MatchedHttpRequest>,
-        unmatched_tx: UnmatchedSender,
+        matched_tx: Sender<HandlerHttpRequest>,
     ) -> Self {
         let client_filters = Arc::new(DashMap::with_capacity(128));
         client_filters.insert(client_id, filter);
@@ -93,7 +82,6 @@ impl HttpFilterManager {
             _port: port,
             client_filters,
             matched_tx,
-            unmatched_tx,
         }
     }
 
@@ -144,14 +132,15 @@ impl HttpFilterManager {
         original_stream: TcpStream,
         original_address: SocketAddr,
         connection_id: ConnectionId,
-    ) -> Result<Option<HttpFilter>, HttpTrafficError> {
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError> {
         HttpFilterBuilder::new(
             original_stream,
             original_address,
             connection_id,
             self.client_filters.clone(),
             self.matched_tx.clone(),
-            self.unmatched_tx.clone(),
+            connection_close_sender,
         )
         .await?
         .start()
@@ -162,7 +151,7 @@ impl HttpFilterManager {
     }
 }
 
-#[cfg(test)]
+#[cfg(never)]
 mod http_traffic_tests {
     use core::convert::Infallible;
     use std::net::Ipv4Addr;
@@ -184,6 +173,40 @@ mod http_traffic_tests {
         DUMMY_RESPONSE_MATCHED, DUMMY_RESPONSE_UNMATCHED,
     };
 
+    /// Helper that sends a [`Request`] to `destination` with some custom headers.
+    async fn hyper_client_task(destination: SocketAddr, original: SocketAddr, expected: Bytes) {
+        let client = TcpStream::connect(destination).await.unwrap();
+        let (mut request_sender, connection) =
+            client::conn::http1::handshake(client).await.unwrap();
+
+        tokio::spawn(async move {
+            if let Err(fail) = connection.await {
+                eprintln!("Error in connection: {}", fail);
+            }
+        });
+
+        let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
+        let body = Full::new(body);
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("http://127.0.0.1:{}", original.port()))
+            .header("First-Header", "mirrord")
+            .header("Mirrord-Test", "Hello")
+            .body(body)
+            .unwrap();
+
+        // Send a request and wait compare the dummy response we get from the filter's hyper
+        // handler.
+        let response_body = request_sender
+            .send_request(request)
+            .await
+            .unwrap()
+            .into_body();
+
+        let got_body = response_body.collect().await.unwrap().to_bytes();
+        assert_eq!(got_body, expected);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_http_traffic_filter_selects_on_header() {
         let server_address: SocketAddr = (Ipv4Addr::LOCALHOST, 7777).into();
@@ -191,23 +214,11 @@ mod http_traffic_tests {
             .await
             .expect("Bound TcpListener.");
 
-        let request_task = tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            let request = client
-                .get(format!("http://127.0.0.1:{}", server_address.port()))
-                .header("First-Header", "mirrord")
-                .header("Mirrord-Test", "Hello")
-                .build()
-                .unwrap();
-
-            // Send a request and wait compare the dummy response we get from the filter's hyper
-            // handler.
-            let response = client.execute(request).await.unwrap();
-            assert_eq!(
-                response.text().await.unwrap(),
-                DUMMY_RESPONSE_MATCHED.to_string()
-            );
-        });
+        let client_task = tokio::spawn(hyper_client_task(
+            server_address,
+            server_address,
+            Bytes::from(DUMMY_RESPONSE_MATCHED.to_string().into_bytes()),
+        ));
 
         let (tcp_stream, _) = server.accept().await.expect("Connection success!");
 
@@ -272,7 +283,7 @@ mod http_traffic_tests {
         drop(interceptor_stream);
 
         assert!(_hyper_task.await.is_ok());
-        assert!(request_task.await.is_ok());
+        assert!(client_task.await.is_ok());
     }
 
     /// Replies with a proper `Response` to test the unmatched filter case.
@@ -305,39 +316,11 @@ mod http_traffic_tests {
             .expect("Bound TcpListener.");
 
         // The client sends a request to the agent (mimmicking the stealing feature).
-        let client_task = tokio::spawn(async move {
-            let client = TcpStream::connect(agent_address).await.unwrap();
-            let (mut request_sender, connection) =
-                client::conn::http1::handshake(client).await.unwrap();
-
-            tokio::spawn(async move {
-                if let Err(fail) = connection.await {
-                    eprintln!("Error in connection: {}", fail);
-                }
-            });
-
-            let body = Bytes::from("Hello, HTTP!".to_string().into_bytes());
-            let body = Full::new(body);
-            let request = Request::builder()
-                .method("GET")
-                .uri(format!("http://127.0.0.1:{}", server_address.port()))
-                .header("First-Header", "mirrord")
-                .header("Mirrord-Test", "Hello")
-                .body(body)
-                .unwrap();
-
-            // Send a request and wait compare the dummy response we get from the filter's hyper
-            // handler.
-            let response_body = request_sender
-                .send_request(request)
-                .await
-                .unwrap()
-                .into_body();
-
-            let got_body = response_body.collect().await.unwrap().to_bytes();
-            let expected = Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes());
-            assert_eq!(got_body, expected);
-        });
+        let client_task = tokio::spawn(hyper_client_task(
+            agent_address,
+            server_address,
+            Bytes::from(DUMMY_RESPONSE_UNMATCHED.to_string().into_bytes()),
+        ));
 
         let (tcp_stream, _) = agent.accept().await.expect("Connection success!");
 

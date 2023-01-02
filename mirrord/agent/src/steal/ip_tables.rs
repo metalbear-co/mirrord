@@ -1,5 +1,7 @@
 use mirrord_protocol::Port;
+use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
+use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
@@ -89,6 +91,11 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn list_rules(&self) -> Result<Vec<String>> {
+        self.inner.list_rules(&self.chain_name)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
             &self.chain_name,
@@ -103,6 +110,24 @@ where
             &self.chain_name,
             &self.formatter.redirect_rule(redirected_port, target_port),
         )
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn add_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.insert_rule(&self.chain_name, &rule, 1)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn remove_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.remove_rule(&self.chain_name, &rule)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -130,14 +155,17 @@ enum IPTableFormatter {
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
 
+    #[tracing::instrument(level = "debug", skip_all)]
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
+        debug!("> Output is {output:#?}");
 
         if output.iter().any(|rule| {
             IPTableFormatter::MESH_OUTPUTS
                 .iter()
                 .any(|mesh_output| rule.contains(mesh_output))
         }) {
+            debug!("> We're in a MESH folks!");
             Ok(IPTableFormatter::Mesh)
         } else {
             Ok(IPTableFormatter::Normal)
@@ -161,6 +189,16 @@ impl IPTableFormatter {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
                 format!("-o lo {}", redirect_rule)
+            }
+        }
+    }
+
+    fn bypass_own_packets_rule(&self) -> Option<String> {
+        match self {
+            IPTableFormatter::Normal => None,
+            IPTableFormatter::Mesh => {
+                let gid = getgid();
+                Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
         }
     }

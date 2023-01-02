@@ -167,6 +167,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
+#[tracing::instrument(level = "debug")]
 pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
     let fd: RawFd = File::open(ns_path)?.into_raw_fd();
     debug!("set_namespace -> fd {:#?}", fd);

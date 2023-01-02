@@ -35,7 +35,7 @@ use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
     steal::{connection::TcpConnectionStealer, StealerCommand},
-    util::{run_thread, ClientId, IndexAllocator},
+    util::{enter_namespace, run_thread, ClientId, IndexAllocator},
 };
 
 mod cli;
@@ -345,18 +345,32 @@ async fn start_agent() -> Result<()> {
 
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
 
-    let _ = run_thread(dns_worker(dns_receiver, pid));
+    let _ = run_thread(
+        dns_worker(dns_receiver, pid),
+        "DNS worker".to_string(),
+        move || {
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
+        },
+    );
 
     let sniffer_cancellation_token = cancellation_token.clone();
     let sniffer_task = run_thread(
-        TcpConnectionSniffer::new(sniffer_command_rx, pid, args.network_interface)
+        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface)
             .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
+        "Sniffer".to_string(),
+        move || {
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
+        },
     );
 
     let stealer_cancellation_token = cancellation_token.clone();
     let stealer_task = run_thread(
-        TcpConnectionStealer::new(stealer_command_rx, pid)
+        TcpConnectionStealer::new(stealer_command_rx)
             .and_then(|stealer| stealer.start(stealer_cancellation_token)),
+        "Stealer".to_string(),
+        move || {
+            enter_namespace(pid, "net").expect("Failed setting namespace!");
+        },
     );
 
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in

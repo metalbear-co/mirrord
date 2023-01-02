@@ -3,10 +3,14 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     hash::Hash,
+    path::PathBuf,
     thread::JoinHandle,
 };
 
 use num_traits::{zero, CheckedAdd, Num, NumCast};
+use tracing::error;
+
+use crate::{error::AgentError, runtime::set_namespace};
 
 /// Struct that helps you manage topic -> subscribers
 ///
@@ -143,19 +147,46 @@ where
 ///
 /// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
 /// caller's runtime.
-#[tracing::instrument(level = "trace", skip(future))]
-pub fn run_thread<T>(future: T) -> JoinHandle<T::Output>
+///
+/// These tasks will execute `on_start_fn` to change namespace (see [`enter_namespace`] for more
+/// details).
+#[tracing::instrument(level = "trace", skip_all)]
+pub(crate) fn run_thread<F, StartFn>(
+    future: F,
+    thread_name: String,
+    on_start_fn: StartFn,
+) -> JoinHandle<F::Output>
 where
-    T: Future + Send + 'static,
-    T::Output: Send + 'static,
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+    StartFn: Fn() + Send + Sync + 'static,
 {
     std::thread::spawn(move || {
+        on_start_fn();
+
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            .thread_name(thread_name)
+            .on_thread_start(on_start_fn)
             .build()
             .unwrap();
         rt.block_on(future)
     })
+}
+
+/// Used to enter a different (so far only used for "net") namespace for a task.
+///
+/// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to work.
+#[tracing::instrument(level = "debug")]
+pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
+    if let Some(pid) = pid {
+        let path = PathBuf::from("/proc").join(pid.to_string()).join("ns");
+
+        Ok(set_namespace(path.join(namespace))
+            .inspect_err(|fail| error!("Failed setting namespace {fail:#?}"))?)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

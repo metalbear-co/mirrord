@@ -112,6 +112,9 @@ impl AgentManagment for KubernetesAPI {
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
         info!("Using port `{agent_port:?}` for communication");
 
+        let agent_gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
+        info!("Using group-id `{agent_gid:?}`");
+
         let pod_agent_name = if self.agent.ephemeral {
             EphemeralContainer::create_agent(
                 &self.client,
@@ -119,6 +122,7 @@ impl AgentManagment for KubernetesAPI {
                 runtime_data,
                 agent_port,
                 progress,
+                agent_gid,
             )
             .await?
         } else {
@@ -128,6 +132,7 @@ impl AgentManagment for KubernetesAPI {
                 runtime_data,
                 agent_port,
                 progress,
+                agent_gid,
             )
             .await?
         };

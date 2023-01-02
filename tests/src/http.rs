@@ -46,7 +46,7 @@ mod http {
             )
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
-        send_requests(&url, false).await;
+        send_requests(&url, false, Default::default()).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
         process.wait_for_line(Duration::from_secs(10), "PUT");
