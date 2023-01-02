@@ -33,7 +33,7 @@ mod utils {
         Api, Client, Config,
     };
     use rand::{distributions::Alphanumeric, Rng};
-    use reqwest::StatusCode;
+    use reqwest::{RequestBuilder, StatusCode};
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
@@ -672,6 +672,21 @@ mod utils {
         pod
     }
 
+    /// Take a request builder of any method, add headers, send the request, verify success, and
+    /// optionally verify expected response.
+    pub async fn send_request(
+        request_builder: RequestBuilder,
+        expect_response: Option<&str>,
+        headers: reqwest::header::HeaderMap,
+    ) {
+        let res = request_builder.headers(headers).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        if let Some(expected_response) = expect_response {
+            let resp = res.bytes().await.unwrap();
+            assert_eq!(resp, expected_response.as_bytes());
+        }
+    }
+
     pub async fn send_requests(
         url: &str,
         expect_response: bool,
@@ -681,57 +696,40 @@ mod utils {
         // as connection state is flaky
         println!("{url}");
         let client = reqwest::Client::new();
-        let res = client
-            .get(url)
-            .headers(headers.clone())
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, Bytes::from("GET"));
-        }
+        let req_builder = client.get(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("GET"),
+            headers.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
-        let res = client
-            .post(url)
-            .headers(headers.clone())
-            .body(TEXT)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "POST".as_bytes());
-        }
+        let req_builder = client.post(url).body(TEXT);
+        send_request(
+            req_builder,
+            expect_response.then_some("POST"),
+            headers.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
-        let res = client
-            .put(url)
-            .headers(headers.clone())
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "PUT".as_bytes());
-        }
+        let req_builder = client.put(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("PUT"),
+            headers.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
-        let res = client.delete(url).headers(headers).send().await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "DELETE".as_bytes());
-        }
+        let req_builder = client.delete(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("DELETE"),
+            headers.clone(),
+        )
+        .await;
     }
 
     pub async fn get_next_log<T: Stream<Item = Result<Bytes, kube::Error>> + Unpin>(
