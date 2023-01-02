@@ -425,7 +425,6 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     let (Ok(result) | Err(result)) =
                         fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
                             .bypass_with(|_| {
-                                trace!("fstatat bypassed");
                                 syscall_6(syscall, param1, param2, param3, param4, param5, param6)
                             })
                             .map_err(From::from);

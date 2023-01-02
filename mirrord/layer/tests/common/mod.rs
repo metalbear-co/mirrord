@@ -380,7 +380,7 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
-            Application::GoFileOps => String::from("tests/apps/fileops/go/main"),
+            Application::GoFileOps => String::from("tests/apps/fileops/go/fileops"),
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
