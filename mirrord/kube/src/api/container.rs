@@ -191,6 +191,12 @@ impl ContainerApi for JobContainer {
                                 "hostPath": {
                                     "path": "/run"
                                 }
+                            },
+                            {
+                                "name": "hostvar",
+                                "hostPath": {
+                                    "path": "/var"
+                                }
                             }
                         ],
                         "containers": [
@@ -205,6 +211,10 @@ impl ContainerApi for JobContainer {
                                     {
                                         "mountPath": "/host/run",
                                         "name": "hostrun"
+                                    },
+                                    {
+                                        "mountPath": "/host/var",
+                                        "name": "hostvar"
                                     }
                                 ],
                                 "command": agent_command_line,

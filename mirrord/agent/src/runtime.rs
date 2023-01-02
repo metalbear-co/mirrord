@@ -77,7 +77,11 @@ impl DockerContainer {
     fn from_id(container_id: String) -> Result<Self> {
         Ok(DockerContainer {
             container_id,
-            client: Docker::connect_with_unix("/host/run/docker.sock", 10, API_DEFAULT_VERSION)?,
+            client: Docker::connect_with_unix(
+                "/host/var/run/docker.sock",
+                10,
+                API_DEFAULT_VERSION,
+            )?,
         })
     }
 }
