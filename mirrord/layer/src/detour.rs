@@ -235,9 +235,10 @@ where
     }
 
     /// Helper function for returning a detour return value from a hook.
-    /// Success -> Return the contained value.
-    /// Bypass -> Return provided value.
-    /// Error ->> Convert to libc value and return it.
+    ///
+    /// `Success` -> Return the contained value.
+    /// `Bypass` -> Return provided value.
+    /// `Error` -> Convert to libc value and return it.
     pub(crate) fn unwrap_or_bypass(self, value: S) -> S {
         match self {
             Detour::Success(s) => s,
