@@ -326,7 +326,7 @@ jobs:
           go build -o 19
           cd ../app_go
           go build -o 19
-      - run: | # Build Go app to test http mirroring with.
+      - run: | # Build Go app for fileops test
           cd mirrord/layer/tests/apps/fileops/go
           go build -o fileops
       - run: |
