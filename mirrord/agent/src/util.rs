@@ -176,7 +176,8 @@ where
 
 /// Used to enter a different (so far only used for "net") namespace for a task.
 ///
-/// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to work.
+/// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to
+/// work.
 #[tracing::instrument(level = "debug")]
 pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
     if let Some(pid) = pid {
