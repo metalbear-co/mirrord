@@ -174,13 +174,7 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
-    pub(crate) fn bypass<U>(self, value: U) -> Result<U, HookError>
-    where
-        U: From<S>,
-    {
-        self.bypass_with(|_| value)
-    }
-
+    #[cfg(target_os = "linux")]
     pub(crate) fn bypass_with<U, F: FnOnce(Bypass) -> U>(self, op: F) -> Result<U, HookError>
     where
         U: From<S>,
@@ -223,6 +217,35 @@ impl<S> Detour<S> {
     }
 }
 
+impl<S> Detour<S>
+where
+    S: From<HookError>,
+{
+    /// Helper function for returning a detour return value from a hook.
+    /// Success -> Return the contained value.
+    /// Bypass -> call the bypass and return its value.
+    /// Error ->> Convert to libc value and return it.
+    pub(crate) fn unwrap_or_bypass_with<F: FnOnce(Bypass) -> S>(self, op: F) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(b) => op(b),
+            Detour::Error(e) => e.into(),
+        }
+    }
+
+    /// Helper function for returning a detour return value from a hook.
+    /// Success -> Return the contained value.
+    /// Bypass -> Return provided value.
+    /// Error ->> Convert to libc value and return it.
+    pub(crate) fn unwrap_or_bypass(self, value: S) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(_) => value,
+            Detour::Error(e) => e.into(),
+        }
+    }
+}
+
 /// Extends `Option<T>` with the `Option::bypass` function.
 pub(crate) trait OptionExt {
     type Opt;
@@ -237,42 +260,6 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
-        }
-    }
-}
-
-/// Generalize converting Result<T, HookError> to inner value, removing the need to distinguish
-/// the two. For example instead of
-/// ```rs
-/// let (Ok(result) | Err(result)) = read(fd, read_amount)
-/// .map(|read_file| {
-/// logic
-/// })
-/// .bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream))
-/// .map_err(From::from);
-/// ```
-/// you can write
-/// ```rs
-/// read(fd, read_amount).map(|read_file| { // logic
-///  }).bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)).map_err(From::from).inner()
-/// ```
-/// Extends `Result<T, E>` with `Result::inner` that returns the inner value of `Ok` or `Err`.
-pub(crate) trait ResultExt {
-    type Res;
-
-    fn inner(self) -> Self::Res;
-}
-
-impl<T> ResultExt for Result<T, HookError>
-where
-    T: From<HookError>,
-{
-    type Res = T;
-
-    fn inner(self) -> T {
-        match self {
-            Ok(v) => v,
-            Err(e) => e.into(),
         }
     }
 }

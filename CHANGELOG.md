@@ -19,7 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
-- Refactored detours to use new helper function `Result::inner` to simplify flow. (no change in behavior)
+- Refactored detours to use new helper function `Result::as_hook` to simplify flow. (no change in behavior)
 
 ## 3.15.2
 

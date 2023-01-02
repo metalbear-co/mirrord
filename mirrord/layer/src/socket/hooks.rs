@@ -4,14 +4,9 @@ use std::os::unix::io::RawFd;
 
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use tracing::{error, trace};
 
 use super::ops::*;
-use crate::{
-    detour::{DetourGuard, ResultExt},
-    hooks::HookManager,
-    replace,
-};
+use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -19,12 +14,7 @@ pub(crate) unsafe extern "C" fn socket_detour(
     type_: c_int,
     protocol: c_int,
 ) -> c_int {
-    socket(domain, type_, protocol)
-        .bypass_with(|_| FN_SOCKET(domain, type_, protocol))
-        .map_err(From::from)
-        .inspect(|s| trace!("{s:#?}"))
-        .inspect_err(|e| error!("{e:#?}"))
-        .inner()
+    socket(domain, type_, protocol).unwrap_or_bypass_with(|_| FN_SOCKET(domain, type_, protocol))
 }
 
 #[hook_guard_fn]
@@ -34,17 +24,12 @@ pub(crate) unsafe extern "C" fn bind_detour(
     address_length: socklen_t,
 ) -> c_int {
     bind(sockfd, raw_address, address_length)
-        .bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
-        .map_err(From::from)
-        .inner()
+        .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
 }
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn listen_detour(sockfd: RawFd, backlog: c_int) -> c_int {
-    listen(sockfd, backlog)
-        .bypass_with(|_| FN_LISTEN(sockfd, backlog))
-        .map_err(From::from)
-        .inner()
+    listen(sockfd, backlog).unwrap_or_bypass_with(|_| FN_LISTEN(sockfd, backlog))
 }
 
 #[hook_guard_fn]
@@ -54,9 +39,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
     address_length: socklen_t,
 ) -> c_int {
     connect(sockfd, raw_address, address_length)
-        .bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
-        .map_err(From::from)
-        .inner()
+        .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
 }
 
 #[hook_guard_fn]
@@ -66,9 +49,7 @@ pub(super) unsafe extern "C" fn getpeername_detour(
     address_len: *mut socklen_t,
 ) -> c_int {
     getpeername(sockfd, address, address_len)
-        .bypass_with(|_| FN_GETPEERNAME(sockfd, address, address_len))
-        .map_err(From::from)
-        .inner()
+        .unwrap_or_bypass_with(|_| FN_GETPEERNAME(sockfd, address, address_len))
 }
 
 #[hook_guard_fn]
@@ -78,9 +59,7 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
     address_len: *mut socklen_t,
 ) -> c_int {
     getsockname(sockfd, address, address_len)
-        .bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
-        .map_err(From::from)
-        .inner()
+        .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
 }
 
 #[hook_guard_fn]
@@ -94,10 +73,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        accept(sockfd, address, address_len, accept_result)
-            .bypass(accept_result)
-            .map_err(From::from)
-            .inner()
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -114,10 +90,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        accept(sockfd, address, address_len, accept_result)
-            .bypass(accept_result)
-            .map_err(From::from)
-            .inner()
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -148,12 +121,10 @@ pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...
     if fcntl_result == -1 {
         fcntl_result
     } else {
-        fcntl(fd, cmd, fcntl_result)
-            .map(|()| fcntl_result)
-            .bypass(fcntl_result)
-            .map_err(From::from)
-            .inspect(|res| trace!("fcntl_detour -> {res:#?}"))
-            .inner()
+        match fcntl(fd, cmd, fcntl_result) {
+            Ok(()) => fcntl_result,
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -164,12 +135,10 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     if dup_result == -1 {
         dup_result
     } else {
-        dup(fd, dup_result)
-            .map(|()| dup_result)
-            .bypass(dup_result)
-            .map_err(From::from)
-            .inspect(|res| trace!("dup_detour -> {res:#?}"))
-            .inner()
+        match dup(fd, dup_result) {
+            Ok(()) => dup_result,
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -184,12 +153,10 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
     if dup2_result == -1 {
         dup2_result
     } else {
-        dup(oldfd, dup2_result)
-            .map(|()| dup2_result)
-            .bypass(dup2_result)
-            .map_err(From::from)
-            .inspect(|res| trace!("dup2_detour -> {res:#?}"))
-            .inner()
+        match dup(oldfd, dup2_result) {
+            Ok(()) => dup2_result,
+            Err(e) => e.into(),
+        }
     }
 }
 
@@ -201,12 +168,10 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
     if dup3_result == -1 {
         dup3_result
     } else {
-        dup(oldfd, dup3_result)
-            .map(|()| dup3_result)
-            .bypass(dup3_result)
-            .map_err(From::from)
-            .inspect(|res| trace!("dup3_detour -> {res:#?}"))
-            .inner()
+        match dup(oldfd, dup3_result) {
+            Ok(()) => dup3_result,
+            Err(e) => e.into(),
+        }
     }
 }
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
@@ -229,9 +194,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 
             0
         })
-        .bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
-        .map_err(From::from)
-        .inner()
+        .unwrap_or_bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
 }
 
 /// Deallocates a `*mut libc::addrinfo` that was previously allocated with `Box::new` in
