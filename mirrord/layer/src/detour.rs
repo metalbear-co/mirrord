@@ -174,18 +174,6 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
-    #[cfg(target_os = "linux")]
-    pub(crate) fn bypass_with<U, F: FnOnce(Bypass) -> U>(self, op: F) -> Result<U, HookError>
-    where
-        U: From<S>,
-    {
-        match self {
-            Detour::Success(s) => Ok(s.into()),
-            Detour::Bypass(b) => Ok(op(b)),
-            Detour::Error(e) => Err(e),
-        }
-    }
-
     pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => op(s),
