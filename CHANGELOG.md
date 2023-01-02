@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.16.0
+
 ### Added
 
 - Add golang stat hooks, closes [#856](https://github.com/metalbear-co/mirrord/issues/856)
