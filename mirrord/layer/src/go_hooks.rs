@@ -422,6 +422,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         .unwrap_or_bypass_with(|_| {
                             syscall_6(syscall, param1, param2, param3, param4, param5, param6)
                         })
+                        .into()
                 }
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
