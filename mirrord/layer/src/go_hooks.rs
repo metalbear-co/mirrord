@@ -4,8 +4,8 @@ use errno::errno;
 use tracing::trace;
 
 use crate::{
-    close_detour, detour::ResultExt, file::hooks::*, hooks::HookManager, macros::hook_symbol,
-    socket::hooks::*, FILE_MODE,
+    close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
+    FILE_MODE,
 };
 /*
  * Reference for which syscalls are managed by the handlers:
@@ -419,11 +419,9 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 // - SYS_statx: not supported in go
                 libc::SYS_newfstatat => {
                     fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
-                        .bypass_with(|_| {
+                        .unwrap_or_bypass_with(|_| {
                             syscall_6(syscall, param1, param2, param3, param4, param5, param6)
                         })
-                        .map_err(From::from)
-                        .inner()
                 }
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),

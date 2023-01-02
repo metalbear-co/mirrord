@@ -103,7 +103,7 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
     address_len: *mut socklen_t,
     flags: c_int,
 ) -> c_int {
-    trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
+    tracing::trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
 
     accept4_detour(sockfd, address, address_len, flags)
 }
