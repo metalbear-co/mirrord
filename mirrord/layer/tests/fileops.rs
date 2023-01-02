@@ -427,32 +427,29 @@ async fn test_go_stat(
         ))))
         .await
         .unwrap();
-    #[cfg(target_os = "macos")]
-    {
-        assert_eq!(
-            layer_connection.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: None,
-                fd: Some(1),
-                follow_symlink: true
-            }))
-        );
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+            path: None,
+            fd: Some(1),
+            follow_symlink: true
+        }))
+    );
 
-        let metadata = MetadataInternal {
-            device_id: 0,
-            size: 0,
-            user_id: 2,
-            blocks: 3,
-            ..Default::default()
-        };
-        layer_connection
-            .codec
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
-            ))))
-            .await
-            .unwrap();
-    }
+    let metadata = MetadataInternal {
+        device_id: 0,
+        size: 0,
+        user_id: 2,
+        blocks: 3,
+        ..Default::default()
+    };
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            XstatResponse { metadata: metadata },
+        ))))
+        .await
+        .unwrap();
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -476,4 +473,7 @@ async fn test_go_stat(
         ))))
         .await
         .unwrap();
+
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
 }
