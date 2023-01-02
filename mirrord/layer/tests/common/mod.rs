@@ -346,6 +346,7 @@ pub enum Application {
     PythonSelfConnect,
     PythonDontLoad,
     RustFileOps,
+    GoFileOps,
     EnvBashCat,
     NodeFileOps,
 }
@@ -379,6 +380,7 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
+            Application::GoFileOps => String::from("tests/apps/fileops/go/main"),
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
@@ -419,11 +421,12 @@ impl Application {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
-            Application::Go19HTTP => vec![],
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            Application::Go19HTTP => vec![],
+            Application::GoFileOps => vec![],
             Application::RustFileOps => vec![],
             Application::EnvBashCat => vec![],
         }
@@ -432,6 +435,7 @@ impl Application {
     pub fn get_app_port(&self) -> u16 {
         match self {
             Application::Go19HTTP
+            | Application::GoFileOps
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,

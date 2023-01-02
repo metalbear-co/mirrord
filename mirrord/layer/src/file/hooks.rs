@@ -500,6 +500,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     result
 }
 
+/// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
 pub(crate) unsafe fn fstatat_logic(
     fd: RawFd,
     raw_path: *const c_char,
