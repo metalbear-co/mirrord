@@ -518,7 +518,7 @@ pub(crate) unsafe fn fstatat_logic(
 
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fstatat_detour(
+unsafe extern "C" fn fstatat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     out_stat: *mut stat,
