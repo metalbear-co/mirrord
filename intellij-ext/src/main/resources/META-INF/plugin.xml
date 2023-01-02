@@ -45,9 +45,9 @@
             <separator/>
 
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
-        </group>
-
-
+            <!-- New UI Support-->
+            <add-to-group group-id="MainToolbarRight" anchor="first"/>
+            </group>
     </actions>
 
 
