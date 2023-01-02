@@ -240,3 +240,39 @@ impl<T> OptionExt for Option<T> {
         }
     }
 }
+
+/// Generalize converting Result<T, HookError> to inner value, removing the need to distinguish
+/// the two. For example instead of
+/// ```rs
+/// let (Ok(result) | Err(result)) = read(fd, read_amount)
+/// .map(|read_file| {
+/// logic
+/// })
+/// .bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream))
+/// .map_err(From::from);
+/// ```
+/// you can write
+/// ```rs
+/// read(fd, read_amount).map(|read_file| { // logic
+///  }).bypass_with(|_| FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)).map_err(From::from).inner()
+/// ```
+/// Extends `Result<T, E>` with `Result::inner` that returns the inner value of `Ok` or `Err`.
+pub(crate) trait ResultExt {
+    type Res;
+
+    fn inner(self) -> Self::Res;
+}
+
+impl<T> ResultExt for Result<T, HookError>
+where
+    T: From<HookError>,
+{
+    type Res = T;
+
+    fn inner(self) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => e.into(),
+        }
+    }
+}
