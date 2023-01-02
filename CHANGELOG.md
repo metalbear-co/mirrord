@@ -7,9 +7,32 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Error on specifying namespace in configuration without path (pod/container/deployment). Closes [#830](https://github.com/metalbear-co/mirrord/issues/830)
+
+## 3.15.2
+
+### Added
+
+- Logging for IntelliJ plugin for debugging/bug reports.
+
+### Fixed
+
+- Crash when mirroring and state is different between local and remote (happens in Mesh).
+  We now ignore messages that are not in the expected state. (as we can't do anything about it).
+- agent: Fix typo in socket path for k3s environments
+- intellij-plugin: fix missing telemetry/version check
+
+## 3.15.1
+
 ### Added
 
 - Add `__xstat` hook, fixes [#867]((https://github.com/metalbear-co/mirrord/issues/867))
+
+### Fixed
+
+- Fix build scripts for the refactored IntelliJ plugin
 
 ## 3.15.0
 

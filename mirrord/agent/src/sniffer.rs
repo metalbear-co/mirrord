@@ -156,7 +156,6 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
         _ => return None,
     };
 
-    trace!("ip_packet");
     let tcp_packet = match ip_packet.get_next_level_protocol() {
         IpNextHeaderProtocols::Tcp => TcpPacket::new(ip_packet.payload())?,
         _ => return None,
@@ -395,7 +394,6 @@ impl TcpConnectionSniffer {
             .contains(&port)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
@@ -444,10 +442,7 @@ impl TcpConnectionSniffer {
         clients: impl Iterator<Item = &ClientId>,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
-        trace!(
-            "TcpConnectionSniffer::send_message_to_clients -> message {:#?}",
-            message
-        );
+        trace!("TcpConnectionSniffer::send_message_to_clients");
 
         for client_id in clients {
             self.send_message_to_client(client_id, message.clone())
@@ -457,7 +452,7 @@ impl TcpConnectionSniffer {
     }
 
     /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self, message))]
     async fn send_message_to_client(
         &mut self,
         client_id: &ClientId,
@@ -494,15 +489,11 @@ impl TcpConnectionSniffer {
         );
 
         let is_client_packet = self.qualified_port(dest_port);
-        trace!("is_client_packet {:#?}", is_client_packet);
 
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
-                    if tcp_flags == 24 {
-                        debug!("handle_packet -> wiwiwi {:?}", &tcp_packet);
-                    }
                     debug!("not new connection {tcp_flags:?}");
                     return Ok(());
                 }
@@ -548,8 +539,6 @@ impl TcpConnectionSniffer {
                 bytes: tcp_packet.bytes,
                 connection_id: session.id,
             });
-            trace!("message {:#?}", message);
-
             self.send_message_to_clients(session.clients.iter(), message)
                 .await?;
         }
