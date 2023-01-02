@@ -418,10 +418,6 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 //   additional hook needed
                 // - SYS_statx: not supported in go
                 libc::SYS_newfstatat => {
-                    trace!(
-                        "fuck {:?}",
-                        fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
-                    );
                     let (Ok(result) | Err(result)) =
                         fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
                             .bypass_with(|_| {
