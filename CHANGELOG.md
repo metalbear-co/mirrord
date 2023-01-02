@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
+- agent: mount /var from host and reconfigure docker socket to /var/run/docker.sock for better compatibility
 - Error on specifying namespace in configuration without path (pod/container/deployment). Closes [#830](https://github.com/metalbear-co/mirrord/issues/830)
 - IntelliJ plugin with new UI enabled now shows buttons. Closes [#881](https://github.com/metalbear-co/mirrord/issues/881)
 - Fix deprecation warnings (partially), update checkout action to version 3.

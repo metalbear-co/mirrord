@@ -51,9 +51,9 @@ pub(crate) async fn get_container(
     {
         let container_id = container_id.to_string();
         match container_runtime.as_str() {
-            "docker" => Ok(Some(Container::Docker(DockerContainer::from_id(
-                container_id,
-            )?))),
+            "docker" => Ok(Some(Container::Docker(
+                DockerContainer::from_id(container_id).await?,
+            ))),
             "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
                 container_id,
             }))),
@@ -74,10 +74,23 @@ pub(crate) struct DockerContainer {
 }
 
 impl DockerContainer {
-    fn from_id(container_id: String) -> Result<Self> {
+    async fn from_id(container_id: String) -> Result<Self> {
+        let client = match Docker::connect_with_unix(
+            "unix:///host/run/docker.sock",
+            10,
+            API_DEFAULT_VERSION,
+        ) {
+            Ok(client) if client.ping().await.is_ok() => client,
+            _ => Docker::connect_with_unix(
+                "unix:///host/var/run/docker.sock",
+                10,
+                API_DEFAULT_VERSION,
+            )?,
+        };
+
         Ok(DockerContainer {
             container_id,
-            client: Docker::connect_with_unix("/host/run/docker.sock", 10, API_DEFAULT_VERSION)?,
+            client,
         })
     }
 }
