@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.16.1
+
+### Fixed
+
+- Running on specific Kubernetes setups, such as Docker for Desktop should work again.
+
 ## 3.16.0
 
 ### Added
