@@ -50,11 +50,6 @@ class FileOpsTest(unittest.TestCase):
         os.close(file)
         os.close(dir)
 
-
-    def _check_path_exists_on_host(self, path):
-        # Todo: use the subprocess module here
-        return os.path.exists(path)
-
     def _create_new_tmp_file(self):
         """
         Creates a new file in /tmp and returns the path and name of the file.
@@ -63,6 +58,7 @@ class FileOpsTest(unittest.TestCase):
         with open(file_path, "w") as w_file:
             w_file.write(TEXT)
         return file_path, file_name
+
 
 if __name__ == "__main__":
     unittest.main()

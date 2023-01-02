@@ -16,7 +16,7 @@ use tracing::trace;
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_layer_fd,
-    detour::{DetourGuard, ResultExt},
+    detour::{Detour, DetourGuard, ResultExt},
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -437,7 +437,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
-unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
     xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
@@ -486,6 +486,22 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         .inner()
 }
 
+/// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
+pub(crate) unsafe fn fstatat_logic(
+    fd: RawFd,
+    raw_path: *const c_char,
+    out_stat: *mut stat,
+    flag: c_int,
+) -> Detour<i32> {
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
+    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    xstat(Some(path), Some(fd), follow_symlink).map(|res| {
+        let res = res.metadata;
+        fill_stat(out_stat, &res);
+        0
+    })
+}
+
 /// Hook for `libc::fstatat`.
 #[hook_guard_fn]
 unsafe extern "C" fn fstatat_detour(
@@ -494,14 +510,7 @@ unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
-    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    xstat(Some(path), Some(fd), follow_symlink)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
+    fstatat_logic(fd, raw_path, out_stat, flag)
         .bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
         .map_err(From::from)
         .inner()

@@ -7,10 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Add golang stat hooks, closes [#856](https://github.com/metalbear-co/mirrord/issues/856)
+
 ### Fixed
 
 - Error on specifying namespace in configuration without path (pod/container/deployment). Closes [#830](https://github.com/metalbear-co/mirrord/issues/830)
 - IntelliJ plugin with new UI enabled now shows buttons. Closes [#881](https://github.com/metalbear-co/mirrord/issues/881)
+- Fix deprecation warnings (partially), update checkout action to version 3.
 
 ### Changed
 
