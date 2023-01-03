@@ -139,10 +139,11 @@ mod tests {
             auth_info: AuthInfo {
                 exec: Some(ExecConfig {
                     api_version: Some("client.authentication.k8s.io/v1beta1".to_owned()),
-                    command: "node".to_owned(),
+                    command: Some("node".to_owned()),
                     args: Some(vec!["../layer/tests/apps/kubectl/auth-util.js".to_owned()]),
                     env: None,
                     drop_env: None,
+                    interactive_mode: None,
                 }),
                 ..Default::default()
             },
