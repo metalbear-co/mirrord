@@ -1996,6 +1996,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml 0.9.14",
