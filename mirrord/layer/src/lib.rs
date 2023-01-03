@@ -420,7 +420,7 @@ async fn thread_loop(
         tx,
         rx,
         config.feature.network.incoming.is_steal(),
-        config.feature.network.http_filter,
+        config.feature.network.incoming.http_filter,
     );
     loop {
         select! {
@@ -512,10 +512,10 @@ async fn start_layer_thread(
         ) {
             (Some(_), Some(_)) => panic!(
                 r#"mirrord-layer encountered an issue:
-    
+
                 mirrord doesn't support specifying both
                 `OVERRIDE_ENV_VARS_EXCLUDE` and `OVERRIDE_ENV_VARS_INCLUDE` at the same time!
-    
+
                 > Use either `--override_env_vars_exclude` or `--override_env_vars_include`.
                 >> If you want to include all, use `--override_env_vars_include="*"`."#
             ),
@@ -556,7 +556,7 @@ async fn start_layer_thread(
               _ = sleep(Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into())) => {
                 graceful_exit!(r#"
                     agent response timeout - expected env var response
-    
+
                     check that the agent image can run on your architecture
                 "#);
               }

@@ -77,9 +77,9 @@ mod tests {
     #[rstest]
     fn default(
         #[values(
-            (None, IncomingConfig { mode: IncomingMode::Mirror, filter: None}),
-            (Some("false"), IncomingConfig { mode: IncomingMode::Mirror, filter: None}),
-            (Some("true"), IncomingConfig { mode: IncomingMode::Steal, filter: None}),
+            (None, IncomingConfig { mode: IncomingMode::Mirror, http_filter: None}),
+            (Some("false"), IncomingConfig { mode: IncomingMode::Mirror, http_filter: None}),
+            (Some("true"), IncomingConfig { mode: IncomingMode::Steal, http_filter: None}),
         )]
         incoming: (Option<&str>, IncomingConfig),
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
