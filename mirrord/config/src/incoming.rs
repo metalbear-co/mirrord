@@ -15,17 +15,17 @@ use crate::{
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct IncomingConfig {
     #[config(env = "MIRRORD_TCP_OUTGOING", default = IncomingMode::Mirror)]
-    mode: IncomingMode,
+    pub mode: IncomingMode,
 
     #[config(env = "MIRRORD_HTTP_FILTER")]
-    filter: Option<String>,
+    pub filter: Option<String>,
 }
 
 impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let filter = FromEnv::new("MIRRORD_HTTP_FILTER")
             .source_value()
-            .unwrap_or_else(|| Ok(Default::default()))?;
+            .transpose()?;
 
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
             .source_value()
@@ -35,11 +35,9 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-impl IncomingFileConfig {
+impl IncomingConfig {
     pub fn is_steal(&self) -> bool {
-        self.mode
-            .map(|mode| matches!(mode, IncomingMode::Steal))
-            .unwrap_or_default()
+        matches!(self.mode, IncomingMode::Steal)
     }
 }
 
