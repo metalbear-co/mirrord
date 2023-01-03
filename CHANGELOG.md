@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- intellij plugin: mirrord icon should always load now.
+- intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
+
 ## 3.16.2
 
 ### Fixed
