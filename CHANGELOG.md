@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Add brew command to README
+
 ### Fixed
 
 - Add go to skipped processes in JetBrains plugin. Solving GoLand bug.
