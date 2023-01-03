@@ -18,7 +18,7 @@ pub struct IncomingConfig {
     pub mode: IncomingMode,
 
     #[config(env = "MIRRORD_HTTP_FILTER")]
-    pub filter: Option<String>,
+    pub http_filter: Option<String>,
 }
 
 impl MirrordToggleableConfig for IncomingFileConfig {
@@ -31,7 +31,10 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
-        Ok(IncomingConfig { mode, filter })
+        Ok(IncomingConfig {
+            mode,
+            http_filter: filter,
+        })
     }
 }
 
