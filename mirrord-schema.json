@@ -413,11 +413,45 @@
         }
       ]
     },
-    "IncomingConfig": {
-      "type": "string",
-      "enum": [
-        "mirror",
-        "steal"
+    "IncomingFileConfig": {
+      "description": "Controls the mode of operation for incoming traffic.\n\nDefaults to [`IncomingMode::Mirror`].\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror: Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\" http_filter = \"Id: token.*\" ```",
+      "type": "object",
+      "properties": {
+        "http_filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IncomingMode": {
+      "oneOf": [
+        {
+          "description": "Sniffs on TCP port, and send a copy of the data to listeners.",
+          "type": "string",
+          "enum": [
+            "mirror"
+          ]
+        },
+        {
+          "description": "Stealer supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+          "type": "string",
+          "enum": [
+            "steal"
+          ]
+        }
       ]
     },
     "NetworkFileConfig": {
@@ -431,17 +465,11 @@
             "null"
           ]
         },
-        "http_filter": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "incoming": {
-          "description": "Mode of operation for incoming network requests in mirrord, supports `mirror` or `steal`:\n\n- `mirror`: mirror incoming requests to the remote pod to the local process; - `steal`: redirect incoming requests to the remote pod to the local process",
+          "description": "Handles incoming network traffic, see [`IncomingConfig`] for more details.",
           "anyOf": [
             {
-              "$ref": "#/definitions/IncomingConfig"
+              "$ref": "#/definitions/ToggleableConfig_for_IncomingFileConfig"
             },
             {
               "type": "null"
@@ -600,6 +628,16 @@
         },
         {
           "$ref": "#/definitions/FsUserConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_IncomingFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/IncomingFileConfig"
         }
       ]
     },
