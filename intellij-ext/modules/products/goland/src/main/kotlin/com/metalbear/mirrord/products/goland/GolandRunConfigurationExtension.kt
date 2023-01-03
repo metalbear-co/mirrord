@@ -49,7 +49,7 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
                 for (entry in env.entries.iterator()) {
                     cmdLine.addEnvironmentVariable(entry.key, entry.value)
                 }
-                cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver")
+                cmdLine.addEnvironmentVariable("MIRRORD_SKIP_PROCESSES", "dlv;debugserver;go")
             }
 
         }
