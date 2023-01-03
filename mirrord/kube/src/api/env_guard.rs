@@ -91,6 +91,11 @@ impl EnvVarGuard {
         envs: &HashMap<String, String>,
     ) -> Result<(), std::io::Error> {
         for (key, value) in envs {
+            // This env is added by kube-rs to executed process, so it's okay to ignore it
+            if key == "KUBERNETES_EXEC_INFO" {
+                continue;
+            }
+
             let orig_val = self.envs.get(key).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::Other,
