@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    incoming::IncomingConfig,
+    incoming::{IncomingConfig, IncomingFileConfig},
     outgoing::{OutgoingConfig, OutgoingFileConfig},
     util::MirrordToggleableConfig,
 };
@@ -35,14 +35,9 @@ pub struct NetworkConfig {
     ///
     /// - `mirror`: mirror incoming requests to the remote pod to the local process;
     /// - `steal`: redirect incoming requests to the remote pod to the local process
-    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
+    // #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
+    #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
-
-    // TODO: Test this field in unit tests.
-    // TODO: Put inside `IncomingConfig::Steal` so that it cannot exist without steal being on?
-    // TODO: Verify regex compiles.
-    #[config(env = "MIRRORD_HTTP_FILTER")]
-    pub http_filter: Option<String>,
 
     /// Tunnel outgoing network operations through mirrord.
     #[config(toggleable, nested)]
@@ -55,19 +50,15 @@ pub struct NetworkConfig {
 
 impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let incoming = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
-            .source_value()
-            .transpose()?
-            .unwrap_or(IncomingConfig::Mirror);
         let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
             .source_value()
             .transpose()?
             .unwrap_or(false);
+
         Ok(NetworkConfig {
-            incoming,
+            incoming: IncomingFileConfig::disabled_config()?,
             dns,
             outgoing: OutgoingFileConfig::disabled_config()?,
-            http_filter: None,
         })
     }
 }
@@ -77,11 +68,19 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::MirrordConfig,
+        incoming::{IncomingConfig, IncomingMode},
+        util::testing::with_env_vars,
+    };
 
     #[rstest]
     fn default(
-        #[values((None, IncomingConfig::Mirror), (Some("false"), IncomingConfig::Mirror), (Some("true"), IncomingConfig::Steal))]
+        #[values(
+            (None, IncomingConfig { mode: IncomingMode::Mirror, filter: None}),
+            (Some("false"), IncomingConfig { mode: IncomingMode::Mirror, filter: None}),
+            (Some("true"), IncomingConfig { mode: IncomingMode::Steal, filter: None}),
+        )]
         incoming: (Option<&str>, IncomingConfig),
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
     ) {
