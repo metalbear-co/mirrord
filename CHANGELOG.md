@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.16.2
+
 ### Fixed
 
 - Add go to skipped processes in JetBrains plugin. Solving GoLand bug.
