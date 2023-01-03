@@ -107,8 +107,6 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
             body,
         } = value;
         let mut request = Request::new(Full::new(Bytes::from(body)));
-        // TODO: can we construct the request with those values instead of constructing, then
-        //       setting? Does it matter?
         *request.method_mut() = method;
         *request.uri_mut() = uri;
         *request.version_mut() = version;
