@@ -74,6 +74,7 @@ impl<'a> HookManager<'a> {
             .or_else(|_| self.hook_any_lib_export(symbol, detour))
     }
 
+    #[cfg(target_os = "linux")]
     /// Hook a symbol that isn't exported.
     /// It is valuable when hooking internal stuff. (Go)
     fn hook_symbol(
@@ -90,6 +91,7 @@ impl<'a> HookManager<'a> {
             .map_err(Into::into)
     }
 
+    #[cfg(target_os = "linux")]
     /// Hook a symbol in the first module (main module, binary)
     pub(crate) fn hook_symbol_main_module(
         &mut self,

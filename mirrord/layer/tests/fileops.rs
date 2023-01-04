@@ -16,27 +16,12 @@ struct LayerConnection {
 }
 
 impl LayerConnection {
-    /// Accept a connection from the libraries and verify the first message it is supposed to send
-    /// to the agent - GetEnvVarsRequest. Send back a response.
+    /// Accept a connection from the layer
     /// Return the codec of the accepted stream.
     async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
         let (stream, _) = listener.accept().await.unwrap();
         println!("Got connection from library.");
-        let mut codec = Framed::new(stream, DaemonCodec::new());
-        let msg = codec.next().await.unwrap().unwrap();
-        println!("Got first message from library.");
-        if let ClientMessage::GetEnvVarsRequest(request) = msg {
-            assert!(request.env_vars_filter.is_empty());
-            assert_eq!(request.env_vars_select.len(), 1);
-            assert!(request.env_vars_select.contains("*"));
-        } else {
-            panic!("unexpected request {:?}", msg)
-        }
-        codec
-            .send(DaemonMessage::GetEnvVarsResponse(Ok(HashMap::new())))
-            .await
-            .unwrap();
-        codec
+        Framed::new(stream, DaemonCodec::new())
     }
 
     /// Accept the library's connection and verify initial ENV message and PortSubscribe message
@@ -367,6 +352,80 @@ async fn test_node_close(
         .unwrap();
 
     // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+}
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+#[cfg(target_os = "linux")]
+async fn test_go_stat(
+    #[values(Application::GoFileOps)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/test_file.txt".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: false,
+                write: true,
+                append: false,
+                truncate: false,
+                create: true,
+                create_new: false,
+            },
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+            path: Some("/tmp/test_file.txt".to_string().into()),
+            fd: None,
+            follow_symlink: true
+        }))
+    );
+
+    let metadata = MetadataInternal {
+        device_id: 0,
+        size: 0,
+        user_id: 2,
+        blocks: 3,
+        ..Default::default()
+    };
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            XstatResponse { metadata: metadata },
+        ))))
+        .await
+        .unwrap();
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
 }
