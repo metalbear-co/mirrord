@@ -1,13 +1,13 @@
-use std::str::FromStr;
+use std::{ops::Deref, str::FromStr};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    util::MirrordToggleableConfig,
+    util::{MirrordToggleableConfig, VecOrSingle},
 };
 
 /// Controls the mode of operation for incoming traffic.
@@ -51,23 +51,76 @@ pub struct IncomingConfig {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = IncomingMode::Mirror)]
     pub mode: IncomingMode,
 
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
-    pub http_header_filter: Option<String>,
+    #[config(toggleable, nested)]
+    pub http_header_filter: HttpHeaderFilterConfig,
 }
 
-impl MirrordToggleableConfig for IncomingFileConfig {
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+pub struct PortList(VecOrSingle<u16>);
+
+impl Default for PortList {
+    fn default() -> Self {
+        Self(VecOrSingle::Multiple(vec![80, 8080]))
+    }
+}
+
+impl Deref for PortList {
+    type Target = VecOrSingle<u16>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for PortList {
+    type Err = <VecOrSingle<u16> as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(PortList)
+    }
+}
+
+impl Into<Vec<u16>> for PortList {
+    fn into(self) -> Vec<u16> {
+        self.0.to_vec()
+    }
+}
+
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct HttpHeaderFilterConfig {
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
+    pub filter: Option<String>,
+
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_PORTS", default)]
+    pub ports: PortList,
+}
+
+impl MirrordToggleableConfig for HttpHeaderFilterFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
             .source_value()
             .transpose()?;
 
+        let ports = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER_PORTS")
+            .source_value()
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(Self::Generated { filter, ports })
+    }
+}
+
+impl MirrordToggleableConfig for IncomingFileConfig {
+    fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
         Ok(IncomingConfig {
             mode,
-            http_header_filter: filter,
+            http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
         })
     }
 }
