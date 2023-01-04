@@ -23,7 +23,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - update `kube` dependency + bump other
-- update `dlv` packed with plugins - possibly fixing an issue.
+- update `dlv` packed with plugins.
 
 ## 3.16.2
 
