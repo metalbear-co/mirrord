@@ -21,6 +21,15 @@ pub struct TestProcess<'a> {
 }
 
 impl<'a> TestProcess<'a> {
+    pub fn new() -> TestProcess<'a> {
+        TestProcess {
+            child: None,
+            stderr: Arc::new(Mutex::new(String::new())),
+            stdout: Arc::new(Mutex::new(String::new())),
+            env: HashMap::new(),
+        }
+    }
+
     pub async fn get_stdout(&self) -> String {
         (*self.stdout.lock().await).clone()
     }
@@ -29,7 +38,7 @@ impl<'a> TestProcess<'a> {
         assert!((*self.stderr.lock().await).is_empty());
     }
 
-    fn from_child(mut child: Child) -> TestProcess<'a> {
+    fn from_child(&mut self, mut child: Child) {
         let stderr_data = Arc::new(Mutex::new(String::new()));
         let stdout_data = Arc::new(Mutex::new(String::new()));
         let child_stderr = child.stderr.take().unwrap();
@@ -37,6 +46,9 @@ impl<'a> TestProcess<'a> {
         let stderr_data_reader = stderr_data.clone();
         let stdout_data_reader = stdout_data.clone();
         let pid = child.id().unwrap();
+
+        self.stderr = stderr_data;
+        self.stdout = stdout_data;
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(child_stderr);
@@ -69,31 +81,24 @@ impl<'a> TestProcess<'a> {
                 }
             }
         });
-
-        TestProcess {
-            child: Some(child),
-            stderr: stderr_data,
-            stdout: stdout_data,
-            env: HashMap::new(),
-        }
     }
 
-    pub async fn start_process(
-        executable: String,
-        args: Vec<&str>,
-        env: HashMap<&str, &str>,
-    ) -> TestProcess<'a> {
+    pub async fn start_process(&mut self, executable: String, args: Vec<&str>) {
         let bin_path = get_mirrord_binary();
         let mut exec_args: Vec<&str> = vec!["exec", "-t", "pod/mock-target", "--", &executable];
         exec_args.extend(args);
         let child = Command::new(bin_path)
             .args(exec_args)
-            .envs(env)
+            .envs(self.env.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        TestProcess::from_child(child)
+        self.from_child(child);
+    }
+
+    pub fn connect(&mut self, addr: &'a str) {
+        self.env.insert("MIRRORD_CONNECT_TCP", addr);
     }
 
     pub async fn assert_stdout_contains(&self, string: &str) {
@@ -128,14 +133,17 @@ fn get_mirrord_binary() -> String {
         .to_string()
 }
 
-struct LayerConnection {
-    codec: Framed<TcpStream, DaemonCodec>,
+pub(crate) struct LayerConnection {
+    pub codec: Framed<TcpStream, DaemonCodec>,
+    pub addr: String,
 }
 
 impl LayerConnection {
-    async fn accept_library_connection(listener: &TcpListener) -> LayerConnection {
+    pub async fn new() -> LayerConnection {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
         let (stream, _) = listener.accept().await.unwrap();
         let codec = Framed::new(stream, DaemonCodec::new());
-        LayerConnection { codec }
+        LayerConnection { codec, addr }
     }
 }
