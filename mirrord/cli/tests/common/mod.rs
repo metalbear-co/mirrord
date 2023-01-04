@@ -11,6 +11,8 @@ use tokio::{
     sync::Mutex,
 };
 
+pub(crate) mod applications;
+
 pub struct TestProcess<'a> {
     pub child: Option<Child>,
     stderr: Arc<Mutex<String>>,
@@ -78,11 +80,14 @@ impl<'a> TestProcess<'a> {
 
     pub async fn start_process(
         executable: String,
-        args: Vec<String>,
+        args: Vec<&str>,
         env: HashMap<&str, &str>,
     ) -> TestProcess<'a> {
-        let child = Command::new(executable)
-            .args(args)
+        let bin_path = get_mirrord_binary();
+        let mut exec_args: Vec<&str> = vec!["exec", "-t", "pod/mock-target", "--", &executable];
+        exec_args.extend(args);
+        let child = Command::new(bin_path)
+            .args(exec_args)
             .envs(env)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -105,8 +110,6 @@ impl<'a> EnvProvider<'a> for TestProcess<'a> {
     fn with_basic_env(&mut self) {
         self.env.insert("MIRRORD_PROGRESS_MODE", "off");
         self.env.insert("RUST_LOG", "warn,mirrord=trace");
-        self.env
-            .insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target");
         self.env.insert("MIRRORD_REMOTE_DNS", "false");
     }
 
@@ -115,20 +118,14 @@ impl<'a> EnvProvider<'a> for TestProcess<'a> {
     }
 }
 
-pub trait MirrordBinaryProvider<'b> {
-    fn get_mirrord_binary(&self) -> String;
-}
+fn get_mirrord_binary() -> String {
+    let test_bin_path =
+        build_test_binary("mirrord", "../../../").expect("error building test binary");
 
-impl<'a> MirrordBinaryProvider<'a> for TestProcess<'a> {
-    fn get_mirrord_binary(&self) -> String {
-        let test_bin_path =
-            build_test_binary("mirrord", "../../../").expect("error building test binary");
-
-        test_bin_path
-            .to_str()
-            .expect("error converting test binary path to string")
-            .to_string()
-    }
+    test_bin_path
+        .to_str()
+        .expect("error converting test binary path to string")
+        .to_string()
 }
 
 struct LayerConnection {
