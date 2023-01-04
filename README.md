@@ -96,10 +96,13 @@ Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
 ### Installation
 
 You can use either
+
 ```sh
 brew install metalbear-co/mirrord/mirrord
 ```
+
 or
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 ```
