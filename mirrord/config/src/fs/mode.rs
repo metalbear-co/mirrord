@@ -23,7 +23,7 @@ use crate::{
 /// ```yaml
 /// # mirrord-config.yaml
 ///
-/// fs = disabled
+/// fs = local
 /// ```
 ///
 /// - Enable mirrord read-write file operations:
@@ -36,8 +36,6 @@ use crate::{
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
-    /// Deprecated, use local instead
-    Disabled,
     /// mirrord won't do anything fs-related, all operations will be local.
     Local,
     /// mirrord will run overrides on some file operations, but most will be local.
@@ -64,7 +62,6 @@ impl FromStr for FsModeConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "disabled" => Ok(FsModeConfig::Disabled),
             "local" => Ok(FsModeConfig::Local),
             "localwithoverrides" => Ok(FsModeConfig::LocalWithOverrides),
             "read" => Ok(FsModeConfig::Read),
@@ -91,10 +88,6 @@ impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
     fn generate_config(self) -> Result<Self::Generated> {
-        if matches!(self, FsModeConfig::Disabled) {
-            println!("The `disabled` option for `fs` is deprecated. Use `local` instead.");
-        }
-
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
             .source_value()
             .transpose()?;

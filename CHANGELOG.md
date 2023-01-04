@@ -16,6 +16,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
 
+### Deprecated
+
+- Removed `disabled` in favor of `local` in `fs` configuration.
+
 ### Changed
 
 - update `kube` dependency + bump other
