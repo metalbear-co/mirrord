@@ -10,16 +10,15 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// Controls the mode of operation for incoming traffic.
-///
-/// Defaults to [`IncomingMode::Mirror`].
+/// Controls the incoming TCP traffic feature.
 ///
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 2 modes of operation:
 ///
-/// 1. Mirror: Sniffs the TCP data from a port, and forwards a copy to the interested listeners;
+/// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
+/// listeners;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured,
 /// see [`StealModeConfig`]);
@@ -42,19 +41,35 @@ use crate::{
 ///
 /// [feature.network.incoming]
 /// mode = "steal"
-/// http_header_filter = "Id: token.*"
+///
+/// [feature.network.incoming.http_header_filter]
+/// filter = "Id: token.*"
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "IncomingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct IncomingConfig {
+    /// Allows selecting between mirrorring or stealing traffic.
+    ///
+    /// See [`IncomingMode`] for details.
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = IncomingMode::Mirror)]
     pub mode: IncomingMode,
 
+    /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
+    ///
+    /// See [`HttpHeaderFilterConfig`] for details.
     #[config(toggleable, nested)]
     pub http_header_filter: HttpHeaderFilterConfig,
 }
 
+/// Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
+///
+/// Defaults to a list of ports `[80, 8080]`.
+///
+/// ## Internal
+///
+/// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
+/// macro (currently) doesn't support more intricate expressions.
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 pub struct PortList(VecOrSingle<u16>);
 
@@ -86,13 +101,31 @@ impl Into<Vec<u16>> for PortList {
     }
 }
 
+/// Filter configuration for the HTTP traffic stealer feature.
+///
+/// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
+/// feature only captures HTTP requests that match the specified filter, forwarding unmatched
+/// requests to their original destinations.
+///
+/// Only does something when [`IncomingConfig`] is set as [`IncomingMode::Steal`], ignored
+/// otherwise.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpHeaderFilterConfig {
+    /// Used to match against the requests captured by the mirrord-agent pod.
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// ## Usage
+    ///
+    /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
+    /// case-insensitive.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub filter: Option<String>,
 
+    /// Activate the HTTP traffic filter only for these ports.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER_PORTS", default)]
     pub ports: PortList,
 }
@@ -134,6 +167,9 @@ impl IncomingConfig {
     }
 }
 
+/// Mode of operation for the incoming TCP traffic feature.
+///
+/// Defaults to [`IncomingMode::Mirror`].
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
