@@ -405,14 +405,14 @@ async fn test_go_stat(
         .unwrap();
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+        ClientMessage::FileRequest(FileRequest::Xstat(file::XstatRequest {
             path: Some("/tmp/test_file.txt".to_string().into()),
             fd: None,
             follow_symlink: true
         }))
     );
 
-    let metadata = MetadataInternal {
+    let metadata = file::MetadataInternal {
         device_id: 0,
         size: 0,
         user_id: 2,
@@ -422,7 +422,7 @@ async fn test_go_stat(
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
+            file::XstatResponse { metadata },
         ))))
         .await
         .unwrap();
