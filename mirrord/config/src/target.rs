@@ -27,9 +27,10 @@ use crate::{
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
-    Simple(#[serde(deserialize_with = "string_or_struct_option")] Option<Target>),
+    // we need default else target value will be required in some scenarios.
+    Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
     Advanced {
-        #[serde(deserialize_with = "string_or_struct_option")]
+        #[serde(default, deserialize_with = "string_or_struct_option")]
         path: Option<Target>,
         namespace: Option<String>,
     },

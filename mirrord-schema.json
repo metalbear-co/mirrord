@@ -598,6 +598,7 @@
               ]
             },
             "path": {
+              "default": null,
               "anyOf": [
                 {
                   "$ref": "#/definitions/Target"

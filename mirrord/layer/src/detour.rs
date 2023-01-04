@@ -174,24 +174,6 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
-    pub(crate) fn bypass<U>(self, value: U) -> Result<U, HookError>
-    where
-        U: From<S>,
-    {
-        self.bypass_with(|_| value)
-    }
-
-    pub(crate) fn bypass_with<U, F: FnOnce(Bypass) -> U>(self, op: F) -> Result<U, HookError>
-    where
-        U: From<S>,
-    {
-        match self {
-            Detour::Success(s) => Ok(s.into()),
-            Detour::Bypass(b) => Ok(op(b)),
-            Detour::Error(e) => Err(e),
-        }
-    }
-
     pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => op(s),
@@ -219,6 +201,37 @@ impl<S> Detour<S> {
         match self {
             Detour::Success(s) => s,
             Detour::Bypass(_) | Detour::Error(_) => default,
+        }
+    }
+}
+
+impl<S> Detour<S>
+where
+    S: From<HookError>,
+{
+    /// Helper function for returning a detour return value from a hook.
+    ///
+    /// - `Success` -> Return the contained value.
+    /// - `Bypass` -> Call the bypass and return its value.
+    /// - `Error` -> Convert to libc value and return it.
+    pub(crate) fn unwrap_or_bypass_with<F: FnOnce(Bypass) -> S>(self, op: F) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(b) => op(b),
+            Detour::Error(e) => e.into(),
+        }
+    }
+
+    /// Helper function for returning a detour return value from a hook.
+    ///
+    /// `Success` -> Return the contained value.
+    /// `Bypass` -> Return provided value.
+    /// `Error` -> Convert to libc value and return it.
+    pub(crate) fn unwrap_or_bypass(self, value: S) -> S {
+        match self {
+            Detour::Success(s) => s,
+            Detour::Bypass(_) => value,
+            Detour::Error(e) => e.into(),
         }
     }
 }

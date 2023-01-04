@@ -19,7 +19,7 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::{LayerError, Result},
@@ -40,11 +40,11 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         continue;
                     },
                     Err(fail) => {
-                        error!("Failed reading local_stream with {:#?}", fail);
+                        trace!("Failed reading local_stream with {:#?}", fail);
                         break;
                     }
                     Ok(read_amount) if read_amount == 0 => {
-                        warn!("tcp_tunnel -> exiting due to local stream closed!");
+                        trace!("tcp_tunnel -> exiting due to local stream closed!");
                         break;
                     },
                     Ok(_) => {}
@@ -140,23 +140,23 @@ impl TcpHandler for TcpMirrorHandler {
     async fn handle_new_data(&mut self, data: TcpData) -> Result<()> {
         // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
         // abstraction to use something that has mutable access.
-        let mut connection = self
-            .connections
-            .take(&data.connection_id)
-            .ok_or(LayerError::NoConnectionId(data.connection_id))?;
+        if let Some(mut connection) = self.connections.take(&data.connection_id) {
+            debug!(
+                "handle_new_data -> writing {:#?} bytes to id {:#?}",
+                data.bytes.len(),
+                connection.id
+            );
+            // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be
+            // told that we just removed it).
+            connection.write(data.bytes).await?;
 
-        debug!(
-            "handle_new_data -> writing {:#?} bytes to id {:#?}",
-            data.bytes.len(),
-            connection.id
-        );
-        // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be told
-        // that we just removed it).
-        connection.write(data.bytes).await?;
-
-        self.connections.insert(connection);
-        debug!("handle_new_data -> success");
-
+            self.connections.insert(connection);
+            debug!("handle_new_data -> success");
+        } else {
+            // in case connection not found, this might be due to different state between
+            // remote socket and local socket, so we ignore it
+            trace!("connection not found {:#?}, ignoring", data.connection_id);
+        }
         Ok(())
     }
 
@@ -166,10 +166,10 @@ impl TcpHandler for TcpMirrorHandler {
         let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
-        self.connections
-            .remove(&connection_id)
-            .then_some(())
-            .ok_or(LayerError::NoConnectionId(connection_id))
+        self.connections.remove(&connection_id);
+
+        // We ignore if the connection was not found, it might have been closed already
+        Ok(())
     }
 
     fn ports(&self) -> &HashSet<Listen> {

@@ -7,6 +7,82 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- intellij plugin: mirrord icon should always load now.
+- intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
+
+### Changed
+
+- update `kube` dependency + bump other
+
+## 3.16.2
+
+### Fixed
+
+- Add go to skipped processes in JetBrains plugin. Solving GoLand bug.
+
+## 3.16.1
+
+### Fixed
+
+- Running on specific Kubernetes setups, such as Docker for Desktop should work again.
+
+## 3.16.0
+
+### Added
+
+- Add golang stat hooks, closes [#856](https://github.com/metalbear-co/mirrord/issues/856)
+
+### Fixed
+
+- agent: mount /var from host and reconfigure docker socket to /var/run/docker.sock for better compatibility
+- Error on specifying namespace in configuration without path (pod/container/deployment). Closes [#830](https://github.com/metalbear-co/mirrord/issues/830)
+- IntelliJ plugin with new UI enabled now shows buttons. Closes [#881](https://github.com/metalbear-co/mirrord/issues/881)
+- Fix deprecation warnings (partially), update checkout action to version 3.
+
+### Changed
+
+- Refactored detours to use new helper function `Result::as_hook` to simplify flow. (no change in behavior)
+
+## 3.15.2
+
+### Added
+
+- Logging for IntelliJ plugin for debugging/bug reports.
+
+### Fixed
+
+- Crash when mirroring and state is different between local and remote (happens in Mesh).
+  We now ignore messages that are not in the expected state. (as we can't do anything about it).
+- agent: Fix typo in socket path for k3s environments
+- intellij-plugin: fix missing telemetry/version check
+
+## 3.15.1
+
+### Added
+
+- Add `__xstat` hook, fixes [#867]((https://github.com/metalbear-co/mirrord/issues/867))
+
+### Fixed
+
+- Fix build scripts for the refactored IntelliJ plugin
+
+## 3.15.0
+
+### Added
+
+- agent: Add support for k3s envs
+- IntelliJ plugin - refactor, uses cli like vs code.
+
+### Fixed
+
+- getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes[#858](https://github.com/metalbear-co/mirrord/issues/858) and [#848](https://github.com/metalbear-co/mirrord/issues/848)
+
+### Changed
+
+- cli now loads env, removes go env stuff at load, might fix some bugs there.
+
 ## 3.14.3
 
 ### Fixed
@@ -18,7 +94,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - vscode ext: use process env for running mirrord. Fixes [#854](https://github.com/metalbear-co/mirrord/issues/854)
-- getaddrinfo: if node is NULL just bypass, as it's just for choosing ip/port, Fixes[#858](https://github.com/metalbear-co/mirrord/issues/858) and [#848](https://github.com/metalbear-co/mirrord/issues/848)
 
 ## 3.14.1
 

@@ -16,15 +16,6 @@ pub enum ContainerRuntime {
     Containerd,
 }
 
-impl ContainerRuntime {
-    pub fn mount_path(&self) -> &str {
-        match self {
-            ContainerRuntime::Docker => "/var/run/docker.sock",
-            ContainerRuntime::Containerd => "/run/",
-        }
-    }
-}
-
 impl Display for ContainerRuntime {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
