@@ -8,6 +8,8 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
 };
+
+use crate::file::*;
 mod common;
 pub use common::*;
 
@@ -179,7 +181,7 @@ async fn test_pwrite(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -204,7 +206,7 @@ async fn test_pwrite(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -294,7 +296,7 @@ async fn test_node_close(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -405,14 +407,14 @@ async fn test_go_stat(
         .unwrap();
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Xstat(file::XstatRequest {
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: Some("/tmp/test_file.txt".to_string().into()),
             fd: None,
             follow_symlink: true
         }))
     );
 
-    let metadata = file::MetadataInternal {
+    let metadata = MetadataInternal {
         device_id: 0,
         size: 0,
         user_id: 2,
@@ -422,7 +424,7 @@ async fn test_go_stat(
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            file::XstatResponse { metadata },
+            XstatResponse { metadata },
         ))))
         .await
         .unwrap();
