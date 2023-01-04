@@ -1,8 +1,12 @@
 use std::{collections::HashMap, process::Stdio, sync::Arc};
 
+use actix_codec::Framed;
 use k8s_openapi::chrono::Utc;
+use mirrord_protocol::DaemonCodec;
+use test_binary::build_test_binary;
 use tokio::{
     io::{AsyncReadExt, BufReader},
+    net::{TcpListener, TcpStream},
     process::{Child, Command},
     sync::Mutex,
 };
@@ -117,8 +121,24 @@ pub trait MirrordBinaryProvider<'b> {
 
 impl<'a> MirrordBinaryProvider<'a> for TestProcess<'a> {
     fn get_mirrord_binary(&self) -> String {
-        let current_exe =
-            std::env::current_exe().expect("Failed to get the path of the integration test binary");
-        current_exe.to_string_lossy().to_string()
+        let test_bin_path =
+            build_test_binary("mirrord", "../../../").expect("error building test binary");
+
+        test_bin_path
+            .to_str()
+            .expect("error converting test binary path to string")
+            .to_string()
+    }
+}
+
+struct LayerConnection {
+    codec: Framed<TcpStream, DaemonCodec>,
+}
+
+impl LayerConnection {
+    async fn accept_library_connection(listener: &TcpListener) -> LayerConnection {
+        let (stream, _) = listener.accept().await.unwrap();
+        let codec = Framed::new(stream, DaemonCodec::new());
+        LayerConnection { codec }
     }
 }

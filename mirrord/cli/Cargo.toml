@@ -51,3 +51,6 @@ mirrord-layer = { artifact = "cdylib", path="../layer" }
 
 [dev-dependencies]
 rstest = "*"
+test-binary = "2.0.0"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
+actix-codec.workspace = true

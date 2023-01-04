@@ -4,6 +4,7 @@ mod fileops {
     use std::time::Duration;
 
     use rstest::rstest;
+    use test_binary::build_test_binary;
 
     //use crate::common::TestProcess;
 
