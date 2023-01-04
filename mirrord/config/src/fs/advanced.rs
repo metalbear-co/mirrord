@@ -139,7 +139,7 @@ impl FsConfig {
 
     /// Checks if fs operations are active
     pub fn is_active(&self) -> bool {
-        !matches!(self.mode, FsModeConfig::Disabled | FsModeConfig::Local)
+        !matches!(self.mode, FsModeConfig::Local)
     }
 }
 
