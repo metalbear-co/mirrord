@@ -48,3 +48,6 @@ mirrord-sip = { path = "../sip" }
 
 [build-dependencies]
 mirrord-layer = { artifact = "cdylib", path="../layer" }
+
+[dev-dependencies]
+rstest = "*"
