@@ -86,8 +86,8 @@ impl FromStr for PortList {
     }
 }
 
-impl Into<Vec<u16>> for PortList {
-    fn into(self) -> Vec<u16> {
-        self.0.to_vec()
+impl From<PortList> for Vec<u16> {
+    fn from(value: PortList) -> Self {
+        value.0.to_vec()
     }
 }
