@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
     namespaced
 )]
 pub struct TargetSpec {
-    target: Target,
+    pub target: Target,
 }
 
 impl TargetCrd {
