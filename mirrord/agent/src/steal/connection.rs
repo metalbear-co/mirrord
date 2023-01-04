@@ -442,7 +442,7 @@ impl TcpConnectionStealer {
                             Ok(port)
                         }
                     },
-                    Err(e) => Err(From::from(BadHttpFilterRegex(regex_str, e.to_string()))),
+                    Err(fail) => Err(From::from(BadHttpFilterRegex(regex_str, fail.to_string()))),
                 }
             }
         };

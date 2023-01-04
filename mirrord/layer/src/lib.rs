@@ -28,7 +28,7 @@ use libc::c_int;
 use mirrord_config::{
     feature::FeatureConfig,
     fs::FsConfig,
-    incoming::{HttpHeaderFilterConfig, IncomingConfig},
+    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
     network::NetworkConfig,
     util::VecOrSingle,
     LayerConfig,
