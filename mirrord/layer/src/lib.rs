@@ -419,7 +419,7 @@ async fn thread_loop(
         tx,
         rx,
         config.feature.network.incoming.is_steal(),
-        config.feature.network.incoming.http_filter,
+        config.feature.network.incoming.http_header_filter,
     );
     loop {
         select! {

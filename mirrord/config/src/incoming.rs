@@ -42,7 +42,7 @@ use crate::{
 ///
 /// [feature.network.incoming]
 /// mode = "steal"
-/// http_filter = "Id: token.*"
+/// http_header_filter = "Id: token.*"
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "IncomingFileConfig", derive = "JsonSchema")]
@@ -51,13 +51,13 @@ pub struct IncomingConfig {
     #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = IncomingMode::Mirror)]
     pub mode: IncomingMode,
 
-    #[config(env = "MIRRORD_HTTP_FILTER")]
-    pub http_filter: Option<String>,
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
+    pub http_header_filter: Option<String>,
 }
 
 impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let filter = FromEnv::new("MIRRORD_HTTP_FILTER")
+        let filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
             .source_value()
             .transpose()?;
 
@@ -67,7 +67,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
 
         Ok(IncomingConfig {
             mode,
-            http_filter: filter,
+            http_header_filter: filter,
         })
     }
 }

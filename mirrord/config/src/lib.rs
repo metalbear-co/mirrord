@@ -341,7 +341,7 @@ mod tests {
                     dns: Some(false),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig {
                         mode: Some(IncomingMode::Mirror),
-                        http_filter: None,
+                        http_header_filter: None,
                     })),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
