@@ -30,7 +30,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpRequest, HttpResponse, LayerTcpSteal},
-    ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    ClientMessage, DaemonMessage,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::get_tmp_dir;
