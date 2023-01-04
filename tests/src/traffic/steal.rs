@@ -1,17 +1,18 @@
 #[cfg(test)]
 mod steal {
-    use std::{net::UdpSocket, time::Duration};
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpStream,
+        time::Duration,
+    };
 
-    use futures::Future;
-    use futures_util::stream::TryStreamExt;
-    use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api, Client};
-    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+    use kube::Client;
+    use reqwest::header::HeaderMap;
     use rstest::*;
 
     use crate::utils::{
-        get_service_url, kube_client, run_exec, send_request, send_requests, service,
-        udp_logger_service, Agent, Application, KubeService, CONTAINER_NAME,
+        get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
+        service, tcp_echo_service, Agent, Application, KubeService,
     };
 
     #[cfg(target_os = "linux")]
@@ -52,7 +53,7 @@ mod steal {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(45))]
     async fn test_filter_with_single_client_and_only_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -92,7 +93,7 @@ mod steal {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(45))]
     async fn test_filter_with_single_client_and_some_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -152,5 +153,74 @@ mod steal {
             .unwrap();
 
         application.assert(&mirrorded_process);
+    }
+
+    /// Test the case where running with `steal` set and an http header filter, but getting a
+    /// connection of an unsupported protocol.
+    /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
+    /// app does not see the traffic.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    async fn test_complete_passthrough(
+        #[future] tcp_echo_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let application = Application::NodeTcpEcho;
+        let service = tcp_echo_service.await;
+        let kube_client = kube_client.await;
+        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+
+        let mut flags = vec!["--steal"];
+        agent.flag().map(|flag| flags.extend(flag));
+        let mut mirrorded_process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_FILTER", "x-filter=yes")]),
+            )
+            .await;
+
+        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
+
+        let addr = format!("{host}:{port}");
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.write(b"THIS IS NOT HTTP!\n").unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut buf = String::new();
+        reader.read_line(&mut buf).unwrap();
+        assert_eq!(&buf, "remote: THIS IS NOT HTTP!\n"); // Successful round trip with remote app.
+
+        // Verify the data was passed through and nothing was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout();
+        assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
+
+        mirrorded_process.child.kill().await.unwrap();
+
+        // Now do a meta-test to see that with this setup but without the http filter the data does
+        // reach the local app.
+
+        let mut flags = vec!["--steal"];
+        agent.flag().map(|flag| flags.extend(flag));
+        let mut mirrorded_process = application
+            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .await;
+
+        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
+
+        let addr = format!("{host}:{port}");
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.write(b"THIS IS NOT HTTP!\n").unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut buf = String::new();
+        reader.read_line(&mut buf).unwrap();
+        assert_eq!(&buf, "local: THIS IS NOT HTTP!\n"); // Successful round trip with local app.
+
+        // Verify the data was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout();
+        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
+        mirrorded_process.child.kill().await.unwrap();
     }
 }

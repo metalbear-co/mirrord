@@ -85,6 +85,7 @@ mod utils {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        NodeTcpEcho,
     }
 
     #[derive(Debug)]
@@ -209,6 +210,7 @@ mod utils {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
+                Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
 
@@ -614,6 +616,22 @@ mod utils {
         .await
     }
 
+    /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+    /// over TCP, not HTTP.
+    #[fixture]
+    pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
+            "tcp-echo",
+            true,
+            false,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
@@ -628,7 +646,10 @@ mod utils {
         }
     }
 
-    pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
+    pub async fn get_service_host_and_port(
+        kube_client: Client,
+        service: &KubeService,
+    ) -> (String, i32) {
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
         let pods = pod_api
             .list(&ListParams::default().labels(&format!("app={}", service.name)))
@@ -655,7 +676,12 @@ mod utils {
             .and_then(|spec| spec.ports)
             .and_then(|mut ports| ports.pop())
             .unwrap();
-        format!("http://{}:{}", host_ip, port.node_port.unwrap())
+        (host_ip, port.node_port.unwrap())
+    }
+
+    pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
+        let (host_ip, port) = get_service_host_and_port(kube_client, service).await;
+        format!("http://{}:{}", host_ip, port)
     }
 
     pub async fn get_pod_instance(
