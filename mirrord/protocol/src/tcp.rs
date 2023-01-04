@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt, net::IpAddr};
+use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -154,23 +154,6 @@ pub struct HttpResponse {
     pub response: InternalHttpResponse,
 }
 
-impl PartialOrd<Self> for HttpResponse {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// A total order of responses in which the response with the LESSER `request_id` is the GREATER
-/// one.
-impl Ord for HttpResponse {
-    /// request1 > request2  iff. request1.request_id < request2.request_id.
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Reversed order because we want to process lower request_ids first, so we want a min heap
-        // instead of the default max heap.
-        other.request_id.cmp(&self.request_id)
-    }
-}
-
 // Not implemented as From<Response<Incoming>> because async.
 impl HttpResponse {
     pub async fn from_hyper_response(
@@ -202,6 +185,53 @@ impl HttpResponse {
             connection_id,
             response: internal_response,
         })
+    }
+
+    pub fn response_from_request(request: HttpRequest, status: StatusCode, message: &str) -> Self {
+        let HttpRequest {
+            request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+        let body = format!(
+            "{} {}\n{}\n",
+            status.as_str(),
+            status.canonical_reason().unwrap_or_default(),
+            message
+        )
+        .into_bytes();
+        Self {
+            port,
+            connection_id,
+            request_id,
+            response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body,
+            },
+        }
+    }
+
+    pub fn empty_response_from_request(request: HttpRequest, status: StatusCode) -> Self {
+        let HttpRequest {
+            request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+        Self {
+            port,
+            connection_id,
+            request_id,
+            response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+        }
     }
 }
 

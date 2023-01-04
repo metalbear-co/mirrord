@@ -7,7 +7,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::client::conn::http1::{handshake, SendRequest};
+use hyper::{
+    client::conn::http1::{handshake, SendRequest},
+    StatusCode,
+};
 use mirrord_protocol::{
     tcp::{
         HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
@@ -50,9 +53,6 @@ pub struct TcpStealHandler {
 
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
-
-    /// HTTP client tasks send request that could not be sent successfully to be retried.
-    failed_request_sender: Sender<HttpRequest>,
 }
 
 // TODO: let user specify http ports.
@@ -155,7 +155,6 @@ impl TcpStealHandler {
     pub(crate) fn new(
         http_filter: Option<String>,
         http_response_sender: Sender<HttpResponse>,
-        failed_request_sender: Sender<HttpRequest>,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -164,7 +163,6 @@ impl TcpStealHandler {
             http_request_senders: Default::default(),
             http_response_sender,
             http_filter,
-            failed_request_sender,
         }
     }
 
@@ -207,53 +205,133 @@ impl TcpStealHandler {
         Ok(())
     }
 
-    /// The `request` could not be sent in the first try, so maybe the "server" closed the
-    /// connection too soon. Recreate the connection and try again.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn retry_request(&mut self, request: HttpRequest) {
-        // TODO: Only retry once. Have a "retried" bool in HttpRequest?
-        if let Err(err) = self.create_http_connection(request).await {
-            warn!(
-                "Tried to recreate connection in order to resend failed request, but failed with \
-                error: {err:?}"
-            );
+    async fn create_http_connection_with_application(
+        addr: SocketAddr,
+    ) -> Result<SendRequest<Full<Bytes>>, HttpForwarderError> {
+        let target_stream = {
+            let _ = DetourGuard::new();
+            TcpStream::connect(addr).await?
+        };
+        let (http_request_sender, connection): (SendRequest<Full<Bytes>>, _) =
+            handshake(target_stream)
+                .await
+                .map_err::<HttpForwarderError, _>(From::from)?;
+
+        // spawn a task to poll the connection.
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                error!("Error in http connection with addr {addr:?}: {e:?}");
+            }
+        });
+        Ok(http_request_sender)
+    }
+
+    async fn send_http_request_to_application(
+        http_request_sender: &mut SendRequest<Full<Bytes>>,
+        req: HttpRequest,
+        port: Port,
+        connection_id: ConnectionId,
+    ) -> Result<HttpResponse, HttpRequest> {
+        let request_id = req.request_id;
+        match http_request_sender
+            .send_request(req.request.clone().into())
+            .await
+        {
+            Err(err) if err.is_closed() => {
+                warn!(
+                    "Sending request to local application failed with: {err:?}.
+                        Seems like the local application closed the connection too early, so 
+                        creating a new connection and trying again."
+                );
+                trace!("The request to be retried: {req:?}.");
+                Err(req)
+            }
+            Err(err) => {
+                warn!("Request to local application failed with: {err:?}.");
+                let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
+                Ok(HttpResponse::response_from_request(
+                    req,
+                    StatusCode::BAD_GATEWAY,
+                    &body_message,
+                ))
+            }
+            Ok(res) => Ok(
+                HttpResponse::from_hyper_response(res, port, connection_id, request_id)
+                    .await
+                    .unwrap_or_else(|e| {
+                        error!("Failed to read response to filtered http request: {e:?}. \
+                        Please consider reporting this issue on \
+                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
+                        HttpResponse::response_from_request(
+                            req,
+                            StatusCode::BAD_GATEWAY,
+                            "mirrord",
+                        )
+                    }),
+            ),
         }
     }
 
     /// Manage a single tcp connection, forward requests, wait for responses, send responses back.
     async fn connection_task(
+        addr: SocketAddr,
         mut request_receiver: Receiver<HttpRequest>,
-        mut http_request_sender: SendRequest<Full<Bytes>>,
         response_sender: Sender<HttpResponse>,
-        failed_request_sender: Sender<HttpRequest>,
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<(), HttpForwarderError> {
+        let mut http_request_sender =
+            Self::create_http_connection_with_application(addr.clone()).await?;
         // Listen for more requests in this connection and forward them to app.
         while let Some(req) = request_receiver.recv().await {
             trace!("HTTP client task received a new request to send: {req:?}.");
-            let request_id = req.request_id;
-            // Send to application.
-            match http_request_sender
-                .send_request(req.request.clone().into())
-                .await
+            let http_response = match Self::send_http_request_to_application(
+                &mut http_request_sender,
+                req,
+                port,
+                connection_id,
+            )
+            .await
             {
-                Err(err) => {
-                    warn!(
-                        "Sending request to local application failed with: {err:?}.
-                        Queueing it to be retried."
-                    );
-                    trace!("The request to be retired: {req:?}.");
-                    failed_request_sender.send(req).await?
+                Err(req) => {
+                    // The connection was closed. Recreate connection and retry send.
+                    match Self::create_http_connection_with_application(addr.clone()).await {
+                        Ok(request_sender) => {
+                            // Reconnecting was successful.
+                            http_request_sender = request_sender;
+                            Self::send_http_request_to_application(
+                                &mut http_request_sender,
+                                req,
+                                port,
+                                connection_id,
+                            )
+                            .await
+                                .unwrap_or_else(|req| {
+                                    warn!("Application closed connection too early AGAIN. Not retrying, returning error HTTP response.");
+                                    HttpResponse::response_from_request(
+                                        req,
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        "mirrord: local process closed the connection too early twice in a row."
+                                    )
+                                })
+                        }
+                        Err(err) => {
+                            error!(
+                                "The local application closed the http connection early and a \
+                            new connection could not be created. Got error {err:?} when tried to \
+                            reconnect."
+                            );
+                            HttpResponse::response_from_request(
+                                req,
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "mirrord: the local process closed the connection.",
+                            )
+                        }
+                    }
                 }
-                Ok(res) => {
-                    let res =
-                        HttpResponse::from_hyper_response(res, port, connection_id, request_id)
-                            .await?;
-                    // Send response back to forwarder.
-                    response_sender.send(res).await?;
-                }
-            }
+                Ok(res) => res,
+            };
+            response_sender.send(http_response).await?;
         }
         Ok(())
     }
@@ -274,43 +352,18 @@ impl TcpStealHandler {
             .get(&http_request.port)
             .ok_or(LayerError::PortNotFound(http_request.port))?;
         let addr: SocketAddr = listen.into();
-        let target_stream = {
-            let _ = DetourGuard::new();
-            TcpStream::connect(addr).await?
-        };
-        let (sender, connection): (SendRequest<Full<Bytes>>, _) =
-            handshake(target_stream)
-                .await
-                .map_err::<HttpForwarderError, _>(From::from)?;
         let connection_id = http_request.connection_id;
         let port = http_request.port;
-
-        // spawn a task to poll the connection.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!(
-                    "Error in http connection {} on port {}: {}",
-                    connection_id, port, e
-                );
-            }
-        });
 
         let (request_sender, request_receiver) = channel(1024);
 
         let response_sender = self.http_response_sender.clone();
-        let failed_request_sender = self.failed_request_sender.clone();
 
         tokio::spawn(async move {
             trace!("HTTP client task started.");
-            if let Err(e) = Self::connection_task(
-                request_receiver,
-                sender,
-                response_sender,
-                failed_request_sender,
-                port,
-                connection_id,
-            )
-            .await
+            if let Err(e) =
+                Self::connection_task(addr, request_receiver, response_sender, port, connection_id)
+                    .await
             {
                 error!(
                     "Error while forwarding http connection {connection_id} (port {port}): {e:?}."
