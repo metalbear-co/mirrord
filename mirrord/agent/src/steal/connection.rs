@@ -183,7 +183,6 @@ impl TcpConnectionStealer {
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
                     // Send a close message to all clients that were subscribed to the connection.
                     if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
-                        // TODO: is this too much to do in an iteration of the select loop?
                         for client_id in clients.into_iter() {
                             if let Some(client_tx) = self.clients.get(&client_id) {
                                 client_tx.send(DaemonTcp::Close(TcpClose {connection_id})).await?
@@ -230,7 +229,6 @@ impl TcpConnectionStealer {
                 .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
                 .await?)
         } else {
-            // TODO: can this happen when a client unsubscribes?
             warn!(
                 "Got stolen request for client {:?} that is not, or no longer, subscribed.",
                 request.client_id
@@ -562,10 +560,10 @@ impl TcpConnectionStealer {
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
     #[tracing::instrument(
-        level = "debug",
+        level = "trace",
         skip(self),
         fields(response_senders = ?self.http_response_senders.keys()),
-    )] // TODO: trace
+    )]
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
         match self
             .http_response_senders

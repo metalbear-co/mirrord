@@ -112,7 +112,6 @@ impl MatchedHttpRequest {
                 uri,
                 version,
                 headers,
-                extensions: _, // TODO: do we need to use it? There is not such `http_serde` method.
                 ..
             },
             body,

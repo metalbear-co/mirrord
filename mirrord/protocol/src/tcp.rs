@@ -94,7 +94,6 @@ pub struct InternalHttpRequest {
     pub version: Version,
 
     pub body: Vec<u8>,
-    // TODO: What about `extensions`? There is no `http_serde` method for it but it is in `Parts`.
 }
 
 impl From<InternalHttpRequest> for Request<Full<Bytes>> {
@@ -111,7 +110,6 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
         *request.uri_mut() = uri;
         *request.version_mut() = version;
         *request.headers_mut() = headers;
-        // TODO: extensions?
 
         request
     }
@@ -167,7 +165,6 @@ impl HttpResponse {
                 status,
                 version,
                 headers,
-                extensions: _, // TODO: do we need to use it? There is not such `http_serde` method.
                 ..
             },
             body,
