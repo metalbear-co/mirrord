@@ -2,7 +2,7 @@
 mod steal {
     use std::{
         io::{BufRead, BufReader, Write},
-        net::TcpStream,
+        net::{SocketAddr, TcpStream},
         time::Duration,
     };
 
@@ -185,7 +185,7 @@ mod steal {
 
         mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
 
-        let addr = format!("{host}:{port}");
+        let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).unwrap();
         stream.write(b"THIS IS NOT HTTP!\n").unwrap();
         let mut reader = BufReader::new(stream);
@@ -210,7 +210,6 @@ mod steal {
 
         mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
 
-        let addr = format!("{host}:{port}");
         let mut stream = TcpStream::connect(addr).unwrap();
         stream.write(b"THIS IS NOT HTTP!\n").unwrap();
         let mut reader = BufReader::new(stream);
