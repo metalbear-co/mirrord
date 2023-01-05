@@ -85,8 +85,8 @@ impl HttpFilterManager {
         }
     }
 
-    // TODO(alex) [high] 2022-12-12: Is adding a filter like this enough for it to be added to the
-    // hyper task? Do we have a possible deadlock here? Tune in next week for the conclusion!
+    // TODO(alex): Is adding a filter like this enough for it to be added to the hyper task? Do we
+    // have a possible deadlock here? Tune in next week for the conclusion!
     //
     /// Inserts a new client (layer) and its filter.
     ///
@@ -108,10 +108,6 @@ impl HttpFilterManager {
         self.client_filters.contains_key(client_id)
     }
 
-    // TODO(alex) [high] 2022-12-12: hyper doesn't take the actual stream, we're going to be
-    // separating it in reader/writer, so hyper can just return empty responses to nowhere (we glue
-    // a writer from a duplex channel to the actual reader from TcpStream).
-    //
     // If it matches the filter, we send this request via a channel to the layer. And on the
     // Manager, we wait for a message from the layer to send on the writer side of the actual
     // TcpStream.
