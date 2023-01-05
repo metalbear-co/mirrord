@@ -293,8 +293,7 @@ impl TcpStealHandler {
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<(), HttpForwarderError> {
-        let mut http_request_sender =
-            Self::create_http_connection_with_application(addr.clone()).await?;
+        let mut http_request_sender = Self::create_http_connection_with_application(addr).await?;
         // Listen for more requests in this connection and forward them to app.
         while let Some(req) = request_receiver.recv().await {
             trace!("HTTP client task received a new request to send: {req:?}.");
@@ -308,7 +307,7 @@ impl TcpStealHandler {
             {
                 Err(req) => {
                     // The connection was closed. Recreate connection and retry send.
-                    match Self::create_http_connection_with_application(addr.clone()).await {
+                    match Self::create_http_connection_with_application(addr).await {
                         Ok(request_sender) => {
                             // Reconnecting was successful.
                             http_request_sender = request_sender;
