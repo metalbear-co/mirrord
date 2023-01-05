@@ -23,14 +23,35 @@ use crate::{
     util::ClientId,
 };
 
-/// Used to pass data to the [`Service`] implementation.
+/// Used to pass data to the [`Service`] implementation of [`hyper`].
+///
+/// Think of this struct as if it was a bunch of function arguments that are passed down to
+/// [`Service::call`] method.
+///
+/// Each [`TcpStream`] connection (for stealer) requires this.
 #[derive(Debug)]
 pub(super) struct HyperHandler {
+    /// The (shared with the stealer) HTTP filter regexes that are used to filter traffic for this
+    /// particular connection.
     pub(super) filters: Arc<DashMap<ClientId, Regex>>,
+
+    /// [`Sender`] part of the channel used to communicate with the agent that we have a
+    /// [`MatchedHttpRequest`], and it should be forwarded to the layer.
     pub(super) matched_tx: Sender<HandlerHttpRequest>,
+
+    /// Identifies this [`TcpStream`] connection.
     pub(crate) connection_id: ConnectionId,
+
+    /// The port we're filtering HTTP traffic on.
     pub(crate) port: Port,
+
+    /// The original [`SocketAddr`] of the connection we're intercepting.
+    ///
+    /// Used for the case where we have an unmatched request (HTTP request did not match any of the
+    /// `filters`).
     pub(crate) original_destination: SocketAddr,
+
+    /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
 }
 
@@ -57,7 +78,7 @@ async fn matched_request(
 ///
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
 /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
-/// 3. Sends the [`HttpResponse`] to the stealer, via the [`UnmatchedSender`] channel.
+/// 3. Sends the [`HttpResponse`] back on the connected [`TcpStream`].
 #[tracing::instrument(level = "trace")]
 async fn unmatched_request(
     request: Request<Incoming>,

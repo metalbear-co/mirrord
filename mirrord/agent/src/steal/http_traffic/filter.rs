@@ -24,6 +24,7 @@ const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 /// requests.
 pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 
+/// Used to set up the creation of a [`HyperHandler`] task for the HTTP traffic stealer.
 #[derive(Debug)]
 pub(super) struct HttpFilterBuilder {
     http_version: HttpVersion,
@@ -59,28 +60,25 @@ impl HttpFilterBuilder {
         matched_tx: Sender<HandlerHttpRequest>,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<Self, HttpTrafficError> {
-        let reversible_stream = DefaultReversibleStream::read_header(stolen_stream).await;
+        DefaultReversibleStream::read_header(stolen_stream)
+            .await
+            .map(|mut reversible_stream| {
+                let http_version = HttpVersion::new(
+                    reversible_stream.get_header(),
+                    &H2_PREFACE[..MINIMAL_HEADER_SIZE],
+                );
 
-        match reversible_stream.map(|mut stream| {
-            let http_version =
-                HttpVersion::new(stream.get_header(), &H2_PREFACE[..MINIMAL_HEADER_SIZE]);
-
-            (stream, http_version)
-        }) {
-            Ok((reversible_stream, http_version)) => Ok(Self {
-                http_version,
-                client_filters: filters,
-                reversible_stream,
-                original_destination,
-                connection_id,
-                matched_tx,
-                connection_close_sender,
-            }),
-            Err(fail) => {
-                error!("Something went wrong in http filter {fail:#?}");
-                Err(fail)
-            }
-        }
+                Self {
+                    http_version,
+                    client_filters: filters,
+                    reversible_stream,
+                    original_destination,
+                    connection_id,
+                    matched_tx,
+                    connection_close_sender,
+                }
+            })
+            .inspect_err(|fail| error!("Something went wrong in http filter {fail:#?}"))
     }
 
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
