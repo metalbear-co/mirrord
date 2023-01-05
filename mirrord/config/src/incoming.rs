@@ -10,16 +10,19 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-/// Controls the mode of operation for incoming traffic.
-///
-/// Defaults to [`IncomingMode::Mirror`].
+pub mod http_filter;
+
+use http_filter::*;
+
+/// Controls the incoming TCP traffic feature.
 ///
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
 /// details.
 ///
 /// Incoming traffic supports 2 modes of operation:
 ///
-/// 1. Mirror: Sniffs the TCP data from a port, and forwards a copy to the interested listeners;
+/// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
+/// listeners;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured,
 /// see [`StealModeConfig`]);
@@ -42,32 +45,36 @@ use crate::{
 ///
 /// [feature.network.incoming]
 /// mode = "steal"
-/// http_filter = "Id: token.*"
+///
+/// [feature.network.incoming.http_header_filter]
+/// filter = "Id: token.*"
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "IncomingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct IncomingConfig {
-    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default = IncomingMode::Mirror)]
+    /// Allows selecting between mirrorring or stealing traffic.
+    ///
+    /// See [`IncomingMode`] for details.
+    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
     pub mode: IncomingMode,
 
-    #[config(env = "MIRRORD_HTTP_FILTER")]
-    pub http_filter: Option<String>,
+    /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
+    ///
+    /// See [`HttpHeaderFilterConfig`] for details.
+    #[config(toggleable, nested)]
+    pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 }
 
 impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let filter = FromEnv::new("MIRRORD_HTTP_FILTER")
-            .source_value()
-            .transpose()?;
-
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
         Ok(IncomingConfig {
             mode,
-            http_filter: filter,
+            http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
         })
     }
 }
@@ -81,6 +88,9 @@ impl IncomingConfig {
     }
 }
 
+/// Mode of operation for the incoming TCP traffic feature.
+///
+/// Defaults to [`IncomingMode::Mirror`].
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {

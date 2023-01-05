@@ -51,12 +51,12 @@ pub struct TcpStealHandler {
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
 
+    /// These ports would be filtered with the `http_filter`, if it's Some.
+    http_ports: Vec<u16>,
+
     /// HTTP client tasks send request that could not be sent successfully to be retried.
     failed_request_sender: Sender<HttpRequest>,
 }
-
-// TODO: let user specify http ports.
-const HTTP_PORTS: [Port; 2] = [80, 8080];
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
@@ -138,7 +138,7 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        let steal_type = if HTTP_PORTS.contains(&port) && let Some(filter) = &self.http_filter {
+        let steal_type = if self.http_ports.contains(&port) && let Some(filter) = &self.http_filter {
             FilteredHttp(port, filter.clone())
         } else {
             All(port)
@@ -154,6 +154,7 @@ impl TcpHandler for TcpStealHandler {
 impl TcpStealHandler {
     pub(crate) fn new(
         http_filter: Option<String>,
+        http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
         failed_request_sender: Sender<HttpRequest>,
     ) -> Self {
@@ -164,6 +165,7 @@ impl TcpStealHandler {
             http_request_senders: Default::default(),
             http_response_sender,
             http_filter,
+            http_ports,
             failed_request_sender,
         }
     }

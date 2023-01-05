@@ -25,7 +25,14 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::c_int;
-use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
+use mirrord_config::{
+    feature::FeatureConfig,
+    fs::FsConfig,
+    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
+    network::NetworkConfig,
+    util::VecOrSingle,
+    LayerConfig,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -290,12 +297,16 @@ impl Layer {
     fn new(
         tx: Sender<ClientMessage>,
         rx: Receiver<DaemonMessage>,
-        steal: bool,
-        http_filter: Option<String>,
+        incoming: IncomingConfig,
     ) -> Layer {
         // TODO: buffer size?
         let (http_response_sender, http_response_receiver) = channel(1024);
         let (failed_request_sender, failed_request_receiver) = channel(1024);
+        let steal = incoming.is_steal();
+        let IncomingConfig {
+            http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            ..
+        } = incoming;
         Self {
             tx,
             rx,
@@ -306,7 +317,8 @@ impl Layer {
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(
-                http_filter,
+                filter,
+                ports.into(),
                 http_response_sender,
                 failed_request_sender,
             ),
@@ -415,12 +427,16 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(
-        tx,
-        rx,
-        config.feature.network.incoming.is_steal(),
-        config.feature.network.incoming.http_filter,
-    );
+    let LayerConfig {
+        feature:
+            FeatureConfig {
+                network: NetworkConfig { incoming, .. },
+                capture_error_trace,
+                ..
+            },
+        ..
+    } = config;
+    let mut layer = Layer::new(tx, rx, incoming);
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -480,7 +496,7 @@ async fn thread_loop(
         }
     }
 
-    if config.feature.capture_error_trace {
+    if capture_error_trace {
         tracing_util::print_support_message();
     }
     graceful_exit!("mirrord has encountered an error and is now exiting.");

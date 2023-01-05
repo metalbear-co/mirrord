@@ -67,11 +67,16 @@ mod steal {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal", "--http-filter", "x-filter=yes"];
+        let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
 
         let mut client = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter=yes")]),
+            )
             .await;
 
         client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
@@ -108,14 +113,14 @@ mod steal {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
 
-        let mut flags = vec!["--steal", "--http-filter", "x-filter=yes"];
+        let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
         let mut mirrorded_process = application
             .run(
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_HTTP_FILTER", "x-filter=yes")]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter=yes")]),
             )
             .await;
 

@@ -1,5 +1,6 @@
 #![feature(slice_concat_trait)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 pub mod agent;
 pub mod config;
@@ -208,7 +209,9 @@ mod tests {
                             "fs": "write",
                             "network": {
                                 "dns": false,
-                                "incoming": "mirror",
+                                "incoming": {
+                                    "mode": "mirror"
+                                },
                                 "outgoing": {
                                     "tcp": true,
                                     "udp": false
@@ -241,7 +244,9 @@ mod tests {
 
                     [feature.network]
                     dns = false
-                    incoming = "mirror"
+
+                    [feature.network.incoming]
+                    mode = "mirror"
 
                     [feature.network.outgoing]
                     tcp = true
@@ -269,7 +274,8 @@ mod tests {
                         fs: "write"
                         network:
                             dns: false
-                            incoming: "mirror"
+                            incoming:
+                                mode: "mirror"
                             outgoing:
                                 tcp: true
                                 udp: false
@@ -341,7 +347,7 @@ mod tests {
                     dns: Some(false),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig {
                         mode: Some(IncomingMode::Mirror),
-                        http_filter: None,
+                        http_header_filter: None,
                     })),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),

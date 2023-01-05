@@ -151,10 +151,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
-    if let Some(regex_str) = &args.http_filter {
-        std::env::set_var("MIRRORD_HTTP_FILTER", regex_str);
-    }
-
     if args.pause {
         std::env::set_var("MIRRORD_PAUSE", "true");
     }

@@ -413,17 +413,48 @@
         }
       ]
     },
-    "IncomingFileConfig": {
-      "description": "Controls the mode of operation for incoming traffic.\n\nDefaults to [`IncomingMode::Mirror`].\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror: Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\" http_filter = \"Id: token.*\" ```",
+    "HttpHeaderFilterFileConfig": {
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`IncomingConfig`] is set as [`IncomingMode::Steal`], ignored otherwise.",
       "type": "object",
       "properties": {
-        "http_filter": {
+        "filter": {
+          "description": "Used to match against the requests captured by the mirrord-agent pod.\n\nSupports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\n## Usage\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
           "type": [
             "string",
             "null"
           ]
         },
+        "ports": {
+          "description": "Activate the HTTP traffic filter only for these ports.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PortList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IncomingFileConfig": {
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+      "type": "object",
+      "properties": {
+        "http_header_filter": {
+          "description": "Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).\n\nSee [`HttpHeaderFilterConfig`] for details.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_HttpHeaderFilterFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "mode": {
+          "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`IncomingMode`] for details.",
           "anyOf": [
             {
               "$ref": "#/definitions/IncomingMode"
@@ -437,6 +468,7 @@
       "additionalProperties": false
     },
     "IncomingMode": {
+      "description": "Mode of operation for the incoming TCP traffic feature.\n\nDefaults to [`IncomingMode::Mirror`].",
       "oneOf": [
         {
           "description": "Sniffs on TCP port, and send a copy of the data to listeners.",
@@ -554,6 +586,14 @@
         }
       }
     },
+    "PortList": {
+      "description": "Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).\n\nDefaults to a list of ports `[80, 8080]`.\n\n## Internal\n\nWe use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_uint16"
+        }
+      ]
+    },
     "Target": {
       "description": "Specifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234`:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/hello-world-abcd-1234\" ```",
       "anyOf": [
@@ -632,6 +672,16 @@
         }
       ]
     },
+    "ToggleableConfig_for_HttpHeaderFilterFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/HttpHeaderFilterFileConfig"
+        }
+      ]
+    },
     "ToggleableConfig_for_IncomingFileConfig": {
       "anyOf": [
         {
@@ -681,6 +731,23 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      ]
+    },
+    "VecOrSingle_for_uint16": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
           }
         }
       ]

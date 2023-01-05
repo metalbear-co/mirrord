@@ -142,10 +142,6 @@ pub(super) struct ExecArgs {
     #[arg(long = "steal")]
     pub tcp_steal: bool,
 
-    /// A regex to filter http requests by. Steal only requests headers matching the regex.
-    #[arg(long)]
-    pub http_filter: Option<String>,
-
     /// Pause target container while running.
     #[arg(short, long, alias = "paws")]
     pub pause: bool,

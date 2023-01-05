@@ -418,30 +418,33 @@ impl TcpConnectionStealer {
                     Ok(port)
                 }
             }
-            StealType::FilteredHttp(port, regex) => match Regex::new(&regex) {
-                Ok(regex) => match self.port_subscriptions.get_mut(&port) {
-                    Some(Unfiltered(earlier_client)) => {
-                        error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
-                        Err(PortAlreadyStolen(port))
-                    }
-                    Some(HttpFiltered(manager)) => {
-                        manager.new_client(client_id, regex);
-                        Ok(port)
-                    }
-                    None => {
-                        first_subscriber = true;
-                        let manager = HttpFiltered(HttpFilterManager::new(
-                            port,
-                            client_id,
-                            regex,
-                            self.http_request_sender.clone(),
-                        ));
-                        self.port_subscriptions.insert(port, manager);
-                        Ok(port)
-                    }
-                },
-                Err(e) => Err(From::from(BadHttpFilterRegex(regex, e.to_string()))),
-            },
+            StealType::FilteredHttp(port, regex_str) => {
+                // Make the regex case-insensitive.
+                match Regex::new(&format!("(?i){}", regex_str)) {
+                    Ok(regex) => match self.port_subscriptions.get_mut(&port) {
+                        Some(Unfiltered(earlier_client)) => {
+                            error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
+                            Err(PortAlreadyStolen(port))
+                        }
+                        Some(HttpFiltered(manager)) => {
+                            manager.new_client(client_id, regex);
+                            Ok(port)
+                        }
+                        None => {
+                            first_subscriber = true;
+                            let manager = HttpFiltered(HttpFilterManager::new(
+                                port,
+                                client_id,
+                                regex,
+                                self.http_request_sender.clone(),
+                            ));
+                            self.port_subscriptions.insert(port, manager);
+                            Ok(port)
+                        }
+                    },
+                    Err(fail) => Err(From::from(BadHttpFilterRegex(regex_str, fail.to_string()))),
+                }
+            }
         };
         if first_subscriber {
             if let Ok(port) = res {
