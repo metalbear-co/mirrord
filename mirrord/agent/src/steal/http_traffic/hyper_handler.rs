@@ -35,7 +35,7 @@ pub(super) struct HyperHandler {
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
-#[tracing::instrument(level = "debug", skip(matched_tx, response_rx))]
+#[tracing::instrument(level = "trace", skip(matched_tx, response_rx))]
 async fn matched_request(
     request: HandlerHttpRequest,
     matched_tx: Sender<HandlerHttpRequest>,
@@ -53,15 +53,12 @@ async fn matched_request(
     Ok(Response::from_parts(parts, body))
 }
 
-// TODO(alex) [mid] 2022-12-29: The complete passthrough case might need the `set_namespace`
-// mechanism? Need to test it before.
-
 /// Handles the case when no filter matches a header in the request.
 ///
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
 /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
 /// 3. Sends the [`HttpResponse`] to the stealer, via the [`UnmatchedSender`] channel.
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 async fn unmatched_request(
     request: Request<Incoming>,
     original_destination: SocketAddr,
@@ -107,7 +104,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 

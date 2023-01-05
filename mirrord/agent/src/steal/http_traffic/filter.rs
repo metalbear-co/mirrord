@@ -44,7 +44,7 @@ impl HttpFilterBuilder {
     ///
     /// This is a best effort classification, not a guarantee that the stream is HTTP.
     #[tracing::instrument(
-        level = "debug",
+        level = "trace",
         skip_all
         fields(
             local = ?stolen_stream.local_addr(),
@@ -86,7 +86,7 @@ impl HttpFilterBuilder {
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
     #[tracing::instrument(
-        level = "debug",
+        level = "trace",
         skip(self),
         fields(
             self.http_version = ?self.http_version,

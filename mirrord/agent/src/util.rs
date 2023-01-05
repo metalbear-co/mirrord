@@ -178,13 +178,14 @@ where
 ///
 /// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to
 /// work.
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
     if let Some(pid) = pid {
         let path = PathBuf::from("/proc").join(pid.to_string()).join("ns");
 
-        Ok(set_namespace(path.join(namespace))
-            .inspect_err(|fail| error!("Failed setting namespace {fail:#?}"))?)
+        Ok(set_namespace(path.join(namespace)).inspect_err(|fail| {
+            error!("Failed setting pid {pid:#?} namespace {namespace:#?} with {fail:#?}")
+        })?)
     } else {
         Ok(())
     }

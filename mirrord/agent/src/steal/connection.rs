@@ -377,16 +377,17 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    /// Add port redirection to iptables to steal `port`.
-    #[tracing::instrument(level = "debug", skip(self))]
+    /// Adds port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
     fn add_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
         self.iptables()?
             .add_redirect(port, self.stealer.local_addr()?.port())?;
-        debug!("> rules {:#?}", self.iptables()?.list_rules());
 
         self.iptables()?.add_bypass_own_packets()
     }
 
+    /// Removes port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
         self.iptables()?.remove_bypass_own_packets()?;
 
@@ -565,10 +566,10 @@ impl TcpConnectionStealer {
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
     ///                                                             ^- You are here.
     #[tracing::instrument(
-        level = "debug",
+        level = "trace",
         skip(self),
         fields(response_senders = ?self.http_response_senders.keys()),
-    )] // TODO: trace
+    )]
     async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
         match self
             .http_response_senders
