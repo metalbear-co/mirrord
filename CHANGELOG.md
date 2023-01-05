@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Fixed
+
+- Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
+
 ## 3.17.0
 
 ### Added
