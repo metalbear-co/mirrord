@@ -15,6 +15,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
+- fixed setting a breakpoint in GoLand on simple app hanging on release build (disabled lto). - Fixes [#906](https://github.com/metalbear-co/mirrord/issues/906).
 
 ### Deprecated
 
