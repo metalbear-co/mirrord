@@ -226,6 +226,10 @@ impl TcpStealHandler {
         Ok(http_request_sender)
     }
 
+    /// Return Ok(HttpResponse) if there is a response to send back - either the response we got
+    /// from the local process, or an error response we generated.
+    /// Return Err(HttpRequest) if the connection was closed too soon, and that request should be
+    /// retried after reconnecting with the server.
     async fn send_http_request_to_application(
         http_request_sender: &mut SendRequest<Full<Bytes>>,
         req: HttpRequest,
@@ -245,6 +249,15 @@ impl TcpStealHandler {
                 );
                 trace!("The request to be retried: {req:?}.");
                 Err(req)
+            }
+            Err(err) if err.is_parse() => {
+                warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
+                let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
+                Ok(HttpResponse::response_from_request(
+                    req,
+                    StatusCode::BAD_GATEWAY,
+                    &body_message,
+                ))
             }
             Err(err) => {
                 warn!("Request to local application failed with: {err:?}.");
