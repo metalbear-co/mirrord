@@ -96,7 +96,7 @@ pub(super) struct ExecArgs {
     #[arg(long = "rw")]
     pub enable_rw_fs: bool,
 
-    /// Default file system behavior: disabled, read, write, local
+    /// Default file system behavior: read, write, local
     #[arg(long)]
     pub fs_mode: Option<FsMode>,
 

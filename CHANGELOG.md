@@ -7,14 +7,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Fixed
+
+- Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
+
+## 3.17.0
+
+### Added
+
+- Add brew command to README
+
 ### Fixed
 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
+- fixed setting a breakpoint in GoLand on simple app hanging on release build (disabled lto). - Fixes [#906](https://github.com/metalbear-co/mirrord/issues/906).
+
+### Deprecated
+
+- Removed `disabled` in favor of `local` in `fs` configuration.
 
 ### Changed
 
 - update `kube` dependency + bump other
+- update `dlv` packed with plugins.
 
 ## 3.16.2
 
