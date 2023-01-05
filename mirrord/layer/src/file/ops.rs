@@ -5,9 +5,8 @@ use libc::{
     c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
-    file::{ReadDirResponse, XstatResponse},
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    file::XstatResponse, CloseFileResponse, OpenFileResponse, OpenOptionsInternal,
+    ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -220,16 +219,25 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     Detour::Success(result)
 }
 
+/// creates a directory stream for the remote_fd in the agent
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
-    let result = OPEN_FILES
+    let (local_fd, remote_fd) = OPEN_FILES
         .lock()?
         .get_key_value(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopendir -> {local_fd:#?} {remote_fd:#?}"))
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .inspect(|(local_fd, remote_fd)| trace!("fdopendir -> {local_fd:#?} {remote_fd:#?}"))?;
 
-    Detour::Success(result)
+    let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
+
+    let open_dir_request = OpenDir {
+        remote_fd: *remote_fd,
+        dir_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::OpenDir(open_dir_request))?;
+
+    Detour::Success(local_fd as *const _ as *mut _)
 }
 
 #[tracing::instrument(level = "trace")]

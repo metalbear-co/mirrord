@@ -80,3 +80,11 @@ pub struct DirEnt {}
 pub struct ReadDirResponse {
     dirents: DirEnt,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenDirResponse {}
