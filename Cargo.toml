@@ -62,4 +62,5 @@ webpki = { git = "https://github.com/metalbear-co/webpki", branch = "feat-ip-add
 
 [profile.release]
 strip = "debuginfo"
-lto = true
+# Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
+lto = false
