@@ -1989,6 +1989,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "http",
  "k8s-openapi",
  "kube",
  "mirrord-config",
@@ -2002,6 +2003,7 @@ dependencies = [
  "serde_yaml 0.9.14",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

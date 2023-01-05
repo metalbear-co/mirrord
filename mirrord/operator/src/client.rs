@@ -1,157 +1,119 @@
-use std::io;
-
-use actix_codec::{AsyncRead, AsyncWrite};
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use k8s_openapi::api::core::v1::Pod;
-use kube::{api::ListParams, Api, Client};
-use mirrord_config::{operator::OperatorConfig, target::TargetConfig, LayerConfig};
+use http::request::Request;
+use kube::{Api, Client};
+use mirrord_config::{target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api, AgentManagment},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::{
-    net::{TcpStream, ToSocketAddrs},
-    sync::mpsc,
-};
+use thiserror::Error;
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 
-use crate::protocol::{Handshake, OperatorCodec, OperatorRequest, OperatorResponse};
+use crate::crd::TargetCrd;
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
-pub struct OperatorApi<T: ToSocketAddrs> {
-    addr: T,
+#[derive(Debug, Error)]
+pub enum OperatorApiError {
+    #[error("unable to create target for TargetConfig")]
+    InvalidTarget,
+    #[error(transparent)]
+    HttpError(#[from] http::Error),
+    #[error(transparent)]
+    KubeApiError(#[from] KubeApiError),
+}
+
+type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
+
+pub struct OperatorApi {
+    client: Client,
     target: TargetConfig,
 }
 
-impl<T> OperatorApi<T>
-where
-    T: ToSocketAddrs,
-{
-    pub fn new(addr: T, target: TargetConfig) -> Self {
-        OperatorApi { addr, target }
-    }
-}
-
-#[async_trait]
-impl<T> AgentManagment for OperatorApi<T>
-where
-    T: ToSocketAddrs + Send + Sync,
-{
-    type AgentRef = actix_codec::Framed<TcpStream, OperatorCodec>;
-    type Err = io::Error;
-
-    async fn create_connection(
-        &self,
-        codec: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        wrap_connection(codec)
-    }
-
-    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
+impl OperatorApi {
+    pub async fn discover<P>(config: &LayerConfig, progress: &P) -> Result<(Self, TargetCrd)>
     where
         P: Progress + Send + Sync,
     {
-        let stream = TcpStream::connect(&self.addr).await?;
+        let operator_api = OperatorApi::new(&config).await?;
 
-        Ok(connection(stream, self.target.clone()).await)
+        let operator_ref = operator_api.create_agent(progress).await?;
+
+        Ok((operator_api, operator_ref))
     }
-}
 
-pub struct OperatorApiDiscover {
-    client: Client,
-    operator: OperatorConfig,
-    target: TargetConfig,
-}
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
+        let target = config.target.clone();
 
-impl OperatorApiDiscover {
-    pub async fn create(config: &LayerConfig) -> Result<Self, KubeApiError> {
         let client = create_kube_api(Some(config.clone())).await?;
 
-        Ok(OperatorApiDiscover {
-            client,
-            operator: config.operator.clone(),
-            target: config.target.clone(),
-        })
-    }
-
-    pub async fn discover_operator<P: Progress + Send + Sync>(
-        config: &LayerConfig,
-        progress: &P,
-    ) -> Option<(Self, <Self as AgentManagment>::AgentRef)> {
-        let api = OperatorApiDiscover::create(config).await.ok()?;
-
-        let connection = api.create_agent(progress).await.ok()?;
-
-        Some((api, connection))
+        Ok(OperatorApi { client, target })
     }
 }
 
 #[async_trait]
-impl AgentManagment for OperatorApiDiscover {
-    type AgentRef = String;
-    type Err = KubeApiError;
+impl AgentManagment for OperatorApi {
+    type AgentRef = TargetCrd;
+    type Err = OperatorApiError;
 
     async fn create_connection(
         &self,
-        pod_name: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, Some(&self.operator.namespace));
+        target: Self::AgentRef,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let target_api: Api<TargetCrd> =
+            get_k8s_resource_api(&self.client, self.target.namespace.as_deref());
 
-        let mut portforwarder = pod_api
-            .portforward(&pod_name, &[self.operator.port])
-            .await?;
+        let connection = self
+            .client
+            .connect(
+                Request::builder()
+                    .uri(format!(
+                        "{}/{}?connect=true",
+                        target_api.resource_url(),
+                        target.name()
+                    ))
+                    .body(vec![])?,
+            )
+            .await
+            .map_err(KubeApiError::from)?;
 
-        let codec = connection(
-            portforwarder.take_stream(self.operator.port).unwrap(),
-            self.target.clone(),
-        )
-        .await;
-
-        wrap_connection(codec).map_err(KubeApiError::from)
+        wrap_connection(connection)
     }
 
-    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
+    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef>
     where
         P: Progress + Send + Sync,
     {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, Some(&self.operator.namespace));
-        let lp = ListParams::default().labels("app=mirrord-operator");
+        let target_api: Api<TargetCrd> =
+            get_k8s_resource_api(&self.client, self.target.namespace.as_deref());
 
-        let pod_name = pod_api
-            .list(&lp)
-            .await?
-            .items
-            .pop()
-            .and_then(|pod| pod.metadata.name)
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::Other, "Operator Not Found".to_owned())
-            })?;
+        let target = self
+            .target
+            .path
+            .as_ref()
+            .ok_or(OperatorApiError::InvalidTarget)?;
 
-        Ok(pod_name)
+        target_api
+            .get(&TargetCrd::target_name(target))
+            .await
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::from)
     }
-}
-
-async fn connection<T>(connection: T, target: TargetConfig) -> actix_codec::Framed<T, OperatorCodec>
-where
-    for<'con> T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'con,
-{
-    let mut codec = actix_codec::Framed::new(connection, OperatorCodec::client());
-
-    let _ = codec
-        .send(OperatorRequest::Handshake(Handshake::new(target)))
-        .await;
-
-    codec
 }
 
 fn wrap_connection<T>(
-    mut codec: actix_codec::Framed<T, OperatorCodec>,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), std::io::Error>
+    mut connection: T,
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>
 where
-    for<'con> T: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'con,
+    for<'stream> T: StreamExt<Item = Result<Message, TungsteniteError>>
+        + SinkExt<Message, Error = TungsteniteError>
+        + Send
+        + Unpin
+        + 'stream,
 {
     let (client_tx, mut client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
     let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
@@ -159,26 +121,64 @@ where
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(Ok(msg)) = codec.next() => {
-                     match msg {
-                        OperatorResponse::Daemon(msg) => {
-                            if daemon_tx.send(msg).await.is_err() {
-                                println!("DaemonMessage Dropped");
+                client_message = client_rx.recv() => {
+                    if let Some(client_message) = client_message {
+                        if let Ok(payload) = bincode::encode_to_vec(client_message, bincode::config::standard()) {
+                            if let Err(err) = connection.send(payload.into()).await {
+                                println!("{:?}", err);
+
                                 break;
                             }
+                        } else {
+                            break;
                         }
-                    }
-                }
-                Some(client_msg) = client_rx.recv() => {
-                    if codec.send(OperatorRequest::Client(client_msg)).await.is_err() {
-                        println!("DaemonMessage Dropped");
+                    } else {
                         break;
                     }
                 }
-                else => { break }
+                daemon_message = connection.next() => {
+                    if let Some(Ok(Message::Binary(payload))) = daemon_message {
+                        if let Ok((daemon_message, _)) = bincode::decode_from_slice::<DaemonMessage, _>(&payload, bincode::config::standard()) {
+                            if let Err(err) = daemon_tx.send(daemon_message.into()).await {
+                                println!("{:?}", err);
+
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
             }
         }
+
+        let _ = connection.send(Message::Close(None)).await;
     });
 
     Ok((client_tx, daemon_rx))
+}
+
+#[cfg(test)]
+mod tests {
+
+    use mirrord_progress::NoProgress;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn connection() {
+        let mut config = LayerConfig::from_env().unwrap();
+
+        config.target.path = "deploy/py-serv-deployment".parse().ok();
+
+        let api = OperatorApi::new(&config).await.unwrap();
+
+        let target = api.create_agent(&NoProgress).await.unwrap();
+
+        let (client_tx, mut daemon_rx) = api.create_connection(target).await.unwrap();
+
+        let _ = client_tx.send(ClientMessage::Ping).await;
+
+        println!("{:#?}", daemon_rx.recv().await);
+    }
 }

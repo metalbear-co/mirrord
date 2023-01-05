@@ -16,6 +16,17 @@ pub struct TargetSpec {
 }
 
 impl TargetCrd {
+    pub fn target_name(target: &Target) -> String {
+        match target {
+            Target::Deployment(target) => format!("deploy.{}", target.deployment),
+            Target::Pod(target) => format!("pod.{}", target.pod),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        Self::target_name(&self.spec.target)
+    }
+
     pub fn from_target(target_config: TargetConfig) -> Option<Self> {
         let target = target_config.path?;
 
