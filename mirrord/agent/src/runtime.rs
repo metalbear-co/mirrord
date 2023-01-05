@@ -14,7 +14,7 @@ use containerd_client::{
 };
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
-use tracing::debug;
+use tracing::trace;
 
 use crate::error::{AgentError, Result};
 
@@ -184,10 +184,10 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
     let fd: RawFd = File::open(ns_path)?.into_raw_fd();
-    debug!("set_namespace -> fd {:#?}", fd);
+    trace!("set_namespace -> fd {:#?}", fd);
 
     setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
     Ok(())

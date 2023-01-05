@@ -15,7 +15,7 @@ use tokio::{
         oneshot::{self, Receiver},
     },
 };
-use tracing::{error, info};
+use tracing::error;
 
 use super::error::HttpTrafficError;
 use crate::{
@@ -35,7 +35,7 @@ pub(super) struct HyperHandler {
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
-#[tracing::instrument(level = "debug", skip(matched_tx, response_rx))]
+#[tracing::instrument(level = "trace", skip(matched_tx, response_rx))]
 async fn matched_request(
     request: HandlerHttpRequest,
     matched_tx: Sender<HandlerHttpRequest>,
@@ -53,80 +53,48 @@ async fn matched_request(
     Ok(Response::from_parts(parts, body))
 }
 
-// TODO(alex) [mid] 2022-12-29: The complete passthrough case might need the `set_namespace`
-// mechanism? Need to test it before.
-
 /// Handles the case when no filter matches a header in the request.
 ///
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
 /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
 /// 3. Sends the [`HttpResponse`] to the stealer, via the [`UnmatchedSender`] channel.
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 async fn unmatched_request(
     request: Request<Incoming>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    // TODO(alex) [high] 2022-12-29: Need a better mechanism for this. Aviram suggested changing how
-    // we do the `run_thread` piece, we should call `set_namespace` on each new thread for the
-    // stealer.
-    //
-    // https://discord.com/channels/933706914808889356/1049265406461870111/1058115382461874346
-    // set_namespace(PathBuf::from("/proc").join("3831").join("ns").join("net"))
-    //     .inspect_err(|fail| error!("Failed joining net ns {fail:#?}"))
-    //     .unwrap();
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
     // closes a connection, the client could still be wanting to send a request, so we need to
     // re-connect and send.
-
-    // TODO(alex) [mid] 2022-12-27: We end up with an infinite loop here, as we try to connect to
-    // `original_destination`, which is a port we're stealing from, so we steal the connection we're
-    // sending here, re-stealing the request, and on and on.
-    //
-    // https://tetrate.io/blog/traffic-types-and-iptables-rules-in-istio-sidecar-explained/
-    //
-    // better:
-    // https://linkerd.io/2021/09/23/how-linkerd-uses-iptables-to-transparently-route-kubernetes-traffic/
-    //
-    // ADD(alex) [mid] 2022-12-29: Loop solved by using `localhost` address (only the port is from
-    // the `original_address`). But this solution might not be enough for MESH networks.
-    info!("> UNMATCHED!!!");
     let tcp_stream = TcpStream::connect(original_destination)
         .await
         .inspect_err(|fail| error!("Failed connecting to original_destination with {fail:#?}"))?;
-    info!("> CONNECTED!!!");
 
     let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream)
         .await
         .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
-    // dont get here!
-    info!("> result of handshake {connection:#?}");
-
+    // We need this to progress the connection forward (hyper thing).
     tokio::spawn(async move {
         if let Err(fail) = connection.await {
             error!("Connection failed in unmatched with {fail:#?}");
         }
     });
 
-    info!("> CONNECTION progressed");
-
+    // Send the request to the original destination.
     let (mut parts, body) = request_sender
         .send_request(request)
         .await
         .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
         .into_parts();
-    info!("> parts {parts:#?} and body {body:#?}");
-    let body = body.collect().await?.to_bytes();
-    info!("> colected body {body:#?}");
 
+    // Remove headers that would be invalid due to us fiddling with the `body`.
+    let body = body.collect().await?.to_bytes();
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
 
-    info!("removed stuff from parts {parts:#?}");
-
-    let response = Response::from_parts(parts, body.into());
-    info!("the response is {response:#?}");
-    Ok(response)
+    // Rebuild the `Response` after our fiddling.
+    Ok(Response::from_parts(parts, body.into()))
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
@@ -136,13 +104,8 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    // TODO(alex) [mid] 2022-12-13: Do we care at all about what is sent from here as a response to
-    // our client duplex stream?
-    // #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
-        // TODO(alex) [high] 2022-12-27: Need to increment this in a proper place, if we do it
-        // here, then the `request` will go with value `1`, when it should be `0`, resulting in
-        // a "No requests to send" issue in `connection`. response to
         self.request_id += 1;
 
         if let Some(client_id) = request
@@ -151,7 +114,7 @@ impl Service<Request<Incoming>> for HyperHandler {
             .map(|(header_name, header_value)| {
                 header_value
                     .to_str()
-                    .map(|header_value| format!("{}={}", header_name, header_value))
+                    .map(|header_value| format!("{}: {}", header_name, header_value))
             })
             .find_map(|header| {
                 self.filters.iter().find_map(|filter| {

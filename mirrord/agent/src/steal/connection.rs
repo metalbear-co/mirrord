@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, error};
+use tracing::error;
 
 use super::*;
 use crate::{
@@ -375,16 +375,17 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    /// Add port redirection to iptables to steal `port`.
-    #[tracing::instrument(level = "debug", skip(self))]
+    /// Adds port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
     fn add_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
         self.iptables()?
             .add_redirect(port, self.stealer.local_addr()?.port())?;
-        debug!("> rules {:#?}", self.iptables()?.list_rules());
 
         self.iptables()?.add_bypass_own_packets()
     }
 
+    /// Removes port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
         self.iptables()?.remove_bypass_own_packets()?;
 
@@ -416,30 +417,33 @@ impl TcpConnectionStealer {
                     Ok(port)
                 }
             }
-            StealType::FilteredHttp(port, regex) => match Regex::new(&regex) {
-                Ok(regex) => match self.port_subscriptions.get_mut(&port) {
-                    Some(Unfiltered(earlier_client)) => {
-                        error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
-                        Err(PortAlreadyStolen(port))
-                    }
-                    Some(HttpFiltered(manager)) => {
-                        manager.new_client(client_id, regex);
-                        Ok(port)
-                    }
-                    None => {
-                        first_subscriber = true;
-                        let manager = HttpFiltered(HttpFilterManager::new(
-                            port,
-                            client_id,
-                            regex,
-                            self.http_request_sender.clone(),
-                        ));
-                        self.port_subscriptions.insert(port, manager);
-                        Ok(port)
-                    }
-                },
-                Err(e) => Err(From::from(BadHttpFilterRegex(regex, e.to_string()))),
-            },
+            StealType::FilteredHttp(port, regex_str) => {
+                // Make the regex case-insensitive.
+                match Regex::new(&format!("(?i){}", regex_str)) {
+                    Ok(regex) => match self.port_subscriptions.get_mut(&port) {
+                        Some(Unfiltered(earlier_client)) => {
+                            error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
+                            Err(PortAlreadyStolen(port))
+                        }
+                        Some(HttpFiltered(manager)) => {
+                            manager.new_client(client_id, regex);
+                            Ok(port)
+                        }
+                        None => {
+                            first_subscriber = true;
+                            let manager = HttpFiltered(HttpFilterManager::new(
+                                port,
+                                client_id,
+                                regex,
+                                self.http_request_sender.clone(),
+                            ));
+                            self.port_subscriptions.insert(port, manager);
+                            Ok(port)
+                        }
+                    },
+                    Err(fail) => Err(From::from(BadHttpFilterRegex(regex_str, fail.to_string()))),
+                }
+            }
         };
         if first_subscriber {
             if let Ok(port) = res {

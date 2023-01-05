@@ -1,7 +1,6 @@
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
-use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
@@ -155,17 +154,15 @@ enum IPTableFormatter {
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
 
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(level = "trace", skip_all)]
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
-        debug!("> Output is {output:#?}");
 
         if output.iter().any(|rule| {
             IPTableFormatter::MESH_OUTPUTS
                 .iter()
                 .any(|mesh_output| rule.contains(mesh_output))
         }) {
-            debug!("> We're in a MESH folks!");
             Ok(IPTableFormatter::Mesh)
         } else {
             Ok(IPTableFormatter::Normal)

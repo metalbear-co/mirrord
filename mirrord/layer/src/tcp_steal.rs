@@ -53,10 +53,10 @@ pub struct TcpStealHandler {
 
     /// A string with a header regex to filter HTTP requests by.
     http_filter: Option<String>,
-}
 
-// TODO: let user specify http ports.
-const HTTP_PORTS: [Port; 2] = [80, 8080];
+    /// These ports would be filtered with the `http_filter`, if it's Some.
+    http_ports: Vec<u16>,
+}
 
 #[async_trait]
 impl TcpHandler for TcpStealHandler {
@@ -138,7 +138,7 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        let steal_type = if HTTP_PORTS.contains(&port) && let Some(filter) = &self.http_filter {
+        let steal_type = if self.http_ports.contains(&port) && let Some(filter) = &self.http_filter {
             FilteredHttp(port, filter.clone())
         } else {
             All(port)
@@ -154,6 +154,7 @@ impl TcpHandler for TcpStealHandler {
 impl TcpStealHandler {
     pub(crate) fn new(
         http_filter: Option<String>,
+        http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
     ) -> Self {
         Self {
@@ -163,6 +164,7 @@ impl TcpStealHandler {
             http_request_senders: Default::default(),
             http_response_sender,
             http_filter,
+            http_ports,
         }
     }
 
@@ -244,7 +246,7 @@ impl TcpStealHandler {
             Err(err) if err.is_closed() => {
                 warn!(
                     "Sending request to local application failed with: {err:?}.
-                        Seems like the local application closed the connection too early, so 
+                        Seems like the local application closed the connection too early, so
                         creating a new connection and trying again."
                 );
                 trace!("The request to be retried: {req:?}.");
