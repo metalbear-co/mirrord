@@ -1,4 +1,8 @@
-use std::{fs::Metadata, os::unix::prelude::MetadataExt, path::PathBuf};
+use std::{
+    fs::{DirEntry, Metadata},
+    os::unix::prelude::MetadataExt,
+    path::PathBuf,
+};
 
 use bincode::{Decode, Encode};
 
@@ -74,11 +78,23 @@ pub struct ReadDirRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct DirEnt {}
+pub struct DirEntryInternal {
+    pub inode: u64,
+    pub position: u64,
+    pub length: u64,
+    pub name: String,
+    // type: ??
+}
+
+impl From<DirEntry> for DirEntryInternal {
+    fn from(value: DirEntry) -> Self {
+        todo!()
+    }
+}
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirResponse {
-    dirents: DirEnt,
+    pub direntry: DirEntryInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -87,4 +103,4 @@ pub struct OpenDirRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenDirResponse {}
+pub struct OpenDirResponse;

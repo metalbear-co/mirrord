@@ -227,6 +227,7 @@ impl FileHandler {
                 debug!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
                 pop_send(&mut self.readdir_queue, read_dir)
             }
+            OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
         }
     }
 
@@ -536,10 +537,10 @@ impl FileHandler {
     ) -> Result<()> {
         let ReadDir {
             remote_fd,
-            file_channel_tx,
+            dir_channel_tx,
         } = read_dir;
 
-        self.readdir_queue.push_back(file_channel_tx);
+        self.readdir_queue.push_back(dir_channel_tx);
 
         let read_dir_request = ReadDirRequest { remote_fd };
 
@@ -612,7 +613,7 @@ pub struct Xstat {
 #[derive(Debug)]
 pub struct ReadDir {
     pub(crate) remote_fd: u64,
-    pub(crate) file_channel_tx: ResponseChannel<ReadDirResponse>,
+    pub(crate) dir_channel_tx: ResponseChannel<ReadDirResponse>,
 }
 
 #[derive(Debug)]

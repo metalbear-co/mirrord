@@ -5,8 +5,9 @@ use libc::{
     c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
-    file::XstatResponse, CloseFileResponse, OpenFileResponse, OpenOptionsInternal,
-    ReadFileResponse, SeekFileResponse, WriteFileResponse,
+    file::{DirEntryInternal, XstatResponse},
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -219,14 +220,13 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     Detour::Success(result)
 }
 
-/// creates a directory stream for the remote_fd in the agent
+/// creates a directory stream for the `remote_fd` in the agent
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
-    let (local_fd, remote_fd) = OPEN_FILES
-        .lock()?
+    let open_files = OPEN_FILES.lock()?;
+    let (local_fd, remote_fd) = open_files
         .get_key_value(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopendir -> {local_fd:#?} {remote_fd:#?}"))?;
+        .ok_or(Bypass::LocalFdNotFound(fd))?;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -237,9 +237,12 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
 
     blocking_send_file_message(HookMessageFile::OpenDir(open_dir_request))?;
 
+    let _ = dir_channel_rx.blocking_recv()??;
+
     Detour::Success(local_fd as *const _ as *mut _)
 }
 
+// fetches the current entry in the directory stream created by `fdopendir`
 #[tracing::instrument(level = "trace")]
 pub(crate) fn readdir_r(
     dirp: *mut DIR,
@@ -248,16 +251,33 @@ pub(crate) fn readdir_r(
 ) -> Detour<c_int> {
     let remote_fd = get_remote_fd(dirp as RawFd)?;
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+    let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
     let requesting_dir = ReadDir {
         remote_fd,
-        file_channel_tx,
+        dir_channel_tx,
     };
 
     blocking_send_file_message(HookMessageFile::ReadDir(requesting_dir))?;
 
-    file_channel_rx.blocking_recv()??;
+    let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
+
+    let DirEntryInternal {
+        inode,
+        position,
+        length,
+        name,
+    } = direntry;
+
+    let mut entry = unsafe { &mut *entry };
+
+    // let name = CString::new(name).unwrap();
+
+    // entry.d_ino = inode;
+    // entry.d_off = position as i64;
+    // entry.d_reclen = length as u16;
+    // entry.d_name = name;
+    // entry.d_type = 0; // TODO: get the type from the agent
 
     Detour::Success(0)
 }

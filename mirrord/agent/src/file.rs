@@ -545,23 +545,29 @@ impl FileManager {
 
         let dir_stream = path.read_dir()?;
 
-        Err(ResponseError::NotDirectory(fd))
+        self.dir_streams.insert(fd, dir_stream);
+
+        Ok(OpenDirResponse)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         trace!("FileManager::read_dir -> fd {:#?}", fd,);
-        let path = match self
-            .open_files
-            .get(&fd)
-            .ok_or(ResponseError::NotFound(fd))?
-        {
-            RemoteFile::Directory(path) => path,
-            RemoteFile::File(_, path) => path,
+
+        let dir_stream = self
+            .dir_streams
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotDirectory(fd))?;
+
+        let entry = dir_stream
+            .next()
+            .transpose()?
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        let result = ReadDirResponse {
+            direntry: entry.into(),
         };
 
-        let dir_stream = path.read_dir()?;
-
-        Err(ResponseError::NotDirectory(fd))
+        Ok(result)
     }
 }
