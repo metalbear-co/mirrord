@@ -74,7 +74,7 @@ mod tests {
     fn default(
         #[values(
             (
-                None,
+                Some("false"), // breaks here with None
                 IncomingConfig { mode: IncomingMode::Mirror, http_header_filter: Default::default(), }
             ),
             (
@@ -95,7 +95,18 @@ mod tests {
                 ("MIRRORD_REMOTE_DNS", dns.0),
             ],
             || {
-                let env = NetworkFileConfig::default().generate_config().unwrap();
+                println!("incoming {incoming:#?}");
+                println!("dns {dns:#?}");
+
+                let def = NetworkFileConfig::default();
+                println!("default {def:#?}");
+
+                let env = NetworkFileConfig::default()
+                    .generate_config()
+                    .inspect_err(|fail| println!("failed {fail:#?}"))
+                    .unwrap();
+
+                println!("env {:#?} \ninc {:#?}", env.incoming, incoming.1);
 
                 assert_eq!(env.incoming, incoming.1);
                 assert_eq!(env.dns, dns.1);

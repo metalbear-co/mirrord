@@ -1,5 +1,6 @@
 #![feature(slice_concat_trait)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 pub mod agent;
 pub mod config;
@@ -353,6 +354,8 @@ mod tests {
             connect_tcp: None,
             operator: None,
         };
+
+        println!("conf {:#?}\nexpe {:#?}", config, expect);
 
         assert_eq!(config, expect);
     }
