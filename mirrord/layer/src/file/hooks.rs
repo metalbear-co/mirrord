@@ -5,7 +5,10 @@
 /// that is not being hooked (`strace` the program to check).
 use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
 
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
+use libc::{
+    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
+    FILE,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
@@ -79,6 +82,21 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
     let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
     fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> *mut DIR {
+    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readdir_r_detour(
+    dirp: *mut DIR,
+    entry: *mut dirent,
+    result: *mut *mut dirent,
+) -> c_int {
+    trace!("readdir_r_detour");
+    readdir_r(dirp, entry, result).unwrap_or_bypass_with(|_| FN_READDIR_R(dirp, entry, result))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -536,7 +554,21 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
     replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    replace!(
+        hook_manager,
+        "fdopendir",
+        fdopendir_detour,
+        FnFdopendir,
+        FN_FDOPENDIR
+    );
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
+    replace!(
+        hook_manager,
+        "readdir_r",
+        readdir_r_detour,
+        FnReaddir_r,
+        FN_READDIR_R
+    );
     replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
     replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);

@@ -67,3 +67,16 @@ impl From<Metadata> for MetadataInternal {
         }
     }
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct DirEnt {}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirResponse {
+    dirents: DirEnt,
+}

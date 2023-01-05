@@ -1,7 +1,7 @@
 use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
-use libc::{c_char, FILE};
+use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
@@ -236,6 +236,14 @@ impl From<HookError> for i32 {
 }
 
 impl From<HookError> for *mut FILE {
+    fn from(fail: HookError) -> Self {
+        let _ = i64::from(fail);
+
+        ptr::null_mut()
+    }
+}
+
+impl From<HookError> for *mut DIR {
     fn from(fail: HookError) -> Self {
         let _ = i64::from(fail);
 

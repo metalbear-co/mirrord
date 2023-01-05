@@ -20,7 +20,7 @@ use std::{
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    file::{XstatRequest, XstatResponse},
+    file::{ReadDirRequest, ReadDirResponse, XstatRequest, XstatResponse},
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
@@ -117,6 +117,7 @@ pub struct FileHandler {
     close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
     xstat_queue: ResponseDeque<XstatResponse>,
+    readdir_queue: ResponseDeque<ReadDirResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -241,6 +242,7 @@ impl FileHandler {
             Close(close) => self.handle_hook_close(close, tx).await,
             Access(access) => self.handle_hook_access(access, tx).await,
             Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
+            ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
         }
     }
 
@@ -497,6 +499,25 @@ impl FileHandler {
         let request = ClientMessage::FileRequest(FileRequest::Xstat(xstat_request));
         tx.send(request).await.map_err(From::from)
     }
+
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_read_dir(
+        &mut self,
+        read_dir: ReadDir,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let ReadDir {
+            remote_fd,
+            file_channel_tx,
+        } = read_dir;
+
+        self.readdir_queue.push_back(file_channel_tx);
+
+        let read_dir_request = ReadDirRequest { remote_fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::ReadDir(read_dir_request));
+        tx.send(request).await.map_err(From::from)
+    }
 }
 
 #[derive(Debug)]
@@ -561,6 +582,12 @@ pub struct Xstat {
 }
 
 #[derive(Debug)]
+pub struct ReadDir {
+    pub(crate) remote_fd: u64,
+    pub(crate) file_channel_tx: ResponseChannel<ReadDirResponse>,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -573,4 +600,5 @@ pub enum HookMessageFile {
     Close(Close),
     Access(Access),
     Xstat(Xstat),
+    ReadDir(ReadDir),
 }

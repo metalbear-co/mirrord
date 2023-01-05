@@ -1,10 +1,13 @@
 use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{
+    c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
+};
 use mirrord_protocol::{
-    file::XstatResponse, CloseFileResponse, OpenFileResponse, OpenOptionsInternal,
-    ReadFileResponse, SeekFileResponse, WriteFileResponse,
+    file::{ReadDirResponse, XstatResponse},
+    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -215,6 +218,40 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
 
     Detour::Success(result)
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
+    let result = OPEN_FILES
+        .lock()?
+        .get_key_value(&fd)
+        .ok_or(Bypass::LocalFdNotFound(fd))
+        .inspect(|(local_fd, remote_fd)| trace!("fdopendir -> {local_fd:#?} {remote_fd:#?}"))
+        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+
+    Detour::Success(result)
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn readdir_r(
+    dirp: *mut DIR,
+    entry: *mut dirent,
+    result: *mut *mut dirent,
+) -> Detour<c_int> {
+    let remote_fd = get_remote_fd(dirp as RawFd)?;
+
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    let requesting_dir = ReadDir {
+        remote_fd,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(HookMessageFile::ReadDir(requesting_dir))?;
+
+    file_channel_rx.blocking_recv()??;
+
+    Detour::Success(0)
 }
 
 #[tracing::instrument(level = "trace")]
