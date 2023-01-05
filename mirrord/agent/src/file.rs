@@ -9,7 +9,7 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    file::{XstatRequest, XstatResponse},
+    file::{ReadDirRequest, ReadDirResponse, XstatRequest, XstatResponse},
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
@@ -167,6 +167,11 @@ impl FileManager {
             }) => {
                 let xstat_result = self.xstat(path, fd, follow_symlink);
                 Ok(FileResponse::Xstat(xstat_result))
+            }
+
+            FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
+                let read_dir_result = self.read_dir(remote_fd);
+                Ok(FileResponse::ReadDir(read_dir_result))
             }
         }
     }
@@ -515,5 +520,12 @@ impl FileManager {
             metadata: metadata.into(),
         })
         .map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
+        trace!("FileManager::read_dir -> fd {:#?}", fd,);
+
+        Err(ResponseError::NotDirectory(fd))
     }
 }

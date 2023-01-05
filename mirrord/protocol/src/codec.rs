@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{ReadDirRequest, XstatRequest, XstatResponse},
+    file::{ReadDirRequest, ReadDirResponse, XstatRequest, XstatResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -255,6 +255,7 @@ pub enum FileResponse {
     Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
     Xstat(RemoteResult<XstatResponse>),
+    ReadDir(RemoteResult<ReadDirResponse>),
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

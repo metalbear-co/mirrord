@@ -219,6 +219,10 @@ impl FileHandler {
                 debug!("DaemonMessage::XstatResponse {:#?}!", xstat);
                 pop_send(&mut self.xstat_queue, xstat)
             }
+            ReadDir(read_dir) => {
+                debug!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
+                pop_send(&mut self.readdir_queue, read_dir)
+            }
         }
     }
 
