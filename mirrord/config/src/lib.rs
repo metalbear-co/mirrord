@@ -209,7 +209,9 @@ mod tests {
                             "fs": "write",
                             "network": {
                                 "dns": false,
-                                "incoming": "mirror",
+                                "incoming": {
+                                    "mode": "mirror"
+                                },
                                 "outgoing": {
                                     "tcp": true,
                                     "udp": false
@@ -242,7 +244,9 @@ mod tests {
 
                     [feature.network]
                     dns = false
-                    incoming = "mirror"
+
+                    [feature.network.incoming]
+                    mode = "mirror"
 
                     [feature.network.outgoing]
                     tcp = true
@@ -270,7 +274,8 @@ mod tests {
                         fs: "write"
                         network:
                             dns: false
-                            incoming: "mirror"
+                            incoming:
+                                mode: "mirror"
                             outgoing:
                                 tcp: true
                                 udp: false
@@ -354,8 +359,6 @@ mod tests {
             connect_tcp: None,
             operator: None,
         };
-
-        println!("conf {:#?}\nexpe {:#?}", config, expect);
 
         assert_eq!(config, expect);
     }

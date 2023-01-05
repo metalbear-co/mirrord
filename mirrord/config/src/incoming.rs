@@ -56,7 +56,7 @@ pub struct IncomingConfig {
     /// Allows selecting between mirrorring or stealing traffic.
     ///
     /// See [`IncomingMode`] for details.
-    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC")]
+    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
     pub mode: IncomingMode,
 
     /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
