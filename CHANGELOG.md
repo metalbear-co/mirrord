@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## Added
+
+- Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
+
 ## Fixed
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
