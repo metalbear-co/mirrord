@@ -150,6 +150,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
     Regex(#[from] fancy_regex::Error),
+
+    #[error("mirrord-layer: Agent closed connection with error: {0}")]
+    AgentErrorClosed(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

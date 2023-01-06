@@ -203,12 +203,20 @@ impl ClientConnectionHandler {
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
-        let mut running = true;
-        while running {
+        loop {
             select! {
                 message = self.stream.next() => {
                     if let Some(message) = message {
-                        running = self.handle_client_message(message?).await?;
+                        match self.handle_client_message(message?).await {
+                            Ok(true) => {},
+                            Ok(false) => {
+                                break;
+                            }
+                            Err(e) => {
+                                self.respond(DaemonMessage::Close(format!("{:?}", e))).await?;
+                                break;
+                            }
+                        }
                     } else {
                         debug!("Client {} disconnected", self.id);
                         break;
