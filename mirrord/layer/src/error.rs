@@ -143,6 +143,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
     UnexpectedResponseError(ResponseError),
+
+    #[error("mirrord-layer: Agent closed connection with error: {0}")]
+    AgentErrorClosed(String),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
