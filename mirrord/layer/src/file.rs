@@ -21,8 +21,8 @@ use std::{
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
     file::{
-        OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse, XstatRequest,
-        XstatResponse,
+        DirEntryInternal, OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
+        XstatRequest, XstatResponse,
     },
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
@@ -48,6 +48,11 @@ type RemoteFd = u64;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
     fd: RawFd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirStream {
+    direntry: Box<DirEntryInternal>,
 }
 
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =

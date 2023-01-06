@@ -3,15 +3,15 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions, ReadDir},
     io::{prelude::*, BufReader, SeekFrom},
-    os::unix::prelude::FileExt,
+    os::unix::prelude::{DirEntryExt, FileExt},
     path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     file::{
-        OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse, XstatRequest,
-        XstatResponse,
+        DirEntryInternal, OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
+        XstatRequest, XstatResponse,
     },
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
@@ -559,13 +559,21 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotDirectory(fd))?;
 
-        let entry = dir_stream
-            .next()
-            .transpose()?
-            .ok_or(ResponseError::NotFound(fd))?;
+        let result = if let Some((offset, entry)) = dir_stream.enumerate().next() {
+            let entry = entry?;
 
-        let result = ReadDirResponse {
-            direntry: entry.into(),
+            let internal_entry = DirEntryInternal {
+                inode: entry.ino(),
+                position: offset as u64,
+                length: 0_u64, // TODO: get length of entry
+                name: entry.file_name().into_string().unwrap().into_bytes(),
+                file_type: 0_u8, // TODO: get file type
+            };
+            ReadDirResponse {
+                direntry: Some(internal_entry),
+            }
+        } else {
+            ReadDirResponse { direntry: None }
         };
 
         Ok(result)

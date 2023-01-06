@@ -82,19 +82,13 @@ pub struct DirEntryInternal {
     pub inode: u64,
     pub position: u64,
     pub length: u64,
-    pub name: String,
-    // type: ??
-}
-
-impl From<DirEntry> for DirEntryInternal {
-    fn from(value: DirEntry) -> Self {
-        todo!()
-    }
+    pub name: Vec<u8>,
+    pub file_type: u8,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirResponse {
-    pub direntry: DirEntryInternal,
+    pub direntry: Option<DirEntryInternal>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

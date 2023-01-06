@@ -5,9 +5,8 @@ use libc::{
     c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
-    file::{DirEntryInternal, XstatResponse},
-    CloseFileResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+    file::XstatResponse, CloseFileResponse, OpenFileResponse, OpenOptionsInternal,
+    ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -262,22 +261,27 @@ pub(crate) fn readdir_r(
 
     let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
 
-    let DirEntryInternal {
-        inode,
-        position,
-        length,
-        name,
-    } = direntry;
+    if let Some(direntry) = direntry {
+        let direntry_name = direntry.name.as_slice();
+        let mut entry_name: [i8; 256] = [0; 256];
 
-    let mut entry = unsafe { &mut *entry };
+        let casted_name: Vec<i8> = direntry_name.iter().map(|c| *c as i8).collect();
+        entry_name.copy_from_slice(casted_name.as_slice());
 
-    // let name = CString::new(name).unwrap();
+        unsafe {
+            (*entry).d_ino = direntry.inode;
+            (*entry).d_type = direntry.file_type;
+            (*entry).d_off = direntry.position as i64;
+            (*entry).d_reclen = direntry.length as u16;
+            (*entry).d_name = entry_name;
 
-    // entry.d_ino = inode;
-    // entry.d_off = position as i64;
-    // entry.d_reclen = length as u16;
-    // entry.d_name = name;
-    // entry.d_type = 0; // TODO: get the type from the agent
+            *result = entry;
+        }
+    } else {
+        unsafe {
+            *result = std::ptr::null_mut();
+        }
+    }
 
     Detour::Success(0)
 }
