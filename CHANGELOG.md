@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
 
+## Changed
+
+- agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
+
 ## 3.17.0
 
 ### Added
