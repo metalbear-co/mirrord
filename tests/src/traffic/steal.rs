@@ -184,7 +184,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_HTTP_FILTER", "x-filter: yes")]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
