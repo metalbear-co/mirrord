@@ -2,6 +2,7 @@
 #![feature(hash_drain_filter)]
 #![feature(once_cell)]
 #![feature(is_some_and)]
+#![feature(let_chains)]
 
 use std::{
     collections::HashSet,

@@ -404,19 +404,21 @@ impl TcpConnectionStealer {
             self.init_iptables()?;
         }
         let mut first_subscriber = false;
-        let res = match port_steal {
-            StealType::All(port) => {
-                if let Some(sub) = self.port_subscriptions.get(&port) {
+
+        let steal_port = match port_steal {
+            StealType::All(port) => match self.port_subscriptions.get(&port) {
+                Some(sub) => {
                     error!(
                         "Can't steal whole port {port:?} as it is already being stolen: {sub:?}."
                     );
                     Err(PortAlreadyStolen(port))
-                } else {
+                }
+                None => {
                     first_subscriber = true;
                     self.port_subscriptions.insert(port, Unfiltered(client_id));
                     Ok(port)
                 }
-            }
+            },
             StealType::FilteredHttp(port, filter) => {
                 // Make the regex case-insensitive.
                 match Regex::new(&format!("(?i){}", filter)) {
@@ -445,12 +447,12 @@ impl TcpConnectionStealer {
                 }
             }
         };
-        if first_subscriber {
-            if let Ok(port) = res {
-                self.add_stealer_iptables_rules(port)?;
-            }
+
+        if first_subscriber && let Ok(port) = steal_port {
+            self.add_stealer_iptables_rules(port)?;
         }
-        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
+
+        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
             .await
     }
 

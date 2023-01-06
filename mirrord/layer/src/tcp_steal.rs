@@ -6,6 +6,7 @@ use std::{
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::TryFutureExt;
 use http_body_util::Full;
 use hyper::{
     client::conn::http1::{handshake, SendRequest},
@@ -300,6 +301,7 @@ impl TcpStealHandler {
         // Listen for more requests in this connection and forward them to app.
         while let Some(req) = request_receiver.recv().await {
             trace!("HTTP client task received a new request to send: {req:?}.");
+
             let http_response = match Self::send_http_request_to_application(
                 &mut http_request_sender,
                 req,
