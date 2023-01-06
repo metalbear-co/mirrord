@@ -48,7 +48,7 @@ async-trait.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 httparse = "1"
-fancy-regex = { version = "0.10" }
+fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 pin-project = "1"
 

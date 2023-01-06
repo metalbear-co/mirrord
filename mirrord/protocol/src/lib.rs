@@ -1,5 +1,6 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
+#![feature(result_option_inspect)]
 
 pub mod codec;
 pub mod dns;

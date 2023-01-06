@@ -1,3 +1,4 @@
+use core::fmt::Display;
 use std::{fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
@@ -8,6 +9,7 @@ use hyper::{
     Uri, Version,
 };
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
@@ -59,13 +61,44 @@ pub enum DaemonTcp {
     HttpRequest(HttpRequest),
 }
 
+/// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
+/// `Filter::new` that validates the regex in mirrord-layer.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct Filter(String);
+
+impl Filter {
+    pub fn new(filter_str: String) -> Result<Self, fancy_regex::Error> {
+        let _ = fancy_regex::Regex::new(&filter_str).inspect_err(|fail| {
+            error!(
+                r"
+                Something went wrong while creating a regex for [{filter_str:#?}]!
+
+                >> Please check that the string supplied is a valid regex according to
+                   the fancy-regex crate (https://docs.rs/fancy-regex/latest/fancy_regex/).
+
+                > Error:
+                {fail:#?}
+                "
+            )
+        })?;
+
+        Ok(Self(filter_str))
+    }
+}
+
+impl Display for Filter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 /// Describes the stealing subscription to a port:
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum StealType {
     /// Steal all traffic to this port.
     All(Port),
     /// Steal HTTP traffic matching a given filter.
-    FilteredHttp(Port, String),
+    FilteredHttp(Port, Filter),
 }
 
 /// Messages related to Steal Tcp handler from client.
@@ -152,8 +185,11 @@ pub struct HttpResponse {
     pub response: InternalHttpResponse,
 }
 
-// Not implemented as From<Response<Incoming>> because async.
 impl HttpResponse {
+    /// We cannot this with the [`From`] trait as it doesn't support `async` conversions, and we
+    /// also need some extra parameters.
+    ///
+    /// So this is our alternative implementation to `From<Response<Incoming>>`.
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,

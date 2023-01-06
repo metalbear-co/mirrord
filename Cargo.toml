@@ -47,6 +47,7 @@ rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
 regex = "1"
+fancy-regex = { version = "0.10" }
 hyper = { version = "1.0.0-rc.2", features = ["full"] }
 http-body-util = { version = "0.1.0-rc.2" }
 

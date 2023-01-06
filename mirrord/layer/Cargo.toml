@@ -44,7 +44,7 @@ trust-dns-resolver.workspace = true
 num-traits.workspace = true
 
 rand = "0.8"
-fancy-regex = "0.10"
+fancy-regex.workspace = true
 regex.workspace = true
 errno = "0.2"
 async-trait.workspace = true

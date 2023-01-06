@@ -24,3 +24,4 @@ tracing.workspace = true
 hyper = { workspace = true, features = ["client"]}
 http-serde = "1.1.2"
 http-body-util = { workspace = true }
+fancy-regex = { workspace = true }

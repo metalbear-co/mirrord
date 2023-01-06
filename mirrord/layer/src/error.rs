@@ -147,6 +147,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
     HttpForwardingError(#[from] HttpForwarderError),
+
+    #[error("mirrord-layer: Regex creation failed with `{0}`.")]
+    Regex(#[from] fancy_regex::Error),
 }
 
 // Cannot have a generic From<T> implementation for this error, so explicitly implemented here.

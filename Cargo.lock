@@ -2093,6 +2093,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
+ "fancy-regex",
  "http-body-util",
  "http-serde",
  "hyper 1.0.0-rc.2",

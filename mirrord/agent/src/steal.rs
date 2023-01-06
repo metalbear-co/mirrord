@@ -94,7 +94,7 @@ pub struct HandlerHttpRequest {
 }
 
 /// A stolen HTTP request. Unlike [`mirrord_protocol::tcp::HttpRequest`], it also contains a
-/// ClientId.
+/// [`ClientId`].
 #[derive(Debug)]
 pub struct MatchedHttpRequest {
     pub port: Port,

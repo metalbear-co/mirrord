@@ -13,7 +13,7 @@ use hyper::{
 };
 use mirrord_protocol::{
     tcp::{
-        HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        Filter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
         StealType::{All, FilteredHttp},
         TcpClose, TcpData,
     },
@@ -138,11 +138,12 @@ impl TcpHandler for TcpStealHandler {
             .then_some(())
             .ok_or(LayerError::ListenAlreadyExists)?;
 
-        let steal_type = if self.http_ports.contains(&port) && let Some(filter) = &self.http_filter {
-            FilteredHttp(port, filter.clone())
+        let steal_type = if self.http_ports.contains(&port) && let Some(filter_str) = self.http_filter.take() {
+            FilteredHttp(port, Filter::new(filter_str)?)
         } else {
             All(port)
         };
+
         tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
             steal_type,
         )))
