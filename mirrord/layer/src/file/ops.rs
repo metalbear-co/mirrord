@@ -223,9 +223,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
     let open_files = OPEN_FILES.lock()?;
-    let (local_fd, remote_fd) = open_files
-        .get_key_value(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))?;
+    let remote_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -238,7 +236,10 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
 
     let _ = dir_channel_rx.blocking_recv()??;
 
-    Detour::Success(local_fd as *const _ as *mut _)
+    let dir_index = INDEX_ALLOCATOR.lock()?.next_index().unwrap(); // instead of unwrap, return error
+    OPEN_DIRS.lock()?.insert(dir_index, *remote_fd);
+
+    Detour::Success(dir_index as *const u64 as *mut _)
 }
 
 // fetches the current entry in the directory stream created by `fdopendir`
@@ -248,7 +249,10 @@ pub(crate) fn readdir_r(
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> Detour<c_int> {
-    let remote_fd = get_remote_fd(dirp as RawFd)?;
+    let local_dir_fd = dirp as u64;
+    trace!("readdir_r -> local_dir_fd {local_dir_fd:#?}");
+
+    let remote_fd = OPEN_DIRS.lock()?.get(&local_dir_fd).cloned().unwrap();
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 

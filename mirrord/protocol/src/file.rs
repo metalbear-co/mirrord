@@ -1,8 +1,4 @@
-use std::{
-    fs::{DirEntry, Metadata},
-    os::unix::prelude::MetadataExt,
-    path::PathBuf,
-};
+use std::{fs::Metadata, os::unix::prelude::MetadataExt, path::PathBuf};
 
 use bincode::{Decode, Encode};
 
