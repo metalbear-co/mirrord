@@ -6,7 +6,6 @@ use std::{
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::TryFutureExt;
 use http_body_util::Full;
 use hyper::{
     client::conn::http1::{handshake, SendRequest},
