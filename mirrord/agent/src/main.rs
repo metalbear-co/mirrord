@@ -206,7 +206,7 @@ impl ClientConnectionHandler {
             select! {
                 message = self.stream.next() => {
                     if let Some(message) = message {
-                        match self.handle_client_message(message?).await? {
+                        match self.handle_client_message(message?).await {
                             Ok(true) => {},
                             Ok(false) => {
                                 break;
