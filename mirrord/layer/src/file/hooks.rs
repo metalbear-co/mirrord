@@ -85,8 +85,8 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> *mut DIR {
-    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd) as usize) as _
+pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
+    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
 }
 
 #[hook_guard_fn]
@@ -95,7 +95,6 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> c_int {
-    trace!("readdir_r_detour");
     readdir_r(dirp, entry, result).unwrap_or_bypass_with(|_| FN_READDIR_R(dirp, entry, result))
 }
 

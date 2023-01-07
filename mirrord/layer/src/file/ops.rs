@@ -241,7 +241,6 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let fake_local_dir_name = CString::new(remote_fd.to_string())?;
     let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_fd) }?;
-
     OPEN_DIRS.lock()?.insert(local_dir_fd, *remote_fd);
 
     Detour::Success(local_dir_fd as usize)
