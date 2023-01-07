@@ -30,7 +30,6 @@ use mirrord_protocol::{
     ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
     WriteFileResponse, WriteLimitedFileRequest,
 };
-use num_traits::{zero, CheckedAdd, Num, NumCast};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
 
@@ -45,7 +44,6 @@ pub(crate) mod ops;
 
 type LocalFd = RawFd;
 type RemoteFd = u64;
-type LocalDirFd = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -60,60 +58,8 @@ pub(crate) struct DirStream {
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
-pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<RemoteFd, LocalDirFd>>> =
+pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
-
-pub(crate) static INDEX_ALLOCATOR: LazyLock<Mutex<IndexAllocator<LocalDirFd>>> =
-    LazyLock::new(|| Mutex::new(IndexAllocator::new()));
-
-// brought here from the agent, used to create new indexes for open directories
-pub struct IndexAllocator<T>
-where
-    T: Num,
-{
-    index: T,
-    vacant_indices: Vec<T>,
-}
-
-impl<T> IndexAllocator<T>
-where
-    T: Num + CheckedAdd + NumCast + Clone,
-{
-    pub fn new() -> IndexAllocator<T> {
-        IndexAllocator {
-            index: zero(),
-            vacant_indices: Vec::new(),
-        }
-    }
-
-    /// Returns the next available index, returns None if not available (reached max)
-    pub fn next_index(&mut self) -> Option<T> {
-        if let Some(i) = self.vacant_indices.pop() {
-            return Some(i);
-        }
-        match self.index.checked_add(&T::one()) {
-            Some(new_index) => {
-                let res = self.index.clone();
-                self.index = new_index;
-                Some(res)
-            }
-            None => None,
-        }
-    }
-
-    pub fn _free_index(&mut self, index: T) {
-        self.vacant_indices.push(index)
-    }
-}
-
-impl<T> Default for IndexAllocator<T>
-where
-    T: Default + Num + CheckedAdd + NumCast + Clone,
-{
-    fn default() -> Self {
-        IndexAllocator::new()
-    }
-}
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
 /// Rust's [`std::fs::OpenOptions`]

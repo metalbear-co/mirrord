@@ -86,7 +86,7 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> *mut DIR {
-    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
+    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd) as usize) as _
 }
 
 #[hook_guard_fn]

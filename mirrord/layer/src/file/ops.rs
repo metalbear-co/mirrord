@@ -221,7 +221,10 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
 
 /// creates a directory stream for the `remote_fd` in the agent
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
+pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
+    // usize == ptr size
+    // we don't return a pointer to an address that contains DIR
+
     let open_files = OPEN_FILES.lock()?;
     let remote_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?;
 
@@ -236,10 +239,12 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<*mut DIR> {
 
     let _ = dir_channel_rx.blocking_recv()??;
 
-    let dir_index = INDEX_ALLOCATOR.lock()?.next_index().unwrap(); // instead of unwrap, return error
-    OPEN_DIRS.lock()?.insert(dir_index, *remote_fd);
+    let fake_local_dir_name = CString::new(remote_fd.to_string())?;
+    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_fd) }?;
 
-    Detour::Success(dir_index as *const u64 as *mut _)
+    OPEN_DIRS.lock()?.insert(local_dir_fd, *remote_fd);
+
+    Detour::Success(local_dir_fd as usize)
 }
 
 // fetches the current entry in the directory stream created by `fdopendir`
@@ -249,10 +254,8 @@ pub(crate) fn readdir_r(
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> Detour<c_int> {
-    let local_dir_fd = dirp as u64;
-    trace!("readdir_r -> local_dir_fd {local_dir_fd:#?}");
-
-    let remote_fd = OPEN_DIRS.lock()?.get(&local_dir_fd).cloned().unwrap();
+    trace!("readdir_r -> {dirp:#?} {entry:#?} {result:#?}");
+    let remote_fd = OPEN_DIRS.lock()?.get(&(dirp as i32)).cloned().unwrap();
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
