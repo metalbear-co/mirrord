@@ -1,5 +1,5 @@
 use core::ffi::CStr;
-use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{ffi::CString, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{
     c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
@@ -277,9 +277,9 @@ pub(crate) fn readdir_r(
 
         unsafe {
             (*entry).d_ino = direntry.inode;
-            (*entry).d_type = direntry.file_type;
+            (*entry).d_reclen = mem::size_of::<dirent>() as u16; // d_reclen is constant in case of readdir_r
             (*entry).d_off = direntry.position as i64;
-            (*entry).d_reclen = direntry.length as u16;
+            (*entry).d_type = direntry.file_type;
             (*entry).d_name = entry_name;
 
             *result = entry;

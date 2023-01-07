@@ -77,7 +77,6 @@ pub struct ReadDirRequest {
 pub struct DirEntryInternal {
     pub inode: u64,
     pub position: u64,
-    pub length: u64,
     pub name: Vec<u8>,
     pub file_type: u8,
 }
