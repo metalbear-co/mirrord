@@ -272,7 +272,8 @@ pub(crate) fn readdir_r(
         let mut entry_name: [i8; 256] = [0; 256];
 
         let casted_name: Vec<i8> = direntry_name.iter().map(|c| *c as i8).collect();
-        entry_name.copy_from_slice(casted_name.as_slice());
+        let len = casted_name.len().min(entry_name.len());
+        entry_name[..len].copy_from_slice(&casted_name[..len]);
 
         unsafe {
             (*entry).d_ino = direntry.inode;
