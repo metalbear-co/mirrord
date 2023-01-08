@@ -1993,6 +1993,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-progress",
  "mirrord-protocol",
+ "rcgen",
  "reqwest",
  "schemars",
  "serde",
@@ -2828,6 +2829,18 @@ dependencies = [
  "nix 0.25.1",
  "socket2",
  "tokio",
+]
+
+[[package]]
+name = "rcgen"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffbe84efe2f38dea12e9bfc1f65377fdf03e53a18cb3b995faedf7934c7e785b"
+dependencies = [
+ "pem",
+ "ring",
+ "time 0.3.17",
+ "yasna",
 ]
 
 [[package]]
@@ -4544,6 +4557,15 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "yasna"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aed2e7a52e3744ab4d0c05c20aa065258e84c49fd4226f5191b2ed29712710b4"
+dependencies = [
+ "time 0.3.17",
+]
 
 [[package]]
 name = "zeroize"
