@@ -284,7 +284,7 @@ pub(crate) fn readdir_r(
         unsafe {
             (*entry).d_ino = direntry.inode;
             (*entry).d_reclen = mem::size_of::<dirent>() as u16; // d_reclen is constant in case of readdir_r
-            (*entry).d_seekoff = direntry.position as u64;
+            (*entry).d_seekoff = direntry.position;
             (*entry).d_type = direntry.file_type;
             (*entry).d_name = entry_name;
             (*entry).d_namlen = len as u16;
