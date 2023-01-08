@@ -1,9 +1,10 @@
 use std::{
     self,
     collections::HashMap,
-    fs::{File, OpenOptions, ReadDir},
+    fs::{File, FileType, OpenOptions, ReadDir},
     io::{prelude::*, BufReader, SeekFrom},
-    os::unix::prelude::{DirEntryExt, FileExt},
+    iter::Enumerate,
+    os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
     path::{Path, PathBuf},
 };
 
@@ -33,7 +34,7 @@ pub enum RemoteFile {
 pub struct FileManager {
     root_path: PathBuf,
     pub open_files: HashMap<u64, RemoteFile>,
-    pub dir_streams: HashMap<u64, ReadDir>,
+    pub dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     index_allocator: IndexAllocator<u64>,
 }
 
@@ -543,8 +544,7 @@ impl FileManager {
             RemoteFile::File(_, path) => path,
         };
 
-        let dir_stream = path.read_dir()?;
-
+        let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);
 
         Ok(OpenDirResponse)
@@ -552,22 +552,19 @@ impl FileManager {
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
-        trace!("FileManager::read_dir -> fd {:#?}", fd,);
-
         let dir_stream = self
             .dir_streams
             .get_mut(&fd)
             .ok_or(ResponseError::NotDirectory(fd))?;
 
-        let result = if let Some((offset, entry)) = dir_stream.enumerate().next() {
+        let result = if let Some((offset, entry)) = dir_stream.next() {
             let entry = entry?;
 
             let internal_entry = DirEntryInternal {
                 inode: entry.ino(),
                 position: offset as u64,
-                length: 0_u64, // TODO: get length of entry
                 name: entry.file_name().into_string().unwrap().into_bytes(),
-                file_type: 0_u8, // TODO: get file type
+                file_type: 0_u8,
             };
             ReadDirResponse {
                 direntry: Some(internal_entry),
