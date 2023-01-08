@@ -1956,6 +1956,7 @@ name = "mirrord-console"
 version = "3.17.0"
 dependencies = [
  "axum",
+ "log",
  "serde",
  "serde_json",
  "tokio",

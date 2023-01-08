@@ -1,42 +1,86 @@
 mod protocol;
 
+use std::any::type_name;
+
 use axum::{
-    extract::ws::{WebSocket, WebSocketUpgrade, Message},
-    response::{IntoResponse, Response},
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    response::Response,
     routing::get,
     Router,
 };
-
-use tracing::{metadata::LevelFilter, info};
-use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use protocol::Hello;
+use tracing::{error, info, metadata::LevelFilter};
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-/// Receives the first message in the web socket connection.
-/// If the message is valid, it will handle it and return True
-/// If the message is invalid, it will return false
-async fn handle_hello(mut socket: &WebSocket) -> bool {
-    if let Some(Ok(Message::Binary(msg))) = socket.recv().await {
-        if let Ok(msg) = serde_json::from_slice::<Hello>(&msg) {
-            info!("Client with process info {msg:?}");
-        }
-    }
-    false
+struct WsWrapper {
+    socket: WebSocket,
 }
-async fn handle_socket(mut socket: WebSocket) {
 
-    while let Some(msg) = socket.recv().await {
-        let msg = if let Ok(msg) = msg {
-            msg
-        } else {
-            // client disconnected
-            return;
+impl WsWrapper {
+    fn new(socket: WebSocket) -> Self {
+        Self { socket }
+    }
+
+    async fn next_message<T>(&mut self) -> Option<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let raw_msg = self.socket.recv().await;
+        let msg = match raw_msg {
+            None => {
+                error!("Client disconnected");
+                return None;
+            }
+            Some(Ok(Message::Binary(msg))) => msg,
+            _ => {
+                error!("Invalid message {raw_msg:?}");
+                return None;
+            }
         };
 
-        if socket.send(msg).await.is_err() {
-            // client disconnected
-            return;
+        match serde_json::from_slice::<T>(&msg) {
+            Ok(record) => Some(record),
+            Err(e) => {
+                let type_name = type_name::<T>();
+                error!("Client message error: {e:?}, was expecting {type_name:?}");
+                None
+            }
         }
     }
+}
+
+
+async fn handle_socket(socket: WebSocket) {
+    let mut wrapper = WsWrapper::new(socket);
+
+    let client_info: Hello = match wrapper.next_message().await {
+        Some(hello) => {
+            info!("Client connected -  process info {hello:?}");
+            hello
+        }
+        None => {
+            error!("Client disconnected");
+            return;
+        }
+    };
+
+    while let Some(record) = wrapper.next_message::<protocol::Record>().await {
+        let logger = log::logger();
+        logger.log(
+            &log::Record::builder()
+                .args(format_args!(
+                    "pid {:?}: {:?}",
+                    client_info.process_info.id, record.message
+                ))
+                .file(record.file.as_deref())
+                .level(record.metadata.level.into())
+                .module_path(record.module_path.as_deref())
+                .target(&record.metadata.target)
+                .line(record.line)
+                .build(),
+        );
+    }
+    info!("Client disconnected {client_info:?}")
 }
 
 async fn handler(ws: WebSocketUpgrade) -> Response {
