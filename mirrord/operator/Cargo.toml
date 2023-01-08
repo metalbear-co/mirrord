@@ -59,4 +59,4 @@ serde_json = { workspace = true, optional = true }
 serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, optional = true }
-tokio-tungstenite = { version = "0.17", optional = true }
+tokio-tungstenite = { version = "0.18", optional = true }
