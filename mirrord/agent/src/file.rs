@@ -219,7 +219,7 @@ impl FileManager {
         let remote_file = if metadata.is_dir() {
             RemoteFile::Directory(path)
         } else {
-            RemoteFile::File(file, path)
+            RemoteFile::File(file)
         };
 
         self.open_files.insert(fd, remote_file);
