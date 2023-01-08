@@ -1,7 +1,7 @@
 use std::{
     self,
     collections::HashMap,
-    fs::{File, FileType, OpenOptions, ReadDir},
+    fs::{File, OpenOptions, ReadDir},
     io::{prelude::*, BufReader, SeekFrom},
     iter::Enumerate,
     os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
@@ -544,6 +544,8 @@ impl FileManager {
             RemoteFile::File(_, path) => path,
         };
 
+        path.metadata()?.mode();
+
         let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);
 
@@ -560,11 +562,24 @@ impl FileManager {
         let result = if let Some((offset, entry)) = dir_stream.next() {
             let entry = entry?;
 
+            let mode = entry.metadata()?.mode();
+
+            let file_type = match mode & libc::S_IFMT {
+                libc::S_IFLNK => libc::DT_LNK,
+                libc::S_IFREG => libc::DT_REG,
+                libc::S_IFBLK => libc::DT_BLK,
+                libc::S_IFDIR => libc::DT_DIR,
+                libc::S_IFCHR => libc::DT_CHR,
+                libc::S_IFIFO => libc::DT_FIFO,
+                libc::S_IFSOCK => libc::DT_SOCK,
+                _ => libc::DT_UNKNOWN,
+            };
+
             let internal_entry = DirEntryInternal {
                 inode: entry.ino(),
                 position: offset as u64,
                 name: entry.file_name().into_string().unwrap().into_bytes(),
-                file_type: 0_u8,
+                file_type,
             };
             ReadDirResponse {
                 direntry: Some(internal_entry),
