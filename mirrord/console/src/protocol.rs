@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
+use log::Level;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
-    pub name: String,
-    args: Vec<String>,
-    env: Vec<String>,
-    cwd: String,
+    pub args: Vec<String>,
+    pub env: Vec<String>,
+    pub cwd: Option<String>,
     pub id: u64,
 }
 
@@ -14,26 +14,7 @@ pub struct Hello {
     pub process_info: ProcessInfo,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Level {
-    Error,
-    Warn,
-    Info,
-    Debug,
-    Trace,
-}
 
-impl Into<log::Level> for Level {
-    fn into(self) -> log::Level {
-        match self {
-            Level::Debug => log::Level::Debug,
-            Level::Warn => log::Level::Warn,
-            Level::Info => log::Level::Info,
-            Level::Error => log::Level::Error,
-            Level::Trace => log::Level::Trace,
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {

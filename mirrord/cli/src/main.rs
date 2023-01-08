@@ -310,11 +310,15 @@ fn cli_progress() -> TaskProgress {
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> miette::Result<()> {
-    registry()
+    if let Some(conosle_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        mirrord_console::init_logger(&console_address)?;
+    } else {
+        registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
-
+    }
+    
     let cli = Cli::parse();
 
     match cli.commands {

@@ -1,3 +1,5 @@
 pub mod logger;
+pub mod protocol;
+pub mod error;
 
-use logger::ConsoleLogger;
+pub use logger::init_logger;

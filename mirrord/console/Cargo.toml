@@ -15,7 +15,12 @@ edition.workspace = true
 
 [dependencies]
 axum = { version = "0.6", features = ["default", "ws"] }
-log = "0.4"
+log = { version = "0.4", features = ["serde"] }
+miette = "5"
+tokio-tungstenite = "0.18"
+
+futures.workspace = true
+thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

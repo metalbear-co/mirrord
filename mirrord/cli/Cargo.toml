@@ -22,6 +22,7 @@ mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-console = { path = "../console" }
 
 clap.workspace = true
 tracing.workspace = true
@@ -39,7 +40,7 @@ const-random = "0.1.15"
 tokio.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
-miette = { workspace = true, features = ["fancy"] } 
+miette = { version = "5", features = ["fancy"] } 
 thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

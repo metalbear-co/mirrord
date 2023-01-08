@@ -211,6 +211,8 @@ fn layer_start(config: LayerConfig) {
             )
             .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
             .init();
+    } else if let Ok(conosle_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        RUNTIME.block_on(mirrord_console::init_logger(&conosle_addr))?;
     } else {
         tracing_subscriber::registry()
             .with(

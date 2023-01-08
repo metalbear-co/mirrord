@@ -1715,6 +1715,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
 dependencies = [
  "cfg-if",
+ "serde",
 ]
 
 [[package]]
@@ -1857,6 +1858,7 @@ dependencies = [
  "miette",
  "mirrord-auth",
  "mirrord-config",
+ "mirrord-console",
  "mirrord-kube",
  "mirrord-layer",
  "mirrord-operator",
@@ -1956,10 +1958,14 @@ name = "mirrord-console"
 version = "3.17.0"
 dependencies = [
  "axum",
+ "futures",
  "log",
+ "miette",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
+ "tokio-tungstenite 0.18.0",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2009,6 +2015,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-config",
+ "mirrord-console",
  "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-operator",
