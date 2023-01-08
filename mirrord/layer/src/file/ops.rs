@@ -269,15 +269,33 @@ pub(crate) fn readdir_r(
 
     if let Some(direntry) = direntry {
         let direntry_name = direntry.name.as_slice();
+
+        #[cfg(target_os = "linux")]
         let mut entry_name: [i8; 256] = [0; 256];
+
+        #[cfg(target_os = "macos")]
+        let mut entry_name: [i8; 1024] = [0; 1024];
 
         let casted_name: Vec<i8> = direntry_name.iter().map(|c| *c as i8).collect();
         let len = casted_name.len().min(entry_name.len());
         entry_name[..len].copy_from_slice(&casted_name[..len]);
 
+        #[cfg(target_os = "macos")]
         unsafe {
             (*entry).d_ino = direntry.inode;
             (*entry).d_reclen = mem::size_of::<dirent>() as u16; // d_reclen is constant in case of readdir_r
+            (*entry).d_seekoff = direntry.position as u64;
+            (*entry).d_type = direntry.file_type;
+            (*entry).d_name = entry_name;
+            (*entry).d_namlen = len as u16;
+
+            *result = entry;
+        }
+
+        #[cfg(target_os = "linux")]
+        unsafe {
+            (*entry).d_ino = direntry.inode;
+            (*entry).d_reclen = mem::size_of::<dirent>() as u16;
             (*entry).d_off = direntry.position as i64;
             (*entry).d_type = direntry.file_type;
             (*entry).d_name = entry_name;
