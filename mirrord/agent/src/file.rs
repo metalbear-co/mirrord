@@ -544,8 +544,6 @@ impl FileManager {
             RemoteFile::File(_, path) => path,
         };
 
-        path.metadata()?.mode();
-
         let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);
 
