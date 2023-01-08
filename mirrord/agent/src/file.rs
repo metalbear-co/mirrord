@@ -26,7 +26,7 @@ use crate::{error::Result, util::IndexAllocator};
 
 #[derive(Debug)]
 pub enum RemoteFile {
-    File(File, PathBuf),
+    File(File),
     Directory(PathBuf),
 }
 
@@ -253,7 +253,7 @@ impl FileManager {
             let remote_file = if metadata.is_dir() {
                 RemoteFile::Directory(path)
             } else {
-                RemoteFile::File(file, path)
+                RemoteFile::File(file)
             };
 
             self.open_files.insert(fd, remote_file);
@@ -270,7 +270,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
                     let read_amount =
                         file.read(&mut buffer).map(|read_amount| ReadFileResponse {
@@ -302,7 +302,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let mut reader = BufReader::new(std::io::Read::by_ref(file));
                     let mut buffer = String::with_capacity(buffer_size as usize);
                     let read_result = reader
@@ -345,7 +345,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
 
                     let read_result = file.read_at(&mut buffer, start_from).map(|read_amount| {
@@ -375,7 +375,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let written_amount =
                         file.write_at(&buffer, start_from).map(|written_amount| {
                             WriteFileResponse {
@@ -401,7 +401,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let seek_result = file
                         .seek(seek_from)
                         .map(|result_offset| SeekFileResponse { result_offset })?;
@@ -428,7 +428,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let write_result =
                         file.write(&write_bytes)
                             .map(|write_amount| WriteFileResponse {
@@ -502,7 +502,7 @@ impl FileManager {
             }
             // fstat
             (None, Some(fd)) => {
-                if let RemoteFile::File(file, _) = self
+                if let RemoteFile::File(file) = self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
@@ -541,13 +541,17 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))?
         {
             RemoteFile::Directory(path) => path,
-            RemoteFile::File(_, path) => path,
+            _ => panic!("Opened path is a file."),
         };
+
+        let fd = self.index_allocator.next_index().ok_or_else(|| {
+            ResponseError::AllocationFailure("FileManager::open_relative".to_string())
+        })?;
 
         let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);
 
-        Ok(OpenDirResponse)
+        Ok(OpenDirResponse { fd })
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

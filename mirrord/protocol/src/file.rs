@@ -92,4 +92,6 @@ pub struct OpenDirRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenDirResponse;
+pub struct OpenDirResponse {
+    pub fd: u64,
+}

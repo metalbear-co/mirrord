@@ -226,22 +226,22 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // we don't return a pointer to an address that contains DIR
 
     let open_files = OPEN_FILES.lock()?;
-    let remote_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?;
+    let remote_file_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
     let open_dir_request = OpenDir {
-        remote_fd: *remote_fd,
+        remote_fd: *remote_file_fd,
         dir_channel_tx,
     };
 
     blocking_send_file_message(HookMessageFile::OpenDir(open_dir_request))?;
 
-    let _ = dir_channel_rx.blocking_recv()??;
+    let OpenDirResponse { fd } = dir_channel_rx.blocking_recv()??;
 
-    let fake_local_dir_name = CString::new(remote_fd.to_string())?;
-    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_fd) }?;
-    OPEN_DIRS.lock()?.insert(local_dir_fd, *remote_fd);
+    let fake_local_dir_name = CString::new(fd.to_string())?;
+    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_file_fd) }?;
+    OPEN_DIRS.lock()?.insert(local_dir_fd, fd);
 
     Detour::Success(local_dir_fd as usize)
 }
