@@ -229,7 +229,7 @@ impl FileFilter {
     where
         F: FnOnce() -> Bypass,
     {
-        if matches!(&self.mode, FsModeConfig::Local | FsModeConfig::Disabled) {
+        if matches!(&self.mode, FsModeConfig::Local) {
             return Detour::Bypass(op());
         }
         // Order matters here, as we want to make `include` the most important pattern. If the user

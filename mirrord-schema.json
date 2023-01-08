@@ -350,15 +350,8 @@
       "additionalProperties": false
     },
     "FsModeConfig": {
-      "description": "Configuration for enabling read-only and read-write file operations. These options are overriden by user specified overrides and mirrord default overrides. If you set LocalWithOverrides then somefiles can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = disabled ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
+      "description": "Configuration for enabling read-only and read-write file operations. These options are overriden by user specified overrides and mirrord default overrides. If you set LocalWithOverrides then somefiles can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = local ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
       "oneOf": [
-        {
-          "description": "Deprecated, use local instead",
-          "type": "string",
-          "enum": [
-            "disabled"
-          ]
-        },
         {
           "description": "mirrord won't do anything fs-related, all operations will be local.",
           "type": "string",

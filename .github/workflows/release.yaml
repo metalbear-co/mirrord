@@ -148,7 +148,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Set up QEMU
         id: qemu
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       - name: Login to GitHub Container Registry
@@ -223,7 +223,7 @@ jobs:
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target linux-arm64      
       - run: cp /tmp/artifacts/universal-apple-darwin/mirrord vscode-ext/
       # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_amd64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
+      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
       # Same binary for darwin
       - run: |
           cd vscode-ext
@@ -234,7 +234,7 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target darwin-x64
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_arm64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
+      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
       - run: |
           cd vscode-ext
           npm install          
@@ -274,8 +274,8 @@ jobs:
         run: |
           mkdir -p intellij-ext/bin/macos/arm64
           mkdir -p intellij-ext/bin/macos/x86-64
-          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_arm64 -O intellij-ext/bin/macos/arm64/dlv
-          wget https://github.com/metalbear-co/delve/releases/download/1.9.1/delve_darwin_amd64 -O intellij-ext/bin/macos/x86-64/dlv
+          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O intellij-ext/bin/macos/arm64/dlv
+          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O intellij-ext/bin/macos/x86-64/dlv
       - uses: actions/download-artifact@v3
         with:
           path: /tmp/artifacts
