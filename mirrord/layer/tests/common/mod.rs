@@ -342,6 +342,7 @@ pub enum Application {
     GoFileOps,
     EnvBashCat,
     NodeFileOps,
+    GoDir,
 }
 
 impl Application {
@@ -383,6 +384,7 @@ impl Application {
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps => String::from("node"),
+            Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
         }
     }
 
@@ -419,6 +421,7 @@ impl Application {
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::Go19HTTP => vec![],
+            Application::GoDir => vec![],
             Application::GoFileOps => vec![],
             Application::RustFileOps => vec![],
             Application::EnvBashCat => vec![],
@@ -435,7 +438,8 @@ impl Application {
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::EnvBashCat
-            | Application::NodeFileOps => {
+            | Application::NodeFileOps
+            | Application::GoDir => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,

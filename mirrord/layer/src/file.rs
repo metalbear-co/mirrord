@@ -21,8 +21,8 @@ use std::{
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
     file::{
-        DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
-        XstatRequest, XstatResponse,
+        CloseDirRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest,
+        ReadDirResponse, XstatRequest, XstatResponse,
     },
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, FileRequest,
     FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
@@ -477,9 +477,9 @@ impl FileHandler {
         let CloseDir { fd } = close;
         trace!("HookMessage::CloseDirHook fd {:#?}", fd);
 
-        let close_file_request = CloseFileRequest { fd };
+        let close_dir_request = CloseDirRequest { remote_fd: fd };
 
-        let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+        let request = ClientMessage::FileRequest(FileRequest::CloseDir(close_dir_request));
         tx.send(request).await.map_err(From::from)
     }
 

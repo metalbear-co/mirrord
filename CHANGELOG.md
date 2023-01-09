@@ -10,10 +10,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
+- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
 
 ## Fixed
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
+- stat functions now support directories.
+- Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 
 ## Changed
 
@@ -24,14 +27,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - Add brew command to README
-- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
 
 ### Fixed
 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
-- stat functions now support directories.
-- Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 - fixed setting a breakpoint in GoLand on simple app hanging on release build (disabled lto). - Fixes [#906](https://github.com/metalbear-co/mirrord/issues/906).
 
 ### Deprecated
