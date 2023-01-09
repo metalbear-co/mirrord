@@ -216,7 +216,7 @@ impl HttpResponse {
             request_id,
             port,
             connection_id,
-            internal_response: internal_response,
+            internal_response,
         })
     }
 
