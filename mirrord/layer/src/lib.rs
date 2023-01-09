@@ -27,7 +27,6 @@
 //! The operation is executed there, with the result being returned back to `mirrord-layer`, and
 //! finally to the original [`libc`] call.
 //!
-//!
 //! ### Example
 //!
 //! Let's say you have a Node.js app that just opens a file, like this:
