@@ -393,24 +393,6 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    /// Adds port redirection, and bypass gid packets from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn add_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
-        self.iptables()?
-            .add_redirect(port, self.stealer.local_addr()?.port())?;
-
-        self.iptables()?.add_bypass_own_packets()
-    }
-
-    /// Removes port redirection, and bypass gid packets from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn remove_stealer_iptables_rules(&mut self, port: Port) -> Result<()> {
-        self.iptables()?.remove_bypass_own_packets()?;
-
-        self.iptables()?
-            .remove_redirect(port, self.stealer.local_addr()?.port())
-    }
-
     /// Helper function to handle [`Command::PortSubscribe`] messages.
     ///
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
@@ -466,7 +448,7 @@ impl TcpConnectionStealer {
         };
 
         if first_subscriber && let Ok(port) = steal_port {
-            self.add_stealer_iptables_rules(port)?;
+            self.iptables()?.add_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
@@ -492,7 +474,9 @@ impl TcpConnectionStealer {
         };
         if port_unsubscribed {
             // No remaining subscribers on this port.
-            self.remove_stealer_iptables_rules(port)?;
+            self.iptables()?
+                .remove_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
+
             self.port_subscriptions.remove(&port);
             if self.port_subscriptions.is_empty() {
                 // Was this the last client?

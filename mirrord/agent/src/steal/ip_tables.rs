@@ -89,11 +89,15 @@ where
         })
     }
 
+    /// Helper function that lists all the iptables' rules belonging to [`Self::chain_name`].
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn list_rules(&self) -> Result<Vec<String>> {
         self.inner.list_rules(&self.chain_name)
     }
 
+    /// Adds the redirect rule to iptables.
+    ///
+    /// Used to redirect packets when mirrord incoming feature is set to `steal`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
@@ -103,6 +107,10 @@ where
         )
     }
 
+    /// Removes the redirect rule from iptables.
+    ///
+    /// Stops redirecting packets when mirrord incoming feature is set to `steal`, and there are no
+    /// more subscribers on `target_port`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.remove_rule(
@@ -111,6 +119,11 @@ where
         )
     }
 
+    /// Adds a `RETURN` rule based on `gid` to iptables.
+    ///
+    /// When the mirrord incoming feature is set to `steal`, and we're using a filter (instead of
+    /// stealing every packet), we need this rule to avoid stealing our own packets, that were sent
+    /// to their original destinations.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_bypass_own_packets(&self) -> Result<()> {
         if let Some(rule) = self.formatter.bypass_own_packets_rule() {
@@ -120,6 +133,7 @@ where
         }
     }
 
+    /// Removes the `RETURN` bypass rule from iptables.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_bypass_own_packets(&self) -> Result<()> {
         if let Some(rule) = self.formatter.bypass_own_packets_rule() {
@@ -127,6 +141,28 @@ where
         } else {
             Ok(())
         }
+    }
+
+    /// Adds port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn add_stealer_iptables_rules(
+        &self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        self.add_redirect(redirected_port, target_port)
+            .and_then(|_| self.add_bypass_own_packets())
+    }
+
+    /// Removes port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn remove_stealer_iptables_rules(
+        &self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        self.remove_redirect(redirected_port, target_port)
+            .and_then(|_| self.remove_bypass_own_packets())
     }
 }
 
