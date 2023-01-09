@@ -150,11 +150,8 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn closedir_detour(
-    dirp: *mut DIR,
-) -> c_int {
-    closedir(dirp as usize)
-        .unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
+pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
+    closedir(dirp as usize).unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.

@@ -182,6 +182,9 @@ impl FileManager {
                 let read_dir_result = self.read_dir(remote_fd);
                 Some(FileResponse::ReadDir(read_dir_result))
             }
+            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
+                self.close_dir(remote_fd);
+            }
         })
     }
 
@@ -444,9 +447,7 @@ impl FileManager {
     pub(crate) fn close(&mut self, fd: u64) {
         trace!("FileManager::close -> fd {:#?}", fd,);
 
-        if _file = self
-            .open_files
-            .remove(&fd).is_none() {
+        if self.open_files.remove(&fd).is_none() {
             error!("FileManager::close -> fd {:#?} not found", fd);
         } else {
             self.index_allocator.free_index(fd);
@@ -456,9 +457,7 @@ impl FileManager {
     pub(crate) fn close_dir(&mut self, fd: u64) {
         trace!("FileManager::close_dir -> fd {:#?}", fd,);
 
-        if _file = self
-            .dir_streams
-            .remove(&fd).is_none() {
+        if self.dir_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         } else {
             self.index_allocator.free_index(fd);

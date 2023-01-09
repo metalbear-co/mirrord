@@ -24,11 +24,11 @@ use mirrord_protocol::{
         DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
         XstatRequest, XstatResponse,
     },
-    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest,
-    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-    ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, WriteLimitedFileRequest,
+    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, FileRequest,
+    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
+    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+    WriteLimitedFileRequest,
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};
@@ -465,7 +465,11 @@ impl FileHandler {
         tx.send(request).await.map_err(From::from)
     }
 
-    async fn handle_hook_close_dir(&mut self, close: CloseDir, tx: &Sender<ClientMessage>) -> Result<()> {
+    async fn handle_hook_close_dir(
+        &mut self,
+        close: CloseDir,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
         let CloseDir { fd } = close;
         trace!("HookMessage::CloseDirHook fd {:#?}", fd);
 

@@ -462,7 +462,7 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut sockets = SOCKETS.lock()?;
     if let Some(socket) = sockets.get(&fd).cloned() {
         sockets.insert(dup_fd as RawFd, socket);
-        return Ok(())
+        return Ok(());
     }
 
     let mut files = OPEN_FILES.lock()?;
