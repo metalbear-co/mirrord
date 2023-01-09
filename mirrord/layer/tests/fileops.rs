@@ -149,13 +149,6 @@ async fn test_pwrite(
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Close(Ok(
-            CloseFileResponse {},
-        ))))
-        .await
-        .unwrap();
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
     {
@@ -342,14 +335,6 @@ async fn test_node_close(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Close(Ok(
-            CloseFileResponse {},
-        ))))
-        .await
-        .unwrap();
 
     // Assert all clear
     test_process.wait_assert_success().await;

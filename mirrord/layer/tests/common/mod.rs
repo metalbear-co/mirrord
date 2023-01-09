@@ -327,13 +327,6 @@ impl LayerConnection {
                 mirrord_protocol::CloseFileRequest { fd }
             ))
         );
-
-        self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
-                Ok(mirrord_protocol::CloseFileResponse {}),
-            )))
-            .await
-            .unwrap();
     }
 }
 

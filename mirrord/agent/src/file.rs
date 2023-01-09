@@ -11,11 +11,11 @@ use std::{
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     file::{
-        DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
-        XstatRequest, XstatResponse,
+        CloseDirRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest,
+        ReadDirResponse, XstatRequest, XstatResponse,
     },
-    AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
+    AccessFileRequest, AccessFileResponse, CloseFileRequest, FileRequest, FileResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
     ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
     ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
     WriteLimitedFileRequest,
