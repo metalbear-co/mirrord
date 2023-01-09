@@ -45,7 +45,7 @@
 //! 1. We intercept the call to [`libc::open`] using our `open_detour` hook, which calls
 //!  [`file::ops::open`];
 //!
-//! 2. [`file::ops::open`] sends an _open file request_ to `mirrord-agent`;
+//! 2. [`file::ops::open`] sends an open file message to `mirrord-agent`;
 //!
 //! 3. `mirrore-agent` tries to open `/tmp/hello.txt` in the remote context it's running, and
 //! returns the result of the operation back to `mirrord-layer`;
