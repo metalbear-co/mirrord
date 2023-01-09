@@ -468,8 +468,8 @@ async fn thread_loop(
             Some(message) = layer.tcp_steal_handler.next() => {
                 layer.send(message).await.unwrap();
             }
-            Some(resposne) = layer.http_response_receiver.recv() => {
-                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(resposne))).await.unwrap();
+            Some(response) = layer.http_response_receiver.recv() => {
+                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
