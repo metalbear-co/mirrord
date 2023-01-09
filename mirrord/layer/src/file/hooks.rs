@@ -609,21 +609,9 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
     replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
-    replace!(
-        hook_manager,
-        "fdopendir",
-        fdopendir_detour,
-        FnFdopendir,
-        FN_FDOPENDIR
-    );
+
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
-    replace!(
-        hook_manager,
-        "readdir_r",
-        readdir_r_detour,
-        FnReaddir_r,
-        FN_READDIR_R
-    );
+
     replace!(
         hook_manager,
         "closedir",
@@ -673,6 +661,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatat,
             FN_FSTATAT
         );
+        replace!(
+            hook_manager,
+            "fdopendir",
+            fdopendir_detour,
+            FnFdopendir,
+            FN_FDOPENDIR
+        );
+        replace!(
+            hook_manager,
+            "readdir_r",
+            readdir_r_detour,
+            FnReaddir_r,
+            FN_READDIR_R
+        );
     }
     // on non aarch64 (Intel) we need to hook also $INODE64 variants
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -698,6 +700,27 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fstatat_detour,
             FnFstatat,
             FN_FSTATAT
+        );
+        replace!(
+            hook_manager,
+            "fstatat$INODE64",
+            fstatat_detour,
+            FnFstatat,
+            FN_FSTATAT
+        );
+        replace!(
+            hook_manager,
+            "fdopendir$INODE64",
+            fdopendir_detour,
+            FnFdopendir,
+            FN_FDOPENDIR
+        );
+        replace!(
+            hook_manager,
+            "readdir_r$INODE64",
+            readdir_r_detour,
+            FnReaddir_r,
+            FN_READDIR_R
         );
     }
 }
