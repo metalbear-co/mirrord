@@ -444,17 +444,18 @@ impl TcpConnectionStealer {
                             Err(PortAlreadyStolen(port))
                         }
                         Some(HttpFiltered(manager)) => {
-                            manager.new_client(client_id, regex);
+                            manager.add_client(client_id, regex);
                             Ok(port)
                         }
                         None => {
                             first_subscriber = true;
+
                             let manager = HttpFiltered(HttpFilterManager::new(
-                                port,
                                 client_id,
                                 regex,
                                 self.http_request_sender.clone(),
                             ));
+
                             self.port_subscriptions.insert(port, manager);
                             Ok(port)
                         }

@@ -54,7 +54,6 @@ impl HttpVersion {
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
-    _port: u16,
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
@@ -67,7 +66,6 @@ impl HttpFilterManager {
     /// You can't create just an empty [`HttpFilterManager`], as we don't steal traffic on ports
     /// that no client has registered interest in.
     pub(super) fn new(
-        port: u16,
         client_id: ClientId,
         filter: Regex,
         matched_tx: Sender<HandlerHttpRequest>,
@@ -76,7 +74,6 @@ impl HttpFilterManager {
         client_filters.insert(client_id, filter);
 
         Self {
-            _port: port,
             client_filters,
             matched_tx,
         }
@@ -89,7 +86,7 @@ impl HttpFilterManager {
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
     /// here will impact the tasks as well.
-    pub(super) fn new_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
+    pub(super) fn add_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
         self.client_filters.insert(client_id, filter)
     }
 
