@@ -17,6 +17,9 @@
 //! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
 //! remote context.
 //!
+//! Check out the [Introduction](https://mirrord.dev/docs/overview/introduction/) to learn more
+//! about mirrord.
+//!
 //! ## How it works
 //!
 //! This crate intercepts your processes' [`libc`] calls, and instead of executing them locally (as
@@ -24,8 +27,6 @@
 //! The operation is executed there, with the result being returned back to `mirrord-layer`, and
 //! finally to the original [`libc`] call.
 //!
-//! You can read more about it in the mirrord docs
-//! [Introduction](https://mirrord.dev/docs/overview/introduction/).
 //!
 //! ### Example
 //!
