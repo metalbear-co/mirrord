@@ -241,7 +241,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let fake_local_dir_name = CString::new(fd.to_string())?;
     let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_file_fd) }?;
-    OPEN_DIRS.lock()?.insert(local_dir_fd, fd);
+    OPEN_DIRS.lock()?.insert(local_dir_fd as usize, fd);
 
     Detour::Success(local_dir_fd as usize)
 }
@@ -253,8 +253,11 @@ pub(crate) fn readdir_r(
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> Detour<c_int> {
-    trace!("readdir_r -> {dirp:#?} {entry:#?} {result:#?}");
-    let remote_fd = OPEN_DIRS.lock()?.get(&(dirp as i32)).cloned().unwrap();
+    let dir_stream = dirp as usize;
+    let remote_fd = *OPEN_DIRS
+        .lock()?
+        .get(&dir_stream)
+        .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -268,38 +271,28 @@ pub(crate) fn readdir_r(
     let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
 
     if let Some(direntry) = direntry {
-        let direntry_name = direntry.name.as_slice();
+        let dir_name = CString::new(direntry.name)?;
+        let dir_name_bytes = dir_name.as_bytes_with_nul();
 
-        #[cfg(target_os = "linux")]
-        let mut entry_name: [i8; 256] = [0; 256];
-
-        #[cfg(target_os = "macos")]
-        let mut entry_name: [i8; 1024] = [0; 1024];
-
-        let casted_name: Vec<i8> = direntry_name.iter().map(|c| *c as i8).collect();
-        let len = casted_name.len().min(entry_name.len());
-        entry_name[..len].copy_from_slice(&casted_name[..len]);
+        unsafe {
+            (*entry).d_ino = direntry.inode;
+            (*entry).d_reclen = mem::size_of::<dirent>() as u16;
+            (*entry).d_type = direntry.file_type;
+            (*entry).d_name.copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+        }
 
         #[cfg(target_os = "macos")]
         unsafe {
-            (*entry).d_ino = direntry.inode;
-            (*entry).d_reclen = mem::size_of::<dirent>() as u16; // d_reclen is constant in case of readdir_r
             (*entry).d_seekoff = direntry.position;
-            (*entry).d_type = direntry.file_type;
-            (*entry).d_name = entry_name;
-            (*entry).d_namlen = len as u16;
-
+            // name length should be without null
+            (*entry).d_namlen = dir_name.to_bytes().len() as u16;
             *result = entry;
         }
 
         #[cfg(target_os = "linux")]
         unsafe {
-            (*entry).d_ino = direntry.inode;
-            (*entry).d_reclen = mem::size_of::<dirent>() as u16;
             (*entry).d_off = direntry.position as i64;
-            (*entry).d_type = direntry.file_type;
-            (*entry).d_name = entry_name;
-
+            std::ptr::copy(dir_name_bytes, entry.d_name, dir_name_bytes.len());
             *result = entry;
         }
     } else {

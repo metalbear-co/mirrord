@@ -21,7 +21,7 @@ use std::{
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
     file::{
-        DirEntryInternal, OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
+        DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
         XstatRequest, XstatResponse,
     },
     AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
@@ -44,6 +44,7 @@ pub(crate) mod ops;
 
 type LocalFd = RawFd;
 type RemoteFd = u64;
+type DirStreamFd = usize;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RemoteFile {
@@ -58,7 +59,7 @@ pub(crate) struct DirStream {
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
-pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
+pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
@@ -531,9 +532,9 @@ impl FileHandler {
 
         self.opendir_queue.push_back(dir_channel_tx);
 
-        let open_dir_request = OpenDirRequest { remote_fd };
+        let open_dir_request = FdOpenDirRequest { remote_fd };
 
-        let request = ClientMessage::FileRequest(FileRequest::OpenDir(open_dir_request));
+        let request = ClientMessage::FileRequest(FileRequest::FdOpenDir(open_dir_request));
         tx.send(request).await.map_err(From::from)
     }
 

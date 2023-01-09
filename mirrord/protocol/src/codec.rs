@@ -12,7 +12,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
-        OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse, XstatRequest,
+        FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse, XstatRequest,
         XstatResponse,
     },
     outgoing::{
@@ -191,7 +191,7 @@ pub enum FileRequest {
     Close(CloseFileRequest),
     Access(AccessFileRequest),
     Xstat(XstatRequest),
-    OpenDir(OpenDirRequest),
+    FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
 }
 /// `-layer` --> `-agent` messages.

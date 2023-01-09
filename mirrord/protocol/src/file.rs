@@ -77,7 +77,7 @@ pub struct ReadDirRequest {
 pub struct DirEntryInternal {
     pub inode: u64,
     pub position: u64,
-    pub name: Vec<u8>,
+    pub name: String,
     pub file_type: u8,
 }
 
@@ -87,7 +87,7 @@ pub struct ReadDirResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenDirRequest {
+pub struct FdOpenDirRequest {
     pub remote_fd: u64,
 }
 

@@ -298,6 +298,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytemuck"
+version = "1.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaa3a8d9a1ca92e282c96a32d6511b695d7d994d1d102ba85d279f9b2756947f"
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1924,6 +1930,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64",
+ "bytemuck",
  "bytes",
  "ctor",
  "errno",

@@ -174,8 +174,8 @@ impl FileManager {
                 Ok(FileResponse::Xstat(xstat_result))
             }
 
-            FileRequest::OpenDir(OpenDirRequest { remote_fd }) => {
-                let open_dir_result = self.open_dir(remote_fd);
+            FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
+                let open_dir_result = self.fdopen_dir(remote_fd);
                 Ok(FileResponse::OpenDir(open_dir_result))
             }
 
@@ -533,16 +533,15 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn open_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
-        trace!("FileManager::open_dir -> fd {:#?}", fd,);
+    pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
             .get(&fd)
             .ok_or(ResponseError::NotFound(fd))?
         {
-            RemoteFile::Directory(path) => path,
-            _ => panic!("Opened path is a file."),
-        };
+            RemoteFile::Directory(path) => Ok(path),
+            _ => ResponseError::NotDirectory(fd),
+        }?;
 
         let fd = self.index_allocator.next_index().ok_or_else(|| {
             ResponseError::AllocationFailure("FileManager::open_relative".to_string())
@@ -559,7 +558,7 @@ impl FileManager {
         let dir_stream = self
             .dir_streams
             .get_mut(&fd)
-            .ok_or(ResponseError::NotDirectory(fd))?;
+            .ok_or(ResponseError::NotFound(fd))?;
 
         let result = if let Some((offset, entry)) = dir_stream.next() {
             let entry = entry?;
@@ -580,7 +579,7 @@ impl FileManager {
             let internal_entry = DirEntryInternal {
                 inode: entry.ino(),
                 position: offset as u64,
-                name: entry.file_name().into_string().unwrap().into_bytes(),
+                name: entry.file_name().to_string_lossy().into(),
                 file_type,
             };
             ReadDirResponse {
