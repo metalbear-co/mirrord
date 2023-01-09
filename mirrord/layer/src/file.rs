@@ -31,7 +31,7 @@ use mirrord_protocol::{
     WriteFileResponse, WriteLimitedFileRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, error, warn};
+use tracing::{error, trace, warn};
 
 use crate::{
     common::{ResponseChannel, ResponseDeque},
@@ -151,15 +151,15 @@ impl FileHandler {
         use FileResponse::*;
         match message {
             Open(open) => {
-                debug!("DaemonMessage::OpenFileResponse {open:#?}!");
+                trace!("DaemonMessage::OpenFileResponse {open:#?}!");
                 pop_send(&mut self.open_queue, open)
             }
             Read(read) => {
                 // The debug message is too big if we just log it directly.
                 let _ = read
                     .as_ref()
-                    .inspect(|success| debug!("DaemonMessage::ReadFileResponse {:#?}", success))
-                    .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+                    .inspect(|success| trace!("DaemonMessage::ReadFileResponse {:#?}", success))
+                    .inspect_err(|fail| trace!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
                 pop_send(&mut self.read_queue, read)
             }
@@ -167,8 +167,8 @@ impl FileHandler {
                 // The debug message is too big if we just log it directly.
                 let _ = read
                     .as_ref()
-                    .inspect(|success| debug!("DaemonMessage::ReadLineFileResponse {:#?}", success))
-                    .inspect_err(|fail| error!("DaemonMessage::ReadLineFileResponse {:#?}", fail));
+                    .inspect(|success| trace!("DaemonMessage::ReadLineFileResponse {:#?}", success))
+                    .inspect_err(|fail| trace!("DaemonMessage::ReadLineFileResponse {:#?}", fail));
 
                 pop_send(&mut self.read_line_queue, read).inspect_err(|fail| {
                     error!(
@@ -182,10 +182,10 @@ impl FileHandler {
                 let _ = read
                     .as_ref()
                     .inspect(|success| {
-                        debug!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
+                        trace!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
                     })
                     .inspect_err(|fail| {
-                        error!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
+                        trace!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
                     });
 
                 pop_send(&mut self.read_limited_queue, read).inspect_err(|fail| {
@@ -196,29 +196,29 @@ impl FileHandler {
                 })
             }
             Seek(seek) => {
-                debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
+                trace!("DaemonMessage::SeekFileResponse {:#?}!", seek);
                 pop_send(&mut self.seek_queue, seek)
             }
             Write(write) => {
-                debug!("DaemonMessage::WriteFileResponse {:#?}!", write);
+                trace!("DaemonMessage::WriteFileResponse {:#?}!", write);
                 pop_send(&mut self.write_queue, write)
             }
             Close(close) => {
-                debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
+                trace!("DaemonMessage::CloseFileResponse {:#?}!", close);
                 pop_send(&mut self.close_queue, close)
             }
             Access(access) => {
-                debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
+                trace!("DaemonMessage::AccessFileResponse {:#?}!", access);
                 pop_send(&mut self.access_queue, access)
             }
             WriteLimited(write) => {
                 let _ = write
                     .as_ref()
                     .inspect(|success| {
-                        debug!("DaemonMessage::WriteLimitedFileResponse {:#?}", success)
+                        trace!("DaemonMessage::WriteLimitedFileResponse {:#?}", success)
                     })
                     .inspect_err(|fail| {
-                        error!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
+                        trace!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
                     });
 
                 pop_send(&mut self.write_limited_queue, write).inspect_err(|fail| {
@@ -229,11 +229,11 @@ impl FileHandler {
                 })
             }
             Xstat(xstat) => {
-                debug!("DaemonMessage::XstatResponse {:#?}!", xstat);
+                trace!("DaemonMessage::XstatResponse {:#?}!", xstat);
                 pop_send(&mut self.xstat_queue, xstat)
             }
             ReadDir(read_dir) => {
-                debug!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
+                trace!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
                 pop_send(&mut self.readdir_queue, read_dir)
             }
             OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
@@ -272,9 +272,10 @@ impl FileHandler {
             path,
             open_options,
         } = open;
-        debug!(
+        trace!(
             "HookMessage::OpenFileHook path {:#?} | options {:#?}",
-            path, open_options
+            path,
+            open_options
         );
 
         self.open_queue.push_back(file_channel_tx);
@@ -297,9 +298,11 @@ impl FileHandler {
             file_channel_tx,
             open_options,
         } = open_relative;
-        debug!(
+        trace!(
             "HookMessage::OpenRelativeFileHook fd {:#?} | path {:#?} | options {:#?}",
-            relative_fd, path, open_options
+            relative_fd,
+            path,
+            open_options
         );
 
         self.open_queue.push_back(file_channel_tx);
@@ -394,9 +397,10 @@ impl FileHandler {
             seek_from,
             file_channel_tx,
         } = seek;
-        debug!(
+        trace!(
             "HookMessage::SeekFileHook fd {:#?} | seek_from {:#?}",
-            fd, seek_from
+            fd,
+            seek_from
         );
 
         self.seek_queue.push_back(file_channel_tx);
@@ -421,7 +425,7 @@ impl FileHandler {
             file_channel_tx,
             ..
         } = write;
-        debug!(
+        trace!(
             "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
             fd,
             write_bytes.len()
@@ -465,7 +469,7 @@ impl FileHandler {
             fd,
             file_channel_tx,
         } = close;
-        debug!("HookMessage::CloseFileHook fd {:#?}", fd);
+        trace!("HookMessage::CloseFileHook fd {:#?}", fd);
 
         self.close_queue.push_back(file_channel_tx);
 
@@ -486,9 +490,10 @@ impl FileHandler {
             file_channel_tx,
         } = access;
 
-        debug!(
+        trace!(
             "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
-            pathname, mode
+            pathname,
+            mode
         );
 
         self.access_queue.push_back(file_channel_tx);
