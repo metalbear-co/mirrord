@@ -11,7 +11,7 @@ use std::{
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     file::{
-        DirEntryInternal, OpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
+        DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
         XstatRequest, XstatResponse,
     },
     AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
@@ -540,7 +540,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))?
         {
             RemoteFile::Directory(path) => Ok(path),
-            _ => ResponseError::NotDirectory(fd),
+            _ => Err(ResponseError::NotDirectory(fd)),
         }?;
 
         let fd = self.index_allocator.next_index().ok_or_else(|| {

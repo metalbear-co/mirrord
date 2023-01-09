@@ -278,7 +278,9 @@ pub(crate) fn readdir_r(
             (*entry).d_ino = direntry.inode;
             (*entry).d_reclen = mem::size_of::<dirent>() as u16;
             (*entry).d_type = direntry.file_type;
-            (*entry).d_name.copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+            (*entry)
+                .d_name
+                .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
         }
 
         #[cfg(target_os = "macos")]
