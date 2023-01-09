@@ -19,6 +19,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
 
+## Deprecated
+
+- Remove old fs mode
+  - cli: no `--rw` or `--no-fs`.
+  - layer: no `MIRRORD_FILE_OPS`/`MIRRORD_FILE_RO_OPS`/`MIRRORD_FILE_FILTER_INCLUDE`/`MIRRORD_FILE_FILTER_EXCLUDE`
+
 ## 3.17.0
 
 ### Added

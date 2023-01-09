@@ -107,16 +107,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         warn!("fs was both enabled and disabled - disabling will take precedence.");
     }
 
-    if !args.no_fs && args.enable_rw_fs {
-        warn!("--rw is deprecated, use --fs-mode=write instead");
-        std::env::set_var("MIRRORD_FILE_OPS", "true");
-    }
-
-    if args.no_fs || args.enable_rw_fs {
-        warn!("--no-fs is deprecated, use --fs-mode=write instead");
-        std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
-    }
-
     if let Some(fs_mode) = args.fs_mode {
         std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
     }
