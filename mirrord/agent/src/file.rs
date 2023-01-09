@@ -95,7 +95,7 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
 impl FileManager {
     /// Executes the request and returns the response.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse> {
+    pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -104,7 +104,7 @@ impl FileManager {
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let open_result = self.open(path.into(), open_options);
-                FileResponse::Open(open_result)
+                Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
                 relative_fd,
@@ -112,34 +112,38 @@ impl FileManager {
                 open_options,
             }) => {
                 let open_result = self.open_relative(relative_fd, path, open_options);
-                FileResponse::Open(open_result)
+                Some(FileResponse::Open(open_result))
             }
             FileRequest::Read(ReadFileRequest {
                 remote_fd,
                 buffer_size,
             }) => {
                 let read_result = self.read(remote_fd, buffer_size);
-                FileResponse::Read(read_result)
+                Some(FileResponse::Read(read_result))
             }
             FileRequest::ReadLine(ReadLineFileRequest {
                 remote_fd,
                 buffer_size,
             }) => {
                 let read_result = self.read_line(remote_fd, buffer_size);
-                FileResponse::ReadLine(read_result)
+                Some(FileResponse::ReadLine(read_result))
             }
             FileRequest::ReadLimited(ReadLimitedFileRequest {
                 remote_fd,
                 buffer_size,
                 start_from,
-            }) => FileResponse::ReadLimited(self.read_limited(remote_fd, buffer_size, start_from)),
+            }) => Some(FileResponse::ReadLimited(self.read_limited(
+                remote_fd,
+                buffer_size,
+                start_from,
+            ))),
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
-                FileResponse::Seek(seek_result)
+                Some(FileResponse::Seek(seek_result))
             }
             FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
                 let write_result = self.write(fd, write_bytes);
-                FileResponse::Write(write_result)
+                Some(FileResponse::Write(write_result))
             }
             FileRequest::WriteLimited(WriteLimitedFileRequest {
                 remote_fd,
@@ -147,11 +151,11 @@ impl FileManager {
                 write_bytes,
             }) => {
                 let write_result = self.write_limited(remote_fd, start_from, write_bytes);
-                FileResponse::WriteLimited(write_result)
+                Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => {
                 let close_result = self.close(fd);
-                FileResponse::Close(close_result)
+                Some(FileResponse::Close(close_result))
             }
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
@@ -159,7 +163,7 @@ impl FileManager {
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let access_result = self.access(pathname.into(), mode);
-                FileResponse::Access(access_result)
+                Some(FileResponse::Access(access_result))
             }
             FileRequest::Xstat(XstatRequest {
                 path,
@@ -167,17 +171,17 @@ impl FileManager {
                 follow_symlink,
             }) => {
                 let xstat_result = self.xstat(path, fd, follow_symlink);
-                FileResponse::Xstat(xstat_result)
+                Some(FileResponse::Xstat(xstat_result))
             }
 
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
                 let open_dir_result = self.fdopen_dir(remote_fd);
-                FileResponse::OpenDir(open_dir_result)
+                Some(FileResponse::OpenDir(open_dir_result))
             }
 
             FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
                 let read_dir_result = self.read_dir(remote_fd);
-                FileResponse::ReadDir(read_dir_result)
+                Some(FileResponse::ReadDir(read_dir_result))
             }
         })
     }

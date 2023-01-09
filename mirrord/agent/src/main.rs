@@ -256,17 +256,18 @@ impl ClientConnectionHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
         match message {
-            ClientMessage::FileRequest(req) => {
-                let response = self.file_manager.handle_message(req)?;
-                self.respond(DaemonMessage::File(response))
+            ClientMessage::FileRequest(req) => match self.file_manager.handle_message(req)? {
+                Some(response) => self
+                    .respond(DaemonMessage::File(response))
                     .await
                     .inspect_err(|fail| {
                         error!(
                             "handle_client_message -> Failed responding to file message {:#?}!",
                             fail
                         )
-                    })?
-            }
+                    })?,
+                None => {}
+            },
             ClientMessage::TcpOutgoing(layer_message) => {
                 self.tcp_outgoing_api.layer_message(layer_message).await?
             }

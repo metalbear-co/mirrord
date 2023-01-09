@@ -5,7 +5,7 @@ use libc::{
     c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
 };
 use mirrord_protocol::{
-    file::XstatResponse, CloseFileResponse, OpenFileResponse, OpenOptionsInternal,
+    file::XstatResponse, OpenFileResponse, OpenOptionsInternal,
     ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
@@ -18,6 +18,27 @@ use crate::{
     error::{HookError, HookResult as Result},
     HookMessage,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RemoteFile {
+    pub fd: u64,
+}
+
+impl RemoteFile {
+    pub(crate) fn new(fd: u64) -> Self {
+        Self { fd }
+    }
+}
+
+impl Drop for RemoteFile {
+    fn drop(&mut self) {
+        let closing_file = Close { fd: self.fd };
+
+        if let Err(err) = blocking_send_file_message(HookMessageFile::Close(closing_file)) {
+            warn!("Failed to send close file {self:?} message: {err:?}");
+        };
+    }
+}
 
 /// should_ignore(path: P, write: bool)
 /// Checks if the file should be ignored, and returns a [`Bypass::IgnoredFile`] if it should.
@@ -38,7 +59,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
         OPEN_FILES
             .lock()?
             .get(&local_fd)
-            .cloned()
+            .map(|remote_file| remote_file.fd)
             // Bypass if we're not managing the relative part.
             .ok_or(Bypass::LocalFdNotFound(local_fd))?,
     )
@@ -65,7 +86,7 @@ unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: u64) 
 
     // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
     if local_file_fd == -1 {
-        let _ = close_remote_file_on_failure(remote_fd)?;
+        close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
     } else {
         Detour::Success(local_file_fd)
@@ -74,17 +95,11 @@ unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: u64) 
 
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
 #[tracing::instrument(level = "error")]
-fn close_remote_file_on_failure(fd: u64) -> Result<CloseFileResponse> {
+fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    blocking_send_file_message(HookMessageFile::Close(Close {
-        fd,
-        file_channel_tx,
-    }))?;
-
-    file_channel_rx.blocking_recv()?.map_err(From::from)
+    blocking_send_file_message(HookMessageFile::Close(Close { fd }))?;
+    Ok(())
 }
 
 fn blocking_send_file_message(message: HookMessageFile) -> Result<()> {
@@ -154,7 +169,10 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
     let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-    OPEN_FILES.lock().unwrap().insert(local_file_fd, remote_fd);
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
 
     Detour::Success(local_file_fd)
 }
@@ -226,22 +244,24 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // we don't return a pointer to an address that contains DIR
 
     let open_files = OPEN_FILES.lock()?;
-    let remote_file_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?;
+    let remote_file_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
-    let open_dir_request = OpenDir {
-        remote_fd: *remote_file_fd,
+    let open_dir_request = FdOpenDir {
+        remote_fd: remote_file_fd,
         dir_channel_tx,
     };
 
-    blocking_send_file_message(HookMessageFile::OpenDir(open_dir_request))?;
+    blocking_send_file_message(HookMessageFile::FdOpenDir(open_dir_request))?;
 
-    let OpenDirResponse { fd } = dir_channel_rx.blocking_recv()??;
+    let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.blocking_recv()??;
 
     let fake_local_dir_name = CString::new(fd.to_string())?;
-    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, *remote_file_fd) }?;
-    OPEN_DIRS.lock()?.insert(local_dir_fd as usize, fd);
+    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, remote_dir_fd) }?;
+    OPEN_DIRS
+        .lock()?
+        .insert(local_dir_fd as usize, remote_dir_fd);
 
     Detour::Success(local_dir_fd as usize)
 }
@@ -336,7 +356,9 @@ pub(crate) fn openat(
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
         let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        OPEN_FILES.lock()?.insert(local_file_fd, remote_fd);
+        OPEN_FILES
+            .lock()?
+            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
 
         Detour::Success(local_file_fd)
     }
@@ -467,21 +489,6 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
     let WriteFileResponse { written_amount } = file_channel_rx.blocking_recv()??;
     Detour::Success(written_amount.try_into()?)
-}
-
-#[tracing::instrument(level = "trace")]
-pub(crate) fn close(fd: u64) -> Result<c_int> {
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let closing_file = Close {
-        fd,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(HookMessageFile::Close(closing_file))?;
-
-    file_channel_rx.blocking_recv()??;
-    Ok(0)
 }
 
 #[tracing::instrument(level = "trace")]

@@ -19,6 +19,7 @@ use crate::{
     common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
     detour::{Detour, OptionExt},
     error::HookError,
+    file::OPEN_FILES,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     port_debug_patch,
     tcp::{HookMessageTcp, Listen},
@@ -461,8 +462,13 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut sockets = SOCKETS.lock()?;
     if let Some(socket) = sockets.get(&fd).cloned() {
         sockets.insert(dup_fd as RawFd, socket);
+        return Ok(())
     }
 
+    let mut files = OPEN_FILES.lock()?;
+    if let Some(file) = files.get(&fd).cloned() {
+        files.insert(dup_fd as RawFd, file);
+    }
     Ok(())
 }
 

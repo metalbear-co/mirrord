@@ -17,6 +17,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
 - stat functions now support directories.
+- Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 
 ### Deprecated
 

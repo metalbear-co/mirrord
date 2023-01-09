@@ -15,7 +15,7 @@ use std::{
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
@@ -46,17 +46,12 @@ type LocalFd = RawFd;
 type RemoteFd = u64;
 type DirStreamFd = usize;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct RemoteFile {
-    fd: RawFd,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DirStream {
     direntry: Box<DirEntryInternal>,
 }
 
-pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
+pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<ops::RemoteFile>>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
@@ -261,7 +256,7 @@ impl FileHandler {
             Access(access) => self.handle_hook_access(access, tx).await,
             Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
             ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
-            OpenDir(open_dir) => self.handle_hook_open_dir(open_dir, tx).await,
+            FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
         }
     }
 
@@ -465,13 +460,8 @@ impl FileHandler {
     }
 
     async fn handle_hook_close(&mut self, close: Close, tx: &Sender<ClientMessage>) -> Result<()> {
-        let Close {
-            fd,
-            file_channel_tx,
-        } = close;
+        let Close { fd } = close;
         trace!("HookMessage::CloseFileHook fd {:#?}", fd);
-
-        self.close_queue.push_back(file_channel_tx);
 
         let close_file_request = CloseFileRequest { fd };
 
@@ -525,12 +515,12 @@ impl FileHandler {
     }
 
     #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_hook_open_dir(
+    async fn handle_hook_fdopen_dir(
         &mut self,
-        open_dir: OpenDir,
+        open_dir: FdOpenDir,
         tx: &Sender<ClientMessage>,
     ) -> Result<()> {
-        let OpenDir {
+        let FdOpenDir {
             remote_fd,
             dir_channel_tx,
         } = open_dir;
@@ -606,7 +596,6 @@ pub struct Write<T> {
 #[derive(Debug)]
 pub struct Close {
     pub(crate) fd: u64,
-    pub(crate) file_channel_tx: ResponseChannel<CloseFileResponse>,
 }
 
 #[derive(Debug)]
@@ -631,7 +620,7 @@ pub struct ReadDir {
 }
 
 #[derive(Debug)]
-pub struct OpenDir {
+pub struct FdOpenDir {
     pub(crate) remote_fd: u64,
     pub(crate) dir_channel_tx: ResponseChannel<OpenDirResponse>,
 }
@@ -650,5 +639,5 @@ pub enum HookMessageFile {
     Access(Access),
     Xstat(Xstat),
     ReadDir(ReadDir),
-    OpenDir(OpenDir),
+    FdOpenDir(FdOpenDir),
 }
