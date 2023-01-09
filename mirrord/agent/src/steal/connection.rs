@@ -569,7 +569,7 @@ impl TcpConnectionStealer {
         err
     }
 
-    /// Forward an HTTP response to a stolen HTTP request from the layer to the back to the browser.
+    /// Forward an HTTP response to a stolen HTTP request from the layer back to the HTTP client.
     ///
     ///                         _______________agent_______________
     /// Local App --> Layer --> ClientConnectionHandler --> Stealer --> Browser
