@@ -115,7 +115,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::config::MirrordConfig;
 
     #[rstest]
     fn test_advanced_fs_config_default() {

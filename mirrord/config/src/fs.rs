@@ -115,10 +115,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::MirrordConfig,
-        util::{testing::with_env_vars, VecOrSingle},
-    };
+    use crate::config::MirrordConfig;
 
     #[rstest]
     fn test_fs_config_default() {
