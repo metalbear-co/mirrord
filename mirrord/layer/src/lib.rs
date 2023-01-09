@@ -382,7 +382,7 @@ impl Layer {
                 .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
-            DaemonMessage::Close => todo!(),
+            DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
             DaemonMessage::LogMessage(_) => todo!(),
         }
     }

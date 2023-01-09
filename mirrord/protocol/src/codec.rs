@@ -263,7 +263,7 @@ pub enum FileResponse {
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
-    Close,
+    Close(String),
     Tcp(DaemonTcp),
     TcpSteal(DaemonTcp),
     TcpOutgoing(DaemonTcpOutgoing),
