@@ -182,7 +182,7 @@ pub struct HttpResponse {
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
     #[bincode(with_serde)]
-    pub response: InternalHttpResponse,
+    pub internal_response: InternalHttpResponse,
 }
 
 impl HttpResponse {
@@ -216,7 +216,7 @@ impl HttpResponse {
             request_id,
             port,
             connection_id,
-            response: internal_response,
+            internal_response: internal_response,
         })
     }
 
@@ -238,7 +238,7 @@ impl HttpResponse {
             port,
             connection_id,
             request_id,
-            response: InternalHttpResponse {
+            internal_response: InternalHttpResponse {
                 status,
                 version,
                 headers: Default::default(),
@@ -258,7 +258,7 @@ impl HttpResponse {
             port,
             connection_id,
             request_id,
-            response: InternalHttpResponse {
+            internal_response: InternalHttpResponse {
                 status,
                 version,
                 headers: Default::default(),

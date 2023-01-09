@@ -600,7 +600,7 @@ impl TcpConnectionStealer {
             Some(response_tx) => {
                 if let Err(resp) = response_tx.send(
                     response
-                        .response
+                        .internal_response
                         .try_into()
                         .map_err(Self::handle_response_reconstruction_fail)?,
                 ) {
