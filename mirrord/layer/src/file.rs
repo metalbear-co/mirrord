@@ -5,7 +5,7 @@
 ///
 ///
 /// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
-/// open locally), these are controlled by configuring the [`filter::FileFilter`] with
+/// opened locally), these are controlled by configuring the [`filter::FileFilter`] with
 /// `[FsConfig]`.
 use core::fmt;
 use std::{
