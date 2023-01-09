@@ -594,7 +594,7 @@ impl TcpConnectionStealer {
             .remove(&(response.connection_id, response.request_id))
         {
             None => {
-                warn!("Got unexpected http response. Not forwarding.");
+                error!("Got unexpected http response. Not forwarding.");
                 Ok(())
             }
             Some(response_tx) => {
