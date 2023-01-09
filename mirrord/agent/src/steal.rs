@@ -132,12 +132,3 @@ impl MatchedHttpRequest {
         })
     }
 }
-
-/// The subscriptions to steal traffic from a specific port.
-#[derive(Debug)]
-enum StealSubscription {
-    /// All of the port's traffic goes to this single client.
-    Unfiltered(ClientId),
-    /// This port's traffic is filtered and distributed to clients using a manager.
-    HttpFiltered(HttpFilterManager),
-}
