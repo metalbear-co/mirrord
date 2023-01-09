@@ -460,8 +460,6 @@ async fn test_go_dir(#[values(Application::GoDir)] application: Application, dyl
         .await
         .unwrap();
 
-    let message = layer_connection.codec.next().await.unwrap().unwrap();
-
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
