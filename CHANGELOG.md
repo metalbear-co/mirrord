@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Add brew command to README
 - Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`)
+
 ### Fixed
 
 - intellij plugin: mirrord icon should always load now.
