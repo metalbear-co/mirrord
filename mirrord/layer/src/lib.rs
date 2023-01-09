@@ -10,6 +10,55 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(trait_alias)]
+#![deny(clippy::missing_docs_in_private_items)]
+
+//! Loaded dynamically with your local process.
+//!
+//! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
+//! remote context.
+//!
+//! ## How it works
+//!
+//! This crate intercepts your processes' [`libc`] calls, and instead of executing them locally (as
+//! normal), it instead forwards them as a message to the mirrord-agent pod.
+//! The operation is executed there, with the result being returned back to `mirrord-layer`, and
+//! finally to the original [`libc`] call.
+//!
+//! You can read more about it in the mirrord docs
+//! [Introduction](https://mirrord.dev/docs/overview/introduction/).
+//!
+//! ### Example
+//!
+//! Let's say you have a Node.js app that just opens a file, like this:
+//!
+//! - `open-file.mjs`
+//!
+//! ```js
+//! import { open } from 'node:fs';
+//!
+//! open("/tmp/hello.txt");
+//! ```
+//!
+//! When run with mirrord, this is what's going to happen:
+//!
+//! 1. We intercept the call to [`libc::open`] using our `open_detour` hook, which calls
+//!  [`file::ops::open`];
+//!
+//! 2. [`file::ops::open`] sends an _open file request_ to `mirrord-agent`;
+//!
+//! 3. `mirrore-agent` tries to open `/tmp/hello.txt` in the remote context it's running, and
+//! returns the result of the operation back to `mirrord-layer`;
+//!
+//! 4. We handle the mapping of the remote file (the one we have open in `mirrord-agent`), and a
+//! local file (temporarily created);
+//!
+//! 5. And finally, we return the expected result (type) to your Node.js application, as if it had
+//! just called [`libc::open`].
+//!
+//! ## Configuration
+//!
+//! The functions we intercept are controlled via the `mirrord-config` crate, see
+//! [Configuration](https://mirrord.dev/docs/overview/configuration/) for more details.
 
 extern crate alloc;
 use std::{
