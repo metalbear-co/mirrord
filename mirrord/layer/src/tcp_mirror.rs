@@ -7,7 +7,7 @@ use std::{
 
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId,
 };
 use tokio::{
@@ -192,5 +192,16 @@ impl TcpHandler for TcpMirrorHandler {
         tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await
             .map_err(From::from)
+    }
+
+    /// This should never be called here. This exists because we have one trait for mirror and
+    /// steal, but steal has some extra messages that should not be used with mirror.
+    async fn handle_http_request(
+        &mut self,
+        _request: HttpRequest,
+    ) -> std::result::Result<(), LayerError> {
+        error!("Error: Mirror handler received http request.");
+        debug_assert!(false);
+        Ok(())
     }
 }

@@ -46,6 +46,9 @@ pub enum AgentError {
     #[error("Receiver channel is closed!")]
     ReceiverClosed,
 
+    #[error("Request channel closed unexpectedly.")]
+    HttpRequestReceiverClosed,
+
     #[error("ConnectRequest sender failed with `{0}`")]
     SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
 
@@ -109,6 +112,15 @@ pub enum AgentError {
     #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
     Original error `{0}`"#)]
     PacketIgnoreOutgoing(#[source] std::io::Error),
+
+    #[error("Reading request body failed with `{0}`")]
+    HttpRequestSerializationError(#[from] hyper::Error),
+
+    #[error("HTTP filter-stealing error: `{0}`")]
+    HttpFilterError(#[from] crate::steal::http::error::HttpTrafficError),
+
+    #[error("Failed to encode a an HTTP response with error: `{0}`")]
+    HttpEncoding(#[from] hyper::http::Error),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
