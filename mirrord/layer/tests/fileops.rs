@@ -151,13 +151,6 @@ async fn test_pwrite(
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Close(Ok(
-            CloseFileResponse {},
-        ))))
-        .await
-        .unwrap();
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
     {
@@ -345,14 +338,6 @@ async fn test_node_close(
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Close(Ok(
-            CloseFileResponse {},
-        ))))
-        .await
-        .unwrap();
-
     // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
@@ -428,6 +413,157 @@ async fn test_go_stat(
         ))))
         .await
         .unwrap();
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+}
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+#[cfg(target_os = "macos")]
+async fn test_go_dir(#[values(Application::GoDir)] application: Application, dylib_path: &PathBuf) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/foo".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+            path: None,
+            fd: Some(1),
+            follow_symlink: true
+        }))
+    );
+
+    let metadata = MetadataInternal {
+        device_id: 0,
+        size: 0,
+        user_id: 2,
+        blocks: 3,
+        mode: libc::S_IFDIR as u32,
+        ..Default::default()
+    };
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            XstatResponse { metadata: metadata },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
+            OpenDirResponse { fd: 2 },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+            ReadDirResponse {
+                direntry: Some(DirEntryInternal {
+                    name: "a".to_string(),
+                    inode: 1,
+                    position: 1,
+                    file_type: libc::DT_REG,
+                }),
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+            ReadDirResponse {
+                direntry: Some(DirEntryInternal {
+                    name: "b".to_string(),
+                    inode: 2,
+                    position: 2,
+                    file_type: libc::DT_REG,
+                }),
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+            ReadDirResponse { direntry: None },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
+    );
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
+    );
+
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();
 }

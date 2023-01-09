@@ -545,19 +545,18 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Shared code for closing fd in our data structures
 /// Callers should call their respective close before calling this.
 pub(crate) fn close_layer_fd(fd: c_int) {
+    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
         .is_active();
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active
-    && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
-    let close_file_result = file::ops::close(remote_fd);
-
-    if let Err(fail) = close_file_result {
-        error!("Failed closing file with {fail:#?}");
-    };
-}
+    // Remove from sockets, or if not a socket, remove from files if file mode active
+    SOCKETS.lock().unwrap().remove(&fd).is_none().then(|| {
+        if file_mode_active {
+            OPEN_FILES.lock().unwrap().remove(&fd);
+        }
+    });
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we

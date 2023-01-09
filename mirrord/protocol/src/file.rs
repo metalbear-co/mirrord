@@ -67,3 +67,36 @@ impl From<Metadata> for MetadataInternal {
         }
     }
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct CloseDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct DirEntryInternal {
+    pub inode: u64,
+    pub position: u64,
+    pub name: String,
+    pub file_type: u8,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirResponse {
+    pub direntry: Option<DirEntryInternal>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct FdOpenDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct OpenDirResponse {
+    pub fd: u64,
+}
