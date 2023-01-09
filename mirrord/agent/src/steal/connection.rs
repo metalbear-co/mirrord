@@ -442,7 +442,7 @@ impl TcpConnectionStealer {
                 match Regex::new(&format!("(?i){}", filter)) {
                     Ok(regex) => match self.port_subscriptions.get_mut(&port) {
                         Some(Unfiltered(earlier_client)) => {
-                            error!("Can't filter-steal port {port:?} as it is already being stolen in its whole by client {earlier_client:?}.");
+                            error!("Can't steal port {port:?} as it is already being stolen with no filters by client {earlier_client:?}.");
                             Err(PortAlreadyStolen(port))
                         }
                         Some(HttpFiltered(manager)) => {
