@@ -11,7 +11,7 @@ use super::{
     error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
 };
 use crate::{
-    steal::{http_traffic::error, HandlerHttpRequest},
+    steal::{http::error, HandlerHttpRequest},
     util::ClientId,
 };
 

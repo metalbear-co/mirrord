@@ -29,7 +29,7 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http_traffic::HttpFilterManager,
+        http::HttpFilterManager,
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
