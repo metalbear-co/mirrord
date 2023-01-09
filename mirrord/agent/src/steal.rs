@@ -93,8 +93,8 @@ pub struct HandlerHttpRequest {
     pub response_tx: oneshot::Sender<Response<Full<Bytes>>>,
 }
 
-/// A stolen HTTP request. Unlike [`mirrord_protocol::tcp::HttpRequest`], it also contains a
-/// [`ClientId`].
+/// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the
+/// connection task to be forwarded to the matching client.
 #[derive(Debug)]
 pub struct MatchedHttpRequest {
     pub port: Port,
