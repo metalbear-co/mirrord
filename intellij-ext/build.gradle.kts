@@ -125,12 +125,14 @@ tasks {
                 subList(indexOf(start) + 1, indexOf(end))
             }.joinToString("\n").run { markdownToHTML(this) }
         )
-
-        changeNotes.set(provider {
+        val is_ci_raw = System.getenv("CI_BUILD_PLUGIN");
+        if (is_ci_raw == null || is_ci_raw.lowercase() == "false") {
+            changeNotes.set(provider {
             changelog.run {
                 getOrNull(properties("pluginVersion")) ?: getLatest()
             }.toHTML()
         })
+        }
     }
 
     prepareSandbox {
