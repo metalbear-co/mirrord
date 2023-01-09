@@ -186,7 +186,7 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    /// We cannot this with the [`From`] trait as it doesn't support `async` conversions, and we
+    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions, and we
     /// also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
