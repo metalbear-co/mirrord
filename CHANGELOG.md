@@ -10,11 +10,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - Add brew command to README
-
+- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`)
 ### Fixed
 
 - intellij plugin: mirrord icon should always load now.
 - intellij plugin: on target selection cancel, don't show error - just disable mirrord for the run and show message.
+- stat functions now support directories.
 
 ### Deprecated
 
