@@ -281,6 +281,7 @@ pub(crate) fn readdir_r(
             (*entry)
                 .d_name
                 .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+            *result = entry;
         }
 
         #[cfg(target_os = "macos")]
@@ -288,14 +289,11 @@ pub(crate) fn readdir_r(
             (*entry).d_seekoff = direntry.position;
             // name length should be without null
             (*entry).d_namlen = dir_name.to_bytes().len() as u16;
-            *result = entry;
         }
 
         #[cfg(target_os = "linux")]
         unsafe {
             (*entry).d_off = direntry.position as i64;
-            std::ptr::copy(dir_name_bytes, entry.d_name, dir_name_bytes.len());
-            *result = entry;
         }
     } else {
         unsafe {
