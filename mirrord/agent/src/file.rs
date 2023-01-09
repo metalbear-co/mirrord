@@ -498,16 +498,21 @@ impl FileManager {
             }
             // fstat
             (None, Some(fd)) => {
-                if let RemoteFile::File(file) = self
+                match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    return Ok(XstatResponse {
-                        metadata: file.metadata()?.into(),
-                    });
-                } else {
-                    return Err(ResponseError::NotFile(fd));
+                    RemoteFile::File(file) => {
+                        return Ok(XstatResponse {
+                            metadata: file.metadata()?.into(),
+                        })
+                    }
+                    RemoteFile::Directory(path) => {
+                        return Ok(XstatResponse {
+                            metadata: path.metadata()?.into(),
+                        })
+                    }
                 }
             }
             // invalid
