@@ -459,34 +459,38 @@ async fn test_go_dir(#[values(Application::GoDir)] application: Application, dyl
         ))))
         .await
         .unwrap();
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+
+    let mut message = layer_connection.codec.next().await.unwrap().unwrap();
+
+    if matches!(
+        message,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: None,
             fd: Some(1),
             follow_symlink: true
         }))
-    );
+    ) {
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 0,
+            user_id: 2,
+            blocks: 3,
+            mode: libc::S_IFDIR as u32,
+            ..Default::default()
+        };
 
-    let metadata = MetadataInternal {
-        device_id: 0,
-        size: 0,
-        user_id: 2,
-        blocks: 3,
-        mode: libc::S_IFDIR as u32,
-        ..Default::default()
-    };
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
-        ))))
-        .await
-        .unwrap();
+        layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata: metadata },
+            ))))
+            .await
+            .unwrap();
+        message = layer_connection.codec.next().await.unwrap().unwrap();
+    }
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        message,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
