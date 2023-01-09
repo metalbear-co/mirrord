@@ -89,7 +89,7 @@ impl HttpFilterManager {
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
     /// here will impact the tasks as well.
-    pub(super) fn new_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
+    pub(super) fn add_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
         self.client_filters.insert(client_id, filter)
     }
 

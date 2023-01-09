@@ -444,7 +444,7 @@ impl TcpConnectionStealer {
                             Err(PortAlreadyStolen(port))
                         }
                         Some(HttpFiltered(manager)) => {
-                            manager.new_client(client_id, regex);
+                            manager.add_client(client_id, regex);
                             Ok(port)
                         }
                         None => {
