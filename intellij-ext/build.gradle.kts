@@ -125,8 +125,7 @@ tasks {
                 subList(indexOf(start) + 1, indexOf(end))
             }.joinToString("\n").run { markdownToHTML(this) }
         )
-        val is_ci_raw = System.getenv("CI_BUILD_PLUGIN");
-        if (is_ci_raw == null || is_ci_raw.lowercase() == "false") {
+        if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
             changeNotes.set(provider {
             changelog.run {
                 getOrNull(properties("pluginVersion")) ?: getLatest()
