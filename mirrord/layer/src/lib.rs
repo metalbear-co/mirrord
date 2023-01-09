@@ -510,6 +510,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Shared code for closing fd in our data structures
 /// Callers should call their respective close before calling this.
 pub(crate) fn close_layer_fd(fd: c_int) {
+    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
