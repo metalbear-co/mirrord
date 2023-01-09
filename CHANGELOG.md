@@ -7,18 +7,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-## Added
+### Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
 - Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
+- New feature: HTTP traffic filter!
+  - Allows the user to steal HTTP traffic based on HTTP request headers, for example `Client: me` would steal requests that match this header,
+    while letting unmatched requests (and non-HTTP packets) through to their original destinations.
 
-## Fixed
+### Fixed
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
 - stat functions now support directories.
 - Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 
-## Changed
+### Changed
 
 - agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
 
