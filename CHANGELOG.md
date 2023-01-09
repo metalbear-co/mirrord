@@ -12,7 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
 - Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
 - New feature: HTTP traffic filter!
-  - Allows the user to steal HTTP traffic based on HTTP request headers, for example `Client: me` would steal requests that match this header, while letting unmatched requests (and non-HTTP packets) through to their original destinations.
+- Allows the user to steal HTTP traffic based on HTTP request headers, for example `Client: me` would steal requests that match this header, while letting unmatched requests (and non-HTTP packets) through to their original destinations.
 
 ### Fixed
 
