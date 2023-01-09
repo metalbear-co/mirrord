@@ -109,6 +109,10 @@ pub enum AgentError {
     #[error("An internal invariant of the agent was violated, this should not happen.")]
     AgentInvariantViolated,
 
+    #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
+    Original error `{0}`"#)]
+    PacketIgnoreOutgoing(#[source] std::io::Error),
+
     #[error("Reading request body failed with `{0}`")]
     HttpRequestSerializationError(#[from] hyper::Error),
 

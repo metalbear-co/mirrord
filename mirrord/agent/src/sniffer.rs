@@ -136,7 +136,9 @@ async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture
     // we ofc could've done this when a layer connected, but I (A.H) thought it'd make more sense
     // to have this shared among layers (potentially, in the future) - fme.
     capture.set_filter(rawsocket::filter::build_drop_always())?;
-    capture.ignore_outgoing()?;
+    capture
+        .ignore_outgoing()
+        .map_err(AgentError::PacketIgnoreOutgoing)?;
     Ok(capture)
 }
 
