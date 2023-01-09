@@ -8,6 +8,8 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
 };
+
+use crate::file::*;
 mod common;
 pub use common::*;
 
@@ -172,7 +174,7 @@ async fn test_pwrite(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -197,7 +199,7 @@ async fn test_pwrite(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -287,7 +289,7 @@ async fn test_node_close(
         layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();
@@ -407,7 +409,7 @@ async fn test_go_stat(
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
+            XstatResponse { metadata },
         ))))
         .await
         .unwrap();

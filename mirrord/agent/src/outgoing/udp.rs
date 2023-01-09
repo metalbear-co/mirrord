@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
     sync::LazyLock,
     thread,
 };
@@ -29,8 +28,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     error::{AgentError, Result},
-    runtime::set_namespace,
-    util::{run_thread, IndexAllocator},
+    util::{run_thread_in_namespace, IndexAllocator},
 };
 
 type Layer = LayerUdpOutgoing;
@@ -102,7 +100,12 @@ impl UdpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task = run_thread(Self::interceptor_task(pid, layer_rx, daemon_tx));
+        let task = run_thread_in_namespace(
+            Self::interceptor_task(layer_rx, daemon_tx),
+            "UdpOutgoing".to_string(),
+            pid,
+            "net",
+        );
 
         Self {
             _task: task,
@@ -114,18 +117,9 @@ impl UdpOutgoingApi {
     /// Does the actual work for `Request`s and prepares the `Responses:
     #[allow(clippy::type_complexity)]
     async fn interceptor_task(
-        pid: Option<u64>,
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
     ) -> Result<()> {
-        if let Some(pid) = pid {
-            let namespace = PathBuf::from("/proc")
-                .join(PathBuf::from(pid.to_string()))
-                .join(PathBuf::from("ns/net"));
-
-            set_namespace(namespace).unwrap();
-        }
-
         let mut allocator = IndexAllocator::<ConnectionId>::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using

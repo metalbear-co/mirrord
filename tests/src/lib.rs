@@ -33,7 +33,7 @@ mod utils {
         Api, Client, Config,
     };
     use rand::{distributions::Alphanumeric, Rng};
-    use reqwest::StatusCode;
+    use reqwest::{RequestBuilder, StatusCode};
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
@@ -85,6 +85,7 @@ mod utils {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        NodeTcpEcho,
     }
 
     #[derive(Debug)]
@@ -192,14 +193,8 @@ mod utils {
     }
 
     impl Application {
-        pub async fn run(
-            &self,
-            target: &str,
-            namespace: Option<&str>,
-            args: Option<Vec<&str>>,
-            env: Option<Vec<(&str, &str)>>,
-        ) -> TestProcess {
-            let process_cmd = match self {
+        pub fn get_cmd(&self) -> Vec<&str> {
+            match self {
                 Application::PythonFlaskHTTP => {
                     vec!["python3", "-u", "python-e2e/app_flask.py"]
                 }
@@ -215,8 +210,18 @@ mod utils {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
-            };
-            run_exec(process_cmd, target, namespace, args, env).await
+                Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
+            }
+        }
+
+        pub async fn run(
+            &self,
+            target: &str,
+            namespace: Option<&str>,
+            args: Option<Vec<&str>>,
+            env: Option<Vec<(&str, &str)>>,
+        ) -> TestProcess {
+            run_exec(self.get_cmd(), target, namespace, args, env).await
         }
 
         pub fn assert(&self, process: &TestProcess) {
@@ -611,6 +616,22 @@ mod utils {
         .await
     }
 
+    /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+    /// over TCP, not HTTP.
+    #[fixture]
+    pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
+            "tcp-echo",
+            true,
+            false,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
@@ -625,7 +646,10 @@ mod utils {
         }
     }
 
-    pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
+    pub async fn get_service_host_and_port(
+        kube_client: Client,
+        service: &KubeService,
+    ) -> (String, i32) {
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
         let pods = pod_api
             .list(&ListParams::default().labels(&format!("app={}", service.name)))
@@ -652,7 +676,12 @@ mod utils {
             .and_then(|spec| spec.ports)
             .and_then(|mut ports| ports.pop())
             .unwrap();
-        format!("http://{}:{}", host_ip, port.node_port.unwrap())
+        (host_ip, port.node_port.unwrap())
+    }
+
+    pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
+        let (host_ip, port) = get_service_host_and_port(kube_client, service).await;
+        format!("http://{}:{}", host_ip, port)
     }
 
     pub async fn get_pod_instance(
@@ -669,46 +698,64 @@ mod utils {
         pod
     }
 
-    pub async fn send_requests(url: &str, expect_response: bool) {
+    /// Take a request builder of any method, add headers, send the request, verify success, and
+    /// optionally verify expected response.
+    pub async fn send_request(
+        request_builder: RequestBuilder,
+        expect_response: Option<&str>,
+        headers: reqwest::header::HeaderMap,
+    ) {
+        let res = request_builder.headers(headers).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        if let Some(expected_response) = expect_response {
+            let resp = res.bytes().await.unwrap();
+            assert_eq!(resp, expected_response.as_bytes());
+        }
+    }
+
+    pub async fn send_requests(
+        url: &str,
+        expect_response: bool,
+        headers: reqwest::header::HeaderMap,
+    ) {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
         let client = reqwest::Client::new();
-        let res = client.get(url).send().await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, Bytes::from("GET"));
-        }
-
-        let client = reqwest::Client::new();
-        let res = client.post(url).body(TEXT).send().await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "POST".as_bytes());
-        }
+        let req_builder = client.get(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("GET"),
+            headers.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
-        let res = client.put(url).send().await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "PUT".as_bytes());
-        }
+        let req_builder = client.post(url).body(TEXT);
+        send_request(
+            req_builder,
+            expect_response.then_some("POST"),
+            headers.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
-        let res = client.delete(url).send().await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        // read all data sent back
-        let resp = res.bytes().await.unwrap();
-        if expect_response {
-            assert_eq!(resp, "DELETE".as_bytes());
-        }
+        let req_builder = client.put(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("PUT"),
+            headers.clone(),
+        )
+        .await;
+
+        let client = reqwest::Client::new();
+        let req_builder = client.delete(url);
+        send_request(
+            req_builder,
+            expect_response.then_some("DELETE"),
+            headers.clone(),
+        )
+        .await;
     }
 
     pub async fn get_next_log<T: Stream<Item = Result<Bytes, kube::Error>> + Unpin>(
