@@ -10,7 +10,7 @@ use std::{
 
 use async_trait::async_trait;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, HttpRequest, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
@@ -96,6 +96,9 @@ pub(crate) trait TcpHandler {
                 error!("Port subscription failed with unexpected error: {other_error}.");
                 Err(UnexpectedResponseError(other_error))
             }
+            DaemonTcp::HttpRequest(request) => {
+                self.handle_http_request(request).await.map_err(From::from)
+            }
         };
 
         debug!("handle_incoming_message -> handled {:#?}", handled);
@@ -152,6 +155,9 @@ pub(crate) trait TcpHandler {
 
     /// Handle New Data messages
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError>;
+
+    /// Handle New Data messages
+    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError>;
 
     /// Handle connection close
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;

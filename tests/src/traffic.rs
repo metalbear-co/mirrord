@@ -1,5 +1,6 @@
-#[cfg(test)]
+mod steal;
 
+#[cfg(test)]
 mod traffic {
     use std::{net::UdpSocket, time::Duration};
 
@@ -9,8 +10,6 @@ mod traffic {
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
 
-    #[cfg(target_os = "linux")]
-    use crate::utils::{get_service_url, send_requests, Agent, Application};
     use crate::utils::{
         kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
     };
@@ -45,40 +44,6 @@ mod traffic {
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
         process.assert_stderr();
-    }
-
-    #[cfg(target_os = "linux")]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
-    async fn test_steal_http_traffic(
-        #[future] service: KubeService,
-        #[future] kube_client: Client,
-        #[values(
-            Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP,
-            Application::NodeHTTP
-        )]
-        application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-    ) {
-        let service = service.await;
-        let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
-            .await;
-
-        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests(&url, true).await;
-        tokio::time::timeout(Duration::from_secs(40), process.child.wait())
-            .await
-            .unwrap()
-            .unwrap();
-
-        application.assert(&process);
     }
 
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that

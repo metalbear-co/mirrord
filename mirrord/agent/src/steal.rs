@@ -1,26 +1,29 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Incoming, http::request, Request, Response};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, TcpData},
-    ConnectionId, Port,
+    tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
+    ConnectionId, Port, RequestId,
 };
 use tokio::{
     net::TcpListener,
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::{mpsc::Sender, oneshot},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::log::warn;
+use tracing::warn;
 
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    runtime::set_namespace,
-    util::{ClientId, IndexAllocator, Subscriptions},
+    util::{ClientId, IndexAllocator},
 };
 
 pub(super) mod api;
 pub(super) mod connection;
+pub(crate) mod http;
 mod ip_tables;
 mod orig_dst;
 
@@ -37,7 +40,7 @@ enum Command {
     /// A layer wants to subscribe to this [`Port`].
     ///
     /// The agent starts stealing traffic on this [`Port`].
-    PortSubscribe(Port),
+    PortSubscribe(StealType),
 
     /// A layer wants to unsubscribe from this [`Port`].
     ///
@@ -58,6 +61,11 @@ enum Command {
     ///
     /// Agent forwards this data to the other side of original connection.
     ResponseData(TcpData),
+
+    /// Response from local app to stolen HTTP request.
+    ///
+    /// Should be forwarded back to the connection it was stolen from.
+    HttpResponse(HttpResponse),
 }
 
 /// Association between a client (identified by the `client_id`) and a [`Command`].
@@ -70,4 +78,58 @@ pub struct StealerCommand {
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
+}
+
+/// A struct that the [`HyperHandler::call`] sends [`TcpConnectionStealer::start`], with a request
+/// that matched a filter and should be forwarded to a layer, and sender in which the response to
+/// that request can be sent back.
+#[derive(Debug)]
+pub struct HandlerHttpRequest {
+    pub request: MatchedHttpRequest,
+
+    /// For sending the response from the stealer task back to the hyper service.
+    /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
+    pub response_tx: oneshot::Sender<Response<Full<Bytes>>>,
+}
+
+/// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the
+/// connection task to be forwarded to the matching client.
+#[derive(Debug)]
+pub struct MatchedHttpRequest {
+    pub port: Port,
+    pub connection_id: ConnectionId,
+    pub client_id: ClientId,
+    pub request_id: RequestId,
+    pub request: Request<Incoming>,
+}
+
+impl MatchedHttpRequest {
+    async fn into_serializable(self) -> Result<HttpRequest, hyper::Error> {
+        let (
+            request::Parts {
+                method,
+                uri,
+                version,
+                headers,
+                ..
+            },
+            body,
+        ) = self.request.into_parts();
+
+        let body = body.collect().await?.to_bytes().to_vec();
+        let internal_request = InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        };
+
+        Ok(HttpRequest {
+            port: self.port,
+            connection_id: self.connection_id,
+            request_id: self.request_id,
+            internal_request,
+        })
+    }
 }

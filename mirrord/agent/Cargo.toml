@@ -45,6 +45,12 @@ rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 wildmatch = "2"
 enum_dispatch = "0.3.8"
 async-trait.workspace = true
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["full"] }
+httparse = "1"
+fancy-regex = { workspace = true }
+dashmap = { version = "5" }
+pin-project = "1"
 
 [dev-dependencies]
 mockall = "0.11"

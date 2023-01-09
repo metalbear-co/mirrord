@@ -1,5 +1,6 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
+#![feature(result_option_inspect)]
 
 pub mod codec;
 pub mod dns;
@@ -13,8 +14,11 @@ use std::{collections::HashSet, ops::Deref};
 pub use codec::*;
 pub use error::*;
 
-pub type ConnectionId = u64;
 pub type Port = u16;
+pub type ConnectionId = u64;
+
+/// A per-connection HTTP request ID
+pub type RequestId = u16; // TODO: how many requests in a single connection? is u16 appropriate?
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);
