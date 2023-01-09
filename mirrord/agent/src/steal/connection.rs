@@ -427,7 +427,7 @@ impl TcpConnectionStealer {
             StealType::All(port) => match self.port_subscriptions.get(&port) {
                 Some(sub) => {
                     error!(
-                        "Can't steal whole port {port:?} as it is already being stolen: {sub:?}."
+                        "Can't steal port {port:?} as it is already being stolen: {sub:?}."
                     );
                     Err(PortAlreadyStolen(port))
                 }
