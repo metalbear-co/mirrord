@@ -174,6 +174,25 @@ where
     })
 }
 
+/// Calls [`run_thread`] with `on_start_fn` always being [`enter_namespace`].
+#[tracing::instrument(level = "trace", skip_all)]
+pub(crate) fn run_thread_in_namespace<F>(
+    future: F,
+    thread_name: String,
+    pid: Option<u64>,
+    namespace: &str,
+) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let namespace = namespace.to_string();
+
+    run_thread(future, thread_name, move || {
+        enter_namespace(pid, &namespace).expect("Failed setting namespace!")
+    })
+}
+
 /// Used to enter a different (so far only used for "net") namespace for a task.
 ///
 /// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to

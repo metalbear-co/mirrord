@@ -28,7 +28,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     error::{AgentError, Result},
-    util::{enter_namespace, run_thread, IndexAllocator},
+    util::{run_thread_in_namespace, IndexAllocator},
 };
 
 type Layer = LayerUdpOutgoing;
@@ -100,12 +100,11 @@ impl UdpOutgoingApi {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task = run_thread(
+        let task = run_thread_in_namespace(
             Self::interceptor_task(layer_rx, daemon_tx),
             "UdpOutgoing".to_string(),
-            move || {
-                enter_namespace(pid, "net").expect("Failed setting namespace!");
-            },
+            pid,
+            "net",
         );
 
         Self {
