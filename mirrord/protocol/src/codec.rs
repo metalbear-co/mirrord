@@ -13,7 +13,7 @@ use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse, XstatRequest,
-        XstatResponse,
+        XstatResponse, CloseDirRequest,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -193,7 +193,9 @@ pub enum FileRequest {
     Xstat(XstatRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
+    CloseDir(CloseDirRequest)
 }
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -238,8 +240,6 @@ pub struct WriteFileResponse {
     pub written_amount: u64,
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct CloseFileResponse;
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AccessFileResponse;
@@ -256,7 +256,6 @@ pub enum FileResponse {
     Write(RemoteResult<WriteFileResponse>),
     WriteLimited(RemoteResult<WriteFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
-    Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
     Xstat(RemoteResult<XstatResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),

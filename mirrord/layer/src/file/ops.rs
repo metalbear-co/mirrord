@@ -1,12 +1,10 @@
 use core::ffi::CStr;
-use std::{ffi::CString, io::SeekFrom, mem, os::unix::io::RawFd, path::PathBuf};
+use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{
-    c_int, c_uint, dirent, AT_FDCWD, DIR, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR,
-};
+use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::{
-    file::XstatResponse, OpenFileResponse, OpenOptionsInternal,
-    ReadFileResponse, SeekFileResponse, WriteFileResponse,
+    file::{XstatResponse},
+    OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -268,12 +266,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
 // fetches the current entry in the directory stream created by `fdopendir`
 #[tracing::instrument(level = "trace")]
-pub(crate) fn readdir_r(
-    dirp: *mut DIR,
-    entry: *mut dirent,
-    result: *mut *mut dirent,
-) -> Detour<c_int> {
-    let dir_stream = dirp as usize;
+pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
     let remote_fd = *OPEN_DIRS
         .lock()?
         .get(&dir_stream)
@@ -289,37 +282,19 @@ pub(crate) fn readdir_r(
     blocking_send_file_message(HookMessageFile::ReadDir(requesting_dir))?;
 
     let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
+    Detour::Success(direntry)
+}
 
-    if let Some(direntry) = direntry {
-        let dir_name = CString::new(direntry.name)?;
-        let dir_name_bytes = dir_name.as_bytes_with_nul();
+#[tracing::instrument(level = "trace")]
+pub(crate) fn closedir(dir_stream: usize) -> Detour<c_int> {
+    let remote_fd = *OPEN_DIRS
+        .lock()?
+        .get(&dir_stream)
+        .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
 
-        unsafe {
-            (*entry).d_ino = direntry.inode;
-            (*entry).d_reclen = mem::size_of::<dirent>() as u16;
-            (*entry).d_type = direntry.file_type;
-            (*entry)
-                .d_name
-                .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
-            *result = entry;
-        }
+    let requesting_dir = CloseDir { fd: remote_fd };
 
-        #[cfg(target_os = "macos")]
-        unsafe {
-            (*entry).d_seekoff = direntry.position;
-            // name length should be without null
-            (*entry).d_namlen = dir_name.to_bytes().len() as u16;
-        }
-
-        #[cfg(target_os = "linux")]
-        unsafe {
-            (*entry).d_off = direntry.position as i64;
-        }
-    } else {
-        unsafe {
-            *result = std::ptr::null_mut();
-        }
-    }
+    blocking_send_file_message(HookMessageFile::CloseDir(requesting_dir))?;
 
     Detour::Success(0)
 }

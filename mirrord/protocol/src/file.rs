@@ -74,6 +74,11 @@ pub struct ReadDirRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct CloseDirRequest {
+    pub remote_fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct DirEntryInternal {
     pub inode: u64,
     pub position: u64,

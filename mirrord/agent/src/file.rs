@@ -154,8 +154,7 @@ impl FileManager {
                 Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => {
-                let close_result = self.close(fd);
-                Some(FileResponse::Close(close_result))
+                self.close(fd);
             }
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
@@ -442,17 +441,28 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: u64) -> RemoteResult<CloseFileResponse> {
+    pub(crate) fn close(&mut self, fd: u64) {
         trace!("FileManager::close -> fd {:#?}", fd,);
 
-        let _file = self
+        if _file = self
             .open_files
-            .remove(&fd)
-            .ok_or(ResponseError::NotFound(fd))?;
+            .remove(&fd).is_none() {
+            error!("FileManager::close -> fd {:#?} not found", fd);
+        } else {
+            self.index_allocator.free_index(fd);
+        }
+    }
 
-        self.index_allocator.free_index(fd);
+    pub(crate) fn close_dir(&mut self, fd: u64) {
+        trace!("FileManager::close_dir -> fd {:#?}", fd,);
 
-        Ok(CloseFileResponse)
+        if _file = self
+            .dir_streams
+            .remove(&fd).is_none() {
+            error!("FileManager::close_dir -> fd {:#?} not found", fd);
+        } else {
+            self.index_allocator.free_index(fd);
+        }
     }
 
     pub(crate) fn access(

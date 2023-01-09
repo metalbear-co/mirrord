@@ -24,7 +24,7 @@ use mirrord_protocol::{
         DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
         XstatRequest, XstatResponse,
     },
-    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
+    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest,
     FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
     ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
@@ -121,7 +121,6 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     write_limited_queue: ResponseDeque<WriteFileResponse>,
-    close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
     xstat_queue: ResponseDeque<XstatResponse>,
     opendir_queue: ResponseDeque<OpenDirResponse>,
@@ -198,10 +197,6 @@ impl FileHandler {
                 trace!("DaemonMessage::WriteFileResponse {:#?}!", write);
                 pop_send(&mut self.write_queue, write)
             }
-            Close(close) => {
-                trace!("DaemonMessage::CloseFileResponse {:#?}!", close);
-                pop_send(&mut self.close_queue, close)
-            }
             Access(access) => {
                 trace!("DaemonMessage::AccessFileResponse {:#?}!", access);
                 pop_send(&mut self.access_queue, access)
@@ -257,6 +252,7 @@ impl FileHandler {
             Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
             ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
             FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
+            CloseDir(close_dir) => self.handle_hook_close_dir(close_dir, tx).await,
         }
     }
 
@@ -469,6 +465,16 @@ impl FileHandler {
         tx.send(request).await.map_err(From::from)
     }
 
+    async fn handle_hook_close_dir(&mut self, close: CloseDir, tx: &Sender<ClientMessage>) -> Result<()> {
+        let CloseDir { fd } = close;
+        trace!("HookMessage::CloseDirHook fd {:#?}", fd);
+
+        let close_file_request = CloseFileRequest { fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
     async fn handle_hook_access(
         &mut self,
         access: Access,
@@ -626,6 +632,11 @@ pub struct FdOpenDir {
 }
 
 #[derive(Debug)]
+pub struct CloseDir {
+    pub(crate) fd: u64,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -640,4 +651,5 @@ pub enum HookMessageFile {
     Xstat(Xstat),
     ReadDir(ReadDir),
     FdOpenDir(FdOpenDir),
+    CloseDir(CloseDir),
 }
