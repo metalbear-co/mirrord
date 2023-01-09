@@ -83,7 +83,7 @@ pub(crate) struct TcpConnectionStealer {
     /// Receives filtered HTTP requests that need to be forwarded a client.
     http_request_receiver: Receiver<HandlerHttpRequest>,
 
-    /// For sending letting the [`Self::start`] task this connection was closed.
+    /// For informing the [`Self::start`] task about closed connections.
     http_connection_close_sender: Sender<ConnectionId>,
 
     /// [`Self::start`] listens to this, removes the connection and frees the index.
