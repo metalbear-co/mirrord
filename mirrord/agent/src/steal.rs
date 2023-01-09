@@ -128,7 +128,7 @@ impl MatchedHttpRequest {
             port: self.port,
             connection_id: self.connection_id,
             request_id: self.request_id,
-            request: internal_req,
+            internal_request: internal_req,
         })
     }
 }

@@ -151,7 +151,7 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct HttpRequest {
     #[bincode(with_serde)]
-    pub request: InternalHttpRequest,
+    pub internal_request: InternalHttpRequest,
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
     /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
@@ -222,7 +222,7 @@ impl HttpResponse {
 
     pub fn response_from_request(request: HttpRequest, status: StatusCode, message: &str) -> Self {
         let HttpRequest {
-            request: InternalHttpRequest { version, .. },
+            internal_request: InternalHttpRequest { version, .. },
             connection_id,
             request_id,
             port,
@@ -249,7 +249,7 @@ impl HttpResponse {
 
     pub fn empty_response_from_request(request: HttpRequest, status: StatusCode) -> Self {
         let HttpRequest {
-            request: InternalHttpRequest { version, .. },
+            internal_request: InternalHttpRequest { version, .. },
             connection_id,
             request_id,
             port,

@@ -241,7 +241,7 @@ impl TcpStealHandler {
     ) -> Result<HttpResponse, HttpRequest> {
         let request_id = req.request_id;
         match http_request_sender
-            .send_request(req.request.clone().into())
+            .send_request(req.internal_request.clone().into())
             .await
         {
             Err(err) if err.is_closed() => {
