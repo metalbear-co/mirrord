@@ -448,7 +448,8 @@ impl TcpConnectionStealer {
         };
 
         if first_subscriber && let Ok(port) = steal_port {
-            self.iptables()?.add_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
+            self.iptables()?
+                .add_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
