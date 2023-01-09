@@ -100,9 +100,25 @@ impl TcpHandler for TcpStealHandler {
     }
 
     /// An http request was stolen by the http filter. Pass it to the local application.
+    ///
+    /// Send a filtered HTTP request to the application in the appropriate port.
+    /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
+    /// local connection will be started for it, otherwise it will be sent in the existing local
+    /// connection.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
-        self.forward_request(request).await
+        if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
+            trace!(
+                "Got an HTTP request from an existing connection, sending it to the client task \
+                to be forwarded to the application."
+            );
+            Ok(sender
+                .send(request)
+                .await
+                .map_err::<HttpForwarderError, _>(From::from)?)
+        } else {
+            Ok(self.create_http_connection(request).await?)
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -185,27 +201,6 @@ impl TcpStealHandler {
                 LayerTcpSteal::ConnectionUnsubscribe(connection_id),
             )),
         }
-    }
-
-    /// Send a filtered HTTP request to the application in the appropriate port.
-    /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
-    /// local connection will be started for it, otherwise it will be sent in the existing local
-    /// connection.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn forward_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
-        if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
-            trace!(
-                "Got an HTTP request from an existing connection, sending it to the client task \
-                to be forwarded to the application."
-            );
-            sender
-                .send(request)
-                .await
-                .map_err::<HttpForwarderError, _>(From::from)?
-        } else {
-            self.create_http_connection(request).await?
-        }
-        Ok(())
     }
 
     async fn create_http_connection_with_application(
