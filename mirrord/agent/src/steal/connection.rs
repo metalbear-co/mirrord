@@ -29,7 +29,7 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http_traffic::HttpFilterManager,
+        http::HttpFilterManager,
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
@@ -426,9 +426,7 @@ impl TcpConnectionStealer {
         let steal_port = match port_steal {
             StealType::All(port) => match self.port_subscriptions.get(&port) {
                 Some(sub) => {
-                    error!(
-                        "Can't steal port {port:?} as it is already being stolen: {sub:?}."
-                    );
+                    error!("Can't steal port {port:?} as it is already being stolen: {sub:?}.");
                     Err(PortAlreadyStolen(port))
                 }
                 None => {

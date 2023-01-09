@@ -23,7 +23,7 @@ use crate::{
 
 pub(super) mod api;
 pub(super) mod connection;
-pub(crate) mod http_traffic;
+pub(crate) mod http;
 mod ip_tables;
 mod orig_dst;
 
@@ -115,19 +115,21 @@ impl MatchedHttpRequest {
             },
             body,
         ) = self.request.into_parts();
+
         let body = body.collect().await?.to_bytes().to_vec();
-        let internal_req = InternalHttpRequest {
+        let internal_request = InternalHttpRequest {
             method,
             uri,
             headers,
             version,
             body,
         };
+
         Ok(HttpRequest {
             port: self.port,
             connection_id: self.connection_id,
             request_id: self.request_id,
-            internal_request: internal_req,
+            internal_request,
         })
     }
 }

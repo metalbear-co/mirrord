@@ -117,7 +117,7 @@ pub enum AgentError {
     HttpRequestSerializationError(#[from] hyper::Error),
 
     #[error("HTTP filter-stealing error: `{0}`")]
-    HttpFilterError(#[from] crate::steal::http_traffic::error::HttpTrafficError),
+    HttpFilterError(#[from] crate::steal::http::error::HttpTrafficError),
 
     #[error("Failed to encode a an HTTP response with error: `{0}`")]
     HttpEncoding(#[from] hyper::http::Error),
