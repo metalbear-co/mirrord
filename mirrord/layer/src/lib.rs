@@ -57,8 +57,9 @@
 //!
 //! ## Configuration
 //!
-//! The functions we intercept are controlled via the `mirrord-config` crate, see
-//! [Configuration](https://mirrord.dev/docs/overview/configuration/) for more details.
+//! The functions we intercept are controlled via the `mirrord-config` crate, check its
+//! documentation for more details, or
+//! [Configuration](https://mirrord.dev/docs/overview/configuration/) for usage information.
 
 extern crate alloc;
 use std::{
