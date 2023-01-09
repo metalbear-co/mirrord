@@ -186,8 +186,8 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions, and we
-    /// also need some extra parameters.
+    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions,
+    /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
     pub async fn from_hyper_response(
@@ -205,6 +205,7 @@ impl HttpResponse {
             },
             body,
         ) = response.into_parts();
+
         let body = body.collect().await?.to_bytes().to_vec();
         let internal_response = InternalHttpResponse {
             status,
@@ -212,11 +213,12 @@ impl HttpResponse {
             version,
             body,
         };
+
         Ok(HttpResponse {
             request_id,
             port,
             connection_id,
-            internal_response: internal_response,
+            internal_response,
         })
     }
 
@@ -227,6 +229,7 @@ impl HttpResponse {
             request_id,
             port,
         } = request;
+
         let body = format!(
             "{} {}\n{}\n",
             status.as_str(),
@@ -234,6 +237,7 @@ impl HttpResponse {
             message
         )
         .into_bytes();
+
         Self {
             port,
             connection_id,
@@ -254,6 +258,7 @@ impl HttpResponse {
             request_id,
             port,
         } = request;
+
         Self {
             port,
             connection_id,
