@@ -18,7 +18,6 @@ use tracing::warn;
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    steal::http_traffic::HttpFilterManager,
     util::{ClientId, IndexAllocator},
 };
 

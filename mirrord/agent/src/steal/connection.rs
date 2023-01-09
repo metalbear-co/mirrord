@@ -570,14 +570,6 @@ impl TcpConnectionStealer {
         }
     }
 
-    fn handle_response_reconstruction_fail(err: hyper::http::Error) -> hyper::http::Error {
-        error!("Could not reconstruct http response: {err:?}");
-        // TODO: What should happen? Currently just skipping that response, which would
-        //       also spoils the rest of the stream. Should hopefully never happen.
-        debug_assert!(false);
-        err
-    }
-
     /// Forward an HTTP response to a stolen HTTP request from the layer back to the HTTP client.
     ///
     ///                         _______________agent_______________
@@ -588,29 +580,31 @@ impl TcpConnectionStealer {
         skip(self),
         fields(response_senders = ?self.http_response_senders.keys()),
     )]
-    async fn http_response(&mut self, response: HttpResponse) -> Result<()> {
+    async fn http_response(&mut self, response: HttpResponse) {
         match self
             .http_response_senders
             .remove(&(response.connection_id, response.request_id))
         {
             None => {
                 error!("Got unexpected http response. Not forwarding.");
-                Ok(())
             }
             Some(response_tx) => {
-                if let Err(resp) = response_tx.send(
-                    response
-                        .internal_response
-                        .try_into()
-                        .map_err(Self::handle_response_reconstruction_fail)?,
-                ) {
-                    warn!(
-                        "Hyper service has dropped the response receiver before receiving the \
-                    response {:?}.",
-                        resp
-                    );
-                }
-                Ok(())
+                let _res = response // inspecting errors, not propagating.
+                    .internal_response
+                    .try_into()
+                    .inspect_err(|err| {
+                        error!("Could not reconstruct http response: {err:?}");
+                        debug_assert!(false);
+                    })
+                    .map(|response| {
+                        let _res = response_tx.send(response).inspect_err(|resp| {
+                            warn!(
+                                "Hyper service has dropped the response receiver before receiving the \
+                        response {:?}.",
+                                resp
+                            );
+                        });
+                    });
             }
         }
     }
@@ -662,7 +656,7 @@ impl TcpConnectionStealer {
             Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
             Command::ClientClose => self.close_client(client_id)?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
-            Command::HttpResponse(response) => self.http_response(response).await?,
+            Command::HttpResponse(response) => self.http_response(response).await,
         }
 
         Ok(())
