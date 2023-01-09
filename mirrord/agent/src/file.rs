@@ -155,6 +155,7 @@ impl FileManager {
             }
             FileRequest::Close(CloseFileRequest { fd }) => {
                 self.close(fd);
+                None
             }
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
@@ -184,6 +185,7 @@ impl FileManager {
             }
             FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
                 self.close_dir(remote_fd);
+                None
             }
         })
     }
