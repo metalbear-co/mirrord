@@ -141,14 +141,23 @@ impl TcpConnectionStealer {
 
     /// Runs the tcp traffic stealer loop.
     ///
-    /// The loop deals with 3 different paths:
+    /// The loop deals with 6 different paths:
     ///
     /// 1. Receiving [`StealerCommand`]s and calling [`TcpConnectionStealer::handle_command`];
     ///
     /// 2. Accepting remote connections through the [`TcpConnectionStealer::stealer`]
     /// [`TcpListener`]. We steal traffic from the created streams.
     ///
-    /// 3. Handling the cancellation of the whole stealer thread.
+    /// 3. Reading incoming data from the stolen remote connections (accepted in 2.) and forwarding
+    /// to clients.
+    ///
+    /// 4. Receiving filtered HTTP requests and forwarding them to clients (layers).
+    ///
+    /// 5. Receiving the connection IDs of closing filtered HTTP connections, and informing all
+    /// clients that were forward a request out of that connection of the closing of that
+    /// connection.
+    ///
+    /// 6. Handling the cancellation of the whole stealer thread.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn start(
         mut self,
@@ -161,7 +170,6 @@ impl TcpConnectionStealer {
                         self.handle_command(command).await?;
                     } else { break; }
                 },
-                request = self.http_request_receiver.recv() => self.forward_stolen_http_request(request).await?,
                 // Accepts a connection that we're going to be stealing traffic from.
                 accept = self.stealer.accept() => {
                     match accept {
@@ -180,6 +188,7 @@ impl TcpConnectionStealer {
                         error!("Failed reading incoming tcp data with {fail:#?}!");
                     }
                 }
+                request = self.http_request_receiver.recv() => self.forward_stolen_http_request(request).await?,
                 Some(connection_id) = self.http_connection_close_receiver.recv() => {
                     // Send a close message to all clients that were subscribed to the connection.
                     if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
