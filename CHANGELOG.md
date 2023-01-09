@@ -10,7 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - Add brew command to README
-- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`)
+- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
 
 ### Fixed
 
