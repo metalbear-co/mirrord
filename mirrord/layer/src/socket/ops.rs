@@ -33,13 +33,13 @@ use crate::{
 /// this `.into/.from` then the detour would call `.into` on the struct to convert to i32
 /// and would set the according errno.
 #[derive(Debug)]
-pub(crate) struct ConnectResult {
-    pub result: i32,
-    pub error: Option<errno::Errno>,
+pub(super) struct ConnectResult {
+    result: i32,
+    error: Option<errno::Errno>,
 }
 
 impl ConnectResult {
-    pub(crate) fn is_failure(&self) -> bool {
+    pub(super) fn is_failure(&self) -> bool {
         matches!(self.error, Some(err) if err.0 != libc::EINTR && err.0 != libc::EINPROGRESS)
     }
 }
