@@ -38,7 +38,9 @@ impl HttpVersion {
     fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
-        if buffer == h2_preface {
+        if buffer.len() < MINIMAL_HEADER_SIZE {
+            Self::NotHttp
+        } else if buffer == h2_preface {
             Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),

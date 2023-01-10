@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
@@ -16,6 +16,7 @@ use crate::{
 };
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Controls the amount of data we read when trying to detect if the stream's first message contains
 /// an HTTP request.
@@ -60,7 +61,7 @@ impl HttpFilterBuilder {
         matched_tx: Sender<HandlerHttpRequest>,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<Self, HttpTrafficError> {
-        DefaultReversibleStream::read_header(stolen_stream)
+        DefaultReversibleStream::read_header(stolen_stream, DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT)
             .await
             .map(|mut reversible_stream| {
                 let http_version = HttpVersion::new(
