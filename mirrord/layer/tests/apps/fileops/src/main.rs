@@ -77,5 +77,5 @@ fn main() {
         test_stat();
     }
     // let close message get called
-    std::thread::sleep(std::time::Duration::from_micros(10));
+    std::thread::sleep(std::time::Duration::from_millis(10));
 }
