@@ -39,6 +39,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
     address_length: socklen_t,
 ) -> c_int {
     connect(sockfd, raw_address, address_length)
+        .map(From::from)
         .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
 }
 
