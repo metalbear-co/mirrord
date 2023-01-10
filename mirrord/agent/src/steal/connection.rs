@@ -397,7 +397,7 @@ impl TcpConnectionStealer {
     ///
     /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
     /// `client_id` to steal traffic from it.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
         if self.iptables.is_none() {
             // TODO: make the initialization internal to SafeIpTables.

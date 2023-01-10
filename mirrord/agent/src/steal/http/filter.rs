@@ -84,7 +84,7 @@ impl HttpFilterBuilder {
     /// Creates the hyper task, and returns an [`HttpFilter`] that contains the channels we use to
     /// pass the requests to the layer.
     #[tracing::instrument(
-        level = "trace",
+        level = "debug",
         skip(self),
         fields(
             self.http_version = ?self.http_version,
@@ -111,6 +111,7 @@ impl HttpFilterBuilder {
                 tokio::task::spawn(async move {
                     // TODO: do we need to do something with this result?
                     let _res = http1::Builder::new()
+                        .preserve_header_case(true)
                         .serve_connection(
                             reversible_stream,
                             HyperHandler {
@@ -122,6 +123,7 @@ impl HttpFilterBuilder {
                                 request_id: 0,
                             },
                         )
+                        .with_upgrades()
                         .await;
 
                     let _res = connection_close_sender
