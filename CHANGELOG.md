@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.18.0
+
 ### Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
