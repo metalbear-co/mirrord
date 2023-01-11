@@ -8,10 +8,11 @@ use futures::TryFutureExt;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{
     body::Incoming, client, header::UPGRADE, http, service::Service, Request, Response, StatusCode,
+    Version,
 };
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
-    io::copy_bidirectional,
+    io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
     sync::{
         mpsc::Sender,
@@ -123,21 +124,106 @@ async fn unmatched_request(
 
 #[tracing::instrument(level = "debug")]
 async fn upgrade_connection(
-    request: Request<Incoming>,
+    mut request: Request<Incoming>,
     original_destination: SocketAddr,
-) -> Result<(), HttpTrafficError> {
+) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     println!("upgrade connection!");
-    match hyper::upgrade::on(request).await {
+
+    debug!("request was \n{request:#?}");
+
+    let (mut parts, body) = request.into_parts();
+
+    // Remove headers that would be invalid due to us fiddling with the `body`.
+    let body = body.collect().await?.to_bytes();
+    parts.headers.remove(http::header::CONTENT_LENGTH);
+    parts.headers.remove(http::header::TRANSFER_ENCODING);
+    let request = Request::from_parts(parts, body);
+
+    let (parts, body) = request.into_parts();
+
+    // TODO(alex): We're ignoring `parts.extensions`.
+    let method = parts.method.as_str().as_bytes();
+    let uri = parts.uri.to_string().as_bytes();
+    let version = match parts.version {
+        Version::HTTP_09 => "HTTP/0.9",
+        Version::HTTP_10 => "HTTP/1.0",
+        Version::HTTP_11 => "HTTP/1.1",
+        Version::HTTP_2 => "HTTP/2",
+        Version::HTTP_3 => "HTTP/3",
+    }
+    .as_bytes();
+
+    let space = " ".as_bytes();
+    let end_line = "/n/r".as_bytes();
+
+    let parts_length = parts.headers.len();
+    let headers = parts.headers.into_iter().fold(
+        Vec::with_capacity(parts_length),
+        |mut headers, (name, value)| {
+            if let Some(name) = name {
+                let mut header = [
+                    format!("{}: ", name.as_str()).as_bytes(),
+                    value.as_bytes(),
+                    end_line,
+                ]
+                .concat();
+                headers.append(&mut header);
+            }
+
+            headers
+        },
+    );
+
+    let body = body.to_vec();
+    let request_bytes = [
+        method, space, uri, space, version, end_line, &headers, &body,
+    ]
+    .concat();
+
+    match hyper::upgrade::on(&mut request).await {
         Ok(mut upgraded) => {
+            debug!("request is now after upgrade \n{request:#?}");
+
             let mut interceptor_to_original = TcpStream::connect(original_destination).await?;
 
+            let (mut request_sender, connection) =
+                client::conn::http1::handshake(interceptor_to_original)
+                    .await
+                    .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
+
+            // We need this to progress the connection forward (hyper thing).
+            tokio::spawn(async move {
+                if let Err(fail) = connection.await {
+                    error!("Connection failed in unmatched with {fail:#?}");
+                }
+            });
+
+            // Send the request to the original destination.
+            let (mut parts, body) = request_sender
+                .send_request(request)
+                .await
+                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
+                .into_parts();
+
+            // Remove headers that would be invalid due to us fiddling with the `body`.
+            let body = body.collect().await?.to_bytes();
+            parts.headers.remove(http::header::CONTENT_LENGTH);
+            parts.headers.remove(http::header::TRANSFER_ENCODING);
+
+            let response = Response::from_parts(parts, body.into());
+
+            tokio::spawn(async move {});
+
             debug!("we've upgraded the request!");
-            copy_bidirectional(&mut upgraded, &mut interceptor_to_original).await?;
-            Ok(())
+            // copy_bidirectional(&mut upgraded, &mut interceptor_to_original).await?;
+            Ok(response)
         }
         Err(no_upgrade) if no_upgrade.is_user() => {
             debug!("No upgrade friends! but why {no_upgrade:#?}");
-            Ok(())
+            // Ok(())
+            // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not error, and
+            // not ok.
+            todo!("Should be a bypass-like thing")
         }
         Err(fail) => todo!("Failed upgrading with {fail:#?}"),
     }
@@ -161,9 +247,11 @@ impl Service<Request<Incoming>> for HyperHandler {
             //
             // We need to return the `SwitchProtocol` response we get from the passthrough, or can
             // we send one ourselves?
+            //
+            // Need an image/pod that supports websocket upgrade.
             if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
                 debug!("We have an upgrade request folks!");
-                tokio::spawn(upgrade_connection(request, this.original_destination));
+                let response = upgrade_connection(request, this.original_destination).await?;
 
                 println!("after upgrade connection!");
                 let mut response = Response::new(Full::new(Bytes::default()));
