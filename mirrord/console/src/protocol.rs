@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use log::Level;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProcessInfo {
@@ -13,8 +13,6 @@ pub struct ProcessInfo {
 pub struct Hello {
     pub process_info: ProcessInfo,
 }
-
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {

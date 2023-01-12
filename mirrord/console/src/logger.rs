@@ -1,6 +1,6 @@
 use futures::{Sink, SinkExt};
 use log::{LevelFilter, Metadata};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{protocol::Message, Error as WsError},
@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub struct ConsoleLogger {
-    sender: Sender<protocol::Record>,
+    sender: UnboundedSender<protocol::Record>,
 }
 
 impl log::Log for ConsoleLogger {
@@ -22,7 +22,7 @@ impl log::Log for ConsoleLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            match self.sender.blocking_send(protocol::Record {
+            match self.sender.send(protocol::Record {
                 metadata: protocol::Metadata {
                     level: record.level(),
                     target: record.target().to_string(),
@@ -64,7 +64,7 @@ where
     Ok(())
 }
 
-async fn logger_task<C>(mut client: C, mut rx: Receiver<protocol::Record>)
+async fn logger_task<C>(mut client: C, mut rx: UnboundedReceiver<protocol::Record>)
 where
     C: Sink<Message, Error = WsError> + std::marker::Unpin,
 {
@@ -73,10 +73,11 @@ where
         let _ = client.feed(msg).await;
     }
 }
+
 /// Initializes the logger
 /// Connects to the console, and sets the global logger to use it.
 pub async fn init_logger(address: &str) -> Result<()> {
-    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (mut client, _) = connect_async(address)
         .await
         .map_err(ConsoleError::ConnectError)?;

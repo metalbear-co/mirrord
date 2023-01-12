@@ -49,7 +49,6 @@ impl WsWrapper {
     }
 }
 
-
 async fn handle_socket(socket: WebSocket) {
     let mut wrapper = WsWrapper::new(socket);
 
@@ -80,7 +79,7 @@ async fn handle_socket(socket: WebSocket) {
                 .build(),
         );
     }
-    info!("Client disconnected {client_info:?}")
+    info!("Client disconnected pid: {:?}", client_info.process_info.id)
 }
 
 async fn handler(ws: WebSocketUpgrade) -> Response {

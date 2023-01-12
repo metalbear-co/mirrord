@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use miette::Diagnostic;
+use mirrord_console::error::ConsoleError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
@@ -145,4 +146,6 @@ pub(crate) enum CliError {
     LayerExtractFailed(PathBuf, std::io::Error),
     #[error("JSON Serialization error: `{0:#?}`")]
     JsonSerializeError(#[from] serde_json::Error),
+    #[error("Failed connecting to mirrord console for logging {0:#?}")]
+    ConsoleConnectError(#[from] ConsoleError),
 }

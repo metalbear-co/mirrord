@@ -6,7 +6,6 @@ use mirrord_progress::{Progress, ProgressMode, TaskProgress};
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Faciliate the execution of a process using mirrord by an IDE extension
-#[tokio::main(flavor = "current_thread")]
 pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     mirrord_progress::init_from_env(ProgressMode::Json);
 

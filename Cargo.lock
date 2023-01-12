@@ -143,8 +143,8 @@ dependencies = [
  "bytes",
  "futures-util",
  "http",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.23",
  "itoa",
  "matchit",
  "memchr",
@@ -176,7 +176,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "http",
- "http-body",
+ "http-body 0.4.5",
  "mime",
  "rustversion",
  "tower-layer",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.17.0"
+version = "3.18.1"
 dependencies = [
  "axum",
  "futures",
