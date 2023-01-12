@@ -7,8 +7,12 @@ use fancy_regex::Regex;
 use futures::TryFutureExt;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{
-    body::Incoming, client, header::UPGRADE, http, service::Service, Request, Response, StatusCode,
-    Version,
+    body::Incoming,
+    client,
+    header::{SEC_WEBSOCKET_ACCEPT, UPGRADE},
+    http::{self, request::Parts, HeaderValue},
+    service::Service,
+    Request, Response, StatusCode, Version,
 };
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
@@ -19,7 +23,7 @@ use tokio::{
         oneshot::{self, Receiver},
     },
 };
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use super::error::HttpTrafficError;
 use crate::{
@@ -57,6 +61,68 @@ pub(super) struct HyperHandler {
 
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
+}
+
+trait PartsExt {
+    fn as_bytes(&self) -> Vec<u8>;
+}
+
+impl PartsExt for Parts {
+    fn as_bytes(&self) -> Vec<u8> {
+        let Parts {
+            method,
+            uri,
+            version,
+            headers,
+            // TODO(alex): We're ignoring `parts.extensions`.
+            ..
+        } = self;
+
+        let method = method.as_str().as_bytes();
+
+        let uri_str = uri.to_string();
+        let uri = uri_str.as_bytes();
+
+        let version = match *version {
+            Version::HTTP_09 => "HTTP/0.9",
+            Version::HTTP_10 => "HTTP/1.0",
+            Version::HTTP_11 => "HTTP/1.1",
+            Version::HTTP_2 => "HTTP/2",
+            Version::HTTP_3 => "HTTP/3",
+            _ => todo!("WAT"),
+        }
+        .as_bytes();
+
+        let space = b" ";
+        let end_line = b"\r\n";
+
+        let headers_length = headers.len();
+        let headers = headers.iter().fold(
+            Vec::with_capacity(headers_length),
+            |mut headers, (name, value)| {
+                let mut header = [
+                    format!("{}: ", name.as_str()).as_bytes(),
+                    value.as_bytes(),
+                    end_line,
+                ]
+                .concat();
+                headers.append(&mut header);
+
+                headers
+            },
+        );
+
+        let request_bytes = [
+            method, space, uri, space, version, end_line, &headers, end_line,
+        ]
+        .concat();
+
+        debug!(
+            "the monster request is \n{:#?}",
+            String::from_utf8_lossy(&request_bytes)
+        );
+        request_bytes
+    }
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
@@ -124,116 +190,64 @@ async fn unmatched_request(
 
 #[tracing::instrument(level = "debug")]
 async fn upgrade_connection(
-    mut request: Request<Incoming>,
+    request: Request<Incoming>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     println!("upgrade connection!");
 
     debug!("request was \n{request:#?}");
-
     let (mut parts, body) = request.into_parts();
 
     // Remove headers that would be invalid due to us fiddling with the `body`.
     let body = body.collect().await?.to_bytes();
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
+
+    let raw = parts.as_bytes();
+
+    info!("Connecting to original destination to send the request");
+    let mut interceptor_to_original = TcpStream::connect(original_destination).await.unwrap();
+    interceptor_to_original.write(&raw).await.unwrap();
+
+    let mut read_buffer = vec![0; 15000];
+    let amount = interceptor_to_original
+        .read(&mut read_buffer)
+        .await
+        .unwrap();
+
+    info!(
+        "Received response from interceptor is \n{:#?}",
+        String::from_utf8_lossy(&read_buffer[..amount])
+    );
+
     let request = Request::from_parts(parts, body);
 
-    let (parts, body) = request.into_parts();
+    // TODO(alex) [high] 2023-01-12: Use this to send the response from within the upgrade thread to
+    // outside.
+    let (response_tx, response_rx) = oneshot::channel::<Response<Full<Bytes>>>();
 
-    // TODO(alex): We're ignoring `parts.extensions`.
-    let method = parts.method.as_str().as_bytes();
+    tokio::task::spawn(async move {
+        match hyper::upgrade::on(request).await {
+            Ok(mut upgraded) => {
+                info!("Time to upgrade in hyper!");
 
-    let uri_str = parts.uri.to_string();
-    let uri = uri_str.as_bytes();
-
-    let version = match parts.version {
-        Version::HTTP_09 => "HTTP/0.9",
-        Version::HTTP_10 => "HTTP/1.0",
-        Version::HTTP_11 => "HTTP/1.1",
-        Version::HTTP_2 => "HTTP/2",
-        Version::HTTP_3 => "HTTP/3",
-        _ => todo!("WAT"),
-    }
-    .as_bytes();
-
-    let space = b" ";
-    let end_line = b"/r/n";
-
-    let headers_length = parts.headers.len();
-    let headers = parts.headers.iter().fold(
-        Vec::with_capacity(headers_length),
-        |mut headers, (name, value)| {
-            let mut header = [
-                format!("{}: ", name.as_str()).as_bytes(),
-                value.as_bytes(),
-                end_line,
-            ]
-            .concat();
-            headers.append(&mut header);
-
-            headers
-        },
-    );
-
-    let body = body.to_vec();
-    let request_bytes = [
-        method, space, uri, space, version, end_line, &headers, &body,
-    ]
-    .concat();
-
-    debug!(
-        "the monster request is \n{:#?}",
-        String::from_utf8_lossy(&request_bytes)
-    );
-
-    let mut request = Request::from_parts(parts, body);
-    debug!("rebuilt the request \n{request:#?}");
-
-    match hyper::upgrade::on(&mut request).await {
-        Ok(mut upgraded) => {
-            debug!("request is now after upgrade \n{request:#?}");
-
-            let mut interceptor_to_original = TcpStream::connect(original_destination).await?;
-            let mut read_buffer = vec![0; 15000];
-
-            interceptor_to_original.write(&request_bytes).await?;
-            interceptor_to_original.read(&mut read_buffer).await?;
-
-            debug!("we've upgraded the request!");
-
-            let mut headers = vec![httparse::EMPTY_HEADER; headers_length * 10];
-            let mut response = httparse::Response::new(&mut headers);
-            response.parse(&read_buffer)?;
-
-            let mut final_response = Response::builder();
-            for header in response.headers.iter() {
-                final_response = final_response.header(header.name, header.value);
+                todo!();
             }
-
-            let final_response = final_response
-                .status(response.code.unwrap())
-                .version(Version::HTTP_11)
-                .body(Full::default())
-                .unwrap();
-
-            tokio::spawn(async move {
-                copy_bidirectional(&mut upgraded, &mut interceptor_to_original)
-                    .await
-                    .unwrap();
-            });
-
-            Ok(final_response)
+            Err(no_upgrade) if no_upgrade.is_user() => {
+                debug!("No upgrade friends! but why {no_upgrade:#?}");
+                // Ok(())
+                // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not error,
+                // and not ok.
+                todo!("Should be a bypass-like thing")
+            }
+            Err(fail) => todo!("Failed upgrading with {fail:#?}"),
         }
-        Err(no_upgrade) if no_upgrade.is_user() => {
-            debug!("No upgrade friends! but why {no_upgrade:#?}");
-            // Ok(())
-            // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not error, and
-            // not ok.
-            todo!("Should be a bypass-like thing")
-        }
-        Err(fail) => todo!("Failed upgrading with {fail:#?}"),
-    }
+    });
+
+    info!("Outside, we're awaiting for a response from the upgrade");
+    let response = response_rx.await.unwrap();
+    info!("Outside, the response is ready \n{response:#?}");
+    Ok(response)
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
