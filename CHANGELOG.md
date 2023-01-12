@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
+- config: file config updated to fix simple pattern of IncomingConfig. [#933](https://github.com/metalbear-co/mirrord/pull/933)
 
 ## 3.18.0
 
