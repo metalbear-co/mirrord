@@ -610,8 +610,11 @@ pub(super) fn getaddrinfo(
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
+        .map(|raw| {
+            addrinfo_set.insert(raw as usize);
+            raw
+        })
         .reduce(|current, mut previous| {
-            addrinfo_set.insert(previous as usize);
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
