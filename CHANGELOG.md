@@ -10,6 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - crash when `getaddrinfo` is bypassed and libc tries to free our structure. Closes [#930](https://github.com/metalbear-co/mirrord/issues/930)
+- Stealer hangs on short streams left open and fails on short closed streams to filtered HTTP ports -
+ [#926](https://github.com/metalbear-co/mirrord/issues/926).
 
 ## 3.18.1
 
@@ -17,8 +19,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
 - config: file config updated to fix simple pattern of IncomingConfig. [#933](https://github.com/metalbear-co/mirrord/pull/933)
-- Stealer hangs on short streams left open and fails on short closed streams to filtered HTTP ports -
- [#926](https://github.com/metalbear-co/mirrord/issues/926).
 
 ## 3.18.0
 
