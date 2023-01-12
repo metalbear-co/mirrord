@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.18.1
+
 ### Fixed
 
 - Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
