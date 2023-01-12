@@ -582,7 +582,7 @@ pub(super) fn getaddrinfo(
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
-
+    let mut addrinfo_set = MANAGED_ADDRINFO.lock()?;
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
@@ -611,6 +611,7 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .reduce(|current, mut previous| {
+            addrinfo_set.insert(previous as usize);
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };

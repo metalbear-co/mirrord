@@ -227,6 +227,11 @@ unsafe extern "C" fn getaddrinfo_detour(
 ///
 /// The `addrinfo` pointer has to be allocated respecting the `Box`'s
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
+///
+/// This needs to support trimmed linked lists, but at the moment if someone does that
+/// it will call the original freeaddrinfo which might cause UB or crash.
+/// if crashes occur on getaddrinfo - check this case.
+/// This can be solved probably by adding each pointer in the linked list to our HashSet.
 #[hook_guard_fn]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     MANAGED_ADDRINFO
@@ -238,6 +243,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
                     // Iterate over `addrinfo` linked list dropping it.
                     let mut current = addrinfo;
                     while !current.is_null() {
+                        managed_addrinfo.remove(&(current as usize));
                         let current_box = Box::from_raw(current);
                         let ai_addr = Box::from_raw(current_box.ai_addr);
                         let ai_canonname = CString::from_raw(current_box.ai_canonname);
