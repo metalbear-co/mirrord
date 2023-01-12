@@ -207,7 +207,7 @@ unsafe extern "C" fn getaddrinfo_detour(
                     managed_addrinfo.insert(c_addr_info_ptr as usize);
                     0
                 })
-                .unwrap_or(HookError::LockError.into())
+                .unwrap_or_else(|_| HookError::LockError.into())
         })
         .unwrap_or_bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
 }
