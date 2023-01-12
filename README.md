@@ -1,12 +1,6 @@
 <div align="center">
 
-![mirrord logo dark](./images/logo_dark.png#gh-dark-mode-only)
-
-</div>
-
-<div align="center">
-
-![mirrord logo light](./images/logo_light.png#gh-light-mode-only)
+![mirrord logo](./images/logo.svg)
 
 </div>
 
