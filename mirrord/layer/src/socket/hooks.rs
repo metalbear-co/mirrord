@@ -243,7 +243,6 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
                     // Iterate over `addrinfo` linked list dropping it.
                     let mut current = addrinfo;
                     while !current.is_null() {
-                        managed_addrinfo.remove(&(current as usize));
                         let current_box = Box::from_raw(current);
                         let ai_addr = Box::from_raw(current_box.ai_addr);
                         let ai_canonname = CString::from_raw(current_box.ai_canonname);
@@ -253,6 +252,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
                         drop(ai_addr);
                         drop(ai_canonname);
                         drop(current_box);
+                        managed_addrinfo.remove(&(current as usize));
                     }
                 })
                 .unwrap_or_else(|| {
