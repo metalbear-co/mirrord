@@ -5,12 +5,11 @@ use fancy_regex::Regex;
 use mirrord_protocol::ConnectionId;
 use tokio::{net::TcpStream, sync::mpsc::Sender};
 
-use self::{
-    error::HttpTrafficError,
-    filter::{HttpFilterBuilder, MINIMAL_HEADER_SIZE},
-    reversible_stream::ReversibleStream,
+use self::{filter::MINIMAL_HEADER_SIZE, reversible_stream::ReversibleStream};
+use crate::{
+    steal::{http::filter::filter_task, HandlerHttpRequest},
+    util::ClientId,
 };
-use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 pub(super) mod filter;
@@ -104,38 +103,22 @@ impl HttpFilterManager {
         self.client_filters.contains_key(client_id)
     }
 
-    // If it matches the filter, we send this request via a channel to the layer. And on the
-    // Manager, we wait for a message from the layer to send on the writer side of the actual
-    // TcpStream.
-    //
-    /// Starts a new hyper task if the `connection` contains a _valid-ish_ HTTP request.
-    ///
-    /// The [`TcpStream`] itself os not what we feed hyper, instead we create a [`DuplexStream`],
-    /// where one half (_server_) is where hyper does its magic, while the other half
-    /// (_interceptor_) sends the bytes we get from the remote connection.
-    ///
-    /// The _interceptor_ stream is fed the bytes we're reading from the _original_ [`TcpStream`],
-    /// and sends them to the _server_ stream.
-    ///
-    /// This mechanism is required to avoid having hyper send back [`Response`]s to the remote
-    /// connection.
+    /// Start a [`filter_task`] to handle this new connection.
     pub(super) async fn new_connection(
         &self,
         original_stream: TcpStream,
         original_address: SocketAddr,
         connection_id: ConnectionId,
         connection_close_sender: Sender<ConnectionId>,
-    ) -> Result<(), HttpTrafficError> {
-        HttpFilterBuilder::new(
+    ) {
+        tokio::spawn(filter_task(
             original_stream,
             original_address,
             connection_id,
             self.client_filters.clone(),
             self.matched_tx.clone(),
             connection_close_sender,
-        )
-        .await?
-        .start()
+        ));
     }
 
     pub(super) fn is_empty(&self) -> bool {
