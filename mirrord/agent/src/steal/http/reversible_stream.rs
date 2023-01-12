@@ -28,7 +28,7 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
     /// We could be writing less then `HEADER_SIZE` bytes into `header`, in two cases:
     /// 1. Got a timeout before reading as `HEADER_SIZE` bytes.
     /// 2. Read an EOF after less than `HEADER_SIZE` bytes.
-    /// So we need to always now how many bytes we actually have.
+    /// So we need to always know how many bytes we actually have.
     header_len: usize,
 
     /// How many bytes out of the `header` were already read by the owner of self.
