@@ -31,7 +31,11 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
     /// So we need to always know how many bytes we actually have.
     header_len: usize,
 
-    /// How many bytes out of the `header` were already read by the owner of self.
+    /// How many bytes out of the [`header`] were already read by the reader of this
+    /// [`ReversibleStream`]. If the reader reads bytes into a buffer that is smaller than
+    /// `HEADER_SIZE`, it would not read the whole [`header`] on the first read, so this is the
+    /// amount of bytes that were already read. After all the bytes from the [`header`] were read,
+    /// by the user of this struct, further reads are forwarded to the underlying `TcpStream`.
     num_forwarded: usize,
 }
 
