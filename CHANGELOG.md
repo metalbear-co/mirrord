@@ -7,15 +7,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-## Added
+### Fixed
+
+- crash when `getaddrinfo` is bypassed and libc tries to free our structure. Closes [#930](https://github.com/metalbear-co/mirrord/issues/930)
+
+## 3.18.1
+
+### Fixed
+
+- Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
+- config: file config updated to fix simple pattern of IncomingConfig. [#933](https://github.com/metalbear-co/mirrord/pull/933)
+
+## 3.18.0
+
+### Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
+- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
+- New feature: HTTP traffic filter!
+  - Allows the user to steal HTTP traffic based on HTTP request headers, for example `Client: me` would steal requests that match this header,
+    while letting unmatched requests (and non-HTTP packets) through to their original destinations.
 
-## Fixed
+### Fixed
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
+- stat functions now support directories.
+- Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 
-## Changed
+### Changed
 
 - agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
 

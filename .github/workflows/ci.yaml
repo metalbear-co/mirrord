@@ -328,7 +328,9 @@ jobs:
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
           cd ../app_go
-          go build -o 19      
+          go build -o 19
+          cd ../dir_go
+          go build
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build

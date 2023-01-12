@@ -25,10 +25,18 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::c_int;
-use mirrord_config::{fs::FsConfig, util::VecOrSingle, LayerConfig};
+use mirrord_config::{
+    feature::FeatureConfig,
+    fs::FsConfig,
+    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
+    network::NetworkConfig,
+    util::VecOrSingle,
+    LayerConfig,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
+    tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
 #[cfg(target_os = "macos")]
@@ -278,11 +286,25 @@ struct Layer {
 
     pub tcp_steal_handler: TcpStealHandler,
 
+    /// Receives responses in the layer loop to be forwarded to the agent.
+    pub http_response_receiver: Receiver<HttpResponse>,
+
     steal: bool,
 }
 
 impl Layer {
-    fn new(tx: Sender<ClientMessage>, rx: Receiver<DaemonMessage>, steal: bool) -> Layer {
+    fn new(
+        tx: Sender<ClientMessage>,
+        rx: Receiver<DaemonMessage>,
+        incoming: IncomingConfig,
+    ) -> Layer {
+        // TODO: buffer size?
+        let (http_response_sender, http_response_receiver) = channel(1024);
+        let steal = incoming.is_steal();
+        let IncomingConfig {
+            http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            ..
+        } = incoming;
         Self {
             tx,
             rx,
@@ -292,7 +314,8 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::default(),
+            tcp_steal_handler: TcpStealHandler::new(filter, ports.into(), http_response_sender),
+            http_response_receiver,
             steal,
         }
     }
@@ -396,7 +419,16 @@ async fn thread_loop(
     rx: Receiver<DaemonMessage>,
     config: LayerConfig,
 ) {
-    let mut layer = Layer::new(tx, rx, config.feature.network.incoming.is_steal());
+    let LayerConfig {
+        feature:
+            FeatureConfig {
+                network: NetworkConfig { incoming, .. },
+                capture_error_trace,
+                ..
+            },
+        ..
+    } = config;
+    let mut layer = Layer::new(tx, rx, incoming);
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -437,7 +469,10 @@ async fn thread_loop(
             },
             Some(message) = layer.tcp_steal_handler.next() => {
                 layer.send(message).await.unwrap();
-            },
+            }
+            Some(response) = layer.http_response_receiver.recv() => {
+                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
+            }
             _ = sleep(Duration::from_secs(60)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
@@ -450,7 +485,7 @@ async fn thread_loop(
         }
     }
 
-    if config.feature.capture_error_trace {
+    if capture_error_trace {
         tracing_util::print_support_message();
     }
     graceful_exit!("mirrord has encountered an error and is now exiting.");
@@ -512,19 +547,18 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 /// Shared code for closing fd in our data structures
 /// Callers should call their respective close before calling this.
 pub(crate) fn close_layer_fd(fd: c_int) {
+    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
         .is_active();
 
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active
-    && let Some(remote_fd) = OPEN_FILES.lock().unwrap().remove(&fd) {
-    let close_file_result = file::ops::close(remote_fd);
-
-    if let Err(fail) = close_file_result {
-        error!("Failed closing file with {fail:#?}");
-    };
-}
+    // Remove from sockets, or if not a socket, remove from files if file mode active
+    SOCKETS.lock().unwrap().remove(&fd).is_none().then(|| {
+        if file_mode_active {
+            OPEN_FILES.lock().unwrap().remove(&fd);
+        }
+    });
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we

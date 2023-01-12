@@ -1,4 +1,5 @@
 use mirrord_protocol::Port;
+use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
 
 use crate::error::{AgentError, Result};
@@ -88,6 +89,15 @@ where
         })
     }
 
+    /// Helper function that lists all the iptables' rules belonging to [`Self::chain_name`].
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn list_rules(&self) -> Result<Vec<String>> {
+        self.inner.list_rules(&self.chain_name)
+    }
+
+    /// Adds the redirect rule to iptables.
+    ///
+    /// Used to redirect packets when mirrord incoming feature is set to `steal`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.insert_rule(
@@ -97,12 +107,62 @@ where
         )
     }
 
+    /// Removes the redirect rule from iptables.
+    ///
+    /// Stops redirecting packets when mirrord incoming feature is set to `steal`, and there are no
+    /// more subscribers on `target_port`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner.remove_rule(
             &self.chain_name,
             &self.formatter.redirect_rule(redirected_port, target_port),
         )
+    }
+
+    /// Adds a `RETURN` rule based on `gid` to iptables.
+    ///
+    /// When the mirrord incoming feature is set to `steal`, and we're using a filter (instead of
+    /// stealing every packet), we need this rule to avoid stealing our own packets, that were sent
+    /// to their original destinations.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn add_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.insert_rule(&self.chain_name, &rule, 1)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Removes the `RETURN` bypass rule from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn remove_bypass_own_packets(&self) -> Result<()> {
+        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
+            self.inner.remove_rule(&self.chain_name, &rule)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Adds port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn add_stealer_iptables_rules(
+        &self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        self.add_redirect(redirected_port, target_port)
+            .and_then(|_| self.add_bypass_own_packets())
+    }
+
+    /// Removes port redirection, and bypass gid packets from iptables.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(super) fn remove_stealer_iptables_rules(
+        &self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        self.remove_redirect(redirected_port, target_port)
+            .and_then(|_| self.remove_bypass_own_packets())
     }
 }
 
@@ -130,6 +190,7 @@ enum IPTableFormatter {
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
 
+    #[tracing::instrument(level = "trace", skip_all)]
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
@@ -161,6 +222,16 @@ impl IPTableFormatter {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
                 format!("-o lo {}", redirect_rule)
+            }
+        }
+    }
+
+    fn bypass_own_packets_rule(&self) -> Option<String> {
+        match self {
+            IPTableFormatter::Normal => None,
+            IPTableFormatter::Mesh => {
+                let gid = getgid();
+                Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
         }
     }

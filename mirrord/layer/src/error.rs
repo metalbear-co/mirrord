@@ -1,7 +1,7 @@
 use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
-use libc::{c_char, FILE};
+use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
@@ -12,6 +12,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
+use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
@@ -144,6 +145,12 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
     UnexpectedResponseError(ResponseError),
 
+    #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
+    HttpForwardingError(#[from] HttpForwarderError),
+
+    #[error("mirrord-layer: Regex creation failed with `{0}`.")]
+    Regex(#[from] fancy_regex::Error),
+
     #[error("mirrord-layer: Agent closed connection with error: {0}")]
     AgentErrorClosed(String),
 }
@@ -239,6 +246,14 @@ impl From<HookError> for i32 {
 }
 
 impl From<HookError> for *mut FILE {
+    fn from(fail: HookError) -> Self {
+        let _ = i64::from(fail);
+
+        ptr::null_mut()
+    }
+}
+
+impl From<HookError> for *mut DIR {
     fn from(fail: HookError) -> Self {
         let _ = i64::from(fail);
 

@@ -21,3 +21,7 @@ trust-dns-resolver.workspace = true
 serde.workspace = true
 bincode =  { version = "2.0.0-rc.2", features = ["serde"] }
 tracing.workspace = true
+hyper = { workspace = true, features = ["client"]}
+http-serde = "1.1.2"
+http-body-util = { workspace = true }
+fancy-regex = { workspace = true }

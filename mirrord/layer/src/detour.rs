@@ -70,6 +70,7 @@ pub(crate) enum Bypass {
     Type(i32),
     Domain(i32),
     LocalFdNotFound(RawFd),
+    LocalDirStreamNotFound(usize),
     AddressConversion,
     InvalidState(RawFd),
     CStrConversion,

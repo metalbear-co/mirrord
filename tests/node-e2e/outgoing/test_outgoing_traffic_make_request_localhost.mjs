@@ -3,7 +3,7 @@ import { createServer } from "net";
 
 console.log(">> test_outgoing_traffic_make_request_localhost");
 
-const makeRequest = () => {
+const makeRequest = (server) => {
   const options = {
     hostname: "localhost",
     port: 80,
@@ -37,6 +37,7 @@ const makeRequest = () => {
     console.log(">> success");
   });
 
+  server.close();
   request.end();
 };
 
@@ -50,9 +51,7 @@ const listen = () => {
     function () {
       console.log(">> server listening to %j", server.address());
 
-      makeRequest();
-
-      server.close();
+      makeRequest(server);
     }
   );
 
