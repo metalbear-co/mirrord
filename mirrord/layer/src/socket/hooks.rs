@@ -1,12 +1,21 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
-use std::os::unix::io::RawFd;
+use std::{
+    collections::HashSet,
+    os::unix::io::RawFd,
+    sync::{LazyLock, Mutex},
+};
 
 use libc::{c_char, c_int, sockaddr, socklen_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
-use crate::{detour::DetourGuard, hooks::HookManager, replace};
+use crate::{detour::DetourGuard, error::HookError, hooks::HookManager, replace};
+
+/// Here we keep addr infos that we allocated so we'll know when to use the original
+/// freeaddrinfo function and when to use our implementation
+pub(crate) static MANAGED_ADDRINFO: LazyLock<Mutex<HashSet<usize>>> =
+    LazyLock::new(|| Mutex::new(HashSet::with_capacity(4)));
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -192,8 +201,13 @@ unsafe extern "C" fn getaddrinfo_detour(
     getaddrinfo(rawish_node, rawish_service, mem::transmute(raw_hints))
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
-
-            0
+            MANAGED_ADDRINFO
+                .lock()
+                .map(|mut managed_addrinfo| {
+                    managed_addrinfo.insert(c_addr_info_ptr as usize);
+                    0
+                })
+                .unwrap_or(HookError::LockError.into())
         })
         .unwrap_or_bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
 }
@@ -215,19 +229,33 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// [memory layout](https://doc.rust-lang.org/std/boxed/index.html#memory-layout).
 #[hook_guard_fn]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
-    // Iterate over `addrinfo` linked list dropping it.
-    let mut current = addrinfo;
-    while !current.is_null() {
-        let current_box = Box::from_raw(current);
-        let ai_addr = Box::from_raw(current_box.ai_addr);
-        let ai_canonname = CString::from_raw(current_box.ai_canonname);
+    MANAGED_ADDRINFO
+        .lock()
+        .map(|mut managed_addrinfo| {
+            managed_addrinfo
+                .remove(&(addrinfo as usize))
+                .then(|| {
+                    // Iterate over `addrinfo` linked list dropping it.
+                    let mut current = addrinfo;
+                    while !current.is_null() {
+                        let current_box = Box::from_raw(current);
+                        let ai_addr = Box::from_raw(current_box.ai_addr);
+                        let ai_canonname = CString::from_raw(current_box.ai_canonname);
 
-        current = (*current).ai_next;
+                        current = (*current).ai_next;
 
-        drop(ai_addr);
-        drop(ai_canonname);
-        drop(current_box);
-    }
+                        drop(ai_addr);
+                        drop(ai_canonname);
+                        drop(current_box);
+                    }
+                })
+                .unwrap_or_else(|| {
+                    // If the `addrinfo` pointer was not allocated by `getaddrinfo_detour`, then it
+                    // is bypassed.
+                    FN_FREEADDRINFO(addrinfo);
+                })
+        })
+        .expect("Failed to lock MANAGED_ADDRINFO mutex");
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
