@@ -162,7 +162,7 @@ mod tests {
         agent::AgentFileConfig,
         feature::FeatureFileConfig,
         fs::{FsModeConfig, FsUserConfig},
-        incoming::{IncomingFileConfig, IncomingMode},
+        incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
         network::NetworkFileConfig,
         outgoing::OutgoingFileConfig,
         target::{PodTarget, Target, TargetFileConfig},
@@ -345,10 +345,12 @@ mod tests {
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
-                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig {
-                        mode: Some(IncomingMode::Mirror),
-                        http_header_filter: None,
-                    })),
+                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
+                        IncomingAdvancedFileConfig {
+                            mode: Some(IncomingMode::Mirror),
+                            http_header_filter: None,
+                        },
+                    ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
