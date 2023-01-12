@@ -431,8 +431,7 @@
       },
       "additionalProperties": false
     },
-    "IncomingFileConfig": {
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+    "IncomingAdvancedFileConfig": {
       "type": "object",
       "properties": {
         "http_header_filter": {
@@ -457,8 +456,25 @@
             }
           ]
         }
-      },
-      "additionalProperties": false
+      }
+    },
+    "IncomingFileConfig": {
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        {
+          "$ref": "#/definitions/IncomingAdvancedFileConfig"
+        }
+      ]
     },
     "IncomingMode": {
       "description": "Mode of operation for the incoming TCP traffic feature.\n\nDefaults to [`IncomingMode::Mirror`].",

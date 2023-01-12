@@ -1,13 +1,15 @@
 use std::str::FromStr;
 
-use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    util::MirrordToggleableConfig,
+    config::{
+        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
+        MirrordConfig, Result,
+    },
+    util::{MirrordToggleableConfig, ToggleableConfig},
 };
 
 pub mod http_filter;
@@ -49,23 +51,53 @@ use http_filter::*;
 /// [feature.network.incoming.http_header_filter]
 /// filter = "Id: token.*"
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
-#[config(map_to = "IncomingFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
-pub struct IncomingConfig {
-    /// Allows selecting between mirrorring or stealing traffic.
-    ///
-    /// See [`IncomingMode`] for details.
-    #[config(env = "MIRRORD_AGENT_TCP_STEAL_TRAFFIC", default)]
-    pub mode: IncomingMode,
-
-    /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
-    ///
-    /// See [`HttpHeaderFilterConfig`] for details.
-    #[config(toggleable, nested)]
-    pub http_header_filter: http_filter::HttpHeaderFilterConfig,
+#[derive(Deserialize, Clone, Debug, JsonSchema)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+#[serde(untagged, rename_all = "lowercase")]
+pub enum IncomingFileConfig {
+    Simple(Option<IncomingMode>),
+    Advanced(IncomingAdvancedFileConfig),
 }
 
+impl Default for IncomingFileConfig {
+    fn default() -> Self {
+        IncomingFileConfig::Simple(None)
+    }
+}
+
+impl FromMirrordConfig for IncomingConfig {
+    type Generator = IncomingFileConfig;
+}
+
+impl MirrordConfig for IncomingFileConfig {
+    type Generated = IncomingConfig;
+
+    fn generate_config(self) -> Result<Self::Generated> {
+        let config = match self {
+            IncomingFileConfig::Simple(mode) => IncomingConfig {
+                mode: FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
+                    .or(mode)
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
+                http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
+            },
+            IncomingFileConfig::Advanced(advanced) => IncomingConfig {
+                mode: FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
+                    .or(advanced.mode)
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
+                http_header_filter: advanced
+                    .http_header_filter
+                    .unwrap_or_default()
+                    .generate_config()?,
+            },
+        };
+
+        Ok(config)
+    }
+}
 impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
@@ -77,6 +109,27 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
         })
     }
+}
+
+#[derive(Deserialize, Clone, Debug, JsonSchema)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct IncomingAdvancedFileConfig {
+    /// Allows selecting between mirrorring or stealing traffic.
+    ///
+    /// See [`IncomingMode`] for details.
+    pub mode: Option<IncomingMode>,
+
+    /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
+    ///
+    /// See [`HttpHeaderFilterConfig`] for details.
+    pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
+}
+
+#[derive(Default, PartialEq, Eq, Clone, Debug)]
+pub struct IncomingConfig {
+    pub mode: IncomingMode,
+
+    pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 }
 
 impl IncomingConfig {
