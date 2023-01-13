@@ -11,10 +11,11 @@ use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
-        ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        Getdents64Request, OpenDirResponse, OpenFileRequest, OpenFileResponse,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -51,6 +52,7 @@ pub enum FileRequest {
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
+    Getdents64(Getdents64Request),
 }
 
 /// `-layer` --> `-agent` messages.

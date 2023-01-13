@@ -1,3 +1,4 @@
+use core::ffi::{c_size_t, c_ssize_t};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
@@ -10,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
     FILE,
@@ -19,7 +21,7 @@ use mirrord_protocol::file::{
     DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
-use tracing::trace;
+use tracing::{log::error, trace};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
@@ -169,6 +171,39 @@ pub(crate) unsafe extern "C" fn openat_detour(
 
     openat(fd, rawish_path, open_options)
         .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
+}
+
+/// Hook for getdents64, for Go on Linux.
+// #[cfg(target_os = "linux")] // TODO: uncomment.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn getdents64_detour(
+    fd: RawFd,
+    dirent_buf: *mut c_void,
+    buf_size: c_size_t,
+) -> c_ssize_t {
+    getdents64(fd, buf_size as u64)
+        .map(|res| {
+            if let Some(remote_errno) = res.errno {
+                set_errno(Errno(remote_errno));
+                -1 as c_ssize_t
+            } else {
+                let end = dirent_buf.byte_add(buf_size);
+                let mut next = dirent_buf as *mut dirent; // TODO: use dirent64?
+                for dent in res.entries {
+                    // TODO: check for buffer overflow.
+                    match assign_direntry(dent, next) {
+                        Err(e) => {
+                            error!("Error while trying to write remote dir entry to local buffer: {e:?}");
+                            set_errno(Errno(c_int::from(e)));
+                            return -1
+                        },
+                        Ok(()) => next = next.byte_add((*next).d_reclen as usize),
+                    }
+                }
+                res.return_value as c_ssize_t
+            }
+        })
+        .unwrap_or_bypass_with(|_| 0 /* TODO: call getdents64 syscall */)
 }
 
 /// Hook for `libc::read`.

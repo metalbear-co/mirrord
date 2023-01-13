@@ -278,3 +278,13 @@ pub struct ReadDirResponse {
 pub struct CloseDirRequest {
     pub remote_fd: u64,
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct Getdents64Request {
+    pub remote_fd: u64,
+    pub buffer_size: u64,
+}
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct Getdents64Response {
+    pub fd: u64,
+}
