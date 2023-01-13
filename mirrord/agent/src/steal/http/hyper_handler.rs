@@ -188,7 +188,7 @@ async fn unmatched_request(
     Ok(Response::from_parts(parts, body.into()))
 }
 
-#[tracing::instrument(level = "debug")]
+// #[tracing::instrument(level = "debug")]
 async fn upgrade_connection(
     request: Request<Incoming>,
     original_destination: SocketAddr,
@@ -209,15 +209,15 @@ async fn upgrade_connection(
     let mut interceptor_to_original = TcpStream::connect(original_destination).await.unwrap();
     interceptor_to_original.write(&raw).await.unwrap();
 
-    let mut read_buffer = vec![0; 15000];
+    let mut response_buffer = vec![0; 15000];
     let amount = interceptor_to_original
-        .read(&mut read_buffer)
+        .read(&mut response_buffer)
         .await
         .unwrap();
 
     info!(
         "Received response from interceptor is \n{:#?}",
-        String::from_utf8_lossy(&read_buffer[..amount])
+        String::from_utf8_lossy(&response_buffer[..amount])
     );
 
     let request = Request::from_parts(parts, body);
