@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.18.1"
+version = "3.18.2"
 dependencies = [
  "axum",
  "futures",

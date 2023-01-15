@@ -72,7 +72,7 @@ async fn handle_socket(socket: WebSocket) {
                     client_info.process_info.id, record.message
                 ))
                 .file(record.file.as_deref())
-                .level(record.metadata.level.into())
+                .level(record.metadata.level)
                 .module_path(record.module_path.as_deref())
                 .target(&record.metadata.target)
                 .line(record.line)
