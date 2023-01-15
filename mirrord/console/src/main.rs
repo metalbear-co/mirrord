@@ -50,7 +50,7 @@ impl WebSocketWrapper {
 }
 
 async fn handle_socket(socket: WebSocket) {
-    let mut wrapper = WsWrapper::new(socket);
+    let mut wrapper = WebSocketWrapper::new(socket);
 
     let client_info: Hello = match wrapper.next_message().await {
         Some(hello) => {
