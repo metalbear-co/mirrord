@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
+
 ## 3.18.2
 
 ### Fixed

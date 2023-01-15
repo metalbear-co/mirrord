@@ -22,6 +22,7 @@ mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-console = { path = "../console" }
 
 clap.workspace = true
 tracing.workspace = true
