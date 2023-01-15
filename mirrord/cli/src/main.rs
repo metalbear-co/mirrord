@@ -296,7 +296,6 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() -> miette::Result<()> {
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr).await?;
-        println!("AA");
     } else {
         registry()
             .with(fmt::layer())
