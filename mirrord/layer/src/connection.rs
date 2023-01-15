@@ -80,6 +80,7 @@ pub(crate) async fn connect(
                 .await
                 .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
                 .unwrap_or_else(|err| handle_error(err, config));
+                info!("Created new agent {pod_agent_name}, port {agent_port}");
 
                 // Set env var for children to re-use.
                 std::env::set_var("MIRRORD_CONNECT_AGENT", &pod_agent_name);

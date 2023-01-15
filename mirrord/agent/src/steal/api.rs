@@ -1,4 +1,4 @@
-use mirrord_protocol::tcp::{DaemonTcp, LayerTcpSteal, TcpData};
+use mirrord_protocol::tcp::{DaemonTcp, HttpResponse, LayerTcpSteal, TcpData};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::*;
@@ -84,8 +84,8 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortSubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_subscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        self.send_command(Command::PortSubscribe(port)).await
+    pub(crate) async fn port_subscribe(&mut self, port_steal: StealType) -> Result<(), AgentError> {
+        self.send_command(Command::PortSubscribe(port_steal)).await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortUnsubscribe`], that is passed from the
@@ -116,6 +116,14 @@ impl TcpStealerApi {
         self.send_command(Command::ResponseData(tcp_data)).await
     }
 
+    /// Handles the conversion of [`LayerTcpSteal::HttpResponse`], that is passed from the
+    /// agent, to an internal stealer command [`Command::HttpResponse`].
+    ///
+    /// The actual handling of this message is done in [`TcpConnectionStealer`].
+    pub(crate) async fn http_response(&mut self, response: HttpResponse) -> Result<(), AgentError> {
+        self.send_command(Command::HttpResponse(response)).await
+    }
+
     /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
     /// agent, to an internal stealer command [`Command::ClientClose`].
     ///
@@ -128,12 +136,13 @@ impl TcpStealerApi {
 
     pub(crate) async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         match message {
-            LayerTcpSteal::PortSubscribe(port) => self.port_subscribe(port).await,
+            LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.connection_unsubscribe(connection_id).await
             }
             LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
             LayerTcpSteal::Data(tcp_data) => self.client_data(tcp_data).await,
+            LayerTcpSteal::HttpResponse(response) => self.http_response(response).await,
         }
     }
 }

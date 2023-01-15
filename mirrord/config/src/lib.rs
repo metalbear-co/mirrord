@@ -1,5 +1,6 @@
 #![feature(slice_concat_trait)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 pub mod agent;
 pub mod config;
@@ -161,7 +162,7 @@ mod tests {
         agent::AgentFileConfig,
         feature::FeatureFileConfig,
         fs::{FsModeConfig, FsUserConfig},
-        incoming::IncomingConfig,
+        incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
         network::NetworkFileConfig,
         outgoing::OutgoingFileConfig,
         target::{PodTarget, Target, TargetFileConfig},
@@ -208,7 +209,9 @@ mod tests {
                             "fs": "write",
                             "network": {
                                 "dns": false,
-                                "incoming": "mirror",
+                                "incoming": {
+                                    "mode": "mirror"
+                                },
                                 "outgoing": {
                                     "tcp": true,
                                     "udp": false
@@ -241,7 +244,9 @@ mod tests {
 
                     [feature.network]
                     dns = false
-                    incoming = "mirror"
+
+                    [feature.network.incoming]
+                    mode = "mirror"
 
                     [feature.network.outgoing]
                     tcp = true
@@ -269,7 +274,8 @@ mod tests {
                         fs: "write"
                         network:
                             dns: false
-                            incoming: "mirror"
+                            incoming:
+                                mode: "mirror"
                             outgoing:
                                 tcp: true
                                 udp: false
@@ -339,7 +345,12 @@ mod tests {
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
-                    incoming: Some(IncomingConfig::Mirror),
+                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
+                        IncomingAdvancedFileConfig {
+                            mode: Some(IncomingMode::Mirror),
+                            http_header_filter: None,
+                        },
+                    ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),

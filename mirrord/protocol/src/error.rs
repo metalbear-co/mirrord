@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
-use crate::Port;
+use crate::{tcp::Filter, Port};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
@@ -52,6 +52,9 @@ pub enum RemoteError {
     /// on both IPv6 and IPv4.
     #[error("Connect call to `SocketAddr` `{0}` timed out!")]
     ConnectTimedOut(SocketAddr),
+
+    #[error(r#"Got bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
+    BadHttpFilterRegex(Filter, String),
 }
 
 impl From<AddrParseError> for RemoteError {

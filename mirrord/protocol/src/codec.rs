@@ -11,7 +11,10 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{XstatRequest, XstatResponse},
+    file::{
+        CloseDirRequest, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
+        XstatRequest, XstatResponse,
+    },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -188,7 +191,11 @@ pub enum FileRequest {
     Close(CloseFileRequest),
     Access(AccessFileRequest),
     Xstat(XstatRequest),
+    FdOpenDir(FdOpenDirRequest),
+    ReadDir(ReadDirRequest),
+    CloseDir(CloseDirRequest),
 }
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -234,9 +241,6 @@ pub struct WriteFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct CloseFileResponse;
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct AccessFileResponse;
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -251,9 +255,10 @@ pub enum FileResponse {
     Write(RemoteResult<WriteFileResponse>),
     WriteLimited(RemoteResult<WriteFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
-    Close(RemoteResult<CloseFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
     Xstat(RemoteResult<XstatResponse>),
+    ReadDir(RemoteResult<ReadDirResponse>),
+    OpenDir(RemoteResult<OpenDirResponse>),
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

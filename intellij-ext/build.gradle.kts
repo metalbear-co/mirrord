@@ -125,12 +125,13 @@ tasks {
                 subList(indexOf(start) + 1, indexOf(end))
             }.joinToString("\n").run { markdownToHTML(this) }
         )
-
-        changeNotes.set(provider {
+        if (!System.getenv("CI_BUILD_PLUGIN").toBoolean()) {
+            changeNotes.set(provider {
             changelog.run {
                 getOrNull(properties("pluginVersion")) ?: getLatest()
             }.toHTML()
         })
+        }
     }
 
     prepareSandbox {

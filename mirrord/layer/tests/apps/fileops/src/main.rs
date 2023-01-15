@@ -76,4 +76,6 @@ fn main() {
         test_lstat();
         test_stat();
     }
+    // let close message get called
+    std::thread::sleep(std::time::Duration::from_millis(10));
 }
