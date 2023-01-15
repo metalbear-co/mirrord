@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-operator: replace operator api to use KubernetesAPI extension. [#915](https://github.com/metalbear-co/mirrord/pull/915)
+
 ### Fixed
 
 - tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
