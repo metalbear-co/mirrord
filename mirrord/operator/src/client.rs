@@ -1,13 +1,11 @@
-use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{Api, Client};
+use kube::{error::ErrorResponse, Api, Client};
 use mirrord_config::{target::TargetConfig, LayerConfig};
 use mirrord_kube::{
-    api::{get_k8s_resource_api, kubernetes::create_kube_api, AgentManagment},
+    api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
-use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -31,49 +29,64 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
 pub struct OperatorApi {
     client: Client,
-    target: TargetConfig,
+    target_api: Api<TargetCrd>,
+    target_config: TargetConfig,
 }
 
 impl OperatorApi {
-    pub async fn discover<P>(config: &LayerConfig, progress: &P) -> Result<(Self, TargetCrd)>
-    where
-        P: Progress + Send + Sync,
-    {
+    pub async fn discover(
+        config: &LayerConfig,
+    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
         let operator_api = OperatorApi::new(&config).await?;
 
-        let operator_ref = operator_api.create_agent(progress).await?;
-
-        Ok((operator_api, operator_ref))
+        if let Some(target) = operator_api.fetch_target().await? {
+            operator_api.connect_target(target).await.map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
-    pub async fn new(config: &LayerConfig) -> Result<Self> {
-        let target = config.target.clone();
+    async fn new(config: &LayerConfig) -> Result<Self> {
+        let target_config = config.target.clone();
 
         let client = create_kube_api(Some(config.clone())).await?;
 
-        Ok(OperatorApi { client, target })
-    }
-}
-
-#[async_trait]
-impl AgentManagment for OperatorApi {
-    type AgentRef = TargetCrd;
-    type Err = OperatorApiError;
-
-    async fn create_connection(
-        &self,
-        target: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let target_api: Api<TargetCrd> =
-            get_k8s_resource_api(&self.client, self.target.namespace.as_deref());
+            get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
+        Ok(OperatorApi {
+            client,
+            target_api,
+            target_config,
+        })
+    }
+
+    async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
+        let target = self
+            .target_config
+            .path
+            .as_ref()
+            .map(TargetCrd::target_name)
+            .ok_or(OperatorApiError::InvalidTarget)?;
+
+        match self.target_api.get(&target).await {
+            Ok(target) => Ok(Some(target)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
+            Err(err) => Err(OperatorApiError::from(KubeApiError::from(err))),
+        }
+    }
+
+    async fn connect_target(
+        &self,
+        target: TargetCrd,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let connection = self
             .client
             .connect(
                 Request::builder()
                     .uri(format!(
                         "{}/{}?connect=true",
-                        target_api.resource_url(),
+                        self.target_api.resource_url(),
                         target.name()
                     ))
                     .body(vec![])?,
@@ -82,26 +95,6 @@ impl AgentManagment for OperatorApi {
             .map_err(KubeApiError::from)?;
 
         wrap_connection(connection)
-    }
-
-    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef>
-    where
-        P: Progress + Send + Sync,
-    {
-        let target_api: Api<TargetCrd> =
-            get_k8s_resource_api(&self.client, self.target.namespace.as_deref());
-
-        let target = self
-            .target
-            .path
-            .as_ref()
-            .ok_or(OperatorApiError::InvalidTarget)?;
-
-        target_api
-            .get(&TargetCrd::target_name(target))
-            .await
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::from)
     }
 }
 
@@ -125,7 +118,7 @@ where
                     if let Some(client_message) = client_message {
                         if let Ok(payload) = bincode::encode_to_vec(client_message, bincode::config::standard()) {
                             if let Err(err) = connection.send(payload.into()).await {
-                                println!("{:?}", err);
+                                eprintln!("{:?}", err);
 
                                 break;
                             }
@@ -140,7 +133,7 @@ where
                     if let Some(Ok(Message::Binary(payload))) = daemon_message {
                         if let Ok((daemon_message, _)) = bincode::decode_from_slice::<DaemonMessage, _>(&payload, bincode::config::standard()) {
                             if let Err(err) = daemon_tx.send(daemon_message.into()).await {
-                                println!("{:?}", err);
+                                eprintln!("{:?}", err);
 
                                 break;
                             }
@@ -156,29 +149,4 @@ where
     });
 
     Ok((client_tx, daemon_rx))
-}
-
-#[cfg(test)]
-mod tests {
-
-    use mirrord_progress::NoProgress;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn connection() {
-        let mut config = LayerConfig::from_env().unwrap();
-
-        config.target.path = "deploy/py-serv-deployment".parse().ok();
-
-        let api = OperatorApi::new(&config).await.unwrap();
-
-        let target = api.create_agent(&NoProgress).await.unwrap();
-
-        let (client_tx, mut daemon_rx) = api.create_connection(target).await.unwrap();
-
-        let _ = client_tx.send(ClientMessage::Ping).await;
-
-        println!("{:#?}", daemon_rx.recv().await);
-    }
 }
