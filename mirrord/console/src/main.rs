@@ -16,7 +16,7 @@ struct WebSocketWrapper {
     socket: WebSocket,
 }
 
-impl WsWrapper {
+impl WebSocketWrapper {
     fn new(socket: WebSocket) -> Self {
         Self { socket }
     }
