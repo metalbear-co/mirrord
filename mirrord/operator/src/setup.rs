@@ -537,12 +537,13 @@ impl OperatorApiService {
                 ..Default::default()
             },
             spec: Some(APIServiceSpec {
-                group_priority_minimum: 1000,
-                version_priority: 15,
+                ca_bundle: None,
                 group: Some(group.to_string()),
-                version: Some(version.to_string()),
+                group_priority_minimum: 1000,
+                insecure_skip_tls_verify: Some(true),
                 service: Some(service.as_referance()),
-                ..Default::default()
+                version: Some(version.to_string()),
+                version_priority: 15,
             }),
             ..Default::default()
         };
