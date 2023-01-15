@@ -37,7 +37,7 @@ impl OperatorApi {
     pub async fn discover(
         config: &LayerConfig,
     ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
-        let operator_api = OperatorApi::new(&config).await?;
+        let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
             operator_api.connect_target(target).await.map(Some)
@@ -132,7 +132,7 @@ where
                 daemon_message = connection.next() => {
                     if let Some(Ok(Message::Binary(payload))) = daemon_message {
                         if let Ok((daemon_message, _)) = bincode::decode_from_slice::<DaemonMessage, _>(&payload, bincode::config::standard()) {
-                            if let Err(err) = daemon_tx.send(daemon_message.into()).await {
+                            if let Err(err) = daemon_tx.send(daemon_message).await {
                                 eprintln!("{:?}", err);
 
                                 break;

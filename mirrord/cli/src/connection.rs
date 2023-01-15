@@ -29,7 +29,7 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some(connection) = OperatorApi::discover(&config).await.transpose() {
+    if config.operator && let Some(connection) = OperatorApi::discover(config).await.transpose() {
         let (sender, receiver) = connection.map_err(CliError::OperatorConnectionFailed)?;
 
         Ok((

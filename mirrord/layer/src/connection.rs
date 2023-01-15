@@ -56,7 +56,7 @@ pub(crate) async fn connect(
             .connect(&progress)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    } else if config.operator && let Some(connection) = OperatorApi::discover(&config).await.transpose() {
+    } else if config.operator && let Some(connection) = OperatorApi::discover(config).await.transpose() {
         connection.unwrap_or_else(|err| handle_operator_error(err))
     } else {
         let k8s_api = KubernetesAPI::create(config)
