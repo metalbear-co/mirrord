@@ -71,7 +71,6 @@ where
     Ok(())
 }
 
-
 /// Background task that does the communication
 /// with the console app.
 async fn logger_task<C>(mut client: C, mut rx: UnboundedReceiver<protocol::Record>)
