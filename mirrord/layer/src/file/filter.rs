@@ -3,13 +3,9 @@
 /// There are 3 ways of setting this up:
 ///
 /// 1. no configuration (default): will bypass file operations for file paths and types that
-/// match [`DEFAULT_EXCLUDE_LIST`];
+/// match [`generate_local_set`];
 ///
-/// 2. `MIRRORD_FILE_FILTER_INCLUDE`: includes only the files specified by the user (input)
-/// regex;
-///
-/// 3. `MIRRORD_FILE_FILTER_EXCLUDE`: similar to the default, it includes everything that is
-/// not filtered by the user (input) regex, and [`DEFAULT_EXCLUDE_LIST`];
+/// 2. Using the overrides for `read_only`, `read_write` and `local`.
 use std::{env, sync::OnceLock};
 
 use mirrord_config::{
@@ -37,7 +33,7 @@ macro_rules! some_regex_match {
 /// version).
 ///
 /// You most likely do **NOT** want to include any of these, but if have a reason to do so, then
-/// setting `MIRRORD_FILE_FILTER_INCLUDE` allows you to override this list.
+/// setting any of the overrides - `MIRRORD_FILE_X_PATTERN` allows you to override this list.
 fn generate_local_set() -> RegexSet {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
@@ -113,34 +109,7 @@ fn generate_remote_ro_set() -> RegexSet {
 /// Global filter used by file operations to bypass (use local) or continue (use remote).
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
-///  DEPRECATED, behavior preserved but will be deleted once we delete the INCLUDE/EXCLUDE settings.
-///  Holds the `Regex` that is used to either continue or bypass file path operations (such as
-/// [`file::ops::open`]), according to what the user specified.
-///
-/// The [`FileFilter::Include`] variant takes precedence and erases whatever the user supplied as
-/// exclude, this means that if the user specifies both, `FileFilter::Exclude` is never constructed.
-///
-/// Warning: Use [`FileFilter::new`] (or equivalent) when initializing this, otherwise the above
-/// constraint might not be held.
-#[derive(Debug, Clone)]
-pub(crate) enum OldFilter {
-    /// User specified `Regex` containing the file paths that the user wants to include for file
-    /// operations.
-    ///
-    /// Overrides [`FileFilter::Exclude`].
-    Include(RegexSet),
-
-    /// User's specified `Regex`.
-    ///
-    /// Anything not matched by this `Regex` is considered as included.
-    Exclude(RegexSet),
-
-    /// Neither was set (default).
-    Nothing,
-}
-
 pub(crate) struct FileFilter {
-    old_filter: OldFilter,
     read_only: Option<RegexSet>,
     read_write: Option<RegexSet>,
     local: Option<RegexSet>,
@@ -173,16 +142,12 @@ impl FileFilter {
     #[tracing::instrument(level = "trace")]
     pub(crate) fn new(fs_config: FsConfig) -> Self {
         let FsConfig {
-            include,
-            exclude,
             read_write,
             read_only,
             local,
             mode,
         } = fs_config;
 
-        let include = include.map(VecOrSingle::to_vec).unwrap_or_default();
-        let exclude = exclude.map(VecOrSingle::to_vec).unwrap_or_default();
         let read_write =
             build_regex_or_none(read_write.map(VecOrSingle::to_vec).unwrap_or_default())
                 .expect("Building read-write regex set failed");
@@ -194,24 +159,7 @@ impl FileFilter {
         let default_local = generate_local_set();
         let default_remote_ro = generate_remote_ro_set();
 
-        let old_filter = if !include.is_empty() {
-            let include = RegexSetBuilder::new(include)
-                .case_insensitive(true)
-                .build()
-                .expect("Building include regex set failed");
-            OldFilter::Include(include)
-        } else if !exclude.is_empty() {
-            let exclude = RegexSetBuilder::new(exclude)
-                .case_insensitive(true)
-                .build()
-                .expect("Building exclude regex set failed");
-            OldFilter::Exclude(exclude)
-        } else {
-            OldFilter::Nothing
-        };
-
         Self {
-            old_filter,
             read_only,
             read_write,
             local,
@@ -231,16 +179,6 @@ impl FileFilter {
     {
         if matches!(&self.mode, FsModeConfig::Local) {
             return Detour::Bypass(op());
-        }
-        // Order matters here, as we want to make `include` the most important pattern. If the user
-        // specified `include`, then we never want to accidentally allow other paths to pass this
-        // check (this is a corner case that is unlikely to happen, as initialization via
-        // `FileFilter::new` should prevent it from ever seeing the light of day).
-        match &self.old_filter {
-            OldFilter::Include(include) if include.is_match(text) => {}
-            OldFilter::Exclude(exclude) if !exclude.is_match(text) => {}
-            OldFilter::Nothing => {}
-            _ => return Detour::Bypass(op()),
         }
 
         if some_regex_match!(self.read_write, text) {
@@ -295,177 +233,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_include_only_filter() {
-        let include = Some(VecOrSingle::Multiple(vec![
-            "/folder/first.a".to_string(),
-            "/folder/second.a".to_string(),
-        ]));
-
-        let fs_config = FsConfig {
-            include,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
-                "first.a".into()
-            ))
-            .is_success());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_success());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
-                "third.a".into()
-            ))
-            .is_bypass());
-    }
-
-    #[test]
-    fn test_exclude_only_filter() {
-        let exclude = Some(VecOrSingle::Multiple(vec![
-            "/folder/first.a".to_string(),
-            "/folder/second.a".to_string(),
-        ]));
-
-        let fs_config = FsConfig {
-            exclude,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
-                "first.a".into()
-            ))
-            .is_bypass());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_bypass());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
-                "third.a".into()
-            ))
-            .is_success());
-    }
-
-    #[test]
-    fn test_include_overrides_exclude() {
-        let include = Some(VecOrSingle::Multiple(vec![
-            "/folder/first.a".to_string(),
-            "/folder/second.a".to_string(),
-        ]));
-
-        let exclude = include.clone();
-
-        let fs_config = FsConfig {
-            include,
-            exclude,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
-                "first.a".into()
-            ))
-            .is_success());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_success());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/third.a", false, || Bypass::IgnoredFile(
-                "third.a".into()
-            ))
-            .is_bypass());
-    }
-
-    #[test]
-    fn test_regex_include_only_filter() {
-        let include = Some(VecOrSingle::Multiple(vec![r"/folder/.*\.a".to_string()]));
-
-        let fs_config = FsConfig {
-            include,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
-                "first.a".into()
-            ))
-            .is_success());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_success());
-    }
-
-    #[test]
-    fn test_regex_exclude_only_filter() {
-        let exclude = Some(VecOrSingle::Multiple(vec![r"/folder/.*\.a".to_string()]));
-
-        let fs_config = FsConfig {
-            exclude,
-            ..Default::default()
-        };
-
-        let file_filter = FileFilter::new(fs_config);
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/first.a", false, || Bypass::IgnoredFile(
-                "first.a".into()
-            ))
-            .is_bypass());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/folder/second.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_bypass());
-
-        assert!(file_filter
-            .continue_or_bypass_with("/dir/third.a", false, || Bypass::IgnoredFile(
-                "second.a".into()
-            ))
-            .is_success());
-    }
-
     #[rstest]
     #[trace]
-    #[case(FsModeConfig::Write, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Write, "/a/test.a", false, false)]
     #[case(FsModeConfig::Write, "/pain/read_write/test.a", false, false)]
     #[case(FsModeConfig::Write, "/pain/read_only/test.a", false, false)]
     #[case(FsModeConfig::Write, "/pain/write.a", false, false)]
     #[case(FsModeConfig::Write, "/pain/local/test.a", false, true)]
     #[case(FsModeConfig::Write, "/opt/test.a", false, true)]
-    #[case(FsModeConfig::Write, "/a/test.a", true, true)]
+    #[case(FsModeConfig::Write, "/a/test.a", true, false)]
     #[case(FsModeConfig::Write, "/pain/read_write/test.a", true, false)]
     #[case(FsModeConfig::Write, "/pain/read_only/test.a", true, true)]
     #[case(FsModeConfig::Write, "/pain/write.a", true, false)]
     #[case(FsModeConfig::Write, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Write, "/opt/test.a", true, true)]
-    #[case(FsModeConfig::Read, "/a/test.a", false, true)]
+    #[case(FsModeConfig::Read, "/a/test.a", false, false)]
     #[case(FsModeConfig::Read, "/pain/read_write/test.a", false, false)]
     #[case(FsModeConfig::Read, "/pain/read_only/test.a", false, false)]
     #[case(FsModeConfig::Read, "/pain/write.a", false, false)]
@@ -530,7 +312,6 @@ mod tests {
         #[case] write: bool,
         #[case] bypass: bool,
     ) {
-        let include = Some(VecOrSingle::Multiple(vec![r"/pain/.*\.a".to_string()]));
         let read_write = Some(VecOrSingle::Multiple(vec![
             r"/pain/read_write.*\.a".to_string()
         ]));
@@ -539,7 +320,6 @@ mod tests {
         ]));
         let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
         let fs_config = FsConfig {
-            include,
             read_write,
             read_only,
             local,
