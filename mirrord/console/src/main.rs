@@ -12,7 +12,7 @@ use protocol::Hello;
 use tracing::{error, info, metadata::LevelFilter};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-struct WsWrapper {
+struct WebSocketWrapper {
     socket: WebSocket,
 }
 
