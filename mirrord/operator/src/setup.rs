@@ -30,6 +30,8 @@ static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_TLS_SECRET_NAME: &str = "mirrord-operator-tls";
 static OPERATOR_TLS_VOLUME_NAME: &str = "tls-volume";
+static OPERATOR_TLS_KEY_FILE_NAME: &str = "tls.key";
+static OPERATOR_TLS_CERT_FILE_NAME: &str = "tls.pem";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
@@ -188,12 +190,12 @@ impl OperatorDeployment {
                 },
                 EnvVar {
                     name: "OPERATOR_TLS_CERT_PATH".to_owned(),
-                    value: Some("/tls/tls.pem".to_owned()),
+                    value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
                     value_from: None,
                 },
                 EnvVar {
                     name: "OPERATOR_TLS_KEY_PATH".to_owned(),
-                    value: Some("/tls/tls.rsa".to_owned()),
+                    value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
                     value_from: None,
                 },
             ]),
@@ -496,10 +498,13 @@ impl OperatorTlsSecret {
             },
             string_data: Some(BTreeMap::from([
                 (
-                    "tls-key.pem".to_owned(),
+                    OPERATOR_TLS_KEY_FILE_NAME.to_owned(),
                     cert.get_key_pair().serialize_pem(),
                 ),
-                ("tls.pem".to_owned(), cert.serialize_pem().unwrap()),
+                (
+                    OPERATOR_TLS_CERT_FILE_NAME.to_owned(),
+                    cert.serialize_pem().unwrap(),
+                ),
             ])),
             ..Default::default()
         };
