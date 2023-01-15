@@ -703,13 +703,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         );
         replace!(
             hook_manager,
-            "fstatat$INODE64",
-            fstatat_detour,
-            FnFstatat,
-            FN_FSTATAT
-        );
-        replace!(
-            hook_manager,
             "fdopendir$INODE64",
             fdopendir_detour,
             FnFdopendir,

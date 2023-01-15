@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
+- macOS x64/SIP(arm): fix double hooking `fstatat$INODE64`. Possible crash and undefined behavior.
 
 ### Added
 
