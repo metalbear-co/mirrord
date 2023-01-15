@@ -26,8 +26,8 @@ async fn operator_setup(
 
     if let Some(license_key) = license_key {
         let license = License::fetch_async(license_key.clone())
-            .map_err(CliError::LicenseError)
-            .await?;
+            .await
+            .map_err(CliError::LicenseError)?;
 
         eprintln!(
             "Installing with license for {} ({})",
