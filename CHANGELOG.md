@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
+
 ## 3.18.2
 
 ### Fixed

@@ -185,7 +185,11 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+                Some(vec![
+                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
+                    // set time out to 1 to avoid two agents conflict
+                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "1"),
+                ]),
             )
             .await;
 
@@ -206,6 +210,9 @@ mod steal {
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         mirrorded_process.child.kill().await.unwrap();
+
+        // Wait for agent to exit.
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         // Now do a meta-test to see that with this setup but without the http filter the data does
         // reach the local app.
