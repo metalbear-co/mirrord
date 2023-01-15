@@ -15,11 +15,26 @@ edition.workspace = true
 
 [features]
 default = []
-client = ["protocol", "dep:futures", "dep:kube", "dep:k8s-openapi", "dep:tokio", "dep:mirrord-kube", "dep:mirrord-progress"]
 license-fetch = ["dep:reqwest"]
-protocol = ["dep:actix-codec", "dep:bincode", "dep:bytes", "dep:serde_json", "dep:mirrord-config", "dep:mirrord-protocol"]
-setup = ["dep:k8s-openapi", "dep:serde_yaml"]
-server = ["protocol", "license-fetch"]
+client = [
+  "crd",
+  "dep:bincode",
+  "dep:http",
+  "dep:futures",
+  "dep:mirrord-kube",
+  "dep:mirrord-progress",
+  "dep:mirrord-protocol",
+  "dep:tokio-tungstenite"
+]
+crd = [
+  "dep:k8s-openapi",
+  "dep:kube",
+  "dep:mirrord-config",
+  "dep:tokio",
+  "dep:schemars",
+  "dep:serde_json"
+]
+setup = ["crd", "dep:rcgen", "dep:serde_yaml"]
 
 
 [dependencies]
@@ -33,12 +48,16 @@ actix-codec = { workspace = true, optional = true }
 bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
+http = { version = "0.2", optional = true }
 k8s-openapi = { workspace = true, optional = true }
-kube = { workspace = true, optional = true }
+kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
+rcgen = { version = "0.10", features = ["x509-parser"], optional = true }
 reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+schemars = { version = "0.8", optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, optional = true }
+tokio-tungstenite = { version = "0.18", optional = true }

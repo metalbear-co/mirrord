@@ -312,7 +312,7 @@ async fn main() -> miette::Result<()> {
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Login(args) => login(args)?,
-        Commands::Operator(args) => operator_command(*args)?,
+        Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
     }
 
