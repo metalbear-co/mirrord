@@ -59,30 +59,6 @@ pub struct FsConfig {
     #[config(nested)]
     pub mode: FsModeConfig,
 
-    /// DEPRECATED
-    ///  Allows the user to specify regexes that are used to match against files when mirrord file
-    /// operations are enabled.
-    ///
-    /// The regexes specified here will make mirrord operate only on files that match it, otherwise
-    /// the file will be accessed locally (bypassing mirrord).
-    #[config(
-        env = "MIRRORD_FILE_FILTER_INCLUDE",
-        deprecated = "Use access type configuration instead."
-    )]
-    pub include: Option<VecOrSingle<String>>,
-
-    /// DEPRECATED
-    /// Allows the user to specify regexes that are used to match against files when mirrord file
-    /// operations are enabled.
-    ///
-    /// The opposite of `include`, files that match the regexes specified here will bypass mirrord
-    /// and are accessed locally.
-    #[config(
-        env = "MIRRORD_FILE_FILTER_EXCLUDE",
-        deprecated = "Use access type configuration instead."
-    )]
-    pub exclude: Option<VecOrSingle<String>>,
-
     /// Specify file path patterns that if matched will be read and written to the remote.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
@@ -100,13 +76,6 @@ pub struct FsConfig {
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
         let mode = FsModeConfig::disabled_config()?;
-        let include = FromEnv::new("MIRRORD_FILE_FILTER_INCLUDE")
-            .source_value()
-            .transpose()?;
-        let exclude = FromEnv::new("MIRRORD_FILE_FILTER_EXCLUDE")
-            .source_value()
-            .transpose()?;
-
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
             .source_value()
             .transpose()?;
@@ -119,8 +88,6 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
 
         Ok(Self::Generated {
             mode,
-            include,
-            exclude,
             read_write,
             read_only,
             local,
@@ -148,7 +115,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::config::MirrordConfig;
 
     #[rstest]
     fn test_advanced_fs_config_default() {
@@ -157,46 +124,8 @@ mod tests {
             ..Default::default()
         };
 
-        with_env_vars(
-            vec![
-                ("MIRRORD_FILE_OPS", None),
-                ("MIRRORD_FILE_RO_OPS", None),
-                ("MIRRORD_FILE_FILTER_INCLUDE", None),
-                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
-            ],
-            || {
-                let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+        let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
 
-                assert_eq!(fs_config, expect);
-            },
-        );
-    }
-
-    #[rstest]
-    fn test_advanced_fs_config_file_filter_include() {
-        let expect = FsConfig {
-            mode: FsModeConfig::Read,
-            include: Some(VecOrSingle::Single(".*".to_string())),
-            ..Default::default()
-        };
-
-        with_env_vars(
-            vec![
-                ("MIRRORD_FILE_OPS", None),
-                ("MIRRORD_FILE_RO_OPS", None),
-                ("MIRRORD_FILE_FILTER_INCLUDE", None),
-                ("MIRRORD_FILE_FILTER_EXCLUDE", None),
-            ],
-            || {
-                let fs_config = AdvancedFsUserConfig {
-                    include: Some(VecOrSingle::Single(".*".to_string())),
-                    ..Default::default()
-                }
-                .generate_config()
-                .unwrap();
-
-                assert_eq!(fs_config, expect);
-            },
-        );
+        assert_eq!(fs_config, expect);
     }
 }
