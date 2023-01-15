@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
+
 ### Added
 
 - introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
