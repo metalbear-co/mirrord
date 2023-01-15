@@ -11,9 +11,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
 
+## 3.18.2
+
 ### Fixed
 
 - crash when `getaddrinfo` is bypassed and libc tries to free our structure. Closes [#930](https://github.com/metalbear-co/mirrord/issues/930)
+- Stealer hangs on short streams left open and fails on short closed streams to filtered HTTP ports -
+ [#926](https://github.com/metalbear-co/mirrord/issues/926).
 
 ## 3.18.1
 
