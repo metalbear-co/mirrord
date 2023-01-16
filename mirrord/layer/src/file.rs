@@ -19,14 +19,14 @@ use std::{
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
     file::{
-        CloseDirRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest,
-        ReadDirResponse, XstatRequest, XstatResponse,
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
+        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
     },
-    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-    WriteLimitedFileRequest,
+    ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};

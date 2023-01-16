@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Code refactor: moved all file request and response types into own file.
+
 ## 3.19.1
 
 ### Fixed

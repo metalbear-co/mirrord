@@ -1,8 +1,6 @@
-use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, SeekFrom},
-    path::PathBuf,
+    io::{self},
 };
 
 use actix_codec::{Decoder, Encoder};
@@ -12,8 +10,11 @@ use bytes::{Buf, BufMut, BytesMut};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
-        CloseDirRequest, FdOpenDirRequest, OpenDirResponse, ReadDirRequest, ReadDirResponse,
-        XstatRequest, XstatResponse,
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
+        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
+        ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -26,150 +27,6 @@ use crate::{
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadFileRequest {
-    pub remote_fd: u64,
-    pub buffer_size: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadLineFileRequest {
-    pub remote_fd: u64,
-    pub buffer_size: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadLimitedFileRequest {
-    pub remote_fd: u64,
-    pub buffer_size: u64,
-    pub start_from: u64,
-}
-
-// TODO: We're not handling `custom_flags` here, if we ever need to do so, add them here (it's an OS
-// specific thing).
-//
-// TODO: Should probably live in a separate place (same reasoning as `AddrInfoHint`).
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
-pub struct OpenOptionsInternal {
-    pub read: bool,
-    pub write: bool,
-    pub append: bool,
-    pub truncate: bool,
-    pub create: bool,
-    pub create_new: bool,
-}
-
-impl OpenOptionsInternal {
-    pub fn is_read_only(&self) -> bool {
-        self.read && !(self.write || self.append || self.truncate || self.create || self.create_new)
-    }
-
-    pub fn is_write(&self) -> bool {
-        self.write || self.append || self.truncate || self.create || self.create_new
-    }
-}
-
-impl From<OpenOptionsInternal> for std::fs::OpenOptions {
-    fn from(internal: OpenOptionsInternal) -> Self {
-        let OpenOptionsInternal {
-            read,
-            write,
-            append,
-            truncate,
-            create,
-            create_new,
-        } = internal;
-
-        std::fs::OpenOptions::new()
-            .read(read)
-            .write(write)
-            .append(append)
-            .truncate(truncate)
-            .create(create)
-            .create_new(create_new)
-            .to_owned()
-    }
-}
-
-/// Alternative to `std::io::SeekFrom`, used to implement `bincode::Encode` and `bincode::Decode`.
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq)]
-pub enum SeekFromInternal {
-    Start(u64),
-    End(i64),
-    Current(i64),
-}
-
-impl const From<SeekFromInternal> for SeekFrom {
-    fn from(seek_from: SeekFromInternal) -> Self {
-        match seek_from {
-            SeekFromInternal::Start(start) => SeekFrom::Start(start),
-            SeekFromInternal::End(end) => SeekFrom::End(end),
-            SeekFromInternal::Current(current) => SeekFrom::Current(current),
-        }
-    }
-}
-
-impl const From<SeekFrom> for SeekFromInternal {
-    fn from(seek_from: SeekFrom) -> Self {
-        match seek_from {
-            SeekFrom::Start(start) => SeekFromInternal::Start(start),
-            SeekFrom::End(end) => SeekFromInternal::End(end),
-            SeekFrom::Current(current) => SeekFromInternal::Current(current),
-        }
-    }
-}
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenFileRequest {
-    pub path: PathBuf,
-    pub open_options: OpenOptionsInternal,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenRelativeFileRequest {
-    pub relative_fd: u64,
-    pub path: PathBuf,
-    pub open_options: OpenOptionsInternal,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct SeekFileRequest {
-    pub fd: u64,
-    pub seek_from: SeekFromInternal,
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct WriteFileRequest {
-    pub fd: u64,
-    pub write_bytes: Vec<u8>,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct WriteLimitedFileRequest {
-    pub remote_fd: u64,
-    pub start_from: u64,
-    pub write_bytes: Vec<u8>,
-}
-
-impl fmt::Debug for WriteFileRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WriteFileRequest")
-            .field("fd", &self.fd)
-            .field("write_bytes (length)", &self.write_bytes.len())
-            .finish()
-    }
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct CloseFileRequest {
-    pub fd: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct AccessFileRequest {
-    pub pathname: PathBuf,
-    pub mode: u8,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -209,39 +66,6 @@ pub enum ClientMessage {
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
 }
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct OpenFileResponse {
-    pub fd: u64,
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub struct ReadFileResponse {
-    pub bytes: Vec<u8>,
-    pub read_amount: u64,
-}
-
-impl fmt::Debug for ReadFileResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadFileResponse")
-            .field("bytes (length)", &self.bytes.len())
-            .field("read_amount", &self.read_amount)
-            .finish()
-    }
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct SeekFileResponse {
-    pub result_offset: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct WriteFileResponse {
-    pub written_amount: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct AccessFileResponse;
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
 pub type RemoteResult<T> = Result<T, ResponseError>;
