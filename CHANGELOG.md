@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.19.1
+
+### Fixed
+
+- Changelog error failing the JetBrains release.
+
 ## 3.19.0
 
 ### Changed
