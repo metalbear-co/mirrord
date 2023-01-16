@@ -432,12 +432,12 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         }
         _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
     };
-    let final = match res {
+    let k = match res {
         -1 => -errno().0 as i64,
         _ => res,
     };
     trace!("final {final:?}");
-    final
+    k
 }
 
 /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
