@@ -598,9 +598,9 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    rsi, QWORD PTR [rsp+0x28]",
         "mov    rsp, rsi",
         // exit syscall - it clobbers rax so we need to save it
-        "mov rbx, rax",
-        "call exit_syscall",
-        "mov rax, rbx",
+        // "mov rbx, rax",
+        // "call exit_syscall",
+        // "mov rax, rbx",
         // Regular flow
         "cmp    rax, -0xfff",
         "jbe    2f",
