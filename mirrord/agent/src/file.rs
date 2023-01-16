@@ -615,13 +615,6 @@ impl FileManager {
             .map(log_err)
             .peekable();
 
-        // Boolean predicate, is there enough room in the buffer to for the next entry.
-        let entry_fits_in_buffer = |entry_res: &Result<DirEntryInternal, io::Error>| {
-            entry_res
-                .as_ref()
-                .is_ok_and(|entry| entry.get_d_reclen64() as u64 + result_size <= buffer_size)
-        };
-
         // Trying to allocate according to what the syscall caller allocated.
         // The caller of the syscall allocated buffer_size bytes, so if the average linux_dirent64
         // in this dir is not bigger than 32 this should be enough.
@@ -631,7 +624,14 @@ impl FileManager {
 
         // Peek into the next result, and only consume it if there is room for it in the buffer (and
         // there was no error converting to a `DirEntryInternal`.
-        while let Some(entry) = entry_results.next_if(entry_fits_in_buffer).transpose()? {
+        while let Some(entry) = entry_results
+            .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
+                entry_res
+                    .as_ref()
+                    .is_ok_and(|entry| entry.get_d_reclen64() as u64 + result_size <= buffer_size)
+            })
+            .transpose()?
+        {
             result_size += entry.get_d_reclen64() as u64;
             entries.push(entry);
         }
