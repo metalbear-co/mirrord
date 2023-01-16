@@ -527,7 +527,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov r13, rsi",
         // save rcx in r15
         "mov r15, rcx",
-        "call enter_syscall",
+        // "call enter_syscall",
         // Save stack
         "mov rdx, rsp",
         "mov rdi, qword ptr FS:[0xfffffff8]",
@@ -565,9 +565,9 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov qword ptr fs:[0xfffffff8], rdi",
         "mov rsp, rsi",
         // exit syscall - it clobbers rax so we need to save it
-        "mov rbx, rax",
-        "call exit_syscall",
-        "mov rax, rbx",
+        // "mov rbx, rax",
+        // "call exit_syscall",
+        // "mov rax, rbx",
         // Regular flow
         "cmp    rax, -0xfff",
         "jbe    2f",
