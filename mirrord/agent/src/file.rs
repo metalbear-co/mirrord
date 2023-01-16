@@ -2,9 +2,10 @@ use std::{
     self,
     collections::HashMap,
     fs::{File, OpenOptions, ReadDir},
+    io,
     io::{prelude::*, BufReader, SeekFrom},
     iter::Enumerate,
-    os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
+    os::unix::prelude::FileExt,
     path::{Path, PathBuf},
 };
 
@@ -12,11 +13,11 @@ use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
-        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
-        XstatRequest, XstatResponse,
+        FdOpenDirRequest, Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest,
+        OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
+        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -187,6 +188,12 @@ impl FileManager {
                 self.close_dir(remote_fd);
                 None
             }
+            FileRequest::Getdents64(Getdents64Request {
+                remote_fd,
+                buffer_size,
+            }) => Some(FileResponse::Getdents64(
+                self.getdents64(remote_fd, buffer_size),
+            )),
         })
     }
 
@@ -570,41 +577,69 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
-        let dir_stream = self
-            .dir_streams
+    pub(crate) fn get_dir_stream(&mut self, fd: u64) -> RemoteResult<&mut Enumerate<ReadDir>> {
+        self.dir_streams
             .get_mut(&fd)
-            .ok_or(ResponseError::NotFound(fd))?;
+            .ok_or(ResponseError::NotFound(fd))
+    }
 
-        let result = if let Some((offset, entry)) = dir_stream.next() {
-            let entry = entry?;
-
-            let mode = entry.metadata()?.mode();
-
-            let file_type = match mode & libc::S_IFMT {
-                libc::S_IFLNK => libc::DT_LNK,
-                libc::S_IFREG => libc::DT_REG,
-                libc::S_IFBLK => libc::DT_BLK,
-                libc::S_IFDIR => libc::DT_DIR,
-                libc::S_IFCHR => libc::DT_CHR,
-                libc::S_IFIFO => libc::DT_FIFO,
-                libc::S_IFSOCK => libc::DT_SOCK,
-                _ => libc::DT_UNKNOWN,
-            };
-
-            let internal_entry = DirEntryInternal {
-                inode: entry.ino(),
-                position: offset as u64,
-                name: entry.file_name().to_string_lossy().into(),
-                file_type,
-            };
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
+        let dir_stream = self.get_dir_stream(fd)?;
+        let result = if let Some(offset_entry_pair) = dir_stream.next() {
             ReadDirResponse {
-                direntry: Some(internal_entry),
+                direntry: Some(offset_entry_pair.try_into()?),
             }
         } else {
             ReadDirResponse { direntry: None }
         };
 
         Ok(result)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn getdents64(
+        &mut self,
+        fd: u64,
+        buffer_size: u64,
+    ) -> RemoteResult<Getdents64Response> {
+        let mut result_size = 0u64;
+
+        let log_err = |entry_res: Result<DirEntryInternal, io::Error>| {
+            entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
+        };
+
+        let mut entry_results = self
+            .get_dir_stream(fd)?
+            .map(TryInto::try_into) // Convert into DirEntryInternal.
+            .map(log_err)
+            .peekable();
+
+        // Boolean predicate, is there enough room in the buffer to for the next entry.
+        let entry_fits_in_buffer = |entry_res: &Result<DirEntryInternal, io::Error>| {
+            entry_res
+                .as_ref()
+                .is_ok_and(|entry| entry.get_d_reclen64() as u64 + result_size <= buffer_size)
+        };
+
+        // Trying to allocate according to what the syscall caller allocated.
+        // The caller of the syscall allocated buffer_size bytes, so if the average linux_dirent64
+        // in this dir is not bigger than 32 this should be enough.
+        // But don't preallocate more than 256.
+        let initial_vector_capacity = 256.min((buffer_size / 32) as usize);
+        let mut entries = Vec::with_capacity(initial_vector_capacity);
+
+        // Peek into the next result, and only consume it if there is room for it in the buffer (and
+        // there was no error converting to a `DirEntryInternal`.
+        while let Some(entry) = entry_results.next_if(entry_fits_in_buffer).transpose()? {
+            result_size += entry.get_d_reclen64() as u64;
+            entries.push(entry);
+        }
+
+        Ok(Getdents64Response {
+            fd,
+            entries,
+            result_size,
+        })
     }
 }

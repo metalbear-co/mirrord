@@ -11,7 +11,7 @@ use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        Getdents64Request, OpenDirResponse, OpenFileRequest, OpenFileResponse,
+        Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
         ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
         SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
@@ -85,6 +85,7 @@ pub enum FileResponse {
     Xstat(RemoteResult<XstatResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
+    Getdents64(RemoteResult<Getdents64Response>),
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

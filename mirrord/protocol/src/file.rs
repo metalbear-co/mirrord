@@ -1,5 +1,11 @@
 use core::fmt;
-use std::{fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf};
+use std::{
+    fs::{DirEntry, Metadata},
+    io,
+    io::SeekFrom,
+    os::unix::{fs::DirEntryExt, prelude::MetadataExt},
+    path::PathBuf,
+};
 
 use bincode::{Decode, Encode};
 
@@ -62,6 +68,63 @@ pub struct DirEntryInternal {
     pub position: u64,
     pub name: String,
     pub file_type: u8,
+}
+
+impl TryFrom<(usize, io::Result<DirEntry>)> for DirEntryInternal {
+    type Error = io::Error;
+
+    fn try_from(offset_entry_pair: (usize, io::Result<DirEntry>)) -> Result<Self, Self::Error> {
+        let (offset, entry) = offset_entry_pair;
+        let entry = entry?;
+
+        let mode = entry.metadata()?.mode();
+
+        let file_type = match mode & libc::S_IFMT {
+            libc::S_IFLNK => libc::DT_LNK,
+            libc::S_IFREG => libc::DT_REG,
+            libc::S_IFBLK => libc::DT_BLK,
+            libc::S_IFDIR => libc::DT_DIR,
+            libc::S_IFCHR => libc::DT_CHR,
+            libc::S_IFIFO => libc::DT_FIFO,
+            libc::S_IFSOCK => libc::DT_SOCK,
+            _ => libc::DT_UNKNOWN,
+        };
+
+        Ok(DirEntryInternal {
+            inode: entry.ino(),
+            position: offset as u64,
+            name: entry.file_name().to_string_lossy().into(),
+            file_type,
+        })
+    }
+}
+
+impl DirEntryInternal {
+    /// Calculate the `d_reclen` field of a the kernel's `linux_dirent64` struct.
+    /// The actual size of an instance is not `sizeof(linux_dirent64)`, since it contains a flexible
+    /// array member.
+    /// This functions calculates the expected `d_reclen` assuming:
+    /// ```C
+    /// sizeof(ino64_t) == 8
+    /// sizeof(off64_t) == 8
+    /// sizeof(unsigned short) == 2
+    /// sizeof(unsinged char) == 1
+    /// ```
+    pub fn get_d_reclen64(&self) -> u16 {
+        // The 20 is for 19 bytes of fixed size members + the terminating null of the string.
+        return Self::round_up_to_next_multiple_of_8(20 + self.name.len() as u16);
+    }
+
+    /// examples:
+    /// ```
+    /// assert_eq!(round_up_to_next_multiple_of_8(0), 0);
+    /// assert_eq!(round_up_to_next_multiple_of_8(1), 8);
+    /// assert_eq!(round_up_to_next_multiple_of_8(8), 8);
+    /// assert_eq!(round_up_to_next_multiple_of_8(21), 24);
+    /// ```
+    fn round_up_to_next_multiple_of_8(x: u16) -> u16 {
+        (x + 7) & !7
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -284,7 +347,10 @@ pub struct Getdents64Request {
     pub remote_fd: u64,
     pub buffer_size: u64,
 }
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct Getdents64Response {
     pub fd: u64,
+    pub entries: Vec<DirEntryInternal>,
+    pub result_size: u64,
 }

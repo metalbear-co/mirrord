@@ -14,11 +14,12 @@ use std::{
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
-    FILE,
+    EINVAL, FILE,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+    DirEntryInternal, Getdents64Response, MetadataInternal, OpenOptionsInternal, ReadFileResponse,
+    WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::{log::error, trace};
@@ -101,12 +102,18 @@ pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
 unsafe fn assign_direntry(
     in_entry: DirEntryInternal,
     out_entry: *mut dirent,
+    getdents: bool,
 ) -> Result<(), HookError> {
     let dir_name = CString::new(in_entry.name)?;
     let dir_name_bytes = dir_name.as_bytes_with_nul();
 
     (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = std::mem::size_of::<dirent>() as u16;
+    (*out_entry).d_reclen = if getdents {
+        // The structs written by the kernel for the getdents syscall do not have a fixed size.
+        in_entry.get_d_reclen64()
+    } else {
+        std::mem::size_of::<dirent>() as u16
+    };
     (*out_entry).d_type = in_entry.file_type;
     (*out_entry).d_name[..dir_name_bytes.len()]
         .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
@@ -134,7 +141,7 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
     readdir_r(dirp as usize)
         .map(|resp| {
             if let Some(direntry) = resp {
-                match assign_direntry(direntry, entry) {
+                match assign_direntry(direntry, entry, false) {
                     Err(e) => return c_int::from(e),
                     Ok(()) => {
                         *result = entry;
@@ -181,29 +188,39 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
     dirent_buf: *mut c_void,
     buf_size: c_size_t,
 ) -> c_ssize_t {
-    getdents64(fd, buf_size as u64)
-        .map(|res| {
-            if let Some(remote_errno) = res.errno {
-                set_errno(Errno(remote_errno));
-                -1 as c_ssize_t
-            } else {
-                let end = dirent_buf.byte_add(buf_size);
-                let mut next = dirent_buf as *mut dirent; // TODO: use dirent64?
-                for dent in res.entries {
-                    // TODO: check for buffer overflow.
-                    match assign_direntry(dent, next) {
-                        Err(e) => {
-                            error!("Error while trying to write remote dir entry to local buffer: {e:?}");
-                            set_errno(Errno(c_int::from(e)));
-                            return -1
-                        },
-                        Ok(()) => next = next.byte_add((*next).d_reclen as usize),
-                    }
+    match getdents64(fd, buf_size as u64) {
+        Detour::Success(res) => {
+            let mut next = dirent_buf as *mut dirent; // TODO: use dirent64?
+            let end = next.byte_add(buf_size);
+            for dent in res.entries {
+                if next.byte_add(dent.get_d_reclen64() as usize) > end {
+                    error!("Remote result for getdents64 would overflow local buffer.");
+                    set_errno(Errno(libc::EINVAL));
+                    return -1;
                 }
-                res.return_value as c_ssize_t
+                match assign_direntry(dent, next, true) {
+                    Err(e) => {
+                        error!(
+                            "Error while trying to write remote dir entry to local buffer: {e:?}"
+                        );
+                        // TODO: would this only produce errno values that are legal for this
+                        //       syscall?
+                        set_errno(Errno(c_int::from(e)));
+                        return -1;
+                    }
+                    Ok(()) => next = next.byte_add((*next).d_reclen as usize),
+                }
             }
-        })
-        .unwrap_or_bypass_with(|_| 0 /* TODO: call getdents64 syscall */)
+            res.return_value as c_ssize_t
+        }
+        Detour::Bypass(_) => 0, // TODO: call getdents64 syscall.
+        Detour::Error(err) => {
+            error!("Encountered error in getdents64 detour: {e:?}");
+            // TODO: would this only produce errno values that are legal for this syscall?
+            set_errno(Errno(c_int::from(err)));
+            -1
+        }
+    }
 }
 
 /// Hook for `libc::read`.
