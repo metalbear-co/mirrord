@@ -584,13 +584,13 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    QWORD PTR [rsp+0x30], 0x0",
         "mov    QWORD PTR [rsp+0x28], rdx",
         // Call ABI handler
-        "mov QWORD PTR [rsp], r9",
+        "mov QWORD PTR [rsp], r11",
         "mov r9, r8",
-        "mov r8, rsi",
+        "mov r8, r13",
         "mov rsi, rbx",
-        "mov rdx, rcx",
+        "mov rdx, r15",
         "mov rcx, r10",
-        "mov rdi, rax",
+        "mov rdi, r12",
         "call c_abi_syscall6_handler",
         // restore
         "mov    rsi, QWORD PTR [rsp+0x28]",
