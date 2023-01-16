@@ -436,7 +436,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         -1 => -errno().0 as i64,
         _ => res,
     };
-    trace!("final {final:?}");
+    trace!("k {k:?}");
     k
 }
 
