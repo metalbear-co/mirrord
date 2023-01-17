@@ -18,11 +18,7 @@ pub use common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue834(
-    #[values(
-        Application::Go18Issue834,
-        Application::Go19Issue834,
-    )]
-    application: Application,
+    #[values(Application::Go18Issue834, Application::Go19Issue834)] application: Application,
     dylib_path: &PathBuf,
 ) {
     let executable = application.get_executable().await; // Own it.
@@ -35,11 +31,8 @@ async fn test_issue834(
         TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection = LayerConnection::get_initialized_connection(
-        &listener,
-    )
-    .await;
-    
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+
     test_process.wait().await;
     test_process.assert_stdout_contains("okay");
 
