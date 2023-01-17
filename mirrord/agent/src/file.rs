@@ -10,16 +10,14 @@ use std::{
 };
 
 use faccess::{AccessMode, PathExt};
-#[cfg(target_os = "linux")]
-use mirrord_protocol::file::{Getdents64Request, Getdents64Response};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
-        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
-        XstatRequest, XstatResponse,
+        FdOpenDirRequest, Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest,
+        OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
+        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -190,7 +188,6 @@ impl FileManager {
                 self.close_dir(remote_fd);
                 None
             }
-            #[cfg(target_os = "linux")]
             FileRequest::Getdents64(Getdents64Request {
                 remote_fd,
                 buffer_size,
@@ -600,7 +597,6 @@ impl FileManager {
         Ok(result)
     }
 
-    #[cfg(target_os = "linux")]
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn getdents64(
         &mut self,
