@@ -3,7 +3,7 @@ use std::{
     fs::{DirEntry, Metadata},
     io,
     io::SeekFrom,
-    os::unix::{fs::DirEntryExt, prelude::MetadataExt},
+    os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
     path::PathBuf,
 };
 
