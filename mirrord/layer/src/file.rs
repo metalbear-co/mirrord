@@ -17,14 +17,16 @@ use std::{
 };
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+#[cfg(target_os = "linux")]
+use mirrord_protocol::file::{Getdents64Request, Getdents64Response};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest,
-        OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
-        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
     },
     ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
@@ -127,6 +129,7 @@ pub struct FileHandler {
     xstat_queue: ResponseDeque<XstatResponse>,
     opendir_queue: ResponseDeque<OpenDirResponse>,
     readdir_queue: ResponseDeque<ReadDirResponse>,
+    #[cfg(target_os = "linux")]
     getdents64_queue: ResponseDeque<Getdents64Response>,
 }
 
@@ -230,6 +233,11 @@ impl FileHandler {
                 pop_send(&mut self.readdir_queue, read_dir)
             }
             OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
+            #[cfg(target_os = "linux")]
+            Getdents64(getdents64) => {
+                trace!("DaemonMessage::Getdents64Response {:#?}!", getdents64);
+                pop_send(&mut self.getdents64_queue, getdents64)
+            }
         }
     }
 
@@ -256,6 +264,7 @@ impl FileHandler {
             ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
             FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
             CloseDir(close_dir) => self.handle_hook_close_dir(close_dir, tx).await,
+            #[cfg(target_os = "linux")]
             Getdents64(getdents64) => self.handle_hook_getdents64(getdents64, tx).await,
         }
     }
@@ -566,6 +575,7 @@ impl FileHandler {
         tx.send(request).await.map_err(From::from)
     }
 
+    #[cfg(target_os = "linux")]
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_getdents64(
         &mut self,
@@ -667,7 +677,7 @@ pub struct CloseDir {
     pub(crate) fd: u64,
 }
 
-// #[cfg(target_os = "linux")] // TODO: uncomment.
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct Getdents64 {
     pub(crate) remote_fd: u64,
@@ -691,5 +701,6 @@ pub enum HookMessageFile {
     ReadDir(ReadDir),
     FdOpenDir(FdOpenDir),
     CloseDir(CloseDir),
+    #[cfg(target_os = "linux")]
     Getdents64(Getdents64),
 }

@@ -1,9 +1,14 @@
 use core::fmt;
+#[cfg(target_os = "linux")]
+use std::fs::DirEntry;
+#[cfg(target_os = "linux")]
+use std::io;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::DirEntryExt;
 use std::{
-    fs::{DirEntry, Metadata},
-    io,
+    fs::Metadata,
     io::SeekFrom,
-    os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
+    os::unix::prelude::{FileExt, MetadataExt},
     path::PathBuf,
 };
 
@@ -70,6 +75,7 @@ pub struct DirEntryInternal {
     pub file_type: u8,
 }
 
+#[cfg(target_os = "linux")]
 impl TryFrom<(usize, io::Result<DirEntry>)> for DirEntryInternal {
     type Error = io::Error;
 
@@ -342,12 +348,14 @@ pub struct CloseDirRequest {
     pub remote_fd: u64,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct Getdents64Request {
     pub remote_fd: u64,
     pub buffer_size: u64,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct Getdents64Response {
     pub fd: u64,

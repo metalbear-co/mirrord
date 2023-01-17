@@ -7,15 +7,16 @@ use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
+#[cfg(target_os = "linux")]
+use crate::file::{Getdents64Request, Getdents64Response};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
-        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
-        XstatRequest, XstatResponse,
+        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
+        ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -52,6 +53,7 @@ pub enum FileRequest {
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
+    #[cfg(target_os = "linux")]
     Getdents64(Getdents64Request),
 }
 
@@ -85,6 +87,7 @@ pub enum FileResponse {
     Xstat(RemoteResult<XstatResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
+    #[cfg(target_os = "linux")]
     Getdents64(RemoteResult<Getdents64Response>),
 }
 /// `-agent` --> `-layer` messages.

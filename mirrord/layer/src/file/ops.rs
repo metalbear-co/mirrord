@@ -557,7 +557,7 @@ pub(crate) fn xstat(
     Detour::Success(file_channel_rx.blocking_recv()??)
 }
 
-// #[cfg(target_os = "linux")] // TODO: uncomment.
+#[cfg(target_os = "linux")]
 #[tracing::instrument(level = "trace")]
 pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<Getdents64Response> {
     // We're only interested in files that are paired with mirrord-agent.

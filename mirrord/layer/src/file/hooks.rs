@@ -11,18 +11,22 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
+#[cfg(target_os = "linux")]
+use libc::EINVAL;
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
-    EINVAL, FILE,
+    FILE,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, Getdents64Response, MetadataInternal, OpenOptionsInternal, ReadFileResponse,
-    WriteFileResponse,
+    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
-use tracing::{log::error, trace};
+#[cfg(target_os = "linux")]
+use tracing::error;
+use tracing::trace;
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
@@ -104,9 +108,6 @@ unsafe fn assign_direntry(
     out_entry: *mut dirent,
     getdents: bool,
 ) -> Result<(), HookError> {
-    let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = dir_name.as_bytes_with_nul();
-
     (*out_entry).d_ino = in_entry.inode;
     (*out_entry).d_reclen = if getdents {
         // The structs written by the kernel for the getdents syscall do not have a fixed size.
@@ -115,6 +116,9 @@ unsafe fn assign_direntry(
         std::mem::size_of::<dirent>() as u16
     };
     (*out_entry).d_type = in_entry.file_type;
+
+    let dir_name = CString::new(in_entry.name)?;
+    let dir_name_bytes = dir_name.as_bytes_with_nul();
     (*out_entry).d_name[..dir_name_bytes.len()]
         .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
 
@@ -181,7 +185,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
 }
 
 /// Hook for getdents64, for Go on Linux.
-// #[cfg(target_os = "linux")] // TODO: uncomment.
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn getdents64_detour(
     fd: RawFd,
@@ -195,7 +199,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             for dent in res.entries {
                 if next.byte_add(dent.get_d_reclen64() as usize) > end {
                     error!("Remote result for getdents64 would overflow local buffer.");
-                    set_errno(Errno(libc::EINVAL));
+                    set_errno(Errno(EINVAL));
                     return -1;
                 }
                 match assign_direntry(dent, next, true) {
@@ -211,11 +215,11 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                     Ok(()) => next = next.byte_add((*next).d_reclen as usize),
                 }
             }
-            res.return_value as c_ssize_t
+            res.result_size as c_ssize_t
         }
         Detour::Bypass(_) => 0, // TODO: call getdents64 syscall.
         Detour::Error(err) => {
-            error!("Encountered error in getdents64 detour: {e:?}");
+            error!("Encountered error in getdents64 detour: {err:?}");
             // TODO: would this only produce errno values that are legal for this syscall?
             set_errno(Errno(c_int::from(err)));
             -1

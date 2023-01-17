@@ -1,4 +1,4 @@
-// #![cfg(target_os = "linux")] // TODO: Uncomment.
+#![cfg(target_os = "linux")]
 use std::arch::asm;
 
 use errno::errno;
