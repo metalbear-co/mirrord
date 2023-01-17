@@ -432,12 +432,10 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         }
         _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
     };
-    let k = match res {
+    match res {
         -1 => -errno().0 as i64,
         _ => res,
-    };
-    trace!("k {k:?}");
-    k
+    }
 }
 
 /// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
@@ -527,10 +525,14 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov r13, rsi",
         // save rcx in r15
         "mov r15, rcx",
-        // "call enter_syscall",
         // Save stack
         "mov rdx, rsp",
-        "mov rdi, qword ptr FS:[0xfffffff8]",
+        // in the past, we tried to retrieve g from fs:[-0x8]
+        // but this sometimes fails to get g for some reason
+        // and r14 seems to be more correct
+        "mov rdi, r14",
+        // for any case, store it there in case it isn't stored
+        "mov qword ptr fs:[0xfffffff8], rdi",
         "cmp rdi, 0x0",
         "jz 1f",
         "mov rax, qword ptr [rdi + 0x30]",
@@ -564,10 +566,6 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "sub rsi, qword ptr [ rsp + 0x28]",
         "mov qword ptr fs:[0xfffffff8], rdi",
         "mov rsp, rsi",
-        // exit syscall - it clobbers rax so we need to save it
-        // "mov rbx, rax",
-        // "call exit_syscall",
-        // "mov rax, rbx",
         // Regular flow
         "cmp    rax, -0xfff",
         "jbe    2f",
@@ -597,10 +595,6 @@ unsafe extern "C" fn go_syscall_new_detour() {
         // restore
         "mov    rsi, QWORD PTR [rsp+0x28]",
         "mov    rsp, rsi",
-        // exit syscall - it clobbers rax so we need to save it
-        // "mov rbx, rax",
-        // "call exit_syscall",
-        // "mov rax, rbx",
         // Regular flow
         "cmp    rax, -0xfff",
         "jbe    2f",
