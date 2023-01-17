@@ -113,7 +113,7 @@ impl DirEntryInternal {
     /// ```
     pub fn get_d_reclen64(&self) -> u16 {
         // The 20 is for 19 bytes of fixed size members + the terminating null of the string.
-        return Self::round_up_to_next_multiple_of_8(20 + self.name.len() as u16);
+        Self::round_up_to_next_multiple_of_8(20 + self.name.len() as u16)
     }
 
     /// # Examples
