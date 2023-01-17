@@ -116,8 +116,9 @@ impl DirEntryInternal {
         return Self::round_up_to_next_multiple_of_8(20 + self.name.len() as u16);
     }
 
-    /// examples:
-    /// ```
+    /// # Examples
+    ///
+    /// ```ignore
     /// assert_eq!(round_up_to_next_multiple_of_8(0), 0);
     /// assert_eq!(round_up_to_next_multiple_of_8(1), 8);
     /// assert_eq!(round_up_to_next_multiple_of_8(8), 8);
