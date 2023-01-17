@@ -1,22 +1,23 @@
-use core::{future::Future, pin::Pin};
+use core::{future::Future, pin::Pin, task::ready};
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use futures::TryFutureExt;
-use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::{
     body::Incoming,
     client,
     header::{SEC_WEBSOCKET_ACCEPT, UPGRADE},
-    http::{self, request::Parts, HeaderValue},
+    http::{self, request::Parts, Extensions, HeaderValue},
     service::Service,
     Request, Response, StatusCode, Version,
 };
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
     io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt},
+    macros::support::poll_fn,
     net::TcpStream,
     sync::{
         mpsc::Sender,
@@ -63,68 +64,6 @@ pub(super) struct HyperHandler {
     pub(crate) request_id: RequestId,
 }
 
-trait PartsExt {
-    fn as_bytes(&self) -> Vec<u8>;
-}
-
-impl PartsExt for Parts {
-    fn as_bytes(&self) -> Vec<u8> {
-        let Parts {
-            method,
-            uri,
-            version,
-            headers,
-            // TODO(alex): We're ignoring `parts.extensions`.
-            ..
-        } = self;
-
-        let method = method.as_str().as_bytes();
-
-        let uri_str = uri.to_string();
-        let uri = uri_str.as_bytes();
-
-        let version = match *version {
-            Version::HTTP_09 => "HTTP/0.9",
-            Version::HTTP_10 => "HTTP/1.0",
-            Version::HTTP_11 => "HTTP/1.1",
-            Version::HTTP_2 => "HTTP/2",
-            Version::HTTP_3 => "HTTP/3",
-            _ => todo!("WAT"),
-        }
-        .as_bytes();
-
-        let space = b" ";
-        let end_line = b"\r\n";
-
-        let headers_length = headers.len();
-        let headers = headers.iter().fold(
-            Vec::with_capacity(headers_length),
-            |mut headers, (name, value)| {
-                let mut header = [
-                    format!("{}: ", name.as_str()).as_bytes(),
-                    value.as_bytes(),
-                    end_line,
-                ]
-                .concat();
-                headers.append(&mut header);
-
-                headers
-            },
-        );
-
-        let request_bytes = [
-            method, space, uri, space, version, end_line, &headers, end_line,
-        ]
-        .concat();
-
-        debug!(
-            "the monster request is \n{:#?}",
-            String::from_utf8_lossy(&request_bytes)
-        );
-        request_bytes
-    }
-}
-
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
 #[tracing::instrument(level = "trace", skip(matched_tx, response_rx))]
 async fn matched_request(
@@ -149,9 +88,10 @@ async fn matched_request(
 /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
 /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
 /// 3. Sends the [`HttpResponse`] back on the connected [`TcpStream`].
-#[tracing::instrument(level = "trace")]
+// #[tracing::instrument(level = "trace")]
 async fn unmatched_request(
     request: Request<Incoming>,
+    upgrade_request: Option<Request<Full<Bytes>>>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
@@ -161,14 +101,54 @@ async fn unmatched_request(
         .await
         .inspect_err(|fail| error!("Failed connecting to original_destination with {fail:#?}"))?;
 
-    let (mut request_sender, connection) = client::conn::http1::handshake(tcp_stream)
+    // TODO(alex) [high] 2023-01-17: Can probably do the upgrade here, as we have the request and
+    // the stream.
+    let (mut request_sender, mut connection) = client::conn::http1::handshake(tcp_stream)
         .await
         .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
     // We need this to progress the connection forward (hyper thing).
     tokio::spawn(async move {
-        if let Err(fail) = connection.await {
+        if let Err(fail) = poll_fn(|cx| connection.poll_without_shutdown(cx)).await {
             error!("Connection failed in unmatched with {fail:#?}");
+        }
+
+        if let Some(upgrade_request) = upgrade_request {
+            match hyper::upgrade::on(upgrade_request).await {
+                Ok(mut remote_agent_connection) => {
+                    info!("Time to upgrade in hyper!");
+                    // let mut agent_and_original_connection = connection.into_parts();
+                    let hyper::client::conn::http1::Parts {
+                        io: mut agent_original_connection,
+                        read_buf,
+                        ..
+                    } = connection.into_parts();
+
+                    remote_agent_connection
+                        .write_all(&read_buf)
+                        .await
+                        .inspect_err(|fail| {
+                            error!("Failed writing left-over bytes to upgraded_connection with {fail:#?}")
+                        });
+
+                    copy_bidirectional(
+                        &mut remote_agent_connection,
+                        &mut agent_original_connection,
+                    )
+                    .await
+                    .inspect_err(|fail| {
+                        error!("Failed copy_bidirectional for upgrade with {fail:#?}")
+                    });
+                }
+                Err(no_upgrade) if no_upgrade.is_user() => {
+                    debug!("No upgrade friends! but why {no_upgrade:#?}");
+                    // Ok(())
+                    // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not
+                    // error, and not ok.
+                    todo!("Should be a bypass-like thing")
+                }
+                Err(fail) => todo!("Failed upgrading with {fail:#?}"),
+            }
         }
     });
 
@@ -188,68 +168,6 @@ async fn unmatched_request(
     Ok(Response::from_parts(parts, body.into()))
 }
 
-// #[tracing::instrument(level = "debug")]
-async fn upgrade_connection(
-    request: Request<Incoming>,
-    original_destination: SocketAddr,
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    println!("upgrade connection!");
-
-    debug!("request was \n{request:#?}");
-    let (mut parts, body) = request.into_parts();
-
-    // Remove headers that would be invalid due to us fiddling with the `body`.
-    let body = body.collect().await?.to_bytes();
-    parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::TRANSFER_ENCODING);
-
-    let raw = parts.as_bytes();
-
-    info!("Connecting to original destination to send the request");
-    let mut interceptor_to_original = TcpStream::connect(original_destination).await.unwrap();
-    interceptor_to_original.write(&raw).await.unwrap();
-
-    let mut response_buffer = vec![0; 15000];
-    let amount = interceptor_to_original
-        .read(&mut response_buffer)
-        .await
-        .unwrap();
-
-    info!(
-        "Received response from interceptor is \n{:#?}",
-        String::from_utf8_lossy(&response_buffer[..amount])
-    );
-
-    let request = Request::from_parts(parts, body);
-
-    // TODO(alex) [high] 2023-01-12: Use this to send the response from within the upgrade thread to
-    // outside.
-    let (response_tx, response_rx) = oneshot::channel::<Response<Full<Bytes>>>();
-
-    tokio::task::spawn(async move {
-        match hyper::upgrade::on(request).await {
-            Ok(mut upgraded) => {
-                info!("Time to upgrade in hyper!");
-
-                todo!();
-            }
-            Err(no_upgrade) if no_upgrade.is_user() => {
-                debug!("No upgrade friends! but why {no_upgrade:#?}");
-                // Ok(())
-                // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not error,
-                // and not ok.
-                todo!("Should be a bypass-like thing")
-            }
-            Err(fail) => todo!("Failed upgrading with {fail:#?}"),
-        }
-    });
-
-    info!("Outside, we're awaiting for a response from the upgrade");
-    let response = response_rx.await.unwrap();
-    info!("Outside, the response is ready \n{response:#?}");
-    Ok(response)
-}
-
 impl Service<Request<Incoming>> for HyperHandler {
     type Response = Response<Full<Bytes>>;
 
@@ -257,7 +175,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    // #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
@@ -272,12 +190,21 @@ impl Service<Request<Incoming>> for HyperHandler {
             // Need an image/pod that supports websocket upgrade.
             if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
                 debug!("We have an upgrade request folks!");
-                let response = upgrade_connection(request, this.original_destination).await?;
-                debug!("after upgrade connection!");
+                let (parts, body) = request.into_parts();
 
-                debug!("sending back a response \n{response:#?}");
+                let mut upgrade_request = Request::builder()
+                    .method(parts.method.clone())
+                    .uri(parts.uri.clone())
+                    .version(parts.version.clone());
 
-                Ok(response)
+                for (header, value) in parts.headers.iter() {
+                    upgrade_request = upgrade_request.header(header, value);
+                }
+
+                let upgrade_request = upgrade_request.body(Full::default())?;
+                let request = Request::from_parts(parts, body);
+
+                unmatched_request(request, Some(upgrade_request), this.original_destination).await
             } else if let Some(client_id) = request
                 .headers()
                 .iter()
@@ -313,7 +240,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
                 matched_request(handler_request, this.matched_tx.clone(), response_rx).await
             } else {
-                unmatched_request(request, this.original_destination).await
+                unmatched_request(request, None, this.original_destination).await
             }
         };
 

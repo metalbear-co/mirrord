@@ -19,4 +19,7 @@ pub enum HttpTrafficError {
 
     #[error("Failed with Captured `{0}`!")]
     ResponseReceiver(#[from] tokio::sync::oneshot::error::RecvError),
+
+    #[error("Failed hyper HTTP `{0}`!")]
+    HyperHttp(#[from] hyper::http::Error),
 }
