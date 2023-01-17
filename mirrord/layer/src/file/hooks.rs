@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).

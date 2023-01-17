@@ -5,12 +5,7 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-use std::{
-    fs::Metadata,
-    io::SeekFrom,
-    os::unix::prelude::{FileExt, MetadataExt},
-    path::PathBuf,
-};
+use std::{fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf};
 
 use bincode::{Decode, Encode};
 
