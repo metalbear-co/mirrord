@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.19.2
+
 ### Changed
 
 - Code refactor: moved all file request and response types into own file.
