@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
+#![feature(assert_matches)]
+
+use std::{
+    assert_matches::assert_matches, collections::HashMap, path::PathBuf, process::Stdio,
+    time::Duration,
+};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -567,4 +572,126 @@ async fn test_go_dir(#[values(Application::GoDir)] application: Application, dyl
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
+}
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+#[cfg(target_os = "linux")]
+async fn test_go_dir_on_linux(
+    #[values(Application::GoDir)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/foo".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+
+    // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
+    assert_matches!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
+            remote_fd: 1,
+            buffer_size,
+        }))
+    );
+
+    // Simulating the agent: create the response the test expects - two files, "a" and "b".
+    let entries = vec![
+        DirEntryInternal {
+            inode: 1,
+            position: 1,
+            name: "a".to_string(),
+            file_type: libc::DT_REG,
+        },
+        DirEntryInternal {
+            inode: 2,
+            position: 2,
+            name: "b".to_string(),
+            file_type: libc::DT_REG,
+        },
+    ];
+
+    // The total size of the linux_dirent64 structs in memory.
+    let result_size = entries
+        .iter()
+        .map(|entry| entry.get_d_reclen64())
+        .sum::<u16>() as u64;
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Getdents64(Ok(
+            Getdents64Response {
+                fd: 1,
+                entries,
+                result_size,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    // The caller keeps calling the syscall until it gets an "empty" result.
+    assert_matches!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
+            remote_fd: 1,
+            buffer_size,
+        }))
+    );
+
+    // "Empty" result: no entries, total size of 0.
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Getdents64(Ok(
+            Getdents64Response {
+                fd: 1,
+                entries: vec![],
+                result_size: 0,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
+    );
+
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
 }
