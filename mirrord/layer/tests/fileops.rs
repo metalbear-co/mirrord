@@ -627,7 +627,7 @@ async fn test_go_dir_on_linux(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
             remote_fd: 1,
-            buffer_size,
+            .. // Don't want to commit to a specific buffer size.
         }))
     );
 
@@ -670,7 +670,7 @@ async fn test_go_dir_on_linux(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
             remote_fd: 1,
-            buffer_size,
+            ..
         }))
     );
 
