@@ -254,9 +254,9 @@ impl LayerConnection {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
-                mirrord_protocol::OpenFileRequest {
+                mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
-                    open_options: mirrord_protocol::OpenOptionsInternal {
+                    open_options: mirrord_protocol::file::OpenOptionsInternal {
                         read: true,
                         write: false,
                         append: false,
@@ -271,7 +271,7 @@ impl LayerConnection {
         // Answer open.
         self.codec
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
-                Ok(mirrord_protocol::OpenFileResponse { fd }),
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
             )))
             .await
             .unwrap();
@@ -281,7 +281,7 @@ impl LayerConnection {
     pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
-            mirrord_protocol::ReadFileRequest {
+            mirrord_protocol::file::ReadFileRequest {
                 remote_fd: requested_fd,
                 buffer_size,
             },
@@ -298,7 +298,7 @@ impl LayerConnection {
         let read_amount = contents.len();
         self.codec
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
-                Ok(mirrord_protocol::ReadFileResponse {
+                Ok(mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
                 }),
@@ -324,7 +324,7 @@ impl LayerConnection {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
-                mirrord_protocol::CloseFileRequest { fd }
+                mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
     }
