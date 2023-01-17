@@ -2,9 +2,9 @@ use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
-use mirrord_protocol::{
-    file::XstatResponse, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse,
+use mirrord_protocol::file::{
+    OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
+    XstatResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};

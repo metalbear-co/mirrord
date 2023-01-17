@@ -15,9 +15,8 @@ use libc::{
     FILE,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{
-    file::{DirEntryInternal, MetadataInternal},
-    OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+use mirrord_protocol::file::{
+    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::trace;

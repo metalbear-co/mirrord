@@ -7,6 +7,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.19.2
+
+### Changed
+
+- Code refactor: moved all file request and response types into own file.
+
+## 3.19.1
+
+### Fixed
+
+- Changelog error failing the JetBrains release.
+
+## 3.19.0
+
 ### Changed
 
 - mirrord-operator: replace operator api to use KubernetesAPI extension. [#915](https://github.com/metalbear-co/mirrord/pull/915)
@@ -19,6 +33,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
+
+### Deprecated
+
+- Remove old fs mode
+  - cli: no `--rw` or `--no-fs`.
+  - layer: no `MIRRORD_FILE_OPS`/`MIRRORD_FILE_RO_OPS`/`MIRRORD_FILE_FILTER_INCLUDE`/`MIRRORD_FILE_FILTER_EXCLUDE`
 
 ## 3.18.2
 
@@ -54,12 +74,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
-
-## Deprecated
-
-- Remove old fs mode
-  - cli: no `--rw` or `--no-fs`.
-  - layer: no `MIRRORD_FILE_OPS`/`MIRRORD_FILE_RO_OPS`/`MIRRORD_FILE_FILTER_INCLUDE`/`MIRRORD_FILE_FILTER_EXCLUDE`
 
 ## 3.17.0
 
