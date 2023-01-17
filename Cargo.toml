@@ -10,7 +10,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.17.0"
+version = "3.19.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -47,6 +47,7 @@ rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
 regex = "1"
+miette = "5"
 fancy-regex = { version = "0.10" }
 hyper = { version = "1.0.0-rc.2", features = ["full"] }
 http-body-util = { version = "0.1.0-rc.2" }

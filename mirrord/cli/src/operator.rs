@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Setup the operator into a file or to stdout, with explanation.
-fn operator_setup(
+async fn operator_setup(
     accept_tos: bool,
     file: Option<PathBuf>,
     namespace: OperatorNamespace,
@@ -25,7 +25,9 @@ fn operator_setup(
     }
 
     if let Some(license_key) = license_key {
-        let license = License::fetch(license_key.clone()).map_err(CliError::LicenseError)?;
+        let license = License::fetch_async(license_key.clone())
+            .await
+            .map_err(CliError::LicenseError)?;
 
         eprintln!(
             "Installing with license for {} ({})",
@@ -57,13 +59,13 @@ fn operator_setup(
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
-pub(crate) fn operator_command(args: OperatorArgs) -> Result<()> {
+pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
         OperatorCommand::Setup {
             accept_tos,
             file,
             namespace,
             license_key,
-        } => operator_setup(accept_tos, file, namespace, license_key),
+        } => operator_setup(accept_tos, file, namespace, license_key).await,
     }
 }

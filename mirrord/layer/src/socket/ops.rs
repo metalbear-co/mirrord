@@ -26,6 +26,49 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
+/// Helper struct for connect results where we want to hold the original errno
+/// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
+/// and the caller should have the original value.
+/// In order to use this struct correctly, after calling connect convert the return value using
+/// this `.into/.from` then the detour would call `.into` on the struct to convert to i32
+/// and would set the according errno.
+#[derive(Debug)]
+pub(super) struct ConnectResult {
+    result: i32,
+    error: Option<errno::Errno>,
+}
+
+impl ConnectResult {
+    pub(super) fn is_failure(&self) -> bool {
+        matches!(self.error, Some(err) if err.0 != libc::EINTR && err.0 != libc::EINPROGRESS)
+    }
+}
+
+impl From<i32> for ConnectResult {
+    fn from(result: i32) -> Self {
+        if result == -1 {
+            ConnectResult {
+                result,
+                error: Some(errno::errno()),
+            }
+        } else {
+            ConnectResult {
+                result,
+                error: None,
+            }
+        }
+    }
+}
+
+impl From<ConnectResult> for i32 {
+    fn from(connect_result: ConnectResult) -> Self {
+        if let Some(error) = connect_result.error {
+            errno::set_errno(error);
+        }
+        connect_result.result
+    }
+}
+
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
 #[tracing::instrument(level = "trace")]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
@@ -193,12 +236,14 @@ const UDP: ConnectType = !TCP;
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
 /// interception procedure.
+/// This returns errno so we can restore the correct errno in case result is -1 (until we get
+/// back to the hook we might call functions that will corrupt errno)
 #[tracing::instrument(level = "trace")]
 fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
     remote_address: SocketAddr,
     mut user_socket_info: Arc<UserSocket>,
-) -> Detour<i32> {
+) -> Detour<ConnectResult> {
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -224,14 +269,13 @@ fn connect_outgoing<const TYPE: ConnectType>(
     let connect_to = SockAddr::from(mirror_address);
 
     // Connect to the interceptor socket that is listening.
-    let connect_result = unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) };
+    let connect_result: ConnectResult =
+        unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) }.into();
 
-    let err_code = errno::errno().0;
-    if connect_result == -1 && err_code != libc::EINPROGRESS && err_code != libc::EINTR {
+    if connect_result.is_failure() {
         error!(
-            "connect -> Failed call to libc::connect with {:#?} errno is {:#?}",
+            "connect -> Failed call to libc::connect with {:#?}",
             connect_result,
-            errno::errno()
         );
         return Err(io::Error::last_os_error())?;
     }
@@ -261,7 +305,7 @@ pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
     address_length: socklen_t,
-) -> Detour<i32> {
+) -> Detour<ConnectResult> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
 
     if is_ignored_port(remote_address) || port_debug_patch(remote_address) {
@@ -298,7 +342,7 @@ pub(super) fn connect(
         if result != 0 {
             Detour::Error(Err(io::Error::last_os_error())?)?
         } else {
-            Detour::Success(result)
+            Detour::Success(result.into())
         }
     };
 
@@ -538,7 +582,7 @@ pub(super) fn getaddrinfo(
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
-
+    let mut addrinfo_set = MANAGED_ADDRINFO.lock()?;
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
@@ -566,6 +610,10 @@ pub(super) fn getaddrinfo(
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
+        .map(|raw| {
+            addrinfo_set.insert(raw as usize);
+            raw
+        })
         .reduce(|current, mut previous| {
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.

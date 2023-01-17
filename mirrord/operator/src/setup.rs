@@ -5,8 +5,8 @@ use k8s_openapi::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             Container, ContainerPort, EnvFromSource, EnvVar, Namespace, PodSpec, PodTemplateSpec,
-            Secret, SecretEnvSource, SecurityContext, Service, ServiceAccount, ServicePort,
-            ServiceSpec,
+            Secret, SecretEnvSource, SecretVolumeSource, SecurityContext, Service, ServiceAccount,
+            ServicePort, ServiceSpec, Volume, VolumeMount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
@@ -14,13 +14,24 @@ use k8s_openapi::{
         apis::meta::v1::{LabelSelector, ObjectMeta},
         util::intstr::IntOrString,
     },
+    kube_aggregator::pkg::apis::apiregistration::v1::{
+        APIService, APIServiceSpec, ServiceReference,
+    },
 };
+use kube::Resource;
 use thiserror::Error;
 
+use crate::crd::TargetCrd;
+
 static OPERATOR_NAME: &str = "mirrord-operator";
+static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_SECRET_NAME: &str = "mirrord-operator-license";
+static OPERATOR_TLS_SECRET_NAME: &str = "mirrord-operator-tls";
+static OPERATOR_TLS_VOLUME_NAME: &str = "tls-volume";
+static OPERATOR_TLS_KEY_FILE_NAME: &str = "tls.key";
+static OPERATOR_TLS_CERT_FILE_NAME: &str = "tls.pem";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
@@ -51,6 +62,8 @@ pub struct Operator {
     secret: OperatorSecret,
     service: OperatorService,
     service_account: OperatorServiceAccount,
+    tls_secret: OperatorTlsSecret,
+    api_service: OperatorApiService,
 }
 
 impl Operator {
@@ -58,12 +71,17 @@ impl Operator {
         let secret = OperatorSecret::new(&license_key, &namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
 
+        let tls_secret = OperatorTlsSecret::new(&namespace);
+
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
 
-        let deployment = OperatorDeployment::new(&namespace, &service_account, &secret);
+        let deployment =
+            OperatorDeployment::new(&namespace, &service_account, &secret, &tls_secret);
 
         let service = OperatorService::new(&namespace);
+
+        let api_service = OperatorApiService::new(&service);
 
         Operator {
             namespace,
@@ -73,6 +91,8 @@ impl Operator {
             secret,
             service,
             service_account,
+            tls_secret,
+            api_service,
         }
     }
 }
@@ -98,6 +118,12 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.service.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.tls_secret.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.api_service.to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -142,6 +168,7 @@ impl OperatorDeployment {
         namespace: &OperatorNamespace,
         sa: &OperatorServiceAccount,
         secret: &OperatorSecret,
+        tls_secret: &OperatorTlsSecret,
     ) -> Self {
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
@@ -150,11 +177,28 @@ impl OperatorDeployment {
                 env!("CARGO_PKG_VERSION")
             )),
             image_pull_policy: Some("IfNotPresent".to_owned()),
-            env: Some(vec![EnvVar {
-                name: "RUST_LOG".to_owned(),
-                value: Some("mirrord=info,operator=info".to_owned()),
-                value_from: None,
-            }]),
+            env: Some(vec![
+                EnvVar {
+                    name: "RUST_LOG".to_owned(),
+                    value: Some("mirrord=info,operator=info".to_owned()),
+                    value_from: None,
+                },
+                EnvVar {
+                    name: "OPERATOR_ADDR".to_owned(),
+                    value: Some(format!("0.0.0.0:{OPERATOR_PORT}")),
+                    value_from: None,
+                },
+                EnvVar {
+                    name: "OPERATOR_TLS_CERT_PATH".to_owned(),
+                    value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
+                    value_from: None,
+                },
+                EnvVar {
+                    name: "OPERATOR_TLS_KEY_PATH".to_owned(),
+                    value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
+                    value_from: None,
+                },
+            ]),
             env_from: Some(vec![EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
                     name: Some(secret.name().to_owned()),
@@ -163,8 +207,13 @@ impl OperatorDeployment {
                 ..Default::default()
             }]),
             ports: Some(vec![ContainerPort {
-                name: Some("tcp".to_owned()),
-                container_port: 8080,
+                name: Some("https".to_owned()),
+                container_port: OPERATOR_PORT,
+                ..Default::default()
+            }]),
+            volume_mounts: Some(vec![VolumeMount {
+                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+                mount_path: "/tls".to_owned(),
                 ..Default::default()
             }]),
             security_context: Some(SecurityContext {
@@ -179,6 +228,14 @@ impl OperatorDeployment {
         let pod_spec = PodSpec {
             containers: vec![container],
             service_account_name: Some(sa.name().to_owned()),
+            volumes: Some(vec![Volume {
+                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(tls_secret.name().to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
             ..Default::default()
         };
 
@@ -390,9 +447,9 @@ impl OperatorService {
                 type_: Some("ClusterIP".to_owned()),
                 selector: Some(APP_LABELS.clone()),
                 ports: Some(vec![ServicePort {
-                    name: Some("tcp".to_owned()),
-                    port: 8080,
-                    target_port: Some(IntOrString::String("tcp".to_owned())),
+                    name: Some("https".to_owned()),
+                    port: OPERATOR_PORT,
+                    target_port: Some(IntOrString::String("https".to_owned())),
                     ..Default::default()
                 }]),
                 ..Default::default()
@@ -402,9 +459,100 @@ impl OperatorService {
 
         OperatorService(service)
     }
+
+    pub fn as_referance(&self) -> ServiceReference {
+        ServiceReference {
+            name: self.0.metadata.name.clone(),
+            namespace: self.0.metadata.namespace.clone(),
+            port: Some(OPERATOR_PORT),
+        }
+    }
 }
 
 impl OperatorSetup for OperatorService {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorTlsSecret(Secret);
+
+impl OperatorTlsSecret {
+    pub fn new(namespace: &OperatorNamespace) -> Self {
+        let cert = rcgen::generate_simple_self_signed(vec![
+            OPERATOR_SERVICE_NAME.to_owned(),
+            format!("{OPERATOR_SERVICE_NAME}.svc.cluster.local"),
+            format!(
+                "{OPERATOR_SERVICE_NAME}.{}.svc.cluster.local",
+                namespace.name()
+            ),
+        ])
+        .expect("unable to create self signed certificate");
+
+        let secret = Secret {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_TLS_SECRET_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
+                ..Default::default()
+            },
+            string_data: Some(BTreeMap::from([
+                (
+                    OPERATOR_TLS_KEY_FILE_NAME.to_owned(),
+                    cert.get_key_pair().serialize_pem(),
+                ),
+                (
+                    OPERATOR_TLS_CERT_FILE_NAME.to_owned(),
+                    cert.serialize_pem().unwrap(),
+                ),
+            ])),
+            ..Default::default()
+        };
+
+        OperatorTlsSecret(secret)
+    }
+
+    fn name(&self) -> &str {
+        self.0.metadata.name.as_deref().unwrap_or_default()
+    }
+}
+
+impl OperatorSetup for OperatorTlsSecret {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+        serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorApiService(APIService);
+
+impl OperatorApiService {
+    pub fn new(service: &OperatorService) -> Self {
+        let group = TargetCrd::group(&());
+        let version = TargetCrd::version(&());
+
+        let api_service = APIService {
+            metadata: ObjectMeta {
+                name: Some(format!("{version}.{group}")),
+                ..Default::default()
+            },
+            spec: Some(APIServiceSpec {
+                ca_bundle: None,
+                group: Some(group.to_string()),
+                group_priority_minimum: 1000,
+                insecure_skip_tls_verify: Some(true),
+                service: Some(service.as_referance()),
+                version: Some(version.to_string()),
+                version_priority: 15,
+            }),
+            ..Default::default()
+        };
+
+        OperatorApiService(api_service)
+    }
+}
+
+impl OperatorSetup for OperatorApiService {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }

@@ -171,6 +171,7 @@ mod steal {
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
+        #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
         let application = Application::NodeTcpEcho;
         let service = tcp_echo_service.await;
@@ -184,7 +185,11 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+                Some(vec![
+                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
+                    // set time out to 1 to avoid two agents conflict
+                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
+                ]),
             )
             .await;
 
@@ -192,17 +197,22 @@ mod steal {
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(b"THIS IS NOT HTTP!\n").unwrap();
+        stream.write(tcp_data.as_bytes()).unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
         reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf, "remote: THIS IS NOT HTTP!\n"); // Successful round trip with remote app.
+        println!("Got response: {buf}");
+        assert_eq!(&buf[..8], "remote: "); // The data was passed through to remote app.
+        assert_eq!(&buf[8..], tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
         let stdout_after = mirrorded_process.get_stdout();
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         mirrorded_process.child.kill().await.unwrap();
+
+        // Wait for agent to exit.
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         // Now do a meta-test to see that with this setup but without the http filter the data does
         // reach the local app.
@@ -216,11 +226,12 @@ mod steal {
         mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
 
         let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(b"THIS IS NOT HTTP!\n").unwrap();
+        stream.write(tcp_data.as_bytes()).unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
         reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf, "local: THIS IS NOT HTTP!\n"); // Successful round trip with local app.
+        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
+        assert_eq!(&buf[7..], tcp_data); // The correct data was sent there and back.
 
         // Verify the data was sent to the local app.
         let stdout_after = mirrorded_process.get_stdout();

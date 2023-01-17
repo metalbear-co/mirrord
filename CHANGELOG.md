@@ -7,6 +7,54 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Code refactor: moved all file request and response types into own file.
+
+## 3.19.1
+
+### Fixed
+
+- Changelog error failing the JetBrains release.
+
+## 3.19.0
+
+### Changed
+
+- mirrord-operator: replace operator api to use KubernetesAPI extension. [#915](https://github.com/metalbear-co/mirrord/pull/915)
+
+### Fixed
+
+- tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
+- macOS x64/SIP(arm): fix double hooking `fstatat$INODE64`. Possible crash and undefined behavior.
+
+### Added
+
+- introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
+
+### Deprecated
+
+- Remove old fs mode
+  - cli: no `--rw` or `--no-fs`.
+  - layer: no `MIRRORD_FILE_OPS`/`MIRRORD_FILE_RO_OPS`/`MIRRORD_FILE_FILTER_INCLUDE`/`MIRRORD_FILE_FILTER_EXCLUDE`
+
+## 3.18.2
+
+### Fixed
+
+- crash when `getaddrinfo` is bypassed and libc tries to free our structure. Closes [#930](https://github.com/metalbear-co/mirrord/issues/930)
+- Stealer hangs on short streams left open and fails on short closed streams to filtered HTTP ports -
+ [#926](https://github.com/metalbear-co/mirrord/issues/926).
+
+## 3.18.1
+
+### Fixed
+
+- Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
+- config: file config updated to fix simple pattern of IncomingConfig. [#933](https://github.com/metalbear-co/mirrord/pull/933)
+
+## 3.18.0
+
 ### Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).

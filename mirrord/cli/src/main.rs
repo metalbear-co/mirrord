@@ -48,16 +48,9 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
                                            specifying `--pause`.
     ";
 
-/// Creates an agent and fetches environment variables from it.
-/// Wrapper of async function with tokio for use from sync context.
-#[tokio::main(flavor = "current_thread")]
-async fn start_agent(config: &LayerConfig, progress: &TaskProgress) -> Result<MirrordExecution> {
-    MirrordExecution::start(config, progress).await
-}
-
-fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
+async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if !args.no_telemetry {
-        prompt_outdated_version();
+        prompt_outdated_version().await;
     }
     info!(
         "Launching {:?} with arguments {:?}",
@@ -105,16 +98,6 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if args.enable_rw_fs && args.no_fs {
         warn!("use --fs-mode=write or --fs-mode=readonly please");
         warn!("fs was both enabled and disabled - disabling will take precedence.");
-    }
-
-    if !args.no_fs && args.enable_rw_fs {
-        warn!("--rw is deprecated, use --fs-mode=write instead");
-        std::env::set_var("MIRRORD_FILE_OPS", "true");
-    }
-
-    if args.no_fs || args.enable_rw_fs {
-        warn!("--no-fs is deprecated, use --fs-mode=write instead");
-        std::env::set_var("MIRRORD_FILE_RO_OPS", "false");
     }
 
     if let Some(fs_mode) = args.fs_mode {
@@ -197,7 +180,7 @@ fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         }
     }
 
-    let execution_info = start_agent(&config, &sub_progress)?;
+    let execution_info = MirrordExecution::start(&config, progress).await?;
 
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
@@ -267,7 +250,6 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
 ///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
-#[tokio::main(flavor = "current_thread")]
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let pods = get_kube_pods(args.namespace.as_deref()).await?;
     let target_vector = pods
@@ -309,35 +291,41 @@ fn cli_progress() -> TaskProgress {
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-fn main() -> miette::Result<()> {
-    registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+
+#[tokio::main]
+async fn main() -> miette::Result<()> {
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        mirrord_console::init_logger(&console_addr).await?;
+    } else {
+        registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+    }
 
     let cli = Cli::parse();
 
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &cli_progress())?,
+        Commands::Exec(args) => exec(&args, &cli_progress()).await?,
         Commands::Extract { path } => {
             extract_library(Some(path), &cli_progress(), false)?;
         }
-        Commands::ListTargets(args) => print_pod_targets(&args)?,
+        Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Login(args) => login(args)?,
-        Commands::Operator(args) => operator_command(*args)?,
-        Commands::ExtensionExec(args) => extension_exec(*args)?,
+        Commands::Operator(args) => operator_command(*args).await?,
+        Commands::ExtensionExec(args) => extension_exec(*args).await?,
     }
 
     Ok(())
 }
 
-fn prompt_outdated_version() {
+async fn prompt_outdated_version() {
     let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
 
     if check_version {
-        if let Ok(client) = reqwest::blocking::Client::builder().build() {
+        if let Ok(client) = reqwest::Client::builder().build() {
             if let Ok(result) = client
                 .get(format!(
                     "https://version.mirrord.dev/get-latest-version?source=2&currentVersion={}&platform={}",
@@ -345,9 +333,9 @@ fn prompt_outdated_version() {
                     std::env::consts::OS
                 ))
                 .timeout(Duration::from_secs(1))
-                .send()
+                .send().await
             {
-                if let Ok(latest_version) = Version::parse(&result.text().unwrap()) {
+                if let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                         println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`.", latest_version);
                         println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")

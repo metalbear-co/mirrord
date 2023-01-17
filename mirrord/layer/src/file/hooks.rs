@@ -15,9 +15,8 @@ use libc::{
     FILE,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{
-    file::{DirEntryInternal, MetadataInternal},
-    OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+use mirrord_protocol::file::{
+    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::trace;
@@ -694,13 +693,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_FSTAT
         );
         replace!(hook_manager, "stat$INODE64", stat_detour, FnStat, FN_STAT);
-        replace!(
-            hook_manager,
-            "fstatat$INODE64",
-            fstatat_detour,
-            FnFstatat,
-            FN_FSTATAT
-        );
         replace!(
             hook_manager,
             "fstatat$INODE64",

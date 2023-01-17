@@ -3,12 +3,10 @@
 /// Read-only file operations are enabled by default, you can turn it off by setting
 /// `MIRRORD_FILE_RO_OPS` to `false`.
 ///
-/// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 ///
 /// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
-/// open locally), these are controlled by configuring the [`filter::FileFilter`] with either
-/// `MIRRORD_FILE_FILTER_INCLUDE` or `MIRRORD_FILE_FILTER_EXCLUDE` (the later adds aditional
-/// exclusions to the default).
+/// opened locally), these are controlled by configuring the [`filter::FileFilter`] with
+/// `[FsConfig]`.
 use core::fmt;
 use std::{
     collections::HashMap,
@@ -21,14 +19,14 @@ use std::{
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
     file::{
-        CloseDirRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse, ReadDirRequest,
-        ReadDirResponse, XstatRequest, XstatResponse,
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
+        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
     },
-    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
-    SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-    WriteLimitedFileRequest,
+    ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
 use tokio::sync::mpsc::Sender;
 use tracing::{error, trace, warn};

@@ -9,7 +9,6 @@ pub mod feature;
 pub mod fs;
 pub mod incoming;
 pub mod network;
-pub mod operator;
 pub mod outgoing;
 pub mod target;
 pub mod util;
@@ -27,7 +26,7 @@ use schemars::JsonSchema;
 
 use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    operator::OperatorConfig, target::TargetConfig, util::VecOrSingle,
+    target::TargetConfig, util::VecOrSingle,
 };
 
 /// Main struct for mirrord-layer's configuration
@@ -119,8 +118,9 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    #[config(nested, toggleable)]
-    pub operator: OperatorConfig,
+    /// Allow to lookup if operator is installed on cluster and use it
+    #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
+    pub operator: bool,
 }
 
 impl LayerConfig {
@@ -162,7 +162,7 @@ mod tests {
         agent::AgentFileConfig,
         feature::FeatureFileConfig,
         fs::{FsModeConfig, FsUserConfig},
-        incoming::{IncomingFileConfig, IncomingMode},
+        incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
         network::NetworkFileConfig,
         outgoing::OutgoingFileConfig,
         target::{PodTarget, Target, TargetFileConfig},
@@ -345,10 +345,12 @@ mod tests {
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
-                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig {
-                        mode: Some(IncomingMode::Mirror),
-                        http_header_filter: None,
-                    })),
+                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
+                        IncomingAdvancedFileConfig {
+                            mode: Some(IncomingMode::Mirror),
+                            http_header_filter: None,
+                        },
+                    ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
