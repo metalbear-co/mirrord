@@ -14,12 +14,12 @@ use std::{
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
-#[cfg(target_os = "linux")]
-use libc::EINVAL;
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
     FILE,
 };
+#[cfg(target_os = "linux")]
+use libc::{EBADF, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
@@ -208,9 +208,9 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                         error!(
                             "Error while trying to write remote dir entry to local buffer: {e:?}"
                         );
-                        // TODO: would this only produce errno values that are legal for this
-                        //       syscall?
-                        set_errno(Errno(c_int::from(e)));
+                        // There is no appropriate error code for "We hijacked this operation and
+                        // had an error while trying to create a CString."
+                        set_errno(Errno(EBADF)); // Invalid file descriptor.
                         return -1;
                     }
                     Ok(()) => next = next.byte_add((*next).d_reclen as usize),
@@ -221,8 +221,10 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
         Detour::Bypass(_) => libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size),
         Detour::Error(err) => {
             error!("Encountered error in getdents64 detour: {err:?}");
-            // TODO: would this only produce errno values that are legal for this syscall?
-            set_errno(Errno(c_int::from(err)));
+            // There is no appropriate error code for "We hijacked this operation to a remote agent
+            // and the agent returned an error". We could try to map different (remote) errors to
+            // the error codes though.
+            set_errno(Errno(EBADF));
             -1
         }
     }
