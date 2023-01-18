@@ -2,6 +2,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
+use futures::{FutureExt, TryFutureExt};
 use hyper::server::{self, conn::http1};
 use mirrord_protocol::ConnectionId;
 use tokio::{
@@ -12,7 +13,9 @@ use tokio::{
 };
 use tracing::{error, info, trace};
 
-use super::{hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion};
+use super::{
+    error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
+};
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
@@ -39,8 +42,9 @@ pub(super) async fn filter_task(
     filters: Arc<DashMap<ClientId, Regex>>,
     matched_tx: Sender<HandlerHttpRequest>,
     connection_close_sender: Sender<ConnectionId>,
-) {
+) -> Result<(), HttpTrafficError> {
     let port = original_destination.port();
+
     match DefaultReversibleStream::read_header(
         stolen_stream,
         DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT,
@@ -69,8 +73,13 @@ pub(super) async fn filter_task(
                     //
                     // Should also probably drop the `with_upgrades` thing, otherwise hyper may
                     // think that the service is not done, and block us from doing this.
-                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<Option<TcpStream>>();
-                    let hyper_result = http1::Builder::new()
+                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<TcpStream>();
+                    let server::conn::http1::Parts {
+                        io: mut remote_to_agent,
+                        read_buf,
+                        service,
+                        ..
+                    } = http1::Builder::new()
                         .preserve_header_case(true)
                         .serve_connection(
                             reversible_stream,
@@ -85,41 +94,20 @@ pub(super) async fn filter_task(
                             },
                         )
                         .without_shutdown()
-                        .await;
+                        .await?;
 
-                    {}
+                    if let Ok(mut interceptor_to_original) = upgrade_rx.await {
+                        copy_bidirectional(&mut remote_to_agent, &mut interceptor_to_original)
+                            .await?;
+                    }
 
-                    select! {
-                        interceptor_to_original = upgrade_rx => {
-                            info!("Have interceptor to original stream in {:#?}", interceptor_to_original);
-                            info!("We also have hyper raw {:#?}", hyper_result);
-
-                            let server::conn::http1::Parts {
-                                io: mut remote_to_agent,
-                                read_buf,
-                                service,
-                                ..
-                            } = hyper_result.unwrap();
-
-                            match interceptor_to_original {
-                                Ok(Some(mut interceptor_to_original)) => {
-                                    copy_bidirectional(&mut interceptor_to_original, &mut remote_to_agent).await.unwrap();
-                                },
-                                Err(fail) => {
-                                    error!("Failed retrieving from the interceptor to original channel with {fail:#?}");
-                                }
-                                _ => { info!("No data in interceptor to original channel, not upgrade!"); }
-                            }
-                        }
-                    };
-
-                    let _res = connection_close_sender
+                    connection_close_sender
                         .send(connection_id)
                         .await
                         .inspect_err(|connection_id| {
                             error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
                             Cannot report the closing of connection {connection_id}.");
-                        });
+                        }).map_err(From::from)
                 }
 
                 // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
@@ -142,15 +130,19 @@ pub(super) async fn filter_task(
                                     trace!(
                                         "Forwarded {incoming} incoming bytes and {outgoing} \
                                         outgoing bytes in passthrough connection"
-                                    )
+                                    );
+
+                                    Ok(())
                                 }
                                 Err(err) => {
                                     error!(
                                         "Encountered error while forwarding unsupported \
                                     connection to its original destination: {err:?}"
-                                    )
+                                    );
+
+                                    Err(err)?
                                 }
-                            };
+                            }
                         }
                         Err(err) => {
                             error!(
@@ -158,6 +150,7 @@ pub(super) async fn filter_task(
                                  . Received a connection with an unsupported protocol version to a \
                                  filtered HTTP port, but cannot forward the connection because of \
                                  the connection error: {err:?}");
+                            Err(err)?
                         }
                     }
                 }
@@ -166,6 +159,7 @@ pub(super) async fn filter_task(
 
         Err(read_error) => {
             error!("Got error while trying to read first bytes of TCP stream: {read_error:?}");
+            Err(read_error)
         }
     }
 }

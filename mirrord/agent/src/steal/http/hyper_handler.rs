@@ -64,7 +64,7 @@ pub(super) struct HyperHandler {
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
 
-    pub(super) upgrade_tx: Option<oneshot::Sender<Option<TcpStream>>>,
+    pub(super) upgrade_tx: Option<oneshot::Sender<TcpStream>>,
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
@@ -95,7 +95,7 @@ async fn matched_request(
 async fn unmatched_request(
     request: Request<Incoming>,
     is_upgrade: bool,
-    upgrade_tx: Option<oneshot::Sender<Option<TcpStream>>>,
+    upgrade_tx: Option<oneshot::Sender<TcpStream>>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
@@ -105,8 +105,6 @@ async fn unmatched_request(
         .await
         .inspect_err(|fail| error!("Failed connecting to original_destination with {fail:#?}"))?;
 
-    // TODO(alex) [high] 2023-01-17: Can probably do the upgrade here, as we have the request and
-    // the stream.
     let (mut request_sender, mut connection) = client::conn::http1::handshake(tcp_stream)
         .await
         .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
@@ -117,17 +115,31 @@ async fn unmatched_request(
             error!("Connection failed in unmatched with {fail:#?}");
         }
 
+        // TODO(alex) [high] 2023-01-18: Document why we can't use `hyper::upgrade::on` here.
+        // It's due to how hyper inserts an `OnUpgrade` in the `Request::extension`, and this whole
+        // thing is pretty locked up to hyper itself.
+        //
+        // We need to take the `Request` by move, as we need to `send_request` over there, thus
+        // requring a copy of the request to be passed to the `hyper::upgrade::on` handler. This
+        // doesn't work, because the `Request` holds the `OnUpgrade` channel (an `rx` that is
+        // handled internally by hyper), so even if we copy all the fields, we can't copy the
+        // `OnUpgrade` channel.
+        //
+        // This means that we're going to have 2 different requests, one that triggers the
+        // `upgrade::on`, but will never do anything (due to us not being able to pass it to the
+        // handler), and another tha never triggers it.
+
+        // If this is not an upgrade, then we'll just drop the `Sender`, this is enough to signal
+        // the `Receiver` in `filter.rs` that we're not dealing with an upgrade request, and that
+        // the `HyperHandler` connection can be dropped.
         if is_upgrade {
             info!("time to handle the upgrade manually");
             let client::conn::http1::Parts { io, read_buf, .. } = connection.into_parts();
 
-            if let Some(upgrade_tx) = upgrade_tx {
-                upgrade_tx.send(Some(io)).unwrap();
-            }
-        } else {
-            if let Some(upgrade_tx) = upgrade_tx {
-                upgrade_tx.send(None).unwrap();
-            }
+            let _ = upgrade_tx
+                .map(|sender| sender.send(io))
+                .transpose()
+                .inspect_err(|_| error!("Failed sending interceptor connection!"));
         }
     });
 

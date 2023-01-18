@@ -1,3 +1,4 @@
+use mirrord_protocol::ConnectionId;
 use thiserror::Error;
 
 use crate::steal::HandlerHttpRequest;
@@ -22,4 +23,10 @@ pub enum HttpTrafficError {
 
     #[error("Failed hyper HTTP `{0}`!")]
     HyperHttp(#[from] hyper::http::Error),
+
+    #[error("Failed hyper HTTP `{0}`!")]
+    CloseSender(#[from] tokio::sync::mpsc::error::SendError<ConnectionId>),
+
+    #[error("This is not an upgrade connection!")]
+    NotUpgrade,
 }
