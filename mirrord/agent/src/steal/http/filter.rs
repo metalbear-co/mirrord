@@ -2,14 +2,15 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::server::conn::http1;
+use hyper::server::{self, conn::http1};
 use mirrord_protocol::ConnectionId;
 use tokio::{
     io::copy_bidirectional,
     net::TcpStream,
+    select,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use super::{hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion};
 use crate::{steal::HandlerHttpRequest, util::ClientId};
@@ -68,8 +69,8 @@ pub(super) async fn filter_task(
                     //
                     // Should also probably drop the `with_upgrades` thing, otherwise hyper may
                     // think that the service is not done, and block us from doing this.
-                    let (bypassed_tx, bypassed_rx) = oneshot::channel();
-                    let _res = http1::Builder::new()
+                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<Option<TcpStream>>();
+                    let hyper_result = http1::Builder::new()
                         .preserve_header_case(true)
                         .serve_connection(
                             reversible_stream,
@@ -80,11 +81,37 @@ pub(super) async fn filter_task(
                                 port,
                                 original_destination,
                                 request_id: 0,
-                                bypassed_tx,
+                                upgrade_tx: Some(upgrade_tx),
                             },
                         )
-                        .with_upgrades()
+                        .without_shutdown()
                         .await;
+
+                    {}
+
+                    select! {
+                        interceptor_to_original = upgrade_rx => {
+                            info!("Have interceptor to original stream in {:#?}", interceptor_to_original);
+                            info!("We also have hyper raw {:#?}", hyper_result);
+
+                            let server::conn::http1::Parts {
+                                io: mut remote_to_agent,
+                                read_buf,
+                                service,
+                                ..
+                            } = hyper_result.unwrap();
+
+                            match interceptor_to_original {
+                                Ok(Some(mut interceptor_to_original)) => {
+                                    copy_bidirectional(&mut interceptor_to_original, &mut remote_to_agent).await.unwrap();
+                                },
+                                Err(fail) => {
+                                    error!("Failed retrieving from the interceptor to original channel with {fail:#?}");
+                                }
+                                _ => { info!("No data in interceptor to original channel, not upgrade!"); }
+                            }
+                        }
+                    };
 
                     let _res = connection_close_sender
                         .send(connection_id)
