@@ -108,11 +108,15 @@ pub enum OperatorMessage {
 
 impl OperatorMessage {
     pub fn is_error(&self) -> bool {
-        true
+        match self {
+            OperatorMessage::LockedPort(_, _) => true,
+        }
     }
 
     pub fn is_critical(&self) -> bool {
-        true
+        match self {
+            OperatorMessage::LockedPort(_, _) => true,
+        }
     }
 }
 
