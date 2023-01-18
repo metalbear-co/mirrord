@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Remove already deprecated `--no-fs` and `--rw` options, that do not do anything anymore, but were still listed in the
   help message.
 
+### Changed
+
+- e2e tests: re-enable go.
+
 ## 3.19.2
 
 ### Changed

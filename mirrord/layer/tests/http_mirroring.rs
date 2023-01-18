@@ -40,7 +40,8 @@ async fn test_mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
-        Application::NodeHTTP
+        Application::NodeHTTP,
+        Application::Go19HTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
@@ -103,13 +104,4 @@ async fn test_mirroring_with_http(
     test_process.assert_stdout_contains("DELETE: Request completed");
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();
-}
-
-/// Run the http mirroring test only on MacOS, because of a known crash on Linux.
-#[cfg(target_os = "macos")]
-#[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(60))]
-async fn test_mirroring_with_http_go(dylib_path: &PathBuf) {
-    test_mirroring_with_http(Application::Go19HTTP, dylib_path).await;
 }
