@@ -9,7 +9,7 @@ mod main {
         env,
         env::temp_dir,
         io::{self, Read},
-        os::macos::fs::MetadataExt,
+        os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
     };
 
@@ -123,11 +123,15 @@ mod main {
                     UnlikelyError("Can't read script contents as utf8".to_string())
                 })?);
                 std::fs::write(patched_path.as_ref(), new_contents)?;
-                // Give the new file the same permissions as the old file.
-                std::fs::set_permissions(
-                    patched_path.as_ref(),
-                    std::fs::metadata(&original_path)?.permissions(),
-                )?;
+
+                // We set the permissions of the patched script to be like those of the original
+                // script, but allowing the user to write, so that in the next run, when we are here
+                // again, we have permission to overwrite the patched script (we rewrite the script
+                // every run, in case it is a user script that was changed).
+                let mut permissions = std::fs::metadata(&original_path)?.permissions();
+                let mode = permissions.mode() | 0o200; // user can write.
+                permissions.set_mode(mode);
+                std::fs::set_permissions(patched_path.as_ref(), permissions)?;
                 Ok(())
             })
             .ok_or_else(|| UnlikelyError("Can't read shebang anymore.".to_string()))?
@@ -444,6 +448,27 @@ mod main {
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        /// Test that patching the same script twice does not lead to an error.
+        /// This is a regression test for a bug where patching a script to which the user did not
+        /// have write permissions would fail the second time, because we could not overwrite the
+        /// patched script, due to lack of write permissions.
+        #[test]
+        fn patch_twice() {
+            let mut script = tempfile::NamedTempFile::new().unwrap();
+            let script_contents = "#!/usr/bin/env bash\nexit\n";
+            script.write(script_contents.as_ref()).unwrap();
+            script.flush().unwrap();
+
+            let path = script.path();
+
+            let permissions = std::fs::Permissions::from_mode(0o555); // read and execute, no write.
+            std::fs::set_permissions(path, permissions).unwrap();
+
+            let path_str = path.to_str().unwrap();
+            let _ = sip_patch(path_str).unwrap().unwrap();
+            let _ = sip_patch(path_str).unwrap().unwrap();
         }
 
         /// Run `sip_patch` on a file that has a shebang that points to itself and verify that
