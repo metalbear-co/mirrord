@@ -190,7 +190,7 @@ impl TcpOutgoingApi {
                 }
                 else => {
                     // We have no more data coming from any of the remote hosts.
-                    warn!("interceptor_task -> no messages left");
+                    trace!("interceptor_task -> no messages left");
                     break;
                 }
             }
