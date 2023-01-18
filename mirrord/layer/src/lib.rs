@@ -419,6 +419,8 @@ impl Layer {
                 } else {
                     info!("{}", operator_message);
                 }
+
+                Ok(())
             }
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
             DaemonMessage::LogMessage(_) => todo!(),
