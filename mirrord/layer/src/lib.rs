@@ -414,10 +414,10 @@ impl Layer {
                     if operator_message.is_critical() {
                         graceful_exit!("{}", operator_message);
                     } else {
-                        eprintln!("{}", operator_message);
+                        error!("{}", operator_message);
                     }
                 } else {
-                    println!("{}", operator_message);
+                    info!("{}", operator_message);
                 }
             }
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
