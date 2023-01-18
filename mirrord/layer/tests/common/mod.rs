@@ -387,8 +387,8 @@ impl Application {
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps => String::from("node"),
             Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
-            Application::Go19Issue834 => String::from("tests/apps/issue_834/19"),
-            Application::Go18Issue834 => String::from("tests/apps/issue_834/18"),
+            Application::Go19Issue834 => String::from("tests/apps/issue834/19"),
+            Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
         }
     }
 
