@@ -39,7 +39,7 @@ use crate::{
 /// [`Service::call`] method.
 ///
 /// Each [`TcpStream`] connection (for stealer) requires this.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct HyperHandler {
     /// The (shared with the stealer) HTTP filter regexes that are used to filter traffic for this
     /// particular connection.
@@ -63,6 +63,8 @@ pub(super) struct HyperHandler {
 
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
+
+    pub(super) bypassed_tx: Sender<Option<TcpStream>>,
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
@@ -84,99 +86,177 @@ async fn matched_request(
     Ok(Response::from_parts(parts, body))
 }
 
-/// Handles the case when no filter matches a header in the request.
-///
-/// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
-/// 2. Sends the [`Request`] to it, and awaits a [`Response`];
-/// 3. Sends the [`HttpResponse`] back on the connected [`TcpStream`].
-// #[tracing::instrument(level = "trace")]
-async fn unmatched_request(
-    request: Request<Incoming>,
-    upgrade_request: Option<Request<Full<Bytes>>>,
-    original_destination: SocketAddr,
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
-    // closes a connection, the client could still be wanting to send a request, so we need to
-    // re-connect and send.
-    let tcp_stream = TcpStream::connect(original_destination)
-        .await
-        .inspect_err(|fail| error!("Failed connecting to original_destination with {fail:#?}"))?;
+impl HyperHandler {
+    async fn handle(
+        &mut self,
+        request: Request<Incoming>,
+    ) -> Result<
+        <Self as Service<Request<Incoming>>>::Response,
+        <Self as Service<Request<Incoming>>>::Error,
+    > {
+        self.request_id += 1;
 
-    // TODO(alex) [high] 2023-01-17: Can probably do the upgrade here, as we have the request and
-    // the stream.
-    let (mut request_sender, mut connection) = client::conn::http1::handshake(tcp_stream)
-        .await
-        .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
+        // TODO(alex) [high] 2023-01-10: curl h2c is not supported, gotta test this with another
+        // thing, like websocket upgrade.
+        //
+        // We need to return the `SwitchProtocol` response we get from the passthrough, or can
+        // we send one ourselves?
+        //
+        // Need an image/pod that supports websocket upgrade.
+        if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
+            info!("We have an upgrade request folks!");
+            let (mut parts, body) = request.into_parts();
 
-    // We need this to progress the connection forward (hyper thing).
-    tokio::spawn(async move {
-        if let Err(fail) = poll_fn(|cx| connection.poll_without_shutdown(cx)).await {
-            error!("Connection failed in unmatched with {fail:#?}");
+            let extension = parts.extensions.remove::<OnUpgrade>();
+            let mut upgrade_request = Request::builder()
+                .method(parts.method.clone())
+                .uri(parts.uri.clone())
+                .version(parts.version.clone())
+                .extension(extension);
+
+            for (header, value) in parts.headers.iter() {
+                upgrade_request = upgrade_request.header(header, value);
+            }
+
+            let upgrade_request = upgrade_request.body(Full::default())?;
+            let request = Request::from_parts(parts, body);
+
+            self.unmatched_request(request, Some(upgrade_request), self.original_destination)
+                .await
+        } else if let Some(client_id) = request
+            .headers()
+            .iter()
+            .map(|(header_name, header_value)| {
+                header_value
+                    .to_str()
+                    .map(|header_value| format!("{}: {}", header_name, header_value))
+            })
+            .find_map(|header| {
+                self.filters.iter().find_map(|filter| {
+                    // TODO(alex) [low] 2022-12-23: Remove the `header` unwrap.
+                    if filter.is_match(header.as_ref().unwrap()).unwrap() {
+                        Some(*filter.key())
+                    } else {
+                        None
+                    }
+                })
+            })
+        {
+            let req = MatchedHttpRequest {
+                port: self.port,
+                connection_id: self.connection_id,
+                client_id,
+                request_id: self.request_id,
+                request,
+            };
+
+            let (response_tx, response_rx) = oneshot::channel();
+            let handler_request = HandlerHttpRequest {
+                request: req,
+                response_tx,
+            };
+
+            matched_request(handler_request, self.matched_tx.clone(), response_rx).await
+        } else {
+            self.unmatched_request(request, None, self.original_destination)
+                .await
         }
+    }
 
-        if let Some(mut upgrade_request) = upgrade_request {
-            info!("the upgrade request {upgrade_request:#?}");
-            upgrade_request.extensions_mut().remove::<OnUpgrade>();
+    /// Handles the case when no filter matches a header in the request.
+    ///
+    /// 1. Creates a [`hyper::client::conn::http1::Connection`] to the `original_destination`;
+    /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
+    /// 3. Sends the [`HttpResponse`] back on the connected [`TcpStream`].
+    // #[tracing::instrument(level = "trace")]
+    async fn unmatched_request(
+        &self,
+        request: Request<Incoming>,
+        upgrade_request: Option<Request<Full<Bytes>>>,
+        original_destination: SocketAddr,
+    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+        // TODO(alex): We need a "retry" mechanism here for the client handling part, when the
+        // server closes a connection, the client could still be wanting to send a request,
+        // so we need to re-connect and send.
+        let tcp_stream = TcpStream::connect(original_destination)
+            .await
+            .inspect_err(|fail| {
+                error!("Failed connecting to original_destination with {fail:#?}")
+            })?;
 
-            info!("the upgrade request after removing OnUpgrade {upgrade_request:#?}");
+        // TODO(alex) [high] 2023-01-17: Can probably do the upgrade here, as we have the request
+        // and the stream.
+        let (mut request_sender, mut connection) = client::conn::http1::handshake(tcp_stream)
+            .await
+            .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
-            match hyper::upgrade::on(upgrade_request).await {
-                Ok(mut remote_agent_connection) => {
-                    info!("Time to upgrade in hyper!");
-                    let hyper::client::conn::http1::Parts {
-                        io: mut agent_original_connection,
-                        read_buf,
-                        ..
-                    } = connection.into_parts();
+        // We need this to progress the connection forward (hyper thing).
+        tokio::spawn(async move {
+            if let Err(fail) = poll_fn(|cx| connection.poll_without_shutdown(cx)).await {
+                error!("Connection failed in unmatched with {fail:#?}");
+            }
 
-                    remote_agent_connection
+            if let Some(upgrade_request) = upgrade_request {
+                info!("the upgrade request {upgrade_request:#?}");
+
+                match hyper::upgrade::on(upgrade_request).await {
+                    Ok(mut remote_agent_connection) => {
+                        info!("Time to upgrade in hyper!");
+                        let hyper::client::conn::http1::Parts {
+                            io: mut agent_original_connection,
+                            read_buf,
+                            ..
+                        } = connection.into_parts();
+
+                        remote_agent_connection
                         .write_all(&read_buf)
                         .await
                         .inspect_err(|fail| {
                             error!("Failed writing left-over bytes to upgraded_connection with {fail:#?}")
                         });
 
-                    copy_bidirectional(
-                        &mut remote_agent_connection,
-                        &mut agent_original_connection,
-                    )
-                    .await
-                    .inspect_err(|fail| {
-                        error!("Failed copy_bidirectional for upgrade with {fail:#?}")
-                    });
-                }
-                Err(no_upgrade) if no_upgrade.is_user() => {
-                    info!("No upgrade friends! but why {no_upgrade:#?}");
-                    // Ok(())
-                    // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not
-                    // error, and not ok.
-                    // todo!("Should be a bypass-like thing")
-                }
-                Err(fail) => {
-                    error!("Failed upgrading with {fail:#?}");
+                        copy_bidirectional(
+                            &mut remote_agent_connection,
+                            &mut agent_original_connection,
+                        )
+                        .await
+                        .inspect_err(|fail| {
+                            error!("Failed copy_bidirectional for upgrade with {fail:#?}")
+                        });
+                    }
+                    Err(no_upgrade) if no_upgrade.is_user() => {
+                        info!("No upgrade friends! but why {no_upgrade:#?}");
+                        // Ok(())
+                        // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not
+                        // error, and not ok.
+                        // todo!("Should be a bypass-like thing")
+                    }
+                    Err(fail) => {
+                        error!("Failed upgrading with {fail:#?}");
+                    }
                 }
             }
-        }
-    });
+        });
 
-    // Send the request to the original destination.
-    let (mut parts, body) = request_sender
-        .send_request(request)
-        .await
-        .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
-        .into_parts();
+        // Send the request to the original destination.
+        let (mut parts, body) = request_sender
+            .send_request(request)
+            .await
+            .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
+            .into_parts();
 
-    // Remove headers that would be invalid due to us fiddling with the `body`.
-    let body = body.collect().await?.to_bytes();
-    parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::TRANSFER_ENCODING);
+        // Remove headers that would be invalid due to us fiddling with the `body`.
+        let body = body.collect().await?.to_bytes();
+        parts.headers.remove(http::header::CONTENT_LENGTH);
+        parts.headers.remove(http::header::TRANSFER_ENCODING);
 
-    info!("Sending the unmatched response (could be the upgrade response from remote)");
+        info!("Sending the unmatched response (could be the upgrade response from remote)");
 
-    // Rebuild the `Response` after our fiddling.
-    let response = Response::from_parts(parts, body.into());
-    info!("the response for unmatched is {response:#?}");
-    Ok(response)
+        // Rebuild the `Response` after our fiddling.
+        let response = Response::from_parts(parts, body.into());
+        info!("the response for unmatched is {response:#?}");
+        Ok(response)
+    }
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
@@ -188,73 +268,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
     // #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
-        self.request_id += 1;
-
-        let this = self.clone();
-        let response = async move {
-            // TODO(alex) [high] 2023-01-10: curl h2c is not supported, gotta test this with another
-            // thing, like websocket upgrade.
-            //
-            // We need to return the `SwitchProtocol` response we get from the passthrough, or can
-            // we send one ourselves?
-            //
-            // Need an image/pod that supports websocket upgrade.
-            if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
-                info!("We have an upgrade request folks!");
-                let (parts, body) = request.into_parts();
-
-                let mut upgrade_request = Request::builder()
-                    .method(parts.method.clone())
-                    .uri(parts.uri.clone())
-                    .version(parts.version.clone());
-
-                for (header, value) in parts.headers.iter() {
-                    upgrade_request = upgrade_request.header(header, value);
-                }
-
-                let upgrade_request = upgrade_request.body(Full::default())?;
-                let request = Request::from_parts(parts, body);
-
-                unmatched_request(request, Some(upgrade_request), this.original_destination).await
-            } else if let Some(client_id) = request
-                .headers()
-                .iter()
-                .map(|(header_name, header_value)| {
-                    header_value
-                        .to_str()
-                        .map(|header_value| format!("{}: {}", header_name, header_value))
-                })
-                .find_map(|header| {
-                    this.filters.iter().find_map(|filter| {
-                        // TODO(alex) [low] 2022-12-23: Remove the `header` unwrap.
-                        if filter.is_match(header.as_ref().unwrap()).unwrap() {
-                            Some(*filter.key())
-                        } else {
-                            None
-                        }
-                    })
-                })
-            {
-                let req = MatchedHttpRequest {
-                    port: this.port,
-                    connection_id: this.connection_id,
-                    client_id,
-                    request_id: this.request_id,
-                    request,
-                };
-
-                let (response_tx, response_rx) = oneshot::channel();
-                let handler_request = HandlerHttpRequest {
-                    request: req,
-                    response_tx,
-                };
-
-                matched_request(handler_request, this.matched_tx.clone(), response_rx).await
-            } else {
-                unmatched_request(request, None, this.original_destination).await
-            }
-        };
-
+        let response = self.handle(request);
         Box::pin(response)
     }
 }

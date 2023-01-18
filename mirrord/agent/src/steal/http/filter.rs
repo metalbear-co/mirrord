@@ -4,7 +4,11 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::server::conn::http1;
 use mirrord_protocol::ConnectionId;
-use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
+use tokio::{
+    io::copy_bidirectional,
+    net::TcpStream,
+    sync::{mpsc::Sender, oneshot},
+};
 use tracing::{error, trace};
 
 use super::{hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion};
@@ -23,10 +27,10 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 /// Read the start of the TCP stream, decide if it's HTTP (of a supported version), if it is, serve
 /// the connection with a [`HyperHandler`]. If it isn't, just forward the whole TCP connection to
 /// the original destination.
-#[tracing::instrument(
-    level = "trace",
-    skip(stolen_stream, matched_tx, connection_close_sender)
-)]
+// #[tracing::instrument(
+//     level = "trace",
+//     skip(stolen_stream, matched_tx, connection_close_sender)
+// )]
 pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
@@ -49,6 +53,22 @@ pub(super) async fn filter_task(
             ) {
                 HttpVersion::V1 => {
                     // TODO: do we need to do something with this result?
+
+                    // TODO(alex) [high] 2023-01-18: Hnald the upgrade here!
+                    // From hyper_handler, we just send the upgrade request to the original
+                    // destination, then receive and pass the upgrade response to the browser.
+                    //
+                    // We should get here when the response is done, so now we have access to the
+                    // stream (agent-browser), but we also need access to the (agent-original)
+                    // connection, that is being held in the inner unmatched task.
+                    //
+                    // We could add an `upgrade` channel to `HyperHandler`, and check for it here,
+                    // something that sends `Some(connection)` if `upgrade == true` in the task,
+                    // allowing us to await with no issues here.
+                    //
+                    // Should also probably drop the `with_upgrades` thing, otherwise hyper may
+                    // think that the service is not done, and block us from doing this.
+                    let (bypassed_tx, bypassed_rx) = oneshot::channel();
                     let _res = http1::Builder::new()
                         .preserve_header_case(true)
                         .serve_connection(
@@ -60,9 +80,9 @@ pub(super) async fn filter_task(
                                 port,
                                 original_destination,
                                 request_id: 0,
+                                bypassed_tx,
                             },
                         )
-                        .without_shutdown().await.unwrap()
                         .with_upgrades()
                         .await;
 
