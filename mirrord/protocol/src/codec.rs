@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     io::{self},
 };
 
@@ -21,7 +22,7 @@ use crate::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
-    ResponseError,
+    Port, ResponseError,
 };
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -97,6 +98,35 @@ pub enum DaemonMessage {
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
+    Operator(OperatorMessage),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum OperatorMessage {
+    LockedPort(Port, Option<String>),
+}
+
+impl OperatorMessage {
+    pub fn is_error(&self) -> bool {
+        true
+    }
+
+    pub fn is_critical(&self) -> bool {
+        true
+    }
+}
+
+impl fmt::Display for OperatorMessage {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OperatorMessage::LockedPort(port, None) => {
+                write!(fmt, "Port {port} is locked")
+            }
+            OperatorMessage::LockedPort(port, Some(message)) => {
+                write!(fmt, "Port {port} is locked: {message}")
+            }
+        }
+    }
 }
 
 pub struct ClientCodec {

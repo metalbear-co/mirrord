@@ -409,6 +409,17 @@ impl Layer {
                 .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
+            DaemonMessage::Operator(operator_message) => {
+                if operator_message.is_error() {
+                    if operator_message.is_critical() {
+                        graceful_exit!("{}", operator_message);
+                    } else {
+                        eprintln!("{}", operator_message);
+                    }
+                } else {
+                    println!("{}", operator_message);
+                }
+            }
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
             DaemonMessage::LogMessage(_) => todo!(),
         }
