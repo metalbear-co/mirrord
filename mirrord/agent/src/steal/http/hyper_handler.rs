@@ -12,6 +12,7 @@ use hyper::{
     header::{SEC_WEBSOCKET_ACCEPT, UPGRADE},
     http::{self, request::Parts, Extensions, HeaderValue},
     service::Service,
+    upgrade::{OnUpgrade, Upgraded},
     Request, Response, StatusCode, Version,
 };
 use mirrord_protocol::{ConnectionId, Port, RequestId};
@@ -113,11 +114,15 @@ async fn unmatched_request(
             error!("Connection failed in unmatched with {fail:#?}");
         }
 
-        if let Some(upgrade_request) = upgrade_request {
+        if let Some(mut upgrade_request) = upgrade_request {
+            info!("the upgrade request {upgrade_request:#?}");
+            upgrade_request.extensions_mut().remove::<OnUpgrade>();
+
+            info!("the upgrade request after removing OnUpgrade {upgrade_request:#?}");
+
             match hyper::upgrade::on(upgrade_request).await {
                 Ok(mut remote_agent_connection) => {
                     info!("Time to upgrade in hyper!");
-                    // let mut agent_and_original_connection = connection.into_parts();
                     let hyper::client::conn::http1::Parts {
                         io: mut agent_original_connection,
                         read_buf,
@@ -141,13 +146,15 @@ async fn unmatched_request(
                     });
                 }
                 Err(no_upgrade) if no_upgrade.is_user() => {
-                    debug!("No upgrade friends! but why {no_upgrade:#?}");
+                    info!("No upgrade friends! but why {no_upgrade:#?}");
                     // Ok(())
                     // TODO(alex) [mid] 2023-01-11: Should be some sort of "Continue" flow, not
                     // error, and not ok.
-                    todo!("Should be a bypass-like thing")
+                    // todo!("Should be a bypass-like thing")
                 }
-                Err(fail) => todo!("Failed upgrading with {fail:#?}"),
+                Err(fail) => {
+                    error!("Failed upgrading with {fail:#?}");
+                }
             }
         }
     });
@@ -164,8 +171,12 @@ async fn unmatched_request(
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
 
+    info!("Sending the unmatched response (could be the upgrade response from remote)");
+
     // Rebuild the `Response` after our fiddling.
-    Ok(Response::from_parts(parts, body.into()))
+    let response = Response::from_parts(parts, body.into());
+    info!("the response for unmatched is {response:#?}");
+    Ok(response)
 }
 
 impl Service<Request<Incoming>> for HyperHandler {
@@ -189,7 +200,7 @@ impl Service<Request<Incoming>> for HyperHandler {
             //
             // Need an image/pod that supports websocket upgrade.
             if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
-                debug!("We have an upgrade request folks!");
+                info!("We have an upgrade request folks!");
                 let (parts, body) = request.into_parts();
 
                 let mut upgrade_request = Request::builder()

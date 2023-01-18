@@ -62,6 +62,7 @@ pub(super) async fn filter_task(
                                 request_id: 0,
                             },
                         )
+                        .without_shutdown().await.unwrap()
                         .with_upgrades()
                         .await;
 
