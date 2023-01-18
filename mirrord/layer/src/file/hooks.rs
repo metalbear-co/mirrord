@@ -195,7 +195,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
 ) -> c_ssize_t {
     match getdents64(fd, buf_size as u64) {
         Detour::Success(res) => {
-            let mut next = dirent_buf as *mut dirent; // TODO: use dirent64?
+            let mut next = dirent_buf as *mut dirent;
             let end = next.byte_add(buf_size);
             for dent in res.entries {
                 if next.byte_add(dent.get_d_reclen64() as usize) > end {
@@ -218,7 +218,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             }
             res.result_size as c_ssize_t
         }
-        Detour::Bypass(_) => 0, // TODO: call getdents64 syscall.
+        Detour::Bypass(_) => libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size),
         Detour::Error(err) => {
             error!("Encountered error in getdents64 detour: {err:?}");
             // TODO: would this only produce errno values that are legal for this syscall?
