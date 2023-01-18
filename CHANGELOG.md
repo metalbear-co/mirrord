@@ -10,6 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Go crash in some scenarios [#834](https://github.com/metalbear-co/mirrord/issues/834).
+- Remove already deprecated `--no-fs` and `--rw` options, that do not do anything anymore, but were still listed in the
+  help message.
 
 ## 3.19.2
 
