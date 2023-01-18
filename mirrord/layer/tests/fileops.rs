@@ -206,7 +206,7 @@ async fn test_pwrite(
     }
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 
     // Assert that fwrite flushed correclty
     let data = std::fs::read("/tmp/test_file2.txt").unwrap();
@@ -340,7 +340,7 @@ async fn test_node_close(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 }
 
 #[rstest]
@@ -414,7 +414,7 @@ async fn test_go_stat(
         .await
         .unwrap();
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 }
 
 #[rstest]
@@ -565,5 +565,5 @@ async fn test_go_dir(#[values(Application::GoDir)] application: Application, dyl
     );
 
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 }
