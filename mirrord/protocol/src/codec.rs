@@ -103,7 +103,7 @@ pub enum DaemonMessage {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum OperatorMessage {
-    LockedPort(Port, Option<String>),
+    LockedPort(Port, String),
 }
 
 impl OperatorMessage {
@@ -119,10 +119,7 @@ impl OperatorMessage {
 impl fmt::Display for OperatorMessage {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OperatorMessage::LockedPort(port, None) => {
-                write!(fmt, "Port {port} is locked")
-            }
-            OperatorMessage::LockedPort(port, Some(message)) => {
+            OperatorMessage::LockedPort(port, message) => {
                 write!(fmt, "Port {port} is locked: {message}")
             }
         }
