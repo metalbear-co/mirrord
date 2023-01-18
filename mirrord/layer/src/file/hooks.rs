@@ -218,7 +218,9 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             }
             res.result_size as c_ssize_t
         }
-        Detour::Bypass(_) => libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size),
+        Detour::Bypass(_) => {
+            libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
+        }
         Detour::Error(err) => {
             error!("Encountered error in getdents64 detour: {err:?}");
             // There is no appropriate error code for "We hijacked this operation to a remote agent
