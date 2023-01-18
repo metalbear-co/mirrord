@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Go crash in some scenarios [#834](https://github.com/metalbear-co/mirrord/issues/834).
+
+## 3.19.2
+
 ### Changed
 
 - Code refactor: moved all file request and response types into own file.
