@@ -95,11 +95,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         );
     }
 
-    if args.enable_rw_fs && args.no_fs {
-        warn!("use --fs-mode=write or --fs-mode=readonly please");
-        warn!("fs was both enabled and disabled - disabling will take precedence.");
-    }
-
     if let Some(fs_mode) = args.fs_mode {
         std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
     }
