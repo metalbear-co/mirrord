@@ -19,17 +19,17 @@ use libc::{
     FILE,
 };
 #[cfg(target_os = "linux")]
-use libc::{EBADF, EINVAL, ENOENT};
+use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
-use mirrord_protocol::ResponseError::NotFound;
+use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
 use tracing::trace;
 #[cfg(target_os = "linux")]
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 #[cfg(target_os = "linux")]
@@ -232,6 +232,15 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 {fd}, remote fd: {not_found_fd})."
             );
             set_errno(Errno(ENOENT)); // "No such directory."
+            -1
+        }
+        Detour::Error(ResponseError(NotDirectory(file_fd))) => {
+            warn!(
+                "Go application tried to read a directory and mirrord carried out that read on the \
+                remote destination, however the type of that file on the remote destination is not \
+                a directory (local fd: {fd}, remote fd: {file_fd})."
+            );
+            set_errno(Errno(ENOTDIR)); // "No such directory."
             -1
         }
         Detour::Error(err) => {

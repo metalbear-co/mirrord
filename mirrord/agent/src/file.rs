@@ -609,37 +609,45 @@ impl FileManager {
             entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
         };
 
-        let mut entry_results = self
-            .get_dir_stream(fd)?
-            .map(TryInto::try_into) // Convert into DirEntryInternal.
-            .map(log_err)
-            .peekable();
+        match self.open_files.get(&fd) {
+            None => Err(ResponseError::NotFound(fd)),
+            Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
+            Some(RemoteFile::Directory(dir)) => {
+                let mut entry_results = dir
+                    .read_dir()?
+                    .enumerate()
+                    .map(TryInto::try_into) // Convert into DirEntryInternal.
+                    .map(log_err)
+                    .peekable();
 
-        // Trying to allocate according to what the syscall caller allocated.
-        // The caller of the syscall allocated buffer_size bytes, so if the average linux_dirent64
-        // in this dir is not bigger than 32 this should be enough.
-        // But don't preallocate more than 256.
-        let initial_vector_capacity = 256.min((buffer_size / 32) as usize);
-        let mut entries = Vec::with_capacity(initial_vector_capacity);
+                // Trying to allocate according to what the syscall caller allocated.
+                // The caller of the syscall allocated buffer_size bytes, so if the average
+                // linux_dirent64 in this dir is not bigger than 32 this should be
+                // enough. But don't preallocate more than 256 places.
+                let initial_vector_capacity = 256.min((buffer_size / 32) as usize);
+                let mut entries = Vec::with_capacity(initial_vector_capacity);
 
-        // Peek into the next result, and only consume it if there is room for it in the buffer (and
-        // there was no error converting to a `DirEntryInternal`.
-        while let Some(entry) = entry_results
-            .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
-                entry_res
-                    .as_ref()
-                    .is_ok_and(|entry| entry.get_d_reclen64() as u64 + result_size <= buffer_size)
-            })
-            .transpose()?
-        {
-            result_size += entry.get_d_reclen64() as u64;
-            entries.push(entry);
+                // Peek into the next result, and only consume it if there is room for it in the
+                // buffer (and there was no error converting to a
+                // `DirEntryInternal`.
+                while let Some(entry) = entry_results
+                    .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
+                        entry_res.as_ref().is_ok_and(|entry| {
+                            entry.get_d_reclen64() as u64 + result_size <= buffer_size
+                        })
+                    })
+                    .transpose()?
+                {
+                    result_size += entry.get_d_reclen64() as u64;
+                    entries.push(entry);
+                }
+
+                Ok(Getdents64Response {
+                    fd,
+                    entries,
+                    result_size,
+                })
+            }
         }
-
-        Ok(Getdents64Response {
-            fd,
-            entries,
-            result_size,
-        })
     }
 }
