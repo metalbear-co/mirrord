@@ -457,7 +457,7 @@ mod main {
         #[test]
         fn patch_twice() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
-            let script_contents = "#!/usr/bin/env bash\nexit\n";
+            let script_contents = "#!/bin/bash\nexit\n";
             script.write(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
 
