@@ -156,8 +156,7 @@ mod file_ops {
         assert!(res.success());
     }
 
-    /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
-    // #[cfg(target_os = "linux")]
+    /// On Linux: Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
