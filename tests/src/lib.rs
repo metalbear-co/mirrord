@@ -228,7 +228,7 @@ mod utils {
                     process.assert_log_level(true, "CRITICAL");
                     process.assert_log_level(false, "CRITICAL");
                 }
-                _ => {},
+                _ => {}
             }
         }
     }
@@ -258,7 +258,7 @@ mod utils {
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                _ => {},
+                _ => {}
             }
         }
     }
