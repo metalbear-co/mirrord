@@ -116,6 +116,10 @@ mod utils {
             self.stdout.lock().unwrap().clone()
         }
 
+        pub fn get_stderr(&self) -> String {
+            self.stderr.lock().unwrap().clone()
+        }
+
         pub fn assert_log_level(&self, stderr: bool, level: &str) {
             if stderr {
                 assert!(!self.stderr.lock().unwrap().contains(level));
@@ -131,8 +135,8 @@ mod utils {
         pub fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
-                let stdout = self.get_stdout();
-                if stdout.contains(line) {
+                let stderr = self.get_stderr();
+                if stderr.contains(line) {
                     return;
                 }
             }
@@ -228,7 +232,7 @@ mod utils {
                     process.assert_log_level(true, "CRITICAL");
                     process.assert_log_level(false, "CRITICAL");
                 }
-                _ => {},
+                _ => {}
             }
         }
     }
@@ -258,7 +262,7 @@ mod utils {
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                _ => {},
+                _ => {}
             }
         }
     }
