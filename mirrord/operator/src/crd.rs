@@ -51,3 +51,27 @@ impl From<TargetCrd> for TargetConfig {
         }
     }
 }
+
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordOperator",
+    struct = "MirrordOperatorCrd"
+)]
+pub struct MirrordOperatorSpec {
+    layers: Option<Vec<MirrordOperatorLayer>>,
+    operator_version: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorLayer {
+    agents: Vec<MirrordOperatorAgent>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorAgent {
+    active_connections: usize,
+    namespace: String,
+    target: Option<Target>,
+}
