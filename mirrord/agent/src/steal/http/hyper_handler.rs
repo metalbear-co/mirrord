@@ -176,15 +176,13 @@ impl Service<Request<Incoming>> for HyperHandler {
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
-        let upgrade_tx = self.upgrade_tx.take();
-
-        let filters = self.filters.clone();
-        let port = self.port;
-        let connection_id = self.connection_id;
-        let request_id = self.request_id;
-        let matched_tx = self.matched_tx.clone();
-
-        let response = |original_destination| async move {
+        let response = |original_destination,
+                        upgrade_tx,
+                        filters: Arc<DashMap<ClientId, Regex>>,
+                        port,
+                        connection_id,
+                        request_id,
+                        matched_tx| async move {
             if request.headers().get(UPGRADE).is_some() {
                 info!("We have an upgrade request folks!");
 
@@ -228,6 +226,14 @@ impl Service<Request<Incoming>> for HyperHandler {
             }
         };
 
-        Box::pin(response(self.original_destination))
+        Box::pin(response(
+            self.original_destination,
+            self.upgrade_tx.take(),
+            self.filters.clone(),
+            self.port,
+            self.connection_id,
+            self.request_id,
+            self.matched_tx.clone(),
+        ))
     }
 }
