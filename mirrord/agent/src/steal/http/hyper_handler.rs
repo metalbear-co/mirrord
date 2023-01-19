@@ -64,7 +64,13 @@ pub(super) struct HyperHandler {
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
 
-    pub(super) upgrade_tx: Option<oneshot::Sender<TcpStream>>,
+    pub(super) upgrade_tx: Option<oneshot::Sender<LiveConnection>>,
+}
+
+#[derive(Debug)]
+pub(super) struct LiveConnection {
+    pub(super) stream: TcpStream,
+    pub(super) unprocessed_bytes: Bytes,
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
@@ -95,7 +101,7 @@ async fn matched_request(
 async fn unmatched_request(
     request: Request<Incoming>,
     is_upgrade: bool,
-    upgrade_tx: Option<oneshot::Sender<TcpStream>>,
+    upgrade_tx: Option<oneshot::Sender<LiveConnection>>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     // TODO(alex): We need a "retry" mechanism here for the client handling part, when the server
@@ -137,7 +143,12 @@ async fn unmatched_request(
             let client::conn::http1::Parts { io, read_buf, .. } = connection.into_parts();
 
             let _ = upgrade_tx
-                .map(|sender| sender.send(io))
+                .map(|sender| {
+                    sender.send(LiveConnection {
+                        stream: io,
+                        unprocessed_bytes: read_buf,
+                    })
+                })
                 .transpose()
                 .inspect_err(|_| error!("Failed sending interceptor connection!"));
         }

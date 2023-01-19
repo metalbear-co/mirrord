@@ -6,7 +6,7 @@ use futures::{FutureExt, TryFutureExt};
 use hyper::server::{self, conn::http1};
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::copy_bidirectional,
+    io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
     select,
     sync::{mpsc::Sender, oneshot},
@@ -14,7 +14,9 @@ use tokio::{
 use tracing::{error, info, trace};
 
 use super::{
-    error::HttpTrafficError, hyper_handler::HyperHandler, DefaultReversibleStream, HttpVersion,
+    error::HttpTrafficError,
+    hyper_handler::{HyperHandler, LiveConnection},
+    DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
@@ -73,11 +75,10 @@ pub(super) async fn filter_task(
                     //
                     // Should also probably drop the `with_upgrades` thing, otherwise hyper may
                     // think that the service is not done, and block us from doing this.
-                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<TcpStream>();
+                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<LiveConnection>();
                     let server::conn::http1::Parts {
-                        io: mut remote_to_agent,
-                        read_buf,
-                        service,
+                        io: mut client_agent, // i.e. browser-agent connection
+                        read_buf: agent_unprocessed,
                         ..
                     } = http1::Builder::new()
                         .preserve_header_case(true)
@@ -96,9 +97,22 @@ pub(super) async fn filter_task(
                         .without_shutdown()
                         .await?;
 
-                    if let Ok(mut interceptor_to_original) = upgrade_rx.await {
-                        copy_bidirectional(&mut remote_to_agent, &mut interceptor_to_original)
-                            .await?;
+                    if let Ok(LiveConnection {
+                        stream: mut agent_remote, // i.e. agent-original destination connection
+                        unprocessed_bytes: client_unprocessed,
+                    }) = upgrade_rx.await
+                    {
+                        // Send the data we received from the client, and have not processed as
+                        // HTTP, to the original destination.
+                        agent_remote.write_all(&agent_unprocessed).await?;
+
+                        // Send the data we received from the original destination, and have not
+                        // processed as HTTP, to the client.
+                        client_agent.write_all(&client_unprocessed).await?;
+
+                        // Now both the client and original destinations should be in sync, so we
+                        // can just copy the bytes from one into the other.
+                        copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
                     }
 
                     connection_close_sender
