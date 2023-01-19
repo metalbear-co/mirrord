@@ -29,9 +29,9 @@ use mirrord_protocol::{
     ResponseError::NotFound,
 };
 use num_traits::Bounded;
+use tracing::trace;
 #[cfg(target_os = "linux")]
-use tracing::error;
-use tracing::{info, trace};
+use tracing::{error, info};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
