@@ -37,7 +37,7 @@ use crate::error::HookError::ResponseError;
 use crate::{
     close_layer_fd,
     detour::{Detour, DetourGuard},
-    error::{HookError, HookError::ResponseError},
+    error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
