@@ -23,10 +23,7 @@ mod http {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(
-            Application::NodeHTTP
-        )]
-        application: Application,
+        #[values(Application::NodeHTTP)] application: Application,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
