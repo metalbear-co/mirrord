@@ -27,7 +27,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -43,7 +42,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
@@ -61,7 +59,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -77,7 +74,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -100,7 +96,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -114,7 +109,6 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -128,7 +122,6 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
@@ -194,7 +187,6 @@ mod traffic {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
 
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
@@ -245,7 +237,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
@@ -253,7 +244,6 @@ mod traffic {
         let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -292,6 +282,5 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 }

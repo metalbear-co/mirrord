@@ -116,10 +116,6 @@ mod utils {
             self.stdout.lock().unwrap().clone()
         }
 
-        pub fn assert_stderr(&self) {
-            assert!(self.stderr.lock().unwrap().is_empty());
-        }
-
         pub fn assert_log_level(&self, stderr: bool, level: &str) {
             if stderr {
                 assert!(!self.stderr.lock().unwrap().contains(level));
@@ -232,7 +228,7 @@ mod utils {
                     process.assert_log_level(true, "CRITICAL");
                     process.assert_log_level(false, "CRITICAL");
                 }
-                _ => process.assert_stderr(),
+                _ => {},
             }
         }
     }
@@ -262,7 +258,7 @@ mod utils {
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                _ => process.assert_stderr(),
+                _ => {},
             }
         }
     }

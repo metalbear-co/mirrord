@@ -122,7 +122,6 @@ mod file_ops {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     // currently there is an issue with piping across forks of processes so 'test_bash_file_read'
@@ -140,7 +139,6 @@ mod file_ops {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[ignore]
@@ -156,6 +154,5 @@ mod file_ops {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 }

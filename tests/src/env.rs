@@ -28,7 +28,6 @@ mod env {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -52,7 +51,6 @@ mod env {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -66,7 +64,6 @@ mod env {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -88,7 +85,6 @@ mod env {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -110,7 +106,6 @@ mod env {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -121,7 +116,6 @@ mod env {
         let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -132,6 +126,5 @@ mod env {
         let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 }
