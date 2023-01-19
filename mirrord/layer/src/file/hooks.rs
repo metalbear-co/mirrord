@@ -226,7 +226,11 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
         }
         Detour::Error(ResponseError(NotFound(not_found_fd))) => {
-            info!("Go application tried to read a directory and mirrord carried out that read on the remote destination, however that directory was not found over there.");
+            info!(
+                "Go application tried to read a directory and mirrord carried out that read on the \
+                remote destination, however that directory was not found over there (local fd: \
+                {fd}, remote fd: {not_found_fd})."
+            );
             set_errno(Errno(ENOENT)); // "No such directory."
             -1
         }
