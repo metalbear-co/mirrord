@@ -15,11 +15,14 @@ tests/go-e2e-env/go-e2e-env
 tests/go-e2e-fileops/go-e2e-fileops
 tests/go-e2e-outgoing/go-e2e-outgoing
 tests/go-e2e-dns/go-e2e-dns
+tests/go-e2e-dir/go-e2e-dir
 
 mirrord/layer/tests/apps/app_go/19
 mirrord/layer/tests/apps/app_go/app_go
 mirrord/layer/tests/apps/self_open/self_open
 mirrord/layer/tests/apps/self_open/19
+mirrord/layer/tests/apps/dir_go/dir_go
+mirrord/layer/tests/apps/dir_go_bypass/dir_go_bypass
 
 ### VSCode ###
 .vscode/*

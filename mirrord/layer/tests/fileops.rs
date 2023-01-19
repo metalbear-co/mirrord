@@ -1,8 +1,8 @@
 #![feature(assert_matches)]
 
 use std::{
-    assert_matches::assert_matches, collections::HashMap, path::PathBuf, process::Stdio,
-    time::Duration,
+    assert_matches::assert_matches, collections::HashMap, env::temp_dir, path::PathBuf,
+    process::Stdio, time::Duration,
 };
 
 use actix_codec::Framed;
@@ -691,6 +691,48 @@ async fn test_go_dir_on_linux(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
+
+    test_process.wait_assert_success().await;
+    test_process.assert_stderr_empty();
+}
+
+/// Test that the bypass works for reading dirs with Go.
+/// Run with mirrord a go program that opens a dir and fails it does not found expected files in it,
+/// then assert it did not fail.
+/// Have FS on, but the specific path of the dir local, so that we cover that case where the syscall
+/// is hooked, but we bypass.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_go_dir_bypass(
+    #[values(Application::GoDirBypass)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let tmp_dir = temp_dir().join("go_dir_bypass_test");
+    std::fs::create_dir_all(tmp_dir.clone()).unwrap();
+    std::fs::write(tmp_dir.join("a"), "").unwrap();
+    std::fs::write(tmp_dir.join("b"), "").unwrap();
+
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    let path_string = tmp_dir.to_str().unwrap().to_string();
+
+    // Have FS on so that getdents64 gets hooked.
+    env.insert("MIRRORD_FILE_MODE", "read");
+
+    // But make this path local so that in the getdents64 detour we get to the bypass.
+    env.insert("MIRRORD_FILE_LOCAL_PATTERN", &path_string);
+
+    let mut test_process =
+        TestProcess::start_process(executable, vec![path_string.clone()], env).await;
+
+    let mut _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
 
     test_process.wait_assert_success().await;
     test_process.assert_stderr_empty();

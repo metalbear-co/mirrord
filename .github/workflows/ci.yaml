@@ -300,6 +300,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dir_go
           go build
+      - run: |
+          cd mirrord/layer/tests/apps/dir_go_bypass
+          go build
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"

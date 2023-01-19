@@ -223,6 +223,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             res.result_size as c_ssize_t
         }
         Detour::Bypass(_) => {
+            trace!("bypassing getdents64: calling syscall locally (fd: {fd}).");
             libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
         }
         Detour::Error(ResponseError(NotFound(not_found_fd))) => {
