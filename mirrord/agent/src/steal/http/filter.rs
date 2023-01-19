@@ -28,13 +28,31 @@ const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10)
 /// requests.
 pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 
-/// Read the start of the TCP stream, decide if it's HTTP (of a supported version), if it is, serve
-/// the connection with a [`HyperHandler`]. If it isn't, just forward the whole TCP connection to
-/// the original destination.
-// #[tracing::instrument(
-//     level = "trace",
-//     skip(stolen_stream, matched_tx, connection_close_sender)
-// )]
+/// Reads the start of the [`TcpStream`], and decides if it's HTTP (we currently only support
+/// HTTP/1) or not,
+///
+/// ## HTTP/1
+///
+/// If the stream is identified as HTTP/1 by our check in [`HttpVersion::new`], then we serve the
+/// connection with [`HyperHandler`].
+///
+/// ### Upgrade
+///
+/// If an upgrade request is detected in the [`HyperHandler`], then we take the HTTP connection
+/// that's being served (after HTTP processing is done), and use [`copy_bidirectional`] to copy the
+/// data from the upgraded connection to its original destination (similar to the Not HTTP/1
+/// handling).
+///
+/// ## Not HTTP/1
+///
+/// Forwards the whole TCP connection to the original destination with [`copy_bidirectional`].
+///
+/// It's important to note that, we don't lose the bytes read from the original stream, due to us
+/// converting it into a  [`DefaultReversibleStream`].
+#[tracing::instrument(
+    level = "trace",
+    skip(stolen_stream, matched_tx, connection_close_sender)
+)]
 pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
@@ -57,23 +75,11 @@ pub(super) async fn filter_task(
                 &H2_PREFACE[..MINIMAL_HEADER_SIZE],
             ) {
                 HttpVersion::V1 => {
-                    // TODO: do we need to do something with this result?
-
-                    // TODO(alex) [high] 2023-01-18: Hnald the upgrade here!
-                    // From hyper_handler, we just send the upgrade request to the original
-                    // destination, then receive and pass the upgrade response to the browser.
-                    //
-                    // We should get here when the response is done, so now we have access to the
-                    // stream (agent-browser), but we also need access to the (agent-original)
-                    // connection, that is being held in the inner unmatched task.
-                    //
-                    // We could add an `upgrade` channel to `HyperHandler`, and check for it here,
-                    // something that sends `Some(connection)` if `upgrade == true` in the task,
-                    // allowing us to await with no issues here.
-                    //
-                    // Should also probably drop the `with_upgrades` thing, otherwise hyper may
-                    // think that the service is not done, and block us from doing this.
+                    // Contains the upgraded interceptor connection, if any.
                     let (upgrade_tx, upgrade_rx) = oneshot::channel::<LiveConnection>();
+
+                    // We have to keep the connection alive to handle a possible upgrade request
+                    // manually.
                     let server::conn::http1::Parts {
                         io: mut client_agent, // i.e. browser-agent connection
                         read_buf: agent_unprocessed,
