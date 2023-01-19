@@ -21,19 +21,19 @@ use libc::{
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{
-    file::{
-        DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse,
-        WriteFileResponse,
-    },
-    ResponseError::NotFound,
+use mirrord_protocol::file::{
+    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
+#[cfg(target_os = "linux")]
+use mirrord_protocol::ResponseError::NotFound;
 use num_traits::Bounded;
 use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
+#[cfg(target_os = "linux")]
+use crate::error::HookError::ResponseError;
 use crate::{
     close_layer_fd,
     detour::{Detour, DetourGuard},
