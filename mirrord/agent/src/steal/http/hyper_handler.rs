@@ -1,23 +1,14 @@
-use core::{future::Future, pin::Pin, task::ready};
+use core::{future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::{FutureExt, TryFutureExt};
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
-use hyper::{
-    body::Incoming,
-    client,
-    header::{SEC_WEBSOCKET_ACCEPT, UPGRADE},
-    http::{self, request::Parts, Extensions, HeaderValue},
-    service::Service,
-    upgrade::{OnUpgrade, Upgraded},
-    Request, Response, StatusCode, Version,
-};
+use futures::TryFutureExt;
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Incoming, client, header::UPGRADE, http, service::Service, Request, Response};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
-    io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt},
     macros::support::poll_fn,
     net::TcpStream,
     sync::{
@@ -25,7 +16,7 @@ use tokio::{
         oneshot::{self, Receiver},
     },
 };
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use super::error::HttpTrafficError;
 use crate::{
@@ -187,15 +178,14 @@ impl Service<Request<Incoming>> for HyperHandler {
 
         let upgrade_tx = self.upgrade_tx.take();
 
-        let original_destination = self.original_destination.clone();
         let filters = self.filters.clone();
         let port = self.port;
         let connection_id = self.connection_id;
         let request_id = self.request_id;
         let matched_tx = self.matched_tx.clone();
 
-        let response = async move {
-            if let Some(upgrade_to) = request.headers().get(UPGRADE).cloned() {
+        let response = |original_destination| async move {
+            if request.headers().get(UPGRADE).is_some() {
                 info!("We have an upgrade request folks!");
 
                 unmatched_request(request, true, upgrade_tx, original_destination).await
@@ -238,6 +228,6 @@ impl Service<Request<Incoming>> for HyperHandler {
             }
         };
 
-        Box::pin(response)
+        Box::pin(response(self.original_destination))
     }
 }

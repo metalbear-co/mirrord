@@ -2,16 +2,14 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::{FutureExt, TryFutureExt};
 use hyper::server::{self, conn::http1};
 use mirrord_protocol::ConnectionId;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
-    select,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,

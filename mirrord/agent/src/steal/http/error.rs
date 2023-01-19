@@ -26,7 +26,4 @@ pub enum HttpTrafficError {
 
     #[error("Failed hyper HTTP `{0}`!")]
     CloseSender(#[from] tokio::sync::mpsc::error::SendError<ConnectionId>),
-
-    #[error("This is not an upgrade connection!")]
-    NotUpgrade,
 }
