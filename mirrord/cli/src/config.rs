@@ -88,14 +88,6 @@ pub(super) struct ExecArgs {
     #[arg(short = 'i', long)]
     pub agent_image: Option<String>,
 
-    /// Disable file read only
-    #[arg(long)]
-    pub no_fs: bool,
-
-    /// Enable file hooking (Both R/W)
-    #[arg(long = "rw")]
-    pub enable_rw_fs: bool,
-
     /// Default file system behavior: read, write, local
     #[arg(long)]
     pub fs_mode: Option<FsMode>,

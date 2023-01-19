@@ -347,6 +347,12 @@ impl OperatorRole {
                     verbs: vec!["update".to_owned()],
                     ..Default::default()
                 },
+                PolicyRule {
+                    api_groups: Some(vec!["".to_owned()]),
+                    resources: Some(vec!["users".to_owned(), "groups".to_owned()]),
+                    verbs: vec!["impersonate".to_owned()],
+                    ..Default::default()
+                },
             ]),
             ..Default::default()
         };
