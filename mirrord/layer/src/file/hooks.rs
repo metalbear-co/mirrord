@@ -19,21 +19,25 @@ use libc::{
     FILE,
 };
 #[cfg(target_os = "linux")]
-use libc::{EBADF, EINVAL};
+use libc::{EBADF, EINVAL, ENOENT};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::file::{
-    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+use mirrord_protocol::{
+    file::{
+        DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse,
+        WriteFileResponse,
+    },
+    ResponseError::NotFound,
 };
 use num_traits::Bounded;
 #[cfg(target_os = "linux")]
 use tracing::error;
-use tracing::trace;
+use tracing::{info, trace};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_layer_fd,
     detour::{Detour, DetourGuard},
-    error::HookError,
+    error::{HookError, HookError::ResponseError},
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -221,10 +225,15 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
         Detour::Bypass(_) => {
             libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
         }
+        Detour::Error(ResponseError(NotFound(not_found_fd))) => {
+            info!("Go application tried to read a directory and mirrord carried out that read on the remote destination, however that directory was not found over there.");
+            set_errno(Errno(ENOENT)); // "No such directory."
+            -1
+        }
         Detour::Error(err) => {
             error!("Encountered error in getdents64 detour: {err:?}");
             // There is no appropriate error code for "We hijacked this operation to a remote agent
-            // and the agent returned an error". We could try to map different (remote) errors to
+            // and the agent returned an error". We could try to map more (remote) errors to
             // the error codes though.
             set_errno(Errno(EBADF));
             -1
