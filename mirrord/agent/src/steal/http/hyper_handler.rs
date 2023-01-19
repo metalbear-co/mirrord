@@ -197,16 +197,18 @@ impl Service<Request<Incoming>> for HyperHandler {
                 })
                 .find_map(|header| {
                     filters.iter().find_map(|filter| {
-                        // TODO(alex) [low] 2022-12-23: Remove the `header` unwrap.
-                        if filter.is_match(header.as_ref().unwrap()).unwrap() {
-                            Some(*filter.key())
-                        } else {
-                            None
-                        }
+                        filter
+                            .is_match(
+                                header
+                                    .as_ref()
+                                    .expect("The header value has to be convertible to `String`!"),
+                            )
+                            .expect("Something went wrong in the regex matcher!")
+                            .then_some(*filter.key())
                     })
                 })
             {
-                let req = MatchedHttpRequest {
+                let request = MatchedHttpRequest {
                     port,
                     connection_id,
                     client_id,
@@ -216,7 +218,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
                 let (response_tx, response_rx) = oneshot::channel();
                 let handler_request = HandlerHttpRequest {
-                    request: req,
+                    request,
                     response_tx,
                 };
 
