@@ -623,7 +623,7 @@ impl FileManager {
         })
     }
 
-    fn get_current_and_parent_entries(current: &PathBuf) -> IntoIter<io::Result<DirEntryInternal>> {
+    fn get_current_and_parent_entries(current: &Path) -> IntoIter<io::Result<DirEntryInternal>> {
         let mut entries = vec![Self::path_to_dir_entry_internal(
             current,
             0,
