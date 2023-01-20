@@ -1,10 +1,10 @@
 use std::{
     self,
     collections::HashMap,
-    fs::{File, OpenOptions, ReadDir},
+    fs::{DirEntry, File, OpenOptions, ReadDir},
     io,
     io::{prelude::*, BufReader, SeekFrom},
-    iter::Enumerate,
+    iter::{Enumerate, Map, Peekable},
     os::unix::prelude::FileExt,
     path::{Path, PathBuf},
 };
@@ -31,11 +31,22 @@ pub enum RemoteFile {
     Directory(PathBuf),
 }
 
+type GetDents64Stream = Peekable<
+    Map<
+        Map<
+            Enumerate<ReadDir>,
+            impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+        >,
+        impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
+    >,
+>;
+
 #[derive(Debug, Default)]
 pub struct FileManager {
     root_path: PathBuf,
     pub open_files: HashMap<u64, RemoteFile>,
     pub dir_streams: HashMap<u64, Enumerate<ReadDir>>,
+    pub getdents_streams: HashMap<u64, GetDents64Stream>,
     index_allocator: IndexAllocator<u64>,
 }
 
@@ -583,6 +594,36 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
     }
 
+    fn log_err(
+        entry_res: std::result::Result<DirEntryInternal, io::Error>,
+    ) -> std::result::Result<DirEntryInternal, io::Error> {
+        entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn get_or_create_getdents64_stream(
+        &mut self,
+        fd: u64,
+    ) -> RemoteResult<&mut GetDents64Stream> {
+        if !self.getdents_streams.contains_key(&fd) {
+            match self.open_files.get(&fd) {
+                None => return Err(ResponseError::NotFound(fd)),
+                Some(RemoteFile::File(_file)) => return Err(ResponseError::NotDirectory(fd)),
+                Some(RemoteFile::Directory(dir)) => {
+                    // TODO: add . and .. to the iterator.
+                    let stream = dir
+                        .read_dir()?
+                        .enumerate()
+                        .map(TryInto::try_into) // Convert into DirEntryInternal.
+                        .map(Self::log_err)
+                        .peekable();
+                    self.getdents_streams.insert(fd, stream);
+                }
+            }
+        }
+        Ok(self.getdents_streams.get_mut(&fd).unwrap())
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
@@ -605,49 +646,42 @@ impl FileManager {
     ) -> RemoteResult<Getdents64Response> {
         let mut result_size = 0u64;
 
-        let log_err = |entry_res: Result<DirEntryInternal, io::Error>| {
-            entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
-        };
+        let entry_results = self.get_or_create_getdents64_stream(fd)?;
+        if entry_results.peek().is_none() {
+            // Reached end.
+            Ok(Getdents64Response {
+                fd,
+                entries: vec![],
+                result_size: 0,
+            })
+        } else {
+            // Trying to allocate according to what the syscall caller allocated.
+            // The caller of the syscall allocated buffer_size bytes, so if the average
+            // linux_dirent64 in this dir is not bigger than 32 this should be
+            // enough. But don't preallocate more than 256 places.
+            let initial_vector_capacity = 256.min((buffer_size / 32) as usize);
+            let mut entries = Vec::with_capacity(initial_vector_capacity);
 
-        match self.open_files.get(&fd) {
-            None => Err(ResponseError::NotFound(fd)),
-            Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
-            Some(RemoteFile::Directory(dir)) => {
-                let mut entry_results = dir
-                    .read_dir()?
-                    .enumerate()
-                    .map(TryInto::try_into) // Convert into DirEntryInternal.
-                    .map(log_err)
-                    .peekable();
-
-                // Trying to allocate according to what the syscall caller allocated.
-                // The caller of the syscall allocated buffer_size bytes, so if the average
-                // linux_dirent64 in this dir is not bigger than 32 this should be
-                // enough. But don't preallocate more than 256 places.
-                let initial_vector_capacity = 256.min((buffer_size / 32) as usize);
-                let mut entries = Vec::with_capacity(initial_vector_capacity);
-
-                // Peek into the next result, and only consume it if there is room for it in the
-                // buffer (and there was no error converting to a
-                // `DirEntryInternal`.
-                while let Some(entry) = entry_results
-                    .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
-                        entry_res.as_ref().is_ok_and(|entry| {
-                            entry.get_d_reclen64() as u64 + result_size <= buffer_size
-                        })
+            // Peek into the next result, and only consume it if there is room for it in the
+            // buffer (and there was no error converting to a
+            // `DirEntryInternal`.
+            while let Some(entry) = entry_results
+                .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
+                    entry_res.as_ref().is_ok_and(|entry| {
+                        entry.get_d_reclen64() as u64 + result_size <= buffer_size
                     })
-                    .transpose()?
-                {
-                    result_size += entry.get_d_reclen64() as u64;
-                    entries.push(entry);
-                }
-
-                Ok(Getdents64Response {
-                    fd,
-                    entries,
-                    result_size,
                 })
+                .transpose()?
+            {
+                result_size += entry.get_d_reclen64() as u64;
+                entries.push(entry);
             }
+
+            Ok(Getdents64Response {
+                fd,
+                entries,
+                result_size,
+            })
         }
     }
 }
