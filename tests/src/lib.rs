@@ -641,8 +641,6 @@ mod utils {
             kube_client,
             "default",
             "NodePort",
-            // TODO(alex) [high] 2023-01-20: Change this to the metalbear published image.
-            // "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "docker.io/meowjesty/samples-websockets:latest",
             "websocket",
             true,

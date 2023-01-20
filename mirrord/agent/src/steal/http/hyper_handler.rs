@@ -122,9 +122,8 @@ async fn matched_request(
 /// anything due it being in a different `Request` than the one we actually send to the hyper
 /// machine.
 #[tracing::instrument(level = "trace")]
-async fn unmatched_request(
+async fn unmatched_request<const IS_UPGRADE: bool>(
     request: Request<Incoming>,
-    is_upgrade: bool,
     upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
     original_destination: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
@@ -149,7 +148,7 @@ async fn unmatched_request(
         // If this is not an upgrade, then we'll just drop the `Sender`, this is enough to signal
         // the `Receiver` in `filter.rs` that we're not dealing with an upgrade request, and that
         // the `HyperHandler` connection can be dropped.
-        if is_upgrade {
+        if IS_UPGRADE {
             let client::conn::http1::Parts { io, read_buf, .. } = connection.into_parts();
 
             let _ = upgrade_tx
@@ -199,7 +198,7 @@ impl Service<Request<Incoming>> for HyperHandler {
                         request_id,
                         matched_tx| async move {
             if request.headers().get(UPGRADE).is_some() {
-                unmatched_request(request, true, upgrade_tx, original_destination).await
+                unmatched_request::<true>(request, upgrade_tx, original_destination).await
             } else if let Some(client_id) = request
                 .headers()
                 .iter()
@@ -237,7 +236,7 @@ impl Service<Request<Incoming>> for HyperHandler {
 
                 matched_request(handler_request, matched_tx, response_rx).await
             } else {
-                unmatched_request(request, false, upgrade_tx, original_destination).await
+                unmatched_request::<false>(request, upgrade_tx, original_destination).await
             }
         };
 
