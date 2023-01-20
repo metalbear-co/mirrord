@@ -5,11 +5,13 @@ use std::{
     io,
     io::{prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Map, Peekable},
-    os::unix::prelude::FileExt,
+    os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
+    vec::IntoIter,
 };
 
 use faccess::{AccessMode, PathExt};
+use libc::DT_DIR;
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
@@ -31,13 +33,22 @@ pub enum RemoteFile {
     Directory(PathBuf),
 }
 
+/// `Peekable`: So that we can stop consuming if there is no more place in buf.
+/// `Chain`: because `read_dir`'s returned stream does not contain `.` and `..`.
+///        So we chain our own stream with `.` and `..` in it to the one returned by `read_dir`.
+/// `IntoIter`: That's our DIY stream with `.` and `..` ^.
+/// first `Map`: Converting into DirEntryInternal.
+/// second `Map`: logging any errors from the first map.
 type GetDents64Stream = Peekable<
-    Map<
+    std::iter::Chain<
+        IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
         Map<
-            Enumerate<ReadDir>,
-            impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+            Map<
+                Enumerate<ReadDir>,
+                impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+            >,
+            impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
         >,
-        impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
     >,
 >;
 
@@ -594,10 +605,38 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
     }
 
-    fn log_err(
-        entry_res: std::result::Result<DirEntryInternal, io::Error>,
-    ) -> std::result::Result<DirEntryInternal, io::Error> {
+    fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
         entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
+    }
+
+    fn path_to_dir_entry_internal(
+        path: &Path,
+        position: u64,
+        name: String,
+    ) -> io::Result<DirEntryInternal> {
+        let metadata = std::fs::metadata(path)?;
+        Ok(DirEntryInternal {
+            inode: metadata.ino(),
+            position,
+            name,
+            file_type: DT_DIR,
+        })
+    }
+
+    fn get_current_and_parent_entries(current: &PathBuf) -> IntoIter<io::Result<DirEntryInternal>> {
+        let mut entries = vec![Self::path_to_dir_entry_internal(
+            current,
+            0,
+            ".".to_string(),
+        )];
+        if let Some(parent) = current.parent() {
+            entries.push(Self::path_to_dir_entry_internal(
+                parent,
+                1,
+                "..".to_string(),
+            ))
+        }
+        entries.into_iter()
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -611,11 +650,14 @@ impl FileManager {
                 Some(RemoteFile::File(_file)) => return Err(ResponseError::NotDirectory(fd)),
                 Some(RemoteFile::Directory(dir)) => {
                     // TODO: add . and .. to the iterator.
-                    let stream = dir
-                        .read_dir()?
-                        .enumerate()
-                        .map(TryInto::try_into) // Convert into DirEntryInternal.
-                        .map(Self::log_err)
+                    let current_and_parent = Self::get_current_and_parent_entries(dir);
+                    let stream = current_and_parent
+                        .chain(
+                            dir.read_dir()?
+                                .enumerate()
+                                .map(TryInto::try_into) // Convert into DirEntryInternal.
+                                .map(Self::log_err),
+                        )
                         .peekable();
                     self.getdents_streams.insert(fd, stream);
                 }

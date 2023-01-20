@@ -93,7 +93,7 @@ impl TryFrom<(usize, io::Result<DirEntry>)> for DirEntryInternal {
 
         Ok(DirEntryInternal {
             inode: entry.ino(),
-            position: offset as u64,
+            position: (offset + 2) as u64, // +2 is to make room for "." and "..".
             name: entry.file_name().to_string_lossy().into(),
             file_type,
         })
