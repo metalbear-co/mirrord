@@ -632,6 +632,22 @@ mod utils {
         .await
     }
 
+    // TODO(alex) [mid] 2023-01-19: Add docs
+    #[fixture]
+    pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            // "ghcr.io/metalbear-co/mirrord-websocket:latest",
+            "docker.io/meowjesty/samples-websockets:latest",
+            "websocket",
+            true,
+            false,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
