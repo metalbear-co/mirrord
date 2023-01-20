@@ -189,7 +189,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
         .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
 }
 
-/// Hook for getdents64, for Go on Linux.
+/// Hook for getdents64, for Go's `os.ReadDir` on Linux.
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn getdents64_detour(

@@ -488,7 +488,7 @@ impl FileManager {
     pub(crate) fn close_dir(&mut self, fd: u64) {
         trace!("FileManager::close_dir -> fd {:#?}", fd,);
 
-        if self.dir_streams.remove(&fd).is_none() {
+        if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         } else {
             self.index_allocator.free_index(fd);
@@ -623,6 +623,8 @@ impl FileManager {
         })
     }
 
+    /// Get an iterator that contains entries of the current and parent (if exists) directories,
+    /// to chain with the iterator returned by [`std::fs::read_dir`].
     fn get_current_and_parent_entries(current: &Path) -> IntoIter<io::Result<DirEntryInternal>> {
         let mut entries = vec![Self::path_to_dir_entry_internal(
             current,
@@ -639,6 +641,10 @@ impl FileManager {
         entries.into_iter()
     }
 
+    /// If a stream does not yet exist for this fd, we create and return it.
+    /// The possible remote errors are:
+    /// [`ResponseError::NotFound`] if there is not such fd here.
+    /// [`ResponseError::NotDirectory`] if the fd points to a file with a non-directory file type.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
@@ -650,7 +656,6 @@ impl FileManager {
                     None => Err(ResponseError::NotFound(fd)),
                     Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
                     Some(RemoteFile::Directory(dir)) => {
-                        // TODO: add . and .. to the iterator.
                         let current_and_parent = Self::get_current_and_parent_entries(dir);
                         let stream = current_and_parent
                             .chain(
@@ -682,6 +687,11 @@ impl FileManager {
         Ok(result)
     }
 
+    /// The getdents64 syscall writes dir entries to a buffer, as long as they fit.
+    /// If a call did not process all the entries in a dir, the result of the next call continues
+    /// where the last one stopped.
+    /// After writing all entries, all future calls return 0 entries.
+    /// The caller keeps calling until getting 0.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn getdents64(
         &mut self,
@@ -690,7 +700,12 @@ impl FileManager {
     ) -> RemoteResult<Getdents64Response> {
         let mut result_size = 0u64;
 
+        // If this is the first call with this fd, the stream will be created, otherwise the
+        // existing one is retrieved and we continue from where we stopped on the last call.
         let entry_results = self.get_or_create_getdents64_stream(fd)?;
+
+        // If the stream is empty, it means we've already reached the end in a previous call, so we
+        // just return 0 and don't write any entries.
         if entry_results.peek().is_none() {
             // Reached end.
             Ok(Getdents64Response {
