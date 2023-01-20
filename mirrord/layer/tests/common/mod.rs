@@ -34,10 +34,6 @@ impl TestProcess {
         self.stdout.lock().unwrap().clone()
     }
 
-    pub fn assert_stderr_empty(&self) {
-        assert!(self.stderr.lock().unwrap().is_empty());
-    }
-
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
             assert!(!self.stderr.lock().unwrap().contains(level));

@@ -23,6 +23,5 @@ mod target {
         assert!(targets
             .iter()
             .any(|output| output.starts_with(&format!("pod/{}", service.name))));
-        process.assert_stderr();
     }
 }

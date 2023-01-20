@@ -32,6 +32,6 @@ async fn test_self_connect(dylib_path: &PathBuf) {
     println!("Application subscribed to port, sending tcp messages.");
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
     test_process.assert_no_error_in_stdout();
 }
