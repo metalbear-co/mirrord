@@ -15,10 +15,12 @@ func main() {
 		os.Exit(-1)
 	}
 	fmt.Printf("DirEntries: %s\n", dir)
-	if len(dir) != 4 {
+	// `os.ReadDir` does not include `.` and `..`.
+	if len(dir) != 2 {
 		os.Exit(-1)
 	}
-	if dir[0].Name() != "." || dir[1].Name() != ".." || dir[1].Name() != "test.txt" || dir[2].Name() != "app.py"{
+	// `os.ReadDir` sorts the result by file name.
+	if dir[0].Name() != "app.py" || dir[1].Name() != "test.txt"{
 		os.Exit(-1)
 	}
 	// let close requests be sent for test
