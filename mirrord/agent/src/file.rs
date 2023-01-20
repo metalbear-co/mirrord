@@ -1,6 +1,6 @@
 use std::{
     self,
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fs::{DirEntry, File, OpenOptions, ReadDir},
     io,
     io::{prelude::*, BufReader, SeekFrom},
@@ -644,26 +644,28 @@ impl FileManager {
         &mut self,
         fd: u64,
     ) -> RemoteResult<&mut GetDents64Stream> {
-        if let std::collections::hash_map::Entry::Vacant(e) = self.getdents_streams.entry(fd) {
-            match self.open_files.get(&fd) {
-                None => return Err(ResponseError::NotFound(fd)),
-                Some(RemoteFile::File(_file)) => return Err(ResponseError::NotDirectory(fd)),
-                Some(RemoteFile::Directory(dir)) => {
-                    // TODO: add . and .. to the iterator.
-                    let current_and_parent = Self::get_current_and_parent_entries(dir);
-                    let stream = current_and_parent
-                        .chain(
-                            dir.read_dir()?
-                                .enumerate()
-                                .map(TryInto::try_into) // Convert into DirEntryInternal.
-                                .map(Self::log_err),
-                        )
-                        .peekable();
-                    e.insert(stream);
+        match self.getdents_streams.entry(fd) {
+            Entry::Vacant(e) => {
+                match self.open_files.get(&fd) {
+                    None => Err(ResponseError::NotFound(fd)),
+                    Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
+                    Some(RemoteFile::Directory(dir)) => {
+                        // TODO: add . and .. to the iterator.
+                        let current_and_parent = Self::get_current_and_parent_entries(dir);
+                        let stream = current_and_parent
+                            .chain(
+                                dir.read_dir()?
+                                    .enumerate()
+                                    .map(TryInto::try_into) // Convert into DirEntryInternal.
+                                    .map(Self::log_err),
+                            )
+                            .peekable();
+                        Ok(e.insert(stream))
+                    }
                 }
             }
+            Entry::Occupied(existing) => Ok(existing.into_mut()),
         }
-        Ok(self.getdents_streams.get_mut(&fd).unwrap())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
