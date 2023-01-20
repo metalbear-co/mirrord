@@ -1,9 +1,8 @@
 #![feature(assert_matches)]
 
-use std::{
-    assert_matches::assert_matches, collections::HashMap, env::temp_dir, path::PathBuf,
-    process::Stdio, time::Duration,
-};
+#[cfg(target_os = "linux")]
+use std::assert_matches::assert_matches;
+use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -14,7 +13,6 @@ use tokio::{
     process::Command,
 };
 
-use crate::file::*;
 mod common;
 pub use common::*;
 
@@ -693,7 +691,7 @@ async fn test_go_dir_on_linux(
     );
 
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 }
 
 /// Test that the bypass works for reading dirs with Go.
@@ -735,5 +733,5 @@ async fn test_go_dir_bypass(
     println!("Got connection from layer.");
 
     test_process.wait_assert_success().await;
-    test_process.assert_stderr_empty();
+    test_process.assert_no_error_in_stderr();
 }
