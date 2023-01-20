@@ -346,6 +346,8 @@ jobs:
           go build -o 19
           cd ../dir_go
           go build
+          cd ../dir_go_bypass
+          go build
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
