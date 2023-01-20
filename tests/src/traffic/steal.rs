@@ -240,7 +240,11 @@ mod steal {
         mirrorded_process.child.kill().await.unwrap();
     }
 
-    // TODO(alex) [high] 2023-01-19: How do I properly test this?
+    /// Test the case where running with `steal` set and an http header filter, we get an HTTP
+    /// upgrade request, and this should not reach the local app.
+    ///
+    /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
+    /// app does not see the traffic.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -278,6 +282,7 @@ mod steal {
 
         mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
 
+        // Create a websocket connection to test the HTTP upgrade bypass.
         let host = host.trim();
         let (ws_stream, _) = connect_async(format!("ws://{host}:{port}"))
             .await
@@ -313,7 +318,6 @@ mod steal {
 
         // Now do a meta-test to see that with this setup but without the http filter the data does
         // reach the local app.
-
         let mut flags = vec!["--steal"];
         agent.flag().map(|flag| flags.extend(flag));
         let mut mirrorded_process = application

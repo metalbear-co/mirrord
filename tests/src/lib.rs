@@ -632,13 +632,16 @@ mod utils {
         .await
     }
 
-    // TODO(alex) [mid] 2023-01-19: Add docs
+    /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
+    /// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+    /// connection, allowing us to test HTTP upgrade requests.
     #[fixture]
     pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
         service(
             kube_client,
             "default",
             "NodePort",
+            // TODO(alex) [high] 2023-01-20: Change this to the metalbear published image.
             // "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "docker.io/meowjesty/samples-websockets:latest",
             "websocket",

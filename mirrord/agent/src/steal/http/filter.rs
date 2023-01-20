@@ -13,7 +13,7 @@ use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,
-    hyper_handler::{HyperHandler, LiveConnection},
+    hyper_handler::{HyperHandler, RawHyperConnection},
     DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
@@ -76,7 +76,7 @@ pub(super) async fn filter_task(
             ) {
                 HttpVersion::V1 => {
                     // Contains the upgraded interceptor connection, if any.
-                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<LiveConnection>();
+                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
 
                     // We have to keep the connection alive to handle a possible upgrade request
                     // manually.
@@ -101,7 +101,7 @@ pub(super) async fn filter_task(
                         .without_shutdown()
                         .await?;
 
-                    if let Ok(LiveConnection {
+                    if let Ok(RawHyperConnection {
                         stream: mut agent_remote, // i.e. agent-original destination connection
                         unprocessed_bytes: client_unprocessed,
                     }) = upgrade_rx.await
