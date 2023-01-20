@@ -644,7 +644,7 @@ impl FileManager {
         &mut self,
         fd: u64,
     ) -> RemoteResult<&mut GetDents64Stream> {
-        if !self.getdents_streams.contains_key(&fd) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.getdents_streams.entry(fd) {
             match self.open_files.get(&fd) {
                 None => return Err(ResponseError::NotFound(fd)),
                 Some(RemoteFile::File(_file)) => return Err(ResponseError::NotDirectory(fd)),
@@ -659,7 +659,7 @@ impl FileManager {
                                 .map(Self::log_err),
                         )
                         .peekable();
-                    self.getdents_streams.insert(fd, stream);
+                    e.insert(stream);
                 }
             }
         }
