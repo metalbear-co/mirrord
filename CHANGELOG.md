@@ -7,11 +7,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.20.0
+
+### Added
+
+- Support impersonation in operator
+
 ### Fixed
 
 - Go crash in some scenarios [#834](https://github.com/metalbear-co/mirrord/issues/834).
 - Remove already deprecated `--no-fs` and `--rw` options, that do not do anything anymore, but were still listed in the
   help message.
+- Bug: SIP would fail the second time to run scripts for which the user does not have write permissions.
+
+### Changed
+
+- Change layer/cli logs to be to stderr instead of stdout to avoid mixing with the output of the application. Closes [#786](https://github.com/metalbear-co/mirrord/issues/786)
 
 ### Changed
 

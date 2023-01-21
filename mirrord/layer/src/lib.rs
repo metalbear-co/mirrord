@@ -229,7 +229,8 @@ fn layer_start(config: LayerConfig) {
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
                     .with_span_events(FmtSpan::ACTIVE)
-                    .compact(),
+                    .compact()
+                    .with_writer(std::io::stderr),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
