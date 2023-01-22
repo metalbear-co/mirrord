@@ -53,9 +53,17 @@ impl From<TargetCrd> for TargetConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct TargetStatus {
-    pub connections: usize,
+    pub state: Option<TargetStatusAgentState>,
+    pub connections: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetStatusAgentState {
+    Initializing,
+    Ready,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
