@@ -1,5 +1,8 @@
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+use mirrord_config::{
+    agent::AgentConfig,
+    target::{Target, TargetConfig},
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -74,5 +77,6 @@ pub enum TargetStatusAgentState {
     struct = "MirrordOperatorCrd"
 )]
 pub struct MirrordOperatorSpec {
-    pub operator_version: String,
+    pub agent_config: AgentConfig,
+    pub default_namespace: String,
 }
