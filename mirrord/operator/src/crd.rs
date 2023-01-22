@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
     version = "v1",
     kind = "Target",
     struct = "TargetCrd",
+    status = "TargetStatus",
     namespaced
 )]
 pub struct TargetSpec {
@@ -52,6 +53,11 @@ impl From<TargetCrd> for TargetConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TargetStatus {
+    connections: usize,
+}
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -60,18 +66,5 @@ impl From<TargetCrd> for TargetConfig {
     struct = "MirrordOperatorCrd"
 )]
 pub struct MirrordOperatorSpec {
-    layers: Option<Vec<MirrordOperatorLayer>>,
     operator_version: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorLayer {
-    agents: Vec<MirrordOperatorAgent>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorAgent {
-    active_connections: usize,
-    namespace: String,
-    target: Option<Target>,
 }
