@@ -14,3 +14,15 @@ pub enum DaemonUdpOutgoing {
     Read(RemoteResult<DaemonRead>),
     Close(ConnectionId),
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendMsgResponse {
+    pub sent_amount: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct SendMsgRequest {
+    pub message: String,
+    pub addr: String,
+    pub bound: bool,
+}

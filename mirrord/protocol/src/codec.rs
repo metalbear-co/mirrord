@@ -18,7 +18,7 @@ use crate::{
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing, SendMsgRequest},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ResponseError,
@@ -65,6 +65,7 @@ pub enum ClientMessage {
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
+    SendMsgRequest(SendMsgRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.

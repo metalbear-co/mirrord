@@ -19,7 +19,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{GetAddrInfoHook, ResponseChannel};
+use common::{GetAddrInfoHook, ResponseChannel, SendMsgHook};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -36,6 +36,7 @@ use mirrord_config::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
+    outgoing::udp::{SendMsgRequest, SendMsgResponse},
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
@@ -285,6 +286,7 @@ struct Layer {
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
+    send_queue: VecDeque<ResponseChannel<SendMsgResponse>>,
 
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -316,6 +318,7 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
+            send_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(filter, ports.into(), http_response_sender),
             http_response_receiver,
             steal,
@@ -355,6 +358,20 @@ impl Layer {
                 self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
                 let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
+                self.send(request).await.unwrap();
+            }
+            HookMessage::SendMsgHook(SendMsgHook {
+                message,
+                addr,
+                bound,
+                hook_channel_tx,
+            }) => {
+                self.send_queue.push_back(hook_channel_tx);
+                let request = ClientMessage::SendMsgRequest(SendMsgRequest {
+                    message,
+                    addr,
+                    bound,
+                });
                 self.send(request).await.unwrap();
             }
             HookMessage::TcpOutgoing(message) => self

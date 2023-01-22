@@ -8,15 +8,15 @@ use std::{
     sync::Arc,
 };
 
-use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::dns::LookupRecord;
+use libc::{c_int, msghdr, sockaddr, socklen_t, ssize_t};
+use mirrord_protocol::{dns::LookupRecord, outgoing::udp::SendMsgResponse};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage, SendMsgHook},
     detour::{Detour, OptionExt},
     error::HookError,
     file::OPEN_FILES,
@@ -625,4 +625,38 @@ pub(super) fn getaddrinfo(
     debug!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
+}
+
+pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ssize_t> {
+    let sockets = SOCKETS.lock()?;
+    if let Some(socket) = sockets.get(&fd).cloned() {
+        match socket.kind {
+            SocketKind::Tcp(_) => {}
+            SocketKind::Udp(_) => {
+                let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+                // convert message to a string
+                let addr_cstr = unsafe { CStr::from_ptr((*msg).msg_name as *const i8) };
+                let addr = addr_cstr.to_str().unwrap().to_string();
+
+                let message_cstr =
+                    unsafe { CStr::from_ptr((*(*msg).msg_iov).iov_base as *const i8) };
+                let message = message_cstr.to_str().unwrap().to_string();
+
+                let hook = SendMsgHook {
+                    message,
+                    addr,
+                    bound: false,
+                    hook_channel_tx,
+                };
+
+                blocking_send_hook_message(HookMessage::SendMsgHook(hook))?;
+
+                let SendMsgResponse { sent_amount } = hook_channel_rx.blocking_recv()??;
+
+                return Detour::Success(sent_amount as _);
+            }
+        }
+    }
+
+    todo!()
 }

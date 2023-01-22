@@ -6,7 +6,7 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use libc::{c_char, c_int, msghdr, sockaddr, socklen_t, ssize_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -264,11 +264,27 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
         .expect("Failed to lock MANAGED_ADDRINFO mutex");
 }
 
+#[hook_guard_fn]
+unsafe extern "C" fn sendmsg_detour(
+    socket: c_int,
+    message: *const msghdr,
+    flags: c_int,
+) -> ssize_t {
+    sendmsg(socket, message, flags).unwrap_or_bypass_with(|_| FN_SENDMSG(socket, message, flags))
+}
+
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
     replace!(hook_manager, "listen", listen_detour, FnListen, FN_LISTEN);
+    replace!(
+        hook_manager,
+        "sendmsg",
+        sendmsg_detour,
+        FnSendmsg,
+        FN_SENDMSG
+    );
 
     replace!(
         hook_manager,
