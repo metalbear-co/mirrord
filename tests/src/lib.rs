@@ -641,7 +641,7 @@ mod utils {
             kube_client,
             "default",
             "NodePort",
-            "docker.io/meowjesty/samples-websockets:latest",
+            "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "websocket",
             true,
             false,
