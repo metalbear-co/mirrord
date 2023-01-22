@@ -58,7 +58,7 @@ impl From<TargetCrd> for TargetConfig {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct TargetStatus {
-    agents: Vec<TargetStatusAgent>,
+    pub agents: Vec<TargetStatusAgent>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
