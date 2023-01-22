@@ -24,6 +24,6 @@ pub enum HttpTrafficError {
     #[error("Failed hyper HTTP `{0}`!")]
     HyperHttp(#[from] hyper::http::Error),
 
-    #[error("Failed hyper HTTP `{0}`!")]
+    #[error("Failed closing connection with `{0}`!")]
     CloseSender(#[from] tokio::sync::mpsc::error::SendError<ConnectionId>),
 }
