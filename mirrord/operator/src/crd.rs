@@ -61,7 +61,7 @@ pub struct TargetStatus {
     pub agents: Vec<TargetStatusAgent>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TargetStatusAgent {
     pub target_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,5 +92,11 @@ pub struct MirrordOperatorSpec {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
-    pub acive_targets: Vec<TargetStatusAgent>,
+    pub acive_targets: Vec<MirrordOperatorStatusActiveTargets>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorStatusActiveTargets {
+    pub target_name: String,
+    pub agents: Vec<TargetStatusAgent>,
 }
