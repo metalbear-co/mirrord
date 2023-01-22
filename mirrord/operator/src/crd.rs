@@ -82,9 +82,15 @@ pub enum TargetStatusAgentState {
     group = "operator.metalbear.co",
     version = "v1",
     kind = "MirrordOperator",
-    struct = "MirrordOperatorCrd"
+    struct = "MirrordOperatorCrd",
+    status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
     pub agent_config: AgentConfig,
     pub default_namespace: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorStatus {
+    pub acive_targets: Vec<TargetStatusAgent>,
 }
