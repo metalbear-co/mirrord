@@ -55,7 +55,7 @@ impl From<TargetCrd> for TargetConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TargetStatus {
-    connections: usize,
+    pub connections: usize,
 }
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -66,5 +66,5 @@ pub struct TargetStatus {
     struct = "MirrordOperatorCrd"
 )]
 pub struct MirrordOperatorSpec {
-    operator_version: String,
+    pub operator_version: String,
 }
