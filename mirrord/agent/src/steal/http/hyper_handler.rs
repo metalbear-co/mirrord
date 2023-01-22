@@ -106,7 +106,7 @@ async fn matched_request(
 ///
 /// - Why not use [`hyper::upgrade::on`]?
 ///
-/// [`hyper::upgrade::on`] requires the original [`Request`] as a paremeter, due to it having the
+/// [`hyper::upgrade::on`] requires the original [`Request`] as a parameter, due to it having the
 /// [`OnUpgrade`](hyper::upgrade::OnUpgrade) receiver tucked inside as an
 /// [`Extensions`](http::extensions::Extensions)
 /// (you can see this [here](https://docs.rs/hyper/1.0.0-rc.2/src/hyper/upgrade.rs.html#73)).
