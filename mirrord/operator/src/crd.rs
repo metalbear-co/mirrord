@@ -58,7 +58,9 @@ impl From<TargetCrd> for TargetConfig {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct TargetStatus {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<TargetStatusAgentState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub connections: Option<usize>,
 }
 
