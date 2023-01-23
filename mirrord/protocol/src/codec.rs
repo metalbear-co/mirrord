@@ -18,7 +18,7 @@ use crate::{
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing, SendMsgRequest},
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing, SendMsgRequest, SendMsgResponse},
     },
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ResponseError,
@@ -53,6 +53,11 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum SendRecvRequest {
+    SendMsg(SendMsgRequest),
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -65,7 +70,7 @@ pub enum ClientMessage {
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
-    SendMsgRequest(SendMsgRequest),
+    SendRecvRequest(SendRecvRequest),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -85,6 +90,11 @@ pub enum FileResponse {
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
 }
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum SendRecvResponse {
+    SendMsg(SendMsgResponse),
+}
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonMessage {
@@ -98,6 +108,7 @@ pub enum DaemonMessage {
     Pong,
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
+    SendRecvResponse(RemoteResult<SendRecvResponse>),
 }
 
 pub struct ClientCodec {

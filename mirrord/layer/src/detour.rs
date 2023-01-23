@@ -80,6 +80,8 @@ pub(crate) enum Bypass {
     EmptyBuffer,
     EmptyOption,
     NullNode,
+    TcpSocket,
+    UnManagedSocket,
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
     #[cfg(target_os = "macos")]

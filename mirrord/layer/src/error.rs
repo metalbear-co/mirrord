@@ -112,6 +112,9 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
     SendErrorGetAddrInfoResponse,
 
+    #[error("mirrord-layer: Failed to get `Sender` for sending send/recv response!")]
+    SendErrorSendRecvResponse,
+
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 

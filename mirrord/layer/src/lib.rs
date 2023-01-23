@@ -19,7 +19,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{GetAddrInfoHook, ResponseChannel, SendMsgHook};
+use common::{GetAddrInfoHook, ResponseChannel, SendMsgHook, SendRecvHook};
 use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
@@ -36,9 +36,9 @@ use mirrord_config::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    outgoing::udp::{SendMsgRequest, SendMsgResponse},
+    outgoing::udp::SendMsgRequest,
     tcp::{HttpResponse, LayerTcpSteal},
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, SendRecvRequest, SendRecvResponse,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::get_tmp_dir;
@@ -286,7 +286,7 @@ struct Layer {
     // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
     // to -agent, and when we receive a message from -agent to -layer).
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
-    send_queue: VecDeque<ResponseChannel<SendMsgResponse>>,
+    send_recv_queue: VecDeque<ResponseChannel<SendRecvResponse>>,
 
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -318,7 +318,7 @@ impl Layer {
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            send_queue: VecDeque::new(),
+            send_recv_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(filter, ports.into(), http_response_sender),
             http_response_receiver,
             steal,
@@ -360,18 +360,20 @@ impl Layer {
 
                 self.send(request).await.unwrap();
             }
-            HookMessage::SendMsgHook(SendMsgHook {
+            HookMessage::SendRecvHook(SendRecvHook::SendMsg(SendMsgHook {
                 message,
                 addr,
                 bound,
                 hook_channel_tx,
-            }) => {
-                self.send_queue.push_back(hook_channel_tx);
-                let request = ClientMessage::SendMsgRequest(SendMsgRequest {
-                    message,
-                    addr,
-                    bound,
-                });
+            })) => {
+                self.send_recv_queue.push_back(hook_channel_tx);
+                let request =
+                    ClientMessage::SendRecvRequest(SendRecvRequest::SendMsg(SendMsgRequest {
+                        message,
+                        addr,
+                        bound,
+                    }));
+
                 self.send(request).await.unwrap();
             }
             HookMessage::TcpOutgoing(message) => self
@@ -387,7 +389,6 @@ impl Layer {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
@@ -427,6 +428,12 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
+            DaemonMessage::SendRecvResponse(message) => self
+                .send_recv_queue
+                .pop_front()
+                .ok_or(LayerError::SendErrorSendRecvResponse)?
+                .send(message)
+                .map_err(|_| LayerError::SendErrorSendRecvResponse),
             DaemonMessage::LogMessage(_) => todo!(),
         }
     }

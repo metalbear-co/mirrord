@@ -12,7 +12,7 @@ use futures::{
 };
 use mirrord_protocol::{
     outgoing::{udp::*, *},
-    ConnectionId, RemoteError, ResponseError,
+    ConnectionId, RemoteError, ResponseError, SendRecvRequest, SendRecvResponse,
 };
 use regex::Regex;
 use streammap_ext::StreamMap;
@@ -263,5 +263,24 @@ impl UdpOutgoingApi {
             .recv()
             .await
             .ok_or(AgentError::ReceiverClosed)
+    }
+}
+
+pub(crate) struct SendRecvManager {
+    open_sockets: HashMap<SocketAddr, UdpSocket>,
+}
+
+impl SendRecvManager {
+    pub(crate) fn new() -> Self {
+        Self {
+            open_sockets: HashMap::new(),
+        }
+    }
+
+    pub(crate) async fn handle_message(
+        &self,
+        request: SendRecvRequest,
+    ) -> Result<Option<SendRecvResponse>> {
+        todo!()
     }
 }

@@ -19,8 +19,13 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
-use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
+use mirrord_protocol::{
+    outgoing::udp::SendMsgRequest, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
+};
+use outgoing::{
+    udp::{SendRecvManager, UdpOutgoingApi},
+    TcpOutgoingApi,
+};
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
 use steal::api::TcpStealerApi;
 use tokio::{
@@ -152,7 +157,7 @@ struct ClientConnectionHandler {
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_sender: Sender<DnsRequest>,
-    send_sender: Sender<SendRequest>,
+    send_recv_manager: SendRecvManager,
 }
 
 impl ClientConnectionHandler {
@@ -165,7 +170,6 @@ impl ClientConnectionHandler {
         sniffer_command_sender: Sender<SnifferCommand>,
         stealer_command_sender: Sender<StealerCommand>,
         dns_sender: Sender<DnsRequest>,
-        send_sender: Sender<SendRequest>,
     ) -> Result<Self> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
@@ -185,6 +189,8 @@ impl ClientConnectionHandler {
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
+        let send_recv_manager = SendRecvManager::new();
+
         let client_handler = ClientConnectionHandler {
             id,
             file_manager,
@@ -195,7 +201,7 @@ impl ClientConnectionHandler {
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_sender,
-            send_sender,
+            send_recv_manager,
         };
 
         Ok(client_handler)
@@ -321,8 +327,19 @@ impl ClientConnectionHandler {
                     .await?
             }
 
-            ClientMessage::SendMsgRequest(request) => {
-                todo!("SendMsgRequest")
+            ClientMessage::SendRecvRequest(request) => {
+                if let Some(response) = self.send_recv_manager.handle_message(request).await? {
+                    self.respond(DaemonMessage::SendRecvResponse(Ok(response)))
+                        .await
+                        .inspect_err(|fail| {
+                            error!(
+                                "handle_client_message -> Failed responding to sendrecv message {:#?}!",
+                                fail
+                            )
+                        })?
+                }
+
+                todo!("SendMsgRequest");
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
@@ -361,8 +378,6 @@ async fn start_agent() -> Result<()> {
     let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
 
     let (dns_sender, dns_receiver) = mpsc::channel(1000);
-
-    let (send_sender, send_receiver) = mpsc::channel(1000);
 
     let _ = run_thread_in_namespace(
         dns_worker(dns_receiver, pid),
@@ -407,7 +422,6 @@ async fn start_agent() -> Result<()> {
 
                         let cancellation_token = cancellation_token.clone();
                         let dns_sender = dns_sender.clone();
-                        let send_sender = send_sender.clone();
 
                         let client = tokio::spawn(async move {
                             match ClientConnectionHandler::new(
@@ -418,7 +432,6 @@ async fn start_agent() -> Result<()> {
                                     sniffer_command_tx,
                                     stealer_command_tx,
                                     dns_sender,
-                                    send_sender,
                                 )
                                 .and_then(|client| client.start(cancellation_token))
                                 .await

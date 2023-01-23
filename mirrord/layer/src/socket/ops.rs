@@ -9,14 +9,14 @@ use std::{
 };
 
 use libc::{c_int, msghdr, sockaddr, socklen_t, ssize_t};
-use mirrord_protocol::{dns::LookupRecord, outgoing::udp::SendMsgResponse};
+use mirrord_protocol::{dns::LookupRecord, SendRecvResponse};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage, SendMsgHook},
+    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage, SendMsgHook, SendRecvHook},
     detour::{Detour, OptionExt},
     error::HookError,
     file::OPEN_FILES,
@@ -631,10 +631,11 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
     let sockets = SOCKETS.lock()?;
     if let Some(socket) = sockets.get(&fd).cloned() {
         match socket.kind {
-            SocketKind::Tcp(_) => {}
+            SocketKind::Tcp(_) => {
+                return Detour::Bypass(Bypass::TcpSocket);
+            }
             SocketKind::Udp(_) => {
                 let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-                // convert message to a string
                 let addr_cstr = unsafe { CStr::from_ptr((*msg).msg_name as *const i8) };
                 let addr = addr_cstr.to_str().unwrap().to_string();
 
@@ -645,18 +646,18 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
                 let hook = SendMsgHook {
                     message,
                     addr,
-                    bound: false,
+                    bound: matches!(socket.state, SocketState::Bound(_)),
                     hook_channel_tx,
                 };
 
-                blocking_send_hook_message(HookMessage::SendMsgHook(hook))?;
+                blocking_send_hook_message(HookMessage::SendRecvHook(SendRecvHook::SendMsg(hook)))?;
 
-                let SendMsgResponse { sent_amount } = hook_channel_rx.blocking_recv()??;
+                let SendRecvResponse::SendMsg(result) = hook_channel_rx.blocking_recv()??;
 
-                return Detour::Success(sent_amount as _);
+                return Detour::Success(result.sent_amount as _);
             }
         }
+    } else {
+        return Detour::Bypass(Bypass::UnManagedSocket);
     }
-
-    todo!()
 }
