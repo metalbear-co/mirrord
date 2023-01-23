@@ -3,32 +3,33 @@
 /// Read-only file operations are enabled by default, you can turn it off by setting
 /// `MIRRORD_FILE_RO_OPS` to `false`.
 ///
-/// To enable read-write file operations, set `MIRRORD_FILE_OPS` to `true.
 ///
 /// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
-/// open locally), these are controlled by configuring the [`filter::FileFilter`] with either
-/// `MIRRORD_FILE_FILTER_INCLUDE` or `MIRRORD_FILE_FILTER_EXCLUDE` (the later adds aditional
-/// exclusions to the default).
+/// opened locally), these are controlled by configuring the [`filter::FileFilter`] with
+/// `[FsConfig]`.
 use core::fmt;
 use std::{
     collections::HashMap,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::{
-    file::{XstatRequest, XstatResponse},
-    AccessFileRequest, AccessFileResponse, ClientMessage, CloseFileRequest, CloseFileResponse,
-    FileRequest, FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-    OpenRelativeFileRequest, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-    ReadLineFileRequest, RemoteResult, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-    WriteFileResponse, WriteLimitedFileRequest,
+    file::{
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
+        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
+    },
+    ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, error, warn};
+use tracing::{error, trace, warn};
 
 use crate::{
     common::{ResponseChannel, ResponseDeque},
@@ -41,13 +42,21 @@ pub(crate) mod ops;
 
 type LocalFd = RawFd;
 type RemoteFd = u64;
+type DirStreamFd = usize;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct RemoteFile {
-    fd: RawFd,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirStream {
+    direntry: Box<DirEntryInternal>,
 }
 
-pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, RemoteFd>>> =
+/// `OPEN_FILES` is used to track open files and their corrospending remote file descriptor.
+/// We use Arc so we can support dup more nicely, this means that if user
+/// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
+/// Previously in such scenario we would close the remote, causing issues.
+pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<ops::RemoteFile>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
+
+pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
@@ -114,9 +123,10 @@ pub struct FileHandler {
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
     write_limited_queue: ResponseDeque<WriteFileResponse>,
-    close_queue: ResponseDeque<CloseFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
     xstat_queue: ResponseDeque<XstatResponse>,
+    opendir_queue: ResponseDeque<OpenDirResponse>,
+    readdir_queue: ResponseDeque<ReadDirResponse>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -137,15 +147,15 @@ impl FileHandler {
         use FileResponse::*;
         match message {
             Open(open) => {
-                debug!("DaemonMessage::OpenFileResponse {open:#?}!");
+                trace!("DaemonMessage::OpenFileResponse {open:#?}!");
                 pop_send(&mut self.open_queue, open)
             }
             Read(read) => {
                 // The debug message is too big if we just log it directly.
                 let _ = read
                     .as_ref()
-                    .inspect(|success| debug!("DaemonMessage::ReadFileResponse {:#?}", success))
-                    .inspect_err(|fail| error!("DaemonMessage::ReadFileResponse {:#?}", fail));
+                    .inspect(|success| trace!("DaemonMessage::ReadFileResponse {:#?}", success))
+                    .inspect_err(|fail| trace!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
                 pop_send(&mut self.read_queue, read)
             }
@@ -153,8 +163,8 @@ impl FileHandler {
                 // The debug message is too big if we just log it directly.
                 let _ = read
                     .as_ref()
-                    .inspect(|success| debug!("DaemonMessage::ReadLineFileResponse {:#?}", success))
-                    .inspect_err(|fail| error!("DaemonMessage::ReadLineFileResponse {:#?}", fail));
+                    .inspect(|success| trace!("DaemonMessage::ReadLineFileResponse {:#?}", success))
+                    .inspect_err(|fail| trace!("DaemonMessage::ReadLineFileResponse {:#?}", fail));
 
                 pop_send(&mut self.read_line_queue, read).inspect_err(|fail| {
                     error!(
@@ -168,10 +178,10 @@ impl FileHandler {
                 let _ = read
                     .as_ref()
                     .inspect(|success| {
-                        debug!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
+                        trace!("DaemonMessage::ReadLimitedFileResponse {:#?}", success)
                     })
                     .inspect_err(|fail| {
-                        error!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
+                        trace!("DaemonMessage::ReadLimitedFileResponse {:#?}", fail)
                     });
 
                 pop_send(&mut self.read_limited_queue, read).inspect_err(|fail| {
@@ -182,29 +192,25 @@ impl FileHandler {
                 })
             }
             Seek(seek) => {
-                debug!("DaemonMessage::SeekFileResponse {:#?}!", seek);
+                trace!("DaemonMessage::SeekFileResponse {:#?}!", seek);
                 pop_send(&mut self.seek_queue, seek)
             }
             Write(write) => {
-                debug!("DaemonMessage::WriteFileResponse {:#?}!", write);
+                trace!("DaemonMessage::WriteFileResponse {:#?}!", write);
                 pop_send(&mut self.write_queue, write)
             }
-            Close(close) => {
-                debug!("DaemonMessage::CloseFileResponse {:#?}!", close);
-                pop_send(&mut self.close_queue, close)
-            }
             Access(access) => {
-                debug!("DaemonMessage::AccessFileResponse {:#?}!", access);
+                trace!("DaemonMessage::AccessFileResponse {:#?}!", access);
                 pop_send(&mut self.access_queue, access)
             }
             WriteLimited(write) => {
                 let _ = write
                     .as_ref()
                     .inspect(|success| {
-                        debug!("DaemonMessage::WriteLimitedFileResponse {:#?}", success)
+                        trace!("DaemonMessage::WriteLimitedFileResponse {:#?}", success)
                     })
                     .inspect_err(|fail| {
-                        error!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
+                        trace!("DaemonMessage::WriteLimitedFileResponse {:#?}", fail)
                     });
 
                 pop_send(&mut self.write_limited_queue, write).inspect_err(|fail| {
@@ -215,9 +221,14 @@ impl FileHandler {
                 })
             }
             Xstat(xstat) => {
-                debug!("DaemonMessage::XstatResponse {:#?}!", xstat);
+                trace!("DaemonMessage::XstatResponse {:#?}!", xstat);
                 pop_send(&mut self.xstat_queue, xstat)
             }
+            ReadDir(read_dir) => {
+                trace!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
+                pop_send(&mut self.readdir_queue, read_dir)
+            }
+            OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
         }
     }
 
@@ -241,6 +252,9 @@ impl FileHandler {
             Close(close) => self.handle_hook_close(close, tx).await,
             Access(access) => self.handle_hook_access(access, tx).await,
             Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
+            ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
+            FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
+            CloseDir(close_dir) => self.handle_hook_close_dir(close_dir, tx).await,
         }
     }
 
@@ -251,9 +265,10 @@ impl FileHandler {
             path,
             open_options,
         } = open;
-        debug!(
+        trace!(
             "HookMessage::OpenFileHook path {:#?} | options {:#?}",
-            path, open_options
+            path,
+            open_options
         );
 
         self.open_queue.push_back(file_channel_tx);
@@ -276,9 +291,11 @@ impl FileHandler {
             file_channel_tx,
             open_options,
         } = open_relative;
-        debug!(
+        trace!(
             "HookMessage::OpenRelativeFileHook fd {:#?} | path {:#?} | options {:#?}",
-            relative_fd, path, open_options
+            relative_fd,
+            path,
+            open_options
         );
 
         self.open_queue.push_back(file_channel_tx);
@@ -373,9 +390,10 @@ impl FileHandler {
             seek_from,
             file_channel_tx,
         } = seek;
-        debug!(
+        trace!(
             "HookMessage::SeekFileHook fd {:#?} | seek_from {:#?}",
-            fd, seek_from
+            fd,
+            seek_from
         );
 
         self.seek_queue.push_back(file_channel_tx);
@@ -400,7 +418,7 @@ impl FileHandler {
             file_channel_tx,
             ..
         } = write;
-        debug!(
+        trace!(
             "HookMessage::WriteFileHook fd {:#?} | length {:#?}",
             fd,
             write_bytes.len()
@@ -440,17 +458,26 @@ impl FileHandler {
     }
 
     async fn handle_hook_close(&mut self, close: Close, tx: &Sender<ClientMessage>) -> Result<()> {
-        let Close {
-            fd,
-            file_channel_tx,
-        } = close;
-        debug!("HookMessage::CloseFileHook fd {:#?}", fd);
-
-        self.close_queue.push_back(file_channel_tx);
+        let Close { fd } = close;
+        trace!("HookMessage::CloseFileHook fd {:#?}", fd);
 
         let close_file_request = CloseFileRequest { fd };
 
         let request = ClientMessage::FileRequest(FileRequest::Close(close_file_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
+    async fn handle_hook_close_dir(
+        &mut self,
+        close: CloseDir,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let CloseDir { fd } = close;
+        trace!("HookMessage::CloseDirHook fd {:#?}", fd);
+
+        let close_dir_request = CloseDirRequest { remote_fd: fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::CloseDir(close_dir_request));
         tx.send(request).await.map_err(From::from)
     }
 
@@ -465,9 +492,10 @@ impl FileHandler {
             file_channel_tx,
         } = access;
 
-        debug!(
+        trace!(
             "HookMessage::AccessFileHook pathname {:#?} | mode {:#?}",
-            pathname, mode
+            pathname,
+            mode
         );
 
         self.access_queue.push_back(file_channel_tx);
@@ -495,6 +523,44 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::Xstat(xstat_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_fdopen_dir(
+        &mut self,
+        open_dir: FdOpenDir,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let FdOpenDir {
+            remote_fd,
+            dir_channel_tx,
+        } = open_dir;
+
+        self.opendir_queue.push_back(dir_channel_tx);
+
+        let open_dir_request = FdOpenDirRequest { remote_fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::FdOpenDir(open_dir_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, tx))]
+    async fn handle_hook_read_dir(
+        &mut self,
+        read_dir: ReadDir,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let ReadDir {
+            remote_fd,
+            dir_channel_tx,
+        } = read_dir;
+
+        self.readdir_queue.push_back(dir_channel_tx);
+
+        let read_dir_request = ReadDirRequest { remote_fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::ReadDir(read_dir_request));
         tx.send(request).await.map_err(From::from)
     }
 }
@@ -542,7 +608,6 @@ pub struct Write<T> {
 #[derive(Debug)]
 pub struct Close {
     pub(crate) fd: u64,
-    pub(crate) file_channel_tx: ResponseChannel<CloseFileResponse>,
 }
 
 #[derive(Debug)]
@@ -561,6 +626,23 @@ pub struct Xstat {
 }
 
 #[derive(Debug)]
+pub struct ReadDir {
+    pub(crate) remote_fd: u64,
+    pub(crate) dir_channel_tx: ResponseChannel<ReadDirResponse>,
+}
+
+#[derive(Debug)]
+pub struct FdOpenDir {
+    pub(crate) remote_fd: u64,
+    pub(crate) dir_channel_tx: ResponseChannel<OpenDirResponse>,
+}
+
+#[derive(Debug)]
+pub struct CloseDir {
+    pub(crate) fd: u64,
+}
+
+#[derive(Debug)]
 pub enum HookMessageFile {
     Open(Open),
     OpenRelative(OpenRelative),
@@ -573,4 +655,7 @@ pub enum HookMessageFile {
     Close(Close),
     Access(Access),
     Xstat(Xstat),
+    ReadDir(ReadDir),
+    FdOpenDir(FdOpenDir),
+    CloseDir(CloseDir),
 }

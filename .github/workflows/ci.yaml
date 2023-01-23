@@ -287,13 +287,22 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - uses: actions/setup-go@v3
         with:
-          go-version: "1.19.0"
+          go-version: "1.19.5"
       - run: |
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
       - run: |
           cd mirrord/layer/tests/apps/fileops/go
           go build -o fileops        
+      - run: |
+          cd mirrord/layer/tests/apps/issue834
+          go build -o 19
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.10"
+      - run: |
+          cd mirrord/layer/tests/apps/issue834
+          go build -o 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -328,7 +337,9 @@ jobs:
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
           cd ../app_go
-          go build -o 19      
+          go build -o 19
+          cd ../dir_go
+          go build
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build

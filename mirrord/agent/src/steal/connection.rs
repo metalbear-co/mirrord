@@ -370,7 +370,7 @@ impl TcpConnectionStealer {
                         connection_id,
                         self.http_connection_close_sender.clone(),
                     )
-                    .await?;
+                    .await;
 
                 Ok(())
             }

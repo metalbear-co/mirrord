@@ -57,13 +57,10 @@
       ]
     },
     "operator": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/ToggleableConfig_for_OperatorFileConfig"
-        },
-        {
-          "type": "null"
-        }
+      "description": "Allow to lookup if operator is installed on cluster and use it",
+      "type": [
+        "boolean",
+        "null"
       ]
     },
     "skip_processes": {
@@ -95,28 +92,6 @@
       "description": "Advanced user configuration for file operations.\n\nAllows the user to specify:\n\nWhat is the default behavior for file operations: 1. read - Read from the remote file system (default) 2. write - Read/Write from the remote file system. 3. local - Read from the local file system. 4. disabled - Disable file operations.\n\nBesides the default behavior, user can specify behavior for specific regex patterns. Case insensitive. 1. read_write - List of patterns that should be read/write remotely. 2. read_only - List of patterns that should be read only remotely. 3. local - List of patterns that should be read locally.\n\nThe logic for choosing the behavior is as follows: 1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first). Note: Specifying the same path in two lists is unsupported and can lead to undefined behaviour. 2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns    to provide better UX. 3. If none of the above match, use the default behavior (mode).\n\n## Examples\n\n- Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read read_write = [\"/var/run\"] read_only = [\"/etc\"] local = [\"/lib\"] ```",
       "type": "object",
       "properties": {
-        "exclude": {
-          "description": "DEPRECATED Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe opposite of `include`, files that match the regexes specified here will bypass mirrord and are accessed locally.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/VecOrSingle_for_String"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "include": {
-          "description": "DEPRECATED Allows the user to specify regexes that are used to match against files when mirrord file operations are enabled.\n\nThe regexes specified here will make mirrord operate only on files that match it, otherwise the file will be accessed locally (bypassing mirrord).",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/VecOrSingle_for_String"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "local": {
           "description": "Specify file path patterns that if matched will be opened locally.",
           "anyOf": [
@@ -397,7 +372,7 @@
           ]
         },
         {
-          "description": "Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the `MIRRORD_FILE_FILTER_INCLUDE` and `MIRRORD_FILE_FILTER_EXCLUDE` env vars.",
+          "description": "Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the overrides.",
           "allOf": [
             {
               "$ref": "#/definitions/AdvancedFsUserConfig"
@@ -431,8 +406,7 @@
       },
       "additionalProperties": false
     },
-    "IncomingFileConfig": {
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+    "IncomingAdvancedFileConfig": {
       "type": "object",
       "properties": {
         "http_header_filter": {
@@ -457,8 +431,25 @@
             }
           ]
         }
-      },
-      "additionalProperties": false
+      }
+    },
+    "IncomingFileConfig": {
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        {
+          "$ref": "#/definitions/IncomingAdvancedFileConfig"
+        }
+      ]
     },
     "IncomingMode": {
       "description": "Mode of operation for the incoming TCP traffic feature.\n\nDefaults to [`IncomingMode::Mirror`].",
@@ -511,33 +502,6 @@
               "type": "null"
             }
           ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "OperatorFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "namespace": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "port": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint16",
-          "minimum": 0.0
         }
       },
       "additionalProperties": false
@@ -692,16 +656,6 @@
         },
         {
           "$ref": "#/definitions/NetworkFileConfig"
-        }
-      ]
-    },
-    "ToggleableConfig_for_OperatorFileConfig": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "$ref": "#/definitions/OperatorFileConfig"
         }
       ]
     },

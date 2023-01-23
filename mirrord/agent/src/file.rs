@@ -1,22 +1,26 @@
 use std::{
     self,
     collections::HashMap,
-    fs::{File, OpenOptions},
+    fs::{File, OpenOptions, ReadDir},
     io::{prelude::*, BufReader, SeekFrom},
-    os::unix::prelude::FileExt,
+    iter::Enumerate,
+    os::unix::prelude::{DirEntryExt, FileExt, MetadataExt},
     path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
 use mirrord_protocol::{
-    file::{XstatRequest, XstatResponse},
-    AccessFileRequest, AccessFileResponse, CloseFileRequest, CloseFileResponse, FileRequest,
-    FileResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest,
-    ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, RemoteResult,
-    ResponseError, SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-    WriteLimitedFileRequest,
+    file::{
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
+        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
+        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
+        XstatRequest, XstatResponse,
+    },
+    FileRequest, FileResponse, RemoteResult, ResponseError,
 };
-use tracing::{debug, error, trace};
+use tracing::{error, trace};
 
 use crate::{error::Result, util::IndexAllocator};
 
@@ -30,6 +34,7 @@ pub enum RemoteFile {
 pub struct FileManager {
     root_path: PathBuf,
     pub open_files: HashMap<u64, RemoteFile>,
+    pub dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     index_allocator: IndexAllocator<u64>,
 }
 
@@ -90,8 +95,8 @@ fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Deb
 impl FileManager {
     /// Executes the request and returns the response.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<FileResponse> {
-        match request {
+    pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
+        Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
                 let path = path
@@ -99,7 +104,7 @@ impl FileManager {
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let open_result = self.open(path.into(), open_options);
-                Ok(FileResponse::Open(open_result))
+                Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
                 relative_fd,
@@ -107,38 +112,38 @@ impl FileManager {
                 open_options,
             }) => {
                 let open_result = self.open_relative(relative_fd, path, open_options);
-                Ok(FileResponse::Open(open_result))
+                Some(FileResponse::Open(open_result))
             }
             FileRequest::Read(ReadFileRequest {
                 remote_fd,
                 buffer_size,
             }) => {
                 let read_result = self.read(remote_fd, buffer_size);
-                Ok(FileResponse::Read(read_result))
+                Some(FileResponse::Read(read_result))
             }
             FileRequest::ReadLine(ReadLineFileRequest {
                 remote_fd,
                 buffer_size,
             }) => {
                 let read_result = self.read_line(remote_fd, buffer_size);
-                Ok(FileResponse::ReadLine(read_result))
+                Some(FileResponse::ReadLine(read_result))
             }
             FileRequest::ReadLimited(ReadLimitedFileRequest {
                 remote_fd,
                 buffer_size,
                 start_from,
-            }) => Ok(FileResponse::ReadLimited(self.read_limited(
+            }) => Some(FileResponse::ReadLimited(self.read_limited(
                 remote_fd,
                 buffer_size,
                 start_from,
             ))),
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
-                Ok(FileResponse::Seek(seek_result))
+                Some(FileResponse::Seek(seek_result))
             }
             FileRequest::Write(WriteFileRequest { fd, write_bytes }) => {
                 let write_result = self.write(fd, write_bytes);
-                Ok(FileResponse::Write(write_result))
+                Some(FileResponse::Write(write_result))
             }
             FileRequest::WriteLimited(WriteLimitedFileRequest {
                 remote_fd,
@@ -146,11 +151,11 @@ impl FileManager {
                 write_bytes,
             }) => {
                 let write_result = self.write_limited(remote_fd, start_from, write_bytes);
-                Ok(FileResponse::WriteLimited(write_result))
+                Some(FileResponse::WriteLimited(write_result))
             }
             FileRequest::Close(CloseFileRequest { fd }) => {
-                let close_result = self.close(fd);
-                Ok(FileResponse::Close(close_result))
+                self.close(fd);
+                None
             }
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
@@ -158,7 +163,7 @@ impl FileManager {
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
                 let access_result = self.access(pathname.into(), mode);
-                Ok(FileResponse::Access(access_result))
+                Some(FileResponse::Access(access_result))
             }
             FileRequest::Xstat(XstatRequest {
                 path,
@@ -166,9 +171,23 @@ impl FileManager {
                 follow_symlink,
             }) => {
                 let xstat_result = self.xstat(path, fd, follow_symlink);
-                Ok(FileResponse::Xstat(xstat_result))
+                Some(FileResponse::Xstat(xstat_result))
             }
-        }
+
+            FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
+                let open_dir_result = self.fdopen_dir(remote_fd);
+                Some(FileResponse::OpenDir(open_dir_result))
+            }
+
+            FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
+                let read_dir_result = self.read_dir(remote_fd);
+                Some(FileResponse::ReadDir(read_dir_result))
+            }
+            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
+                self.close_dir(remote_fd);
+                None
+            }
+        })
     }
 
     #[tracing::instrument(level = "trace")]
@@ -177,7 +196,7 @@ impl FileManager {
             Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
             None => PathBuf::from("/"),
         };
-        debug!("Agent root path >> {root_path:?}");
+        trace!("Agent root path >> {root_path:?}");
         Self {
             open_files: HashMap::new(),
             root_path,
@@ -427,17 +446,24 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: u64) -> RemoteResult<CloseFileResponse> {
+    pub(crate) fn close(&mut self, fd: u64) {
         trace!("FileManager::close -> fd {:#?}", fd,);
 
-        let _file = self
-            .open_files
-            .remove(&fd)
-            .ok_or(ResponseError::NotFound(fd))?;
+        if self.open_files.remove(&fd).is_none() {
+            error!("FileManager::close -> fd {:#?} not found", fd);
+        } else {
+            self.index_allocator.free_index(fd);
+        }
+    }
 
-        self.index_allocator.free_index(fd);
+    pub(crate) fn close_dir(&mut self, fd: u64) {
+        trace!("FileManager::close_dir -> fd {:#?}", fd,);
 
-        Ok(CloseFileResponse)
+        if self.dir_streams.remove(&fd).is_none() {
+            error!("FileManager::close_dir -> fd {:#?} not found", fd);
+        } else {
+            self.index_allocator.free_index(fd);
+        }
     }
 
     pub(crate) fn access(
@@ -487,16 +513,21 @@ impl FileManager {
             }
             // fstat
             (None, Some(fd)) => {
-                if let RemoteFile::File(file) = self
+                match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    return Ok(XstatResponse {
-                        metadata: file.metadata()?.into(),
-                    });
-                } else {
-                    return Err(ResponseError::NotFile(fd));
+                    RemoteFile::File(file) => {
+                        return Ok(XstatResponse {
+                            metadata: file.metadata()?.into(),
+                        })
+                    }
+                    RemoteFile::Directory(path) => {
+                        return Ok(XstatResponse {
+                            metadata: path.metadata()?.into(),
+                        })
+                    }
                 }
             }
             // invalid
@@ -515,5 +546,65 @@ impl FileManager {
             metadata: metadata.into(),
         })
         .map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
+        let path = match self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?
+        {
+            RemoteFile::Directory(path) => Ok(path),
+            _ => Err(ResponseError::NotDirectory(fd)),
+        }?;
+
+        let fd = self.index_allocator.next_index().ok_or_else(|| {
+            ResponseError::AllocationFailure("FileManager::fdopen_dir".to_string())
+        })?;
+
+        let dir_stream = path.read_dir()?.enumerate();
+        self.dir_streams.insert(fd, dir_stream);
+
+        Ok(OpenDirResponse { fd })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
+        let dir_stream = self
+            .dir_streams
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        let result = if let Some((offset, entry)) = dir_stream.next() {
+            let entry = entry?;
+
+            let mode = entry.metadata()?.mode();
+
+            let file_type = match mode & libc::S_IFMT {
+                libc::S_IFLNK => libc::DT_LNK,
+                libc::S_IFREG => libc::DT_REG,
+                libc::S_IFBLK => libc::DT_BLK,
+                libc::S_IFDIR => libc::DT_DIR,
+                libc::S_IFCHR => libc::DT_CHR,
+                libc::S_IFIFO => libc::DT_FIFO,
+                libc::S_IFSOCK => libc::DT_SOCK,
+                _ => libc::DT_UNKNOWN,
+            };
+
+            let internal_entry = DirEntryInternal {
+                inode: entry.ino(),
+                position: offset as u64,
+                name: entry.file_name().to_string_lossy().into(),
+                file_type,
+            };
+            ReadDirResponse {
+                direntry: Some(internal_entry),
+            }
+        } else {
+            ReadDirResponse { direntry: None }
+        };
+
+        Ok(result)
     }
 }

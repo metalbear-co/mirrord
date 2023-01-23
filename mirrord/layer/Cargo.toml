@@ -21,6 +21,7 @@ mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube", features = ["env_guard"] }
 mirrord-operator = { path = "../operator", features = ["client"] }
+mirrord-console = { path = "../console" }
 
 ctor = "0.1"
 libc = "0.2"
@@ -55,6 +56,7 @@ stacker = "0.1"
 urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
+bytemuck = "1"
 hyper = { workspace = true, features = ["client"] }
 http-body-util  = { workspace = true }
 

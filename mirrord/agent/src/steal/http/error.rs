@@ -1,3 +1,4 @@
+use mirrord_protocol::ConnectionId;
 use thiserror::Error;
 
 use crate::steal::HandlerHttpRequest;
@@ -19,4 +20,10 @@ pub enum HttpTrafficError {
 
     #[error("Failed with Captured `{0}`!")]
     ResponseReceiver(#[from] tokio::sync::oneshot::error::RecvError),
+
+    #[error("Failed hyper HTTP `{0}`!")]
+    HyperHttp(#[from] hyper::http::Error),
+
+    #[error("Failed closing connection with `{0}`!")]
+    CloseSender(#[from] tokio::sync::mpsc::error::SendError<ConnectionId>),
 }

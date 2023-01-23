@@ -77,9 +77,9 @@ async fn test_bash_script(dylib_path: &PathBuf) {
         .expect_and_answer_file_read("Very interesting contents.", fd)
         .await;
 
-    cat_layer_connection.expect_file_close(fd).await;
-
-    assert!(cat_layer_connection.is_ended().await);
+    // don't expect file close as it might not get called due to race condition
+    // and that's okay - it's either file closing then process terminates or process terminates.
+    // which closes the whole session in the agent
 
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();

@@ -7,15 +7,88 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-## Added
+## 3.20.0
+
+### Added
+
+- Support impersonation in operator
+
+### Fixed
+
+- Go crash in some scenarios [#834](https://github.com/metalbear-co/mirrord/issues/834).
+- Remove already deprecated `--no-fs` and `--rw` options, that do not do anything anymore, but were still listed in the
+  help message.
+- Bug: SIP would fail the second time to run scripts for which the user does not have write permissions.
+
+### Changed
+
+- Change layer/cli logs to be to stderr instead of stdout to avoid mixing with the output of the application. Closes [#786](https://github.com/metalbear-co/mirrord/issues/786)
+
+## 3.19.2
+
+### Changed
+
+- Code refactor: moved all file request and response types into own file.
+
+## 3.19.1
+
+### Fixed
+
+- Changelog error failing the JetBrains release.
+
+## 3.19.0
+
+### Changed
+
+- mirrord-operator: replace operator api to use KubernetesAPI extension. [#915](https://github.com/metalbear-co/mirrord/pull/915)
+
+### Fixed
+
+- tests: flaky passthrough fix. Avoid 2 agents running at the same time, add minimal sleep (1s)
+- macOS x64/SIP(arm): fix double hooking `fstatat$INODE64`. Possible crash and undefined behavior.
+
+### Added
+
+- introduce `mirrord-console` - a utility to debug and investigate mirrord issues.
+
+### Deprecated
+
+- Remove old fs mode
+  - cli: no `--rw` or `--no-fs`.
+  - layer: no `MIRRORD_FILE_OPS`/`MIRRORD_FILE_RO_OPS`/`MIRRORD_FILE_FILTER_INCLUDE`/`MIRRORD_FILE_FILTER_EXCLUDE`
+
+## 3.18.2
+
+### Fixed
+
+- crash when `getaddrinfo` is bypassed and libc tries to free our structure. Closes [#930](https://github.com/metalbear-co/mirrord/issues/930)
+- Stealer hangs on short streams left open and fails on short closed streams to filtered HTTP ports -
+ [#926](https://github.com/metalbear-co/mirrord/issues/926).
+
+## 3.18.1
+
+### Fixed
+
+- Issue when connect returns `libc::EINTR` or `libc::EINPROGRESS` causing outgoing connections to fail.
+- config: file config updated to fix simple pattern of IncomingConfig. [#933](https://github.com/metalbear-co/mirrord/pull/933)
+
+## 3.18.0
+
+### Added
 
 - Agent now sends error encountered back to layer for better UX when bad times happen. (This only applies to error happening on connection-level).
+- Partial ls flow for Go on macOS (implemented `fdopendir` and `readdir_r`). Closes [#902](https://github.com/metalbear-co/mirrord/issues/902)
+- New feature: HTTP traffic filter!
+  - Allows the user to steal HTTP traffic based on HTTP request headers, for example `Client: me` would steal requests that match this header,
+    while letting unmatched requests (and non-HTTP packets) through to their original destinations.
 
-## Fixed
+### Fixed
 
 - Update the setup-qemu-action action to remove a deprecation warning in the Release Workflow
+- stat functions now support directories.
+- Possible bugs with fds being closed before time (we now handle dup'ing of fds, and hold those as ref counts)
 
-## Changed
+### Changed
 
 - agent: Return better error message when failing to use `PACKET_IGNORE_OUTGOING` flag.
 

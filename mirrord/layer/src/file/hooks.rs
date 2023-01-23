@@ -3,12 +3,20 @@
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CStr, os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{
+    ffi::{CStr, CString},
+    os::unix::io::RawFd,
+    ptr, slice,
+    time::Duration,
+};
 
-use libc::{self, c_char, c_int, c_void, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, FILE};
+use libc::{
+    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
+    FILE,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{
-    file::MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+use mirrord_protocol::file::{
+    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
 use num_traits::Bounded;
 use tracing::trace;
@@ -17,6 +25,7 @@ use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::{
     close_layer_fd,
     detour::{Detour, DetourGuard},
+    error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -79,6 +88,69 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
     let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
 
     fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
+    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
+}
+
+/// Assign DirEntryInternal to dirent
+unsafe fn assign_direntry(
+    in_entry: DirEntryInternal,
+    out_entry: *mut dirent,
+) -> Result<(), HookError> {
+    let dir_name = CString::new(in_entry.name)?;
+    let dir_name_bytes = dir_name.as_bytes_with_nul();
+
+    (*out_entry).d_ino = in_entry.inode;
+    (*out_entry).d_reclen = std::mem::size_of::<dirent>() as u16;
+    (*out_entry).d_type = in_entry.file_type;
+    (*out_entry).d_name[..dir_name_bytes.len()]
+        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+
+    #[cfg(target_os = "macos")]
+    {
+        (*out_entry).d_seekoff = in_entry.position;
+        // name length should be without null
+        (*out_entry).d_namlen = dir_name.to_bytes().len() as u16;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        (*out_entry).d_off = in_entry.position as i64;
+    }
+    Ok(())
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readdir_r_detour(
+    dirp: *mut DIR,
+    entry: *mut dirent,
+    result: *mut *mut dirent,
+) -> c_int {
+    readdir_r(dirp as usize)
+        .map(|resp| {
+            if let Some(direntry) = resp {
+                match assign_direntry(direntry, entry) {
+                    Err(e) => return c_int::from(e),
+                    Ok(()) => {
+                        *result = entry;
+                    }
+                }
+            } else {
+                {
+                    *result = std::ptr::null_mut();
+                }
+            }
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_READDIR_R(dirp, entry, result))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
+    closedir(dirp as usize).unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -319,7 +391,7 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
     let fd = fileno_logic(file_stream);
 
     // We're only interested in files that are handled by `mirrord-agent`.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).cloned();
+    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).map(|file| file.fd);
     if remote_fd.is_some() {
         std::io::Error::last_os_error()
             .raw_os_error()
@@ -536,7 +608,16 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
     replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
+
+    replace!(
+        hook_manager,
+        "closedir",
+        closedir_detour,
+        FnClosedir,
+        FN_CLOSEDIR
+    );
     replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
     replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
@@ -579,6 +660,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatat,
             FN_FSTATAT
         );
+        replace!(
+            hook_manager,
+            "fdopendir",
+            fdopendir_detour,
+            FnFdopendir,
+            FN_FDOPENDIR
+        );
+        replace!(
+            hook_manager,
+            "readdir_r",
+            readdir_r_detour,
+            FnReaddir_r,
+            FN_READDIR_R
+        );
     }
     // on non aarch64 (Intel) we need to hook also $INODE64 variants
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -604,6 +699,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fstatat_detour,
             FnFstatat,
             FN_FSTATAT
+        );
+        replace!(
+            hook_manager,
+            "fdopendir$INODE64",
+            fdopendir_detour,
+            FnFdopendir,
+            FN_FDOPENDIR
+        );
+        replace!(
+            hook_manager,
+            "readdir_r$INODE64",
+            readdir_r_detour,
+            FnReaddir_r,
+            FN_READDIR_R
         );
     }
 }

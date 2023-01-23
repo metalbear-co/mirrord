@@ -34,10 +34,6 @@ impl TestProcess {
         self.stdout.lock().unwrap().clone()
     }
 
-    pub fn assert_stderr_empty(&self) {
-        assert!(self.stderr.lock().unwrap().is_empty());
-    }
-
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
             assert!(!self.stderr.lock().unwrap().contains(level));
@@ -254,9 +250,9 @@ impl LayerConnection {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
-                mirrord_protocol::OpenFileRequest {
+                mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
-                    open_options: mirrord_protocol::OpenOptionsInternal {
+                    open_options: mirrord_protocol::file::OpenOptionsInternal {
                         read: true,
                         write: false,
                         append: false,
@@ -271,7 +267,7 @@ impl LayerConnection {
         // Answer open.
         self.codec
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
-                Ok(mirrord_protocol::OpenFileResponse { fd }),
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
             )))
             .await
             .unwrap();
@@ -281,7 +277,7 @@ impl LayerConnection {
     pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
-            mirrord_protocol::ReadFileRequest {
+            mirrord_protocol::file::ReadFileRequest {
                 remote_fd: requested_fd,
                 buffer_size,
             },
@@ -298,7 +294,7 @@ impl LayerConnection {
         let read_amount = contents.len();
         self.codec
             .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
-                Ok(mirrord_protocol::ReadFileResponse {
+                Ok(mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
                 }),
@@ -324,16 +320,9 @@ impl LayerConnection {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
-                mirrord_protocol::CloseFileRequest { fd }
+                mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
-
-        self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Close(
-                Ok(mirrord_protocol::CloseFileResponse {}),
-            )))
-            .await
-            .unwrap();
     }
 }
 
@@ -349,6 +338,9 @@ pub enum Application {
     GoFileOps,
     EnvBashCat,
     NodeFileOps,
+    GoDir,
+    Go19Issue834,
+    Go18Issue834,
 }
 
 impl Application {
@@ -390,6 +382,9 @@ impl Application {
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps => String::from("node"),
+            Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
+            Application::Go19Issue834 => String::from("tests/apps/issue834/19"),
+            Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
         }
     }
 
@@ -426,7 +421,10 @@ impl Application {
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::Go19HTTP => vec![],
+            Application::GoDir => vec![],
             Application::GoFileOps => vec![],
+            Application::Go19Issue834 => vec![],
+            Application::Go18Issue834 => vec![],
             Application::RustFileOps => vec![],
             Application::EnvBashCat => vec![],
         }
@@ -442,7 +440,10 @@ impl Application {
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::EnvBashCat
-            | Application::NodeFileOps => {
+            | Application::NodeFileOps
+            | Application::Go19Issue834
+            | Application::Go18Issue834
+            | Application::GoDir => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,

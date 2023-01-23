@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use miette::Diagnostic;
+use mirrord_console::error::ConsoleError;
 use mirrord_kube::error::KubeApiError;
+use mirrord_operator::client::OperatorApiError;
 use thiserror::Error;
 
 pub(crate) type Result<T, E = CliError> = miette::Result<T, E>;
@@ -26,7 +28,7 @@ pub(crate) enum CliError {
     2. You have sufficient permissions to port forward to the operator.
     {GENERAL_HELP}"#
     ))]
-    OperatorConnectionFailed(KubeApiError),
+    OperatorConnectionFailed(OperatorApiError),
     #[error("Failed to create Kubernetes API. {0:#?}")]
     #[diagnostic(help(
         r#"
@@ -145,4 +147,6 @@ pub(crate) enum CliError {
     LayerExtractFailed(PathBuf, std::io::Error),
     #[error("JSON Serialization error: `{0:#?}`")]
     JsonSerializeError(#[from] serde_json::Error),
+    #[error("Failed connecting to mirrord console for logging {0:#?}")]
+    ConsoleConnectError(#[from] ConsoleError),
 }

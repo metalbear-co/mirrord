@@ -116,8 +116,8 @@ mod utils {
             self.stdout.lock().unwrap().clone()
         }
 
-        pub fn assert_stderr(&self) {
-            assert!(self.stderr.lock().unwrap().is_empty());
+        pub fn get_stderr(&self) -> String {
+            self.stderr.lock().unwrap().clone()
         }
 
         pub fn assert_log_level(&self, stderr: bool, level: &str) {
@@ -135,8 +135,8 @@ mod utils {
         pub fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
-                let stdout = self.get_stdout();
-                if stdout.contains(line) {
+                let stderr = self.get_stderr();
+                if stderr.contains(line) {
                     return;
                 }
             }
@@ -232,7 +232,7 @@ mod utils {
                     process.assert_log_level(true, "CRITICAL");
                     process.assert_log_level(false, "CRITICAL");
                 }
-                _ => process.assert_stderr(),
+                _ => {}
             }
         }
     }
@@ -262,7 +262,7 @@ mod utils {
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                _ => process.assert_stderr(),
+                _ => {}
             }
         }
     }
@@ -626,6 +626,23 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
             "tcp-echo",
+            true,
+            false,
+        )
+        .await
+    }
+
+    /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
+    /// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+    /// connection, allowing us to test HTTP upgrade requests.
+    #[fixture]
+    pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-websocket:latest",
+            "websocket",
             true,
             false,
         )
