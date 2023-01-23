@@ -1,10 +1,11 @@
+use std::time::Duration;
+
 use kube::CustomResource;
-use mirrord_config::{
-    agent::AgentConfig,
-    target::{Target, TargetConfig},
-};
+use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use crate::license::License;
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -17,6 +18,11 @@ use serde::{Deserialize, Serialize};
 )]
 pub struct TargetSpec {
     pub target: Target,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct TargetStatus {
+    pub sessions: Vec<Session>,
 }
 
 impl TargetCrd {
@@ -56,27 +62,6 @@ impl From<TargetCrd> for TargetConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct TargetStatus {
-    pub agents: Vec<TargetStatusAgent>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct TargetStatusAgent {
-    pub target_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connections: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<TargetStatusAgentState>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum TargetStatusAgentState {
-    Initializing,
-    Ready,
-}
-
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -86,17 +71,19 @@ pub enum TargetStatusAgentState {
     status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
-    pub agent_config: AgentConfig,
+    pub operator_versoin: String,
     pub default_namespace: String,
+    pub license: License,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
-    pub acive_targets: Vec<MirrordOperatorStatusActiveTargets>,
+    pub sessions: Vec<Session>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorStatusActiveTargets {
-    pub target_name: String,
-    pub agents: Vec<TargetStatusAgent>,
+pub struct Session {
+    pub duration: Duration,
+    pub user: String,
+    pub target: String,
 }

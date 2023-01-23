@@ -1,5 +1,6 @@
 use std::{fs::File, path::PathBuf};
 
+use chrono::Duration;
 use kube::Api;
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
@@ -9,6 +10,7 @@ use mirrord_operator::{
     setup::{Operator, OperatorNamespace, OperatorSetup},
 };
 use mirrord_progress::{Progress, TaskProgress};
+use prettytable::{row, Table};
 
 use crate::{
     config::{OperatorArgs, OperatorCommand},
@@ -89,6 +91,17 @@ async fn operator_status() -> Result<()> {
         }
     };
 
+    let mut sessions = Table::new();
+
+    sessions.add_row(row!["Target", "User", "Session Duration"]);
+
+    status_progress
+        .subtask(&format!(
+            "Operator version: {}",
+            mirrord_status.spec.operator_versoin
+        ))
+        .done();
+
     status_progress
         .subtask(&format!(
             "Operator default namespace: {}",
@@ -96,30 +109,19 @@ async fn operator_status() -> Result<()> {
         ))
         .done();
 
-    if let Some(status) = &mirrord_status.status {
-        for target in &status.acive_targets {
-            status_progress
-                .subtask(&format!(
-                    "Active Operator Connection: {} ({})",
-                    target.target_name.replacen('.', "/", 1),
-                    target
-                        .agents
-                        .iter()
-                        .map(|agent| format!(
-                            "{} - {}",
-                            agent.target_name.replacen('.', "/", 1),
-                            agent.connections.unwrap_or(0)
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ))
-                .done();
+    if let Some(status) = mirrord_status.status {
+        for session in &status.sessions {
+            if let Ok(duration) = Duration::from_std(session.duration) {
+                sessions.add_row(row![&session.target, &session.user, &duration]);
+            }
         }
     }
 
     status_progress.done_with("Fetched Status");
 
     progress.done();
+
+    sessions.printstd();
 
     Ok(())
 }
