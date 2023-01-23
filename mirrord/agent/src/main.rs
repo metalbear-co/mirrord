@@ -3,6 +3,7 @@
 #![feature(once_cell)]
 #![feature(is_some_and)]
 #![feature(let_chains)]
+#![feature(type_alias_impl_trait)]
 
 use std::{
     collections::HashSet,
