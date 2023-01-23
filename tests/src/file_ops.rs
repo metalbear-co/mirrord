@@ -19,7 +19,14 @@ mod file_ops {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Rust)] ops: FileOps,
+        #[values(
+            FileOps::Python,
+            FileOps::Go18,
+            FileOps::Go19,
+            FileOps::Go20,
+            FileOps::Rust
+        )]
+        ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));

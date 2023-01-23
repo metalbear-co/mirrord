@@ -287,13 +287,22 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - uses: actions/setup-go@v3
         with:
+          go-version: "1.20.0-rc.3"
+      - run: |
+          cd mirrord/layer/tests/apps/self_open
+          go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/fileops/go
+          go build -o fileops
+      - run: |
+          cd mirrord/layer/tests/apps/issue834
+          go build -o 20
+      - uses: actions/setup-go@v3
+        with:
           go-version: "1.19.5"
       - run: |
           cd mirrord/layer/tests/apps/self_open
           go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/fileops/go
-          go build -o fileops        
       - run: |
           cd mirrord/layer/tests/apps/issue834
           go build -o 19
@@ -361,6 +370,18 @@ jobs:
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - run: cargo test -p mirrord-layer
+      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.20.0-rc.3"
+      # TODO: change the 19 filename.
+      - run: | # Build Go app to test http mirroring with.
+          cd mirrord/layer/tests/apps/self_open
+          go build -o 19
+          cd ../app_go
+          go build -o 19
+          cd ../dir_go
+          go build
+      - run: cargo test -p mirrord-layer # Test again with go 1.20.
 
   e2e:
     runs-on: ubuntu-latest
@@ -410,6 +431,24 @@ jobs:
       - run: |
           cd tests/go-e2e-dir
           go build -o 18
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.20.0-rc.3"
+      - run: |
+          cd tests/go-e2e
+          go build -o 20
+      - run: |
+          cd tests/go-e2e-fileops
+          go build -o 20
+      - run: |
+          cd tests/go-e2e-env
+          go build -o 20
+      - run: |
+          cd tests/go-e2e-outgoing
+          go build -o 20
+      - run: |
+          cd tests/go-e2e-dns
+          go build -o 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.0"

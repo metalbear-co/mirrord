@@ -18,7 +18,12 @@ pub use common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue834(
-    #[values(Application::Go18Issue834, Application::Go19Issue834)] application: Application,
+    #[values(
+        Application::Go18Issue834,
+        Application::Go19Issue834,
+        Application::Go20Issue834
+    )]
+    application: Application,
     dylib_path: &PathBuf,
 ) {
     let executable = application.get_executable().await; // Own it.

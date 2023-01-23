@@ -340,6 +340,7 @@ pub enum Application {
     NodeFileOps,
     GoDir,
     GoDirBypass,
+    Go20Issue834,
     Go19Issue834,
     Go18Issue834,
 }
@@ -384,6 +385,7 @@ impl Application {
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps => String::from("node"),
             Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
+            Application::Go20Issue834 => String::from("tests/apps/issue834/20"),
             Application::Go19Issue834 => String::from("tests/apps/issue834/19"),
             Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
             Application::GoDirBypass => String::from("tests/apps/dir_go_bypass/dir_go_bypass"),
@@ -425,6 +427,7 @@ impl Application {
             Application::Go19HTTP => vec![],
             Application::GoDir => vec![],
             Application::GoFileOps => vec![],
+            Application::Go20Issue834 => vec![],
             Application::Go19Issue834 => vec![],
             Application::Go18Issue834 => vec![],
             Application::RustFileOps => vec![],
@@ -444,6 +447,7 @@ impl Application {
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::NodeFileOps
+            | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
             | Application::GoDirBypass
