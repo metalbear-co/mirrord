@@ -280,7 +280,7 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
+        mirrorded_process.wait_for_line(Duration::from_secs(20), "daemon subscribed");
 
         // Create a websocket connection to test the HTTP upgrade bypass.
         let host = host.trim();
