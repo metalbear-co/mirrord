@@ -281,6 +281,18 @@ impl SendRecvManager {
         &self,
         request: SendRecvRequest,
     ) -> Result<Option<SendRecvResponse>> {
-        todo!()
+        match request {
+            SendRecvRequest::SendMsg(message) => {
+                let socket = UdpSocket::bind(message.addr.clone()).await?;
+                let sent_amount = socket
+                    .send_to(&message.message.as_bytes(), message.addr)
+                    .await?;
+                // if bound {
+                //     self.open_sockets.insert(message.addr, socket);
+                // }
+                // TODO: close if the socket is unbound
+                todo!("SendRecvRequest::SendMsg")
+            }
+        }
     }
 }
