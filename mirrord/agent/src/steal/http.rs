@@ -97,7 +97,7 @@ impl HttpFilterManager {
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so removing a client
     /// here will impact the tasks as well.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, Regex)> {
         self.client_filters.remove(client_id)
     }
