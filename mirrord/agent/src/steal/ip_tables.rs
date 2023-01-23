@@ -256,7 +256,7 @@ impl IPTableFormatter {
 mod tests {
     use mockall::predicate::*;
 
-    use crate::*;
+    use super::*;
 
     #[test]
     fn default() {
