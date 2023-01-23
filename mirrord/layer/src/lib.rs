@@ -167,15 +167,38 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 /// ## Usage
 ///
 /// You probably don't want to use this directly, instead prefer calling
-/// [`blocking_send_hook_message`](common::blocking_send_hook_message).
+/// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
+/// Holds the file operations configuration, as specified by [`FsConfig`].
+///
+/// ## Usage
+///
+/// Mainly used to share the [`FsConfig`] in places where we can't easily pass this as an argument
+/// to some function:
+///
+/// 1. [`close_layer_fd`];
+/// 2. [`go_hooks`] file operations.
 pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
+
+/// Tells us if the user enabled the Tcp outgoing feature in [`NetworkConfig`].
+///
+/// ## Usage
+///
+/// Used to change the behavior of the [`connect`] hook operation.
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
+
+/// Tells us if the user enabled the Udp outgoing feature in [`NetworkConfig`].
+///
+/// ## Usage
+///
+/// Used to change the behavior of the [`connect`] hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-/// Check if we're running in NixOS or Devbox
-/// if so, add `sh` to the skip list because of https://github.com/metalbear-co/mirrord/issues/531
+/// Check if we're running in NixOS or Devbox.
+///
+/// - If so, add `sh` to the skip list because of
+/// [#531](https://github.com/metalbear-co/mirrord/issues/531)
 fn nix_devbox_patch(config: &mut LayerConfig) {
     let mut current_skip = config
         .skip_processes
@@ -264,6 +287,8 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 }
 
 /// The one true start of mirrord-layer.
+///
+/// Calls [`layer_pre_initialization`], which runs mirrord-layer.
 #[ctor]
 fn mirrord_layer_entry_point() {
     // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
@@ -286,6 +311,20 @@ fn mirrord_layer_entry_point() {
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Starts the main parts of mirrord-layer.
+///
+/// ## Details
+///
+/// Sets up a few things based on the [`LayerConfig`] given by the user:
+///
+/// 1. [`tracing_subscriber`], or [`mirrord_console`];
+///
+/// 2. Connects to the mirrord-agent with [`connection::connect`];
+///
+/// 3. Initializes some of our globals;
+///
+/// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 5. Starts the main mirrord-layer thread.
 fn layer_start(config: LayerConfig) {
     if config.feature.capture_error_trace {
         tracing_subscriber::registry()
@@ -339,6 +378,12 @@ fn layer_start(config: LayerConfig) {
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
+/// Checks if mirrord-layer should load with the process named `given_process`.
+///
+/// ## Details
+///
+/// Some processes may start other processes (like an IDE launching a program to be debugged), and
+/// we don't want to hook mirrord-layer into those.
 fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
     if let Some(processes_to_avoid) = skip_processes {
         !processes_to_avoid.iter().any(|x| x == given_process)
