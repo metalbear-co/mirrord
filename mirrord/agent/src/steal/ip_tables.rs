@@ -4,7 +4,7 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use crate::error::{AgentError, Result};
 
-pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &'static str = "MIRRORD_IPTABLE_CHAIN_NAME";
+pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
