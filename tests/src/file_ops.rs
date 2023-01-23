@@ -155,4 +155,38 @@ mod file_ops {
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
+
+    /// On Linux: Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn test_go_dir(
+        #[future]
+        #[notrace]
+        service: KubeService,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+        #[values(FileOps::GoDir18, FileOps::GoDir19)] ops: FileOps,
+    ) {
+        let service = service.await;
+        let command = ops.command();
+
+        let mut args = vec!["--fs-mode", "read"];
+
+        if let Some(ephemeral_flag) = agent.flag() {
+            args.extend(ephemeral_flag);
+        }
+
+        let mut process = run_exec(
+            command,
+            &service.target,
+            Some(&service.namespace),
+            Some(args),
+            None,
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        ops.assert(process);
+    }
 }

@@ -16,7 +16,7 @@ edition.workspace = true
 
 [dependencies]
 containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="6bc49c007cf93869e7d83fca4818b6aae1145b45"}
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "fs"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "fs"] }
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.31"
@@ -36,7 +36,7 @@ tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true
 iptables = "0.5"
-libc = "0.2"
+libc.workspace = true
 faccess = "0.2"
 bytes = "1.2"
 regex = "1"

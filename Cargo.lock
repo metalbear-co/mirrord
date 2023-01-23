@@ -2257,6 +2257,7 @@ dependencies = [
  "http-body-util",
  "http-serde",
  "hyper 1.0.0-rc.2",
+ "libc",
  "serde",
  "thiserror",
  "tracing",
@@ -3886,6 +3887,7 @@ dependencies = [
  "serde_json",
  "tempdir",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util 0.7.4",
  "wsl",
 ]

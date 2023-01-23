@@ -101,6 +101,8 @@ mod utils {
         Go18,
         Go19,
         Rust,
+        GoDir18,
+        GoDir19,
     }
 
     pub struct TestProcess {
@@ -256,6 +258,8 @@ mod utils {
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
+                FileOps::GoDir18 => vec!["go-e2e-dir/18"],
+                FileOps::GoDir19 => vec!["go-e2e-dir/19"],
             }
         }
 
@@ -626,6 +630,23 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
             "tcp-echo",
+            true,
+            false,
+        )
+        .await
+    }
+
+    /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
+    /// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+    /// connection, allowing us to test HTTP upgrade requests.
+    #[fixture]
+    pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-websocket:latest",
+            "websocket",
             true,
             false,
         )
