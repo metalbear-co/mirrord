@@ -352,7 +352,7 @@ async fn test_node_close(
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn test_go_stat(
-    #[values(Application::GoFileOps)] application: Application,
+    #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
     let executable = application.get_executable().await;
@@ -425,7 +425,10 @@ async fn test_go_stat(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
-async fn test_go_dir(#[values(Application::GoDir)] application: Application, dylib_path: &PathBuf) {
+async fn test_go_dir(
+    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
+    dylib_path: &PathBuf,
+) {
     let executable = application.get_executable().await;
     println!("Using executable: {}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -703,7 +706,7 @@ async fn test_go_dir_on_linux(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 async fn test_go_dir_bypass(
-    #[values(Application::GoDirBypass)] application: Application,
+    #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
     dylib_path: &PathBuf,
 ) {
     let tmp_dir = temp_dir().join("go_dir_bypass_test");

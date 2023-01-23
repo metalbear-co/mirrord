@@ -329,17 +329,21 @@ impl LayerConnection {
 #[derive(Debug)]
 pub enum Application {
     Go19HTTP,
+    Go20HTTP,
     NodeHTTP,
     PythonFastApiHTTP,
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonDontLoad,
     RustFileOps,
-    GoFileOps,
+    Go19FileOps,
+    Go20FileOps,
     EnvBashCat,
     NodeFileOps,
-    GoDir,
-    GoDirBypass,
+    Go19Dir,
+    Go20Dir,
+    Go19DirBypass,
+    Go20DirBypass,
     Go20Issue834,
     Go19Issue834,
     Go18Issue834,
@@ -374,7 +378,9 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
-            Application::GoFileOps => String::from("tests/apps/fileops/go/fileops"),
+            Application::Go20HTTP => String::from("tests/apps/app_go/20"),
+            Application::Go19FileOps => String::from("tests/apps/fileops/go/19"),
+            Application::Go20FileOps => String::from("tests/apps/fileops/go/20"),
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
@@ -384,11 +390,13 @@ impl Application {
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps => String::from("node"),
-            Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
+            Application::Go19Dir => String::from("tests/apps/dir_go/19"),
+            Application::Go20Dir => String::from("tests/apps/dir_go/20"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20"),
             Application::Go19Issue834 => String::from("tests/apps/issue834/19"),
             Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
-            Application::GoDirBypass => String::from("tests/apps/dir_go_bypass/dir_go_bypass"),
+            Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19"),
+            Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
         }
     }
 
@@ -424,22 +432,28 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
-            Application::Go19HTTP => vec![],
-            Application::GoDir => vec![],
-            Application::GoFileOps => vec![],
-            Application::Go20Issue834 => vec![],
-            Application::Go19Issue834 => vec![],
-            Application::Go18Issue834 => vec![],
-            Application::RustFileOps => vec![],
-            Application::EnvBashCat => vec![],
-            Application::GoDirBypass => vec![],
+            Application::Go19HTTP
+            | Application::Go20HTTP
+            | Application::Go19Dir
+            | Application::Go20Dir
+            | Application::Go19FileOps
+            | Application::Go20FileOps
+            | Application::Go20Issue834
+            | Application::Go19Issue834
+            | Application::Go18Issue834
+            | Application::RustFileOps
+            | Application::EnvBashCat
+            | Application::Go19DirBypass
+            | Application::Go20DirBypass => vec![],
         }
     }
 
     pub fn get_app_port(&self) -> u16 {
         match self {
             Application::Go19HTTP
-            | Application::GoFileOps
+            | Application::Go20HTTP
+            | Application::Go19FileOps
+            | Application::Go20FileOps
             | Application::NodeHTTP
             | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
@@ -450,8 +464,10 @@ impl Application {
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
-            | Application::GoDirBypass
-            | Application::GoDir => {
+            | Application::Go19DirBypass
+            | Application::Go20DirBypass
+            | Application::Go19Dir
+            | Application::Go20Dir => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,

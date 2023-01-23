@@ -173,7 +173,7 @@ mod file_ops {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::GoDir18, FileOps::GoDir19)] ops: FileOps,
+        #[values(FileOps::GoDir18, FileOps::GoDir19, FileOps::GoDir20)] ops: FileOps,
     ) {
         let service = service.await;
         let command = ops.command();

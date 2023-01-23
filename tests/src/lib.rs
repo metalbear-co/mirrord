@@ -105,6 +105,7 @@ mod utils {
         Rust,
         GoDir18,
         GoDir19,
+        GoDir20,
     }
 
     #[derive(Debug)]
@@ -276,6 +277,7 @@ mod utils {
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
                 FileOps::GoDir18 => vec!["go-e2e-dir/18"],
                 FileOps::GoDir19 => vec!["go-e2e-dir/19"],
+                FileOps::GoDir20 => vec!["go-e2e-dir/20"],
             }
         }
 
