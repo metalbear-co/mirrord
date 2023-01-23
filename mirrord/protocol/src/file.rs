@@ -346,14 +346,14 @@ pub struct CloseDirRequest {
 
 #[cfg(target_os = "linux")]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct Getdents64Request {
+pub struct GetDEnts64Request {
     pub remote_fd: u64,
     pub buffer_size: u64,
 }
 
 #[cfg(target_os = "linux")]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct Getdents64Response {
+pub struct GetDEnts64Response {
     pub fd: u64,
     pub entries: Vec<DirEntryInternal>,
     pub result_size: u64,

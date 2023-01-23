@@ -559,19 +559,19 @@ pub(crate) fn xstat(
 
 #[cfg(target_os = "linux")]
 #[tracing::instrument(level = "trace")]
-pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<Getdents64Response> {
+pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Response> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(fd)?;
 
     let (dents_tx, dents_rx) = oneshot::channel();
 
-    let getdents64_message = Getdents64 {
+    let getdents64_message = GetDEnts64 {
         remote_fd,
         buffer_size,
         dents_tx,
     };
 
-    blocking_send_file_message(HookMessageFile::Getdents64(getdents64_message))?;
+    blocking_send_file_message(HookMessageFile::GetDEnts64(getdents64_message))?;
 
     Detour::Success(dents_rx.blocking_recv()??)
 }

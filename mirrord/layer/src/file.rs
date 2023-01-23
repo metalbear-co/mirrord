@@ -18,7 +18,7 @@ use std::{
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 #[cfg(target_os = "linux")]
-use mirrord_protocol::file::{Getdents64Request, Getdents64Response};
+use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
@@ -130,7 +130,7 @@ pub struct FileHandler {
     opendir_queue: ResponseDeque<OpenDirResponse>,
     readdir_queue: ResponseDeque<ReadDirResponse>,
     #[cfg(target_os = "linux")]
-    getdents64_queue: ResponseDeque<Getdents64Response>,
+    getdents64_queue: ResponseDeque<GetDEnts64Response>,
 }
 
 /// Comfort function for popping oldest request from queue and sending given value into the channel.
@@ -234,8 +234,8 @@ impl FileHandler {
             }
             OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
             #[cfg(target_os = "linux")]
-            Getdents64(getdents64) => {
-                trace!("DaemonMessage::Getdents64Response {:#?}!", getdents64);
+            GetDEnts64(getdents64) => {
+                trace!("DaemonMessage::GetDEnts64Response {:#?}!", getdents64);
                 pop_send(&mut self.getdents64_queue, getdents64)
             }
         }
@@ -265,7 +265,7 @@ impl FileHandler {
             FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
             CloseDir(close_dir) => self.handle_hook_close_dir(close_dir, tx).await,
             #[cfg(target_os = "linux")]
-            Getdents64(getdents64) => self.handle_hook_getdents64(getdents64, tx).await,
+            GetDEnts64(getdents64) => self.handle_hook_getdents64(getdents64, tx).await,
         }
     }
 
@@ -579,10 +579,10 @@ impl FileHandler {
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_getdents64(
         &mut self,
-        getdents64: Getdents64,
+        getdents64: GetDEnts64,
         tx: &Sender<ClientMessage>,
     ) -> Result<()> {
-        let Getdents64 {
+        let GetDEnts64 {
             remote_fd,
             buffer_size,
             dents_tx,
@@ -590,12 +590,12 @@ impl FileHandler {
 
         self.getdents64_queue.push_back(dents_tx);
 
-        let getdents_request = Getdents64Request {
+        let getdents_request = GetDEnts64Request {
             remote_fd,
             buffer_size,
         };
 
-        let request = ClientMessage::FileRequest(FileRequest::Getdents64(getdents_request));
+        let request = ClientMessage::FileRequest(FileRequest::GetDEnts64(getdents_request));
         tx.send(request).await.map_err(From::from)
     }
 }
@@ -679,10 +679,10 @@ pub struct CloseDir {
 
 #[cfg(target_os = "linux")]
 #[derive(Debug)]
-pub struct Getdents64 {
+pub struct GetDEnts64 {
     pub(crate) remote_fd: u64,
     pub(crate) buffer_size: u64,
-    pub(crate) dents_tx: ResponseChannel<Getdents64Response>,
+    pub(crate) dents_tx: ResponseChannel<GetDEnts64Response>,
 }
 
 #[derive(Debug)]
@@ -702,5 +702,5 @@ pub enum HookMessageFile {
     FdOpenDir(FdOpenDir),
     CloseDir(CloseDir),
     #[cfg(target_os = "linux")]
-    Getdents64(Getdents64),
+    GetDEnts64(GetDEnts64),
 }

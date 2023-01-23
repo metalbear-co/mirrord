@@ -623,7 +623,7 @@ async fn test_go_dir_on_linux(
     // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
     assert_matches!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
+        ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
             remote_fd: 1,
             .. // Don't want to commit to a specific buffer size.
         }))
@@ -653,8 +653,8 @@ async fn test_go_dir_on_linux(
 
     layer_connection
         .codec
-        .send(DaemonMessage::File(FileResponse::Getdents64(Ok(
-            Getdents64Response {
+        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+            GetDEnts64Response {
                 fd: 1,
                 entries,
                 result_size,
@@ -666,7 +666,7 @@ async fn test_go_dir_on_linux(
     // The caller keeps calling the syscall until it gets an "empty" result.
     assert_matches!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Getdents64(Getdents64Request {
+        ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
             remote_fd: 1,
             ..
         }))
@@ -675,8 +675,8 @@ async fn test_go_dir_on_linux(
     // "Empty" result: no entries, total size of 0.
     layer_connection
         .codec
-        .send(DaemonMessage::File(FileResponse::Getdents64(Ok(
-            Getdents64Response {
+        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+            GetDEnts64Response {
                 fd: 1,
                 entries: vec![],
                 result_size: 0,

@@ -15,7 +15,7 @@ use libc::DT_DIR;
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, Getdents64Request, Getdents64Response, OpenDirResponse, OpenFileRequest,
+        FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
         OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
         ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
         ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
@@ -39,7 +39,7 @@ pub enum RemoteFile {
 /// `IntoIter`: That's our DIY stream with `.` and `..` ^.
 /// first `Map`: Converting into DirEntryInternal.
 /// second `Map`: logging any errors from the first map.
-type GetDents64Stream = Peekable<
+type GetDEnts64Stream = Peekable<
     std::iter::Chain<
         IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
         Map<
@@ -57,7 +57,7 @@ pub struct FileManager {
     root_path: PathBuf,
     pub open_files: HashMap<u64, RemoteFile>,
     pub dir_streams: HashMap<u64, Enumerate<ReadDir>>,
-    pub getdents_streams: HashMap<u64, GetDents64Stream>,
+    pub getdents_streams: HashMap<u64, GetDEnts64Stream>,
     index_allocator: IndexAllocator<u64>,
 }
 
@@ -210,10 +210,10 @@ impl FileManager {
                 self.close_dir(remote_fd);
                 None
             }
-            FileRequest::Getdents64(Getdents64Request {
+            FileRequest::GetDEnts64(GetDEnts64Request {
                 remote_fd,
                 buffer_size,
-            }) => Some(FileResponse::Getdents64(
+            }) => Some(FileResponse::GetDEnts64(
                 self.getdents64(remote_fd, buffer_size),
             )),
         })
@@ -649,7 +649,7 @@ impl FileManager {
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
-    ) -> RemoteResult<&mut GetDents64Stream> {
+    ) -> RemoteResult<&mut GetDEnts64Stream> {
         match self.getdents_streams.entry(fd) {
             Entry::Vacant(e) => {
                 match self.open_files.get(&fd) {
@@ -697,7 +697,7 @@ impl FileManager {
         &mut self,
         fd: u64,
         buffer_size: u64,
-    ) -> RemoteResult<Getdents64Response> {
+    ) -> RemoteResult<GetDEnts64Response> {
         let mut result_size = 0u64;
 
         // If this is the first call with this fd, the stream will be created, otherwise the
@@ -708,7 +708,7 @@ impl FileManager {
         // just return 0 and don't write any entries.
         if entry_results.peek().is_none() {
             // Reached end.
-            Ok(Getdents64Response {
+            Ok(GetDEnts64Response {
                 fd,
                 entries: vec![],
                 result_size: 0,
@@ -736,7 +736,7 @@ impl FileManager {
                 entries.push(entry);
             }
 
-            Ok(Getdents64Response {
+            Ok(GetDEnts64Response {
                 fd,
                 entries,
                 result_size,

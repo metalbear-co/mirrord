@@ -8,7 +8,7 @@ use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
 #[cfg(target_os = "linux")]
-use crate::file::{Getdents64Request, Getdents64Response};
+use crate::file::{GetDEnts64Request, GetDEnts64Response};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
@@ -54,7 +54,7 @@ pub enum FileRequest {
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
     #[cfg(target_os = "linux")]
-    Getdents64(Getdents64Request),
+    GetDEnts64(GetDEnts64Request),
 }
 
 /// `-layer` --> `-agent` messages.
@@ -88,7 +88,7 @@ pub enum FileResponse {
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     #[cfg(target_os = "linux")]
-    Getdents64(RemoteResult<Getdents64Response>),
+    GetDEnts64(RemoteResult<GetDEnts64Response>),
 }
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
