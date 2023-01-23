@@ -137,7 +137,21 @@ mod go_hooks;
 /// Main tokio [`Runtime`] for mirrord-layer async tasks.
 ///
 /// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
-/// `RUNTIME.block_on`.
+/// [`RUNTIME.block_on`](link).
+///
+/// ## Usage
+///
+/// Currently it's being used to run 2 big tasks:
+///
+/// 1. [`connection::connect`]: which creates the mirrord-agent connection for this layer instance;
+///
+/// 2. [`start_layer_thread`]: where we [`spawn`](tokio::spawn) mirrord-layer's main loop.
+///
+/// ## Bypass
+///
+/// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
+/// [`detour::detour_bypass_on`] [`on_thread_start`](link), and [`detour::detour_bypass_off`]
+/// [`on_thread_stop`](link).
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -147,6 +161,13 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .unwrap()
 });
 
+/// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
+/// to [`ClientMessage`]s.
+///
+/// ## Usage
+///
+/// You probably don't want to use this directly, instead prefer calling
+/// [`blocking_send_hook_message`](common::blocking_send_hook_message).
 pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
 
 pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
