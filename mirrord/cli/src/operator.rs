@@ -1,9 +1,14 @@
 use std::{fs::File, path::PathBuf};
 
+use kube::Api;
+use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
+    client::OperatorApiError,
+    crd::MirrordOperatorCrd,
     license::License,
     setup::{Operator, OperatorNamespace, OperatorSetup},
 };
+use mirrord_progress::{Progress, TaskProgress};
 
 use crate::{
     config::{OperatorArgs, OperatorCommand},
@@ -58,6 +63,67 @@ async fn operator_setup(
     Ok(())
 }
 
+async fn operator_status() -> Result<()> {
+    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
+
+    let status_api: Api<MirrordOperatorCrd> = Api::all(
+        create_kube_api(None)
+            .await
+            .map_err(CliError::KubernetesApiFailed)?,
+    );
+
+    let status_progress = progress.subtask("Fetching Status");
+
+    let mirrord_status = match status_api
+        .get("operator-controller")
+        .await
+        .map_err(KubeApiError::KubeError)
+        .map_err(OperatorApiError::KubeApiError)
+        .map_err(CliError::OperatorConnectionFailed)
+    {
+        Ok(status) => status,
+        Err(err) => {
+            status_progress.fail_with("Unable to get Status");
+
+            return Err(err);
+        }
+    };
+
+    status_progress
+        .subtask(&format!(
+            "Operator default namespace: {}",
+            mirrord_status.spec.default_namespace
+        ))
+        .done();
+
+    if let Some(status) = &mirrord_status.status {
+        for target in &status.acive_targets {
+            status_progress
+                .subtask(&format!(
+                    "Active Operator Connection: {} ({})",
+                    target.target_name.replacen('.', "/", 1),
+                    target
+                        .agents
+                        .iter()
+                        .map(|agent| format!(
+                            "{} - {}",
+                            agent.target_name.replacen('.', "/", 1),
+                            agent.connections.unwrap_or(0)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .done();
+        }
+    }
+
+    status_progress.done_with("Fetched Status");
+
+    progress.done();
+
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
@@ -67,5 +133,6 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
         } => operator_setup(accept_tos, file, namespace, license_key).await,
+        OperatorCommand::Status => operator_status().await,
     }
 }
