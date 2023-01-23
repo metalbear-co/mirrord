@@ -98,7 +98,7 @@ async fn operator_status() -> Result<()> {
     status_progress
         .subtask(&format!(
             "Operator version: {}",
-            mirrord_status.spec.operator_versoin
+            mirrord_status.spec.operator_version
         ))
         .done();
 
