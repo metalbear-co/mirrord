@@ -468,13 +468,6 @@ async fn start_agent() -> Result<()> {
     Ok(())
 }
 
-async fn create_iptable_chain() -> Result<String> {
-    let ipt = iptables::new(false).unwrap();
-    let formatter = IPTableFormatter::detect(&ipt)?;
-
-    SafeIpTables::create_chain(&ipt, &formatter)
-}
-
 async fn clear_iptable_chain(chain_name: String) -> Result<()> {
     let ipt = iptables::new(false).unwrap();
     let formatter = IPTableFormatter::detect(&ipt)?;
@@ -483,15 +476,10 @@ async fn clear_iptable_chain(chain_name: String) -> Result<()> {
 }
 
 fn spawn_child_agent() -> Result<()> {
-    use std::process::{Command, Stdio};
-
     let command_args = std::env::args().collect::<Vec<_>>();
 
-    let mut child_agent = Command::new(&command_args[0])
+    let mut child_agent = std::process::Command::new(&command_args[0])
         .args(&command_args[1..])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
         .spawn()?;
 
     let _ = child_agent.wait();
@@ -506,14 +494,7 @@ async fn start_iptable_guard() -> Result<()> {
     let state = State::new(&args).await?;
     let pid = state.get_container_pid().await?;
 
-    let chain_name = run_thread_in_namespace(
-        create_iptable_chain(),
-        "init ip_tables".to_owned(),
-        pid,
-        "net",
-    )
-    .join()
-    .map_err(|_| AgentError::JoinTask)??;
+    let chain_name = SafeIpTables::<iptables::IPTables>::get_chain_name();
 
     std::env::set_var(MIRRORD_IPTABLE_CHAIN_ENV, &chain_name);
 
@@ -521,7 +502,7 @@ async fn start_iptable_guard() -> Result<()> {
 
     run_thread_in_namespace(
         clear_iptable_chain(chain_name),
-        "clear ip_tables".to_owned(),
+        "clear iptables".to_owned(),
         pid,
         "net",
     )

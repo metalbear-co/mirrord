@@ -4,7 +4,7 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use crate::error::{AgentError, Result};
 
-pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &'static str = "MIRRORD_IPTABLE_CHAIN";
+pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &'static str = "MIRRORD_IPTABLE_CHAIN_NAME";
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
@@ -77,7 +77,11 @@ where
     pub(super) fn new(ipt: IPT) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
-        let chain_name = Self::create_chain(&ipt, &formatter)?;
+        let chain_name = Self::get_chain_name();
+
+        ipt.create_chain(&chain_name)?;
+
+        ipt.add_rule(formatter.entrypoint(), &format!("-j {}", &chain_name))?;
 
         Ok(Self {
             inner: ipt,
@@ -86,16 +90,12 @@ where
         })
     }
 
-    pub(crate) fn create_chain(ipt: &IPT, formatter: &IPTableFormatter) -> Result<String> {
-        std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).or_else(|_| {
-            let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
-            let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
-
-            ipt.create_chain(&chain_name)?;
-
-            ipt.add_rule(formatter.entrypoint(), &format!("-j {}", &chain_name))?;
-
-            Ok(chain_name)
+    pub(crate) fn get_chain_name() -> String {
+        std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).unwrap_or_else(|_| {
+            format!(
+                "MIRRORD_REDIRECT_{}",
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            )
         })
     }
 
