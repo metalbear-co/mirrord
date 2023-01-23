@@ -71,7 +71,7 @@ impl From<TargetCrd> for TargetConfig {
     status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
-    pub operator_versoin: String,
+    pub operator_version: String,
     pub default_namespace: String,
     pub license: License,
 }
