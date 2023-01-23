@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- mirrord-agent: Handle HTTP upgrade requests when the stealer feature is enabled (with HTTP traffic) PR [#973](https://github.com/metalbear-co/mirrord/pull/973).
+
 ## 3.20.0
 
 ### Added
