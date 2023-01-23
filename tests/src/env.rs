@@ -5,7 +5,7 @@ mod env {
 
     use rstest::*;
 
-    use crate::utils::{run_exec, service, Application, EnvApp, KubeService};
+    use crate::utils::{run_exec, service, EnvApp, KubeService};
 
     #[rstest]
     #[cfg(target_os = "linux")]
@@ -15,7 +15,7 @@ mod env {
         #[future] service: KubeService,
         #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
     ) {
-        test_remote_env_vars_works(service, application);
+        test_remote_env_vars_works(service, application).await;
     }
 
     #[rstest]
