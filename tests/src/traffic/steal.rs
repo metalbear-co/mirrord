@@ -9,10 +9,11 @@ mod steal {
     use kube::Client;
     use reqwest::header::HeaderMap;
     use rstest::*;
+    use tokio_tungstenite::connect_async;
 
     use crate::utils::{
         get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
-        service, tcp_echo_service, Agent, Application, KubeService,
+        service, tcp_echo_service, websocket_service, Agent, Application, KubeService,
     };
 
     #[cfg(target_os = "linux")]
@@ -232,6 +233,107 @@ mod steal {
         reader.read_line(&mut buf).unwrap();
         assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
         assert_eq!(&buf[7..], tcp_data); // The correct data was sent there and back.
+
+        // Verify the data was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout();
+        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
+        mirrorded_process.child.kill().await.unwrap();
+    }
+
+    /// Test the case where running with `steal` set and an http header filter, we get an HTTP
+    /// upgrade request, and this should not reach the local app.
+    ///
+    /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
+    /// app does not see the traffic.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    async fn test_websocket_upgrade(
+        #[future] websocket_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Agent::Job)] agent: Agent,
+        #[values(
+            "Hello, websocket!\n".to_string(),
+            "websocket\n".to_string()
+        )]
+        write_data: String,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+
+        let application = Application::NodeTcpEcho;
+        let service = websocket_service.await;
+        let kube_client = kube_client.await;
+        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+
+        let mut flags = vec!["--steal"];
+        agent.flag().map(|flag| flags.extend(flag));
+        let mut mirrorded_process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![
+                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
+                    // set time out to 1 to avoid two agents conflict
+                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
+                ]),
+            )
+            .await;
+
+        mirrorded_process.wait_for_line(Duration::from_secs(20), "daemon subscribed");
+
+        // Create a websocket connection to test the HTTP upgrade bypass.
+        let host = host.trim();
+        let (ws_stream, _) = connect_async(format!("ws://{host}:{port}"))
+            .await
+            .expect("Failed websocket connection!");
+
+        let (mut ws_write, mut ws_read) = ws_stream.split();
+
+        ws_write
+            .send(write_data.clone().into())
+            .await
+            .expect("Failed writing to websocket!");
+
+        let read_message = ws_read
+            .next()
+            .await
+            .expect("No message!")
+            .expect("Reading message failed!")
+            .into_text()
+            .expect("Read message was not text!");
+
+        println!("Got response: {read_message}");
+        assert_eq!(&read_message[..8], "remote: "); // The data was passed through to remote app.
+        assert_eq!(&read_message[8..], write_data); // The correct data was sent there and back.
+
+        // Verify the data was passed through and nothing was sent to the local app.
+        let stdout_after = mirrorded_process.get_stdout();
+        assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
+
+        mirrorded_process.child.kill().await.unwrap();
+
+        // Wait for agent to exit.
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        // Now do a meta-test to see that with this setup but without the http filter the data does
+        // reach the local app.
+        let mut flags = vec!["--steal"];
+        agent.flag().map(|flag| flags.extend(flag));
+        let mut mirrorded_process = application
+            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .await;
+
+        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
+
+        let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.write(write_data.as_bytes()).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut buf = String::new();
+        reader.read_line(&mut buf).unwrap();
+        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
+        assert_eq!(&buf[7..], write_data); // The correct data was sent there and back.
 
         // Verify the data was sent to the local app.
         let stdout_after = mirrorded_process.get_stdout();

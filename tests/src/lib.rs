@@ -632,6 +632,23 @@ mod utils {
         .await
     }
 
+    /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
+    /// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+    /// connection, allowing us to test HTTP upgrade requests.
+    #[fixture]
+    pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-websocket:latest",
+            "websocket",
+            true,
+            false,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
