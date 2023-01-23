@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Support for Go's `os.ReadDir` on Linux (by hooking the `getdents64` syscall). Part of
+  [#120](https://github.com/metalbear-co/mirrord/issues/120).
+
 ## 3.20.0
 
 ### Added

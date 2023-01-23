@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
+#![feature(assert_matches)]
+
+#[cfg(target_os = "linux")]
+use std::assert_matches::assert_matches;
+use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -9,7 +13,6 @@ use tokio::{
     process::Command,
 };
 
-use crate::file::*;
 mod common;
 pub use common::*;
 
@@ -564,6 +567,170 @@ async fn test_go_dir(#[values(Application::GoDir)] application: Application, dyl
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+#[cfg(target_os = "linux")]
+async fn test_go_dir_on_linux(
+    #[values(Application::GoDir)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+    // add rw override for the specific path
+    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+            path: "/tmp/foo".to_string().into(),
+            open_options: OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        }))
+    );
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            OpenFileResponse { fd: 1 },
+        ))))
+        .await
+        .unwrap();
+
+    // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
+    assert_matches!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
+            remote_fd: 1,
+            .. // Don't want to commit to a specific buffer size.
+        }))
+    );
+
+    // Simulating the agent: create the response the test expects - two files, "a" and "b".
+    let entries = vec![
+        DirEntryInternal {
+            inode: 1,
+            position: 1,
+            name: "a".to_string(),
+            file_type: libc::DT_REG,
+        },
+        DirEntryInternal {
+            inode: 2,
+            position: 2,
+            name: "b".to_string(),
+            file_type: libc::DT_REG,
+        },
+    ];
+
+    // The total size of the linux_dirent64 structs in memory.
+    let result_size = entries
+        .iter()
+        .map(|entry| entry.get_d_reclen64())
+        .sum::<u16>() as u64;
+
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+            GetDEnts64Response {
+                fd: 1,
+                entries,
+                result_size,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    // The caller keeps calling the syscall until it gets an "empty" result.
+    assert_matches!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
+            remote_fd: 1,
+            ..
+        }))
+    );
+
+    // "Empty" result: no entries, total size of 0.
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+            GetDEnts64Response {
+                fd: 1,
+                entries: vec![],
+                result_size: 0,
+            },
+        ))))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
+    );
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test that the bypass works for reading dirs with Go.
+/// Run with mirrord a go program that opens a dir and fails it does not found expected files in it,
+/// then assert it did not fail.
+/// Have FS on, but the specific path of the dir local, so that we cover that case where the syscall
+/// is hooked, but we bypass.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_go_dir_bypass(
+    #[values(Application::GoDirBypass)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let tmp_dir = temp_dir().join("go_dir_bypass_test");
+    std::fs::create_dir_all(tmp_dir.clone()).unwrap();
+    std::fs::write(tmp_dir.join("a"), "").unwrap();
+    std::fs::write(tmp_dir.join("b"), "").unwrap();
+
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    let path_string = tmp_dir.to_str().unwrap().to_string();
+
+    // Have FS on so that getdents64 gets hooked.
+    env.insert("MIRRORD_FILE_MODE", "read");
+
+    // But make this path local so that in the getdents64 detour we get to the bypass.
+    env.insert("MIRRORD_FILE_LOCAL_PATTERN", &path_string);
+
+    let mut test_process =
+        TestProcess::start_process(executable, vec![path_string.clone()], env).await;
+
+    let mut _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
