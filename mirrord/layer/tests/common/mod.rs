@@ -34,10 +34,6 @@ impl TestProcess {
         self.stdout.lock().unwrap().clone()
     }
 
-    pub fn assert_stderr_empty(&self) {
-        assert!(self.stderr.lock().unwrap().is_empty());
-    }
-
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
             assert!(!self.stderr.lock().unwrap().contains(level));
@@ -343,6 +339,7 @@ pub enum Application {
     EnvBashCat,
     NodeFileOps,
     GoDir,
+    GoDirBypass,
     Go19Issue834,
     Go18Issue834,
 }
@@ -389,6 +386,7 @@ impl Application {
             Application::GoDir => String::from("tests/apps/dir_go/dir_go"),
             Application::Go19Issue834 => String::from("tests/apps/issue834/19"),
             Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
+            Application::GoDirBypass => String::from("tests/apps/dir_go_bypass/dir_go_bypass"),
         }
     }
 
@@ -431,6 +429,7 @@ impl Application {
             Application::Go18Issue834 => vec![],
             Application::RustFileOps => vec![],
             Application::EnvBashCat => vec![],
+            Application::GoDirBypass => vec![],
         }
     }
 
@@ -447,6 +446,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::Go19Issue834
             | Application::Go18Issue834
+            | Application::GoDirBypass
             | Application::GoDir => {
                 unimplemented!("shouldn't get here")
             }

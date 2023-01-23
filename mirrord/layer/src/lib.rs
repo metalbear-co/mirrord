@@ -10,8 +10,12 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(trait_alias)]
+#![feature(c_size_t)]
+#![feature(pointer_byte_offsets)]
 
 extern crate alloc;
+extern crate core;
+
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -229,7 +233,8 @@ fn layer_start(config: LayerConfig) {
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
                     .with_span_events(FmtSpan::ACTIVE)
-                    .compact(),
+                    .compact()
+                    .with_writer(std::io::stderr),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();

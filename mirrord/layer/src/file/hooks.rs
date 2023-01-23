@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use core::ffi::{c_size_t, c_ssize_t};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
@@ -10,18 +12,28 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "linux")]
+use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
     FILE,
 };
+#[cfg(target_os = "linux")]
+use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
 };
+#[cfg(target_os = "linux")]
+use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
 use tracing::trace;
+#[cfg(target_os = "linux")]
+use tracing::{error, info, warn};
 
 use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
+#[cfg(target_os = "linux")]
+use crate::error::HookError::ResponseError;
 use crate::{
     close_layer_fd,
     detour::{Detour, DetourGuard},
@@ -99,13 +111,19 @@ pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
 unsafe fn assign_direntry(
     in_entry: DirEntryInternal,
     out_entry: *mut dirent,
+    getdents: bool,
 ) -> Result<(), HookError> {
+    (*out_entry).d_ino = in_entry.inode;
+    (*out_entry).d_reclen = if getdents {
+        // The structs written by the kernel for the getdents syscall do not have a fixed size.
+        in_entry.get_d_reclen64()
+    } else {
+        std::mem::size_of::<dirent>() as u16
+    };
+    (*out_entry).d_type = in_entry.file_type;
+
     let dir_name = CString::new(in_entry.name)?;
     let dir_name_bytes = dir_name.as_bytes_with_nul();
-
-    (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = std::mem::size_of::<dirent>() as u16;
-    (*out_entry).d_type = in_entry.file_type;
     (*out_entry).d_name[..dir_name_bytes.len()]
         .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
 
@@ -132,7 +150,7 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
     readdir_r(dirp as usize)
         .map(|resp| {
             if let Some(direntry) = resp {
-                match assign_direntry(direntry, entry) {
+                match assign_direntry(direntry, entry, false) {
                     Err(e) => return c_int::from(e),
                     Ok(()) => {
                         *result = entry;
@@ -169,6 +187,72 @@ pub(crate) unsafe extern "C" fn openat_detour(
 
     openat(fd, rawish_path, open_options)
         .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
+}
+
+/// Hook for getdents64, for Go's `os.ReadDir` on Linux.
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn getdents64_detour(
+    fd: RawFd,
+    dirent_buf: *mut c_void,
+    buf_size: c_size_t,
+) -> c_ssize_t {
+    match getdents64(fd, buf_size as u64) {
+        Detour::Success(res) => {
+            let mut next = dirent_buf as *mut dirent;
+            let end = next.byte_add(buf_size);
+            for dent in res.entries {
+                if next.byte_add(dent.get_d_reclen64() as usize) > end {
+                    error!("Remote result for getdents64 would overflow local buffer.");
+                    set_errno(Errno(EINVAL));
+                    return -1;
+                }
+                match assign_direntry(dent, next, true) {
+                    Err(e) => {
+                        error!(
+                            "Error while trying to write remote dir entry to local buffer: {e:?}"
+                        );
+                        // There is no appropriate error code for "We hijacked this operation and
+                        // had an error while trying to create a CString."
+                        set_errno(Errno(EBADF)); // Invalid file descriptor.
+                        return -1;
+                    }
+                    Ok(()) => next = next.byte_add((*next).d_reclen as usize),
+                }
+            }
+            res.result_size as c_ssize_t
+        }
+        Detour::Bypass(_) => {
+            trace!("bypassing getdents64: calling syscall locally (fd: {fd}).");
+            libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
+        }
+        Detour::Error(ResponseError(NotFound(not_found_fd))) => {
+            info!(
+                "Go application tried to read a directory and mirrord carried out that read on the \
+                remote destination, however that directory was not found over there (local fd: \
+                {fd}, remote fd: {not_found_fd})."
+            );
+            set_errno(Errno(ENOENT)); // "No such directory."
+            -1
+        }
+        Detour::Error(ResponseError(NotDirectory(file_fd))) => {
+            warn!(
+                "Go application tried to read a directory and mirrord carried out that read on the \
+                remote destination, however the type of that file on the remote destination is not \
+                a directory (local fd: {fd}, remote fd: {file_fd})."
+            );
+            set_errno(Errno(ENOTDIR)); // "No such directory."
+            -1
+        }
+        Detour::Error(err) => {
+            error!("Encountered error in getdents64 detour: {err:?}");
+            // There is no appropriate error code for "We hijacked this operation to a remote agent
+            // and the agent returned an error". We could try to map more (remote) errors to
+            // the error codes though.
+            set_errno(Errno(EBADF));
+            -1
+        }
+    }
 }
 
 /// Hook for `libc::read`.
