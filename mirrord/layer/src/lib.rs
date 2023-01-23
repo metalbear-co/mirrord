@@ -17,8 +17,8 @@
 //! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
 //! remote context.
 //!
-//! Check out the [Introduction](https://mirrord.dev/docs/overview/introduction/) to learn more
-//! about mirrord.
+//! Check out the [Introduction](https://mirrord.dev/docs/overview/introduction/) guide to learn
+//! more about mirrord.
 //!
 //! ## How it works
 //!
@@ -36,7 +36,7 @@
 //! ```js
 //! import { open } from 'node:fs';
 //!
-//! open("/tmp/hello.txt");
+//! const file = open('/tmp/hello.txt');
 //! ```
 //!
 //! When run with mirrord, this is what's going to happen:
@@ -54,6 +54,9 @@
 //!
 //! 5. And finally, we return the expected result (type) to your Node.js application, as if it had
 //! just called [`libc::open`].
+//!
+//! Your application will get an fd that is valid in the context of mirrord, and calls to other file
+//! functions (like [`libc::read`]), will work just fine, operating on the remote file.
 //!
 //! ## Configuration
 //!
@@ -130,6 +133,11 @@ mod tracing_util;
 #[cfg(target_arch = "x86_64")]
 mod go_hooks;
 
+// TODO(alex) [mid] 2023-01-23: Add proper doc links.
+/// Main tokio [`Runtime`] for mirrord-layer async tasks.
+///
+/// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
+/// `RUNTIME.block_on`.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
