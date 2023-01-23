@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-agent: Wrap agent with a parent proccess to doublecheck the clearing of iptables. See [#955](https://github.com/metalbear-co/mirrord/issues/955)
+
 ## 3.20.0
 
 ### Added
