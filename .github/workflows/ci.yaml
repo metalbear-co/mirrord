@@ -290,13 +290,13 @@ jobs:
           go-version: "1.20.0-rc.3"
       - run: |
           cd mirrord/layer/tests/apps/self_open
-          go build -o 20
+          go1.20rc3 build -o 20
       - run: |
           cd mirrord/layer/tests/apps/fileops/go
-          go build -o fileops
+          go1.20rc3 build -o fileops
       - run: |
           cd mirrord/layer/tests/apps/issue834
-          go build -o 20
+          go1.20rc3 build -o 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
@@ -376,11 +376,11 @@ jobs:
       # TODO: change the 19 filename.
       - run: | # Build Go app to test http mirroring with.
           cd mirrord/layer/tests/apps/self_open
-          go build -o 19
+          go1.20rc3 build -o 19
           cd ../app_go
-          go build -o 19
+          go1.20rc3 build -o 19
           cd ../dir_go
-          go build
+          go1.20rc3 build
       - run: cargo test -p mirrord-layer # Test again with go 1.20.
 
   e2e:
@@ -433,24 +433,6 @@ jobs:
           go build -o 18
       - uses: actions/setup-go@v3
         with:
-          go-version: "1.20.0-rc.3"
-      - run: |
-          cd tests/go-e2e
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-fileops
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 20
-      - uses: actions/setup-go@v3
-        with:
           go-version: "1.19.0"
       - run: |
           cd tests/go-e2e
@@ -467,6 +449,24 @@ jobs:
       - run: |
           cd tests/go-e2e-dns
           go build -o 19
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.20.0-rc.3"
+      - run: |
+          cd tests/go-e2e
+          go1.20rc3 build -o 20
+      - run: |
+          cd tests/go-e2e-fileops
+          go1.20rc3 build -o 20
+      - run: |
+          cd tests/go-e2e-env
+          go1.20rc3 build -o 20
+      - run: |
+          cd tests/go-e2e-outgoing
+          go1.20rc3 build -o 20
+      - run: |
+          cd tests/go-e2e-dns
+          go1.20rc3 build -o 20
       - run: |
           cd tests/go-e2e-dir
           go build -o 19
