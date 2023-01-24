@@ -1,4 +1,4 @@
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, path::PathBuf, time::Duration};
 
 use kube::Api;
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
@@ -113,7 +113,7 @@ async fn operator_status() -> Result<()> {
             sessions.add_row(row![
                 &session.target,
                 &session.user,
-                format!("{}s", session.duration.as_secs()),
+                humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);
         }
     }

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
@@ -77,7 +75,7 @@ pub struct MirrordOperatorStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
-    pub duration: Duration,
+    pub duration_secs: u64,
     pub user: String,
     pub target: String,
 }
