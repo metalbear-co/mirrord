@@ -392,12 +392,37 @@ fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool
     }
 }
 
+/// Acts as an API to the various features of mirrord-layer, holding the `X-Handler` types.
 struct Layer {
+    /// Used by the many `T::handle_hook_message` functions to send [`ClientMessage`]s to
+    /// mirrord-agent.
+    ///
+    /// The [`Receiver`] lives in the
+    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection) loop, where we read from
+    /// this channel and send the messages to the agent.
     tx: Sender<ClientMessage>,
+
+    /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
+    /// [`handle_daemon_message`](link).
+    ///
+    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection)
+    /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
     rx: Receiver<DaemonMessage>,
+
+    /// Part of the heartbeat mechanism of mirrord.
+    ///
+    /// When it's been too long since we've last received a message (60 seconds), and this is
+    /// `false`, we send a [`ClientMessage::Ping`], set this to `true`, and expect to receive a
+    /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
     ping: bool,
+
+    /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
+
+    /// Handler to the TCP outgoing operations, see [`TcpOutgoingHandler`].
     tcp_outgoing_handler: TcpOutgoingHandler,
+
+    /// Handler to the UDP outgoing operations, see [`UdpOutgoingHandler`].
     udp_outgoing_handler: UdpOutgoingHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
@@ -407,15 +432,29 @@ struct Layer {
     // `common` module above `XHook` structs.
     file_handler: FileHandler,
 
-    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
-    // to -agent, and when we receive a message from -agent to -layer).
+    /// Handles the DNS lookup response we get from the agent, see
+    /// [`getaddrinfo`](link).
+    ///
+    /// Unlike most of the other [`DaemonMessage`] handlers, this message is handled directly in
+    /// [`handle_daemon_message`](link)
+    ///
+    /// These are a list of [`oneshot::Sender`](tokio::sync::oneshot::Sender) channels containing
+    /// the [`RemoteResult`](mirrord_protocol::codec::RemoteResult)s of the [`DnsLookup`] operation
+    /// from the agent.
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
 
+    /// Handler to the TCP stealer operations, see [`UdpOutgoingHandler`].
     pub tcp_steal_handler: TcpStealHandler,
 
     /// Receives responses in the layer loop to be forwarded to the agent.
+    ///
+    /// Part of the stealer HTTP traffic feature, see [`http`](link).
     pub http_response_receiver: Receiver<HttpResponse>,
 
+    /// Sets the way we handle [`HookMessage::Tcp`] in [`handle_hook_message`](link):
+    ///
+    /// - `true`: uses [`tcp_steal_handler`](link);
+    /// - `false`: uses [`tcp_mirror_handler`](link).
     steal: bool,
 }
 
@@ -447,10 +486,19 @@ impl Layer {
         }
     }
 
+    /// Sends a [`ClientMessage`] through [`Self::tx`](link) to the [`Receiver`] in
+    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
     async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
+    /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
+    /// [`Self::tx`](link) channel.
+    ///
+    /// ## Special case
+    ///
+    /// The [`HookMessage::GetAddrInfoHook`] message is dealt with here, we convert it to a
+    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`](link).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
@@ -495,6 +543,24 @@ impl Layer {
         }
     }
 
+    /// Passes most of the [`DaemonMessage`]s to their appropriate handlers.
+    ///
+    /// ## Special case
+    ///
+    /// ### [`DaemonMessage::Pong`]
+    ///
+    /// This message has no dedicated handler, and is thus handled directly here, changing the
+    /// [`Self::ping`] state.
+    ///
+    /// ### [`DaemonMessage::GetEnvVarsResponse`]
+    ///
+    /// Handled during mirrord-layer initialization, this message should never make it this far.
+    ///
+    /// ### [`DaemonMessage::GetAddrInfoResponse`]
+    ///
+    /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
+    /// response along in one of the feature's channels from
+    /// [`Self::getaddrinfo_handler_queue`](link).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -540,6 +606,32 @@ impl Layer {
     }
 }
 
+/// Main loop of mirrord-layer.
+///
+/// ## Parameters
+///
+/// - `receiver`: receives the [`HookMessage`]s and pass them along with
+///   [`Layer::handle_hook_message`](link);
+///
+/// - `tx`, `rx`: see [`Layer::tx`](link), and [`Layer::rx`](link);
+///
+/// - `config`: the mirrord-layer configuration, see [`LayerConfig`].
+///
+/// ## Details
+///
+/// We have our big loop here that is initialized in a separate task by [`start_layer_thread`].
+///
+/// In this loop we:
+///
+/// - Pass [`HookMessage`]s to be handled by the [`Layer`];
+///
+/// - Read from the [`Layer`] feature handlers [`Receivers`], to turn outgoing messages into
+///   [`ClientMessage`]s, sending them with [`Layer::send`](link);
+///
+/// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
+///   the other channels received nothing for a while (60 seconds);
+///
+/// - Write log file if [`FeatureConfig::capture_error_trace`](link) is set.
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -618,6 +710,7 @@ async fn thread_loop(
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
+/// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
 #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
 async fn start_layer_thread(
     tx: Sender<ClientMessage>,
@@ -628,7 +721,18 @@ async fn start_layer_thread(
     tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
-/// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
+/// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
+/// the user configured.
+///
+/// ## Parameters
+///
+/// - `enabled_file_ops`: replaces [`libc`] file-ish calls with our own from [`file::hooks`], see
+///   [`FsConfig::is_active`](link), and
+///   [`hooks::enable_file_hooks`](file::hooks::enable_file_hooks);
+///
+/// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
+///   `true`, see [`NetworkConfig`], and
+///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut hook_manager = HookManager::default();
@@ -671,8 +775,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     }
 }
 
-/// Shared code for closing fd in our data structures
+/// Shared code for closing `fd` in our data structures.
+///
 /// Callers should call their respective close before calling this.
+///
+/// ## Details
+///
+/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 pub(crate) fn close_layer_fd(fd: c_int) {
     trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
@@ -692,8 +801,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 // just bypass). Everything works, so, should we intervene?
 //
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
-/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
-/// so it tries to do the same for files.
+/// either let the `fd` bypass and call [`libc::close`] directly, or it might be a managed file
+/// `fd`, so it tries to do the same for files.
+///
+/// ## Hook
+///
+/// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
@@ -701,12 +814,23 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     res
 }
 
-// no need to guard because we call another detour which will do the guard for us.
+/// TODO(alex) [mid] 2023-01-24: What is this?
+///
+/// No need to guard because we call another detour which will do the guard for us.
+///
+/// ## Hook
+///
+/// Replaces [`?`](link).
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
+/// TODO(alex) [mid] 2023-01-24: What is this?
+///
+/// ## Hook
+///
+/// Replaces [`?`](link).
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
@@ -714,6 +838,7 @@ pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: us
     FN_UV_FS_CLOSE(a, b, fd, c)
 }
 
+/// Message presented to the user as a sort of footer when mirrord crashes.
 pub(crate) const FAIL_STILL_STUCK: &str = r#"
 - If you're still stuck and everything looks fine:
 
