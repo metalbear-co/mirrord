@@ -4,7 +4,7 @@ use kube::Api;
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
-    crd::MirrordOperatorCrd,
+    crd::{MirrordOperatorCrd, MirrordOperatorSpec},
     license::License,
     setup::{Operator, OperatorNamespace, OperatorSetup},
 };
@@ -90,45 +90,37 @@ async fn operator_status() -> Result<()> {
         }
     };
 
+    status_progress.done_with("Fetched Status");
+
+    progress.done();
+
+    let MirrordOperatorSpec {
+        operator_version,
+        default_namespace,
+        license:
+            License {
+                name,
+                organization,
+                expire_at,
+            },
+    } = mirrord_status.spec;
+
+    let expire_at = expire_at.format("%e-%b-%Y");
+
+    println!(
+        r#"
+Operator version: {operator_version}
+Operator default namespace: {default_namespace}
+Operator License
+    name: {name}
+    organization: {organization}
+    expire at: {expire_at}
+"#
+    );
+
     let mut sessions = Table::new();
 
     sessions.add_row(row!["Target", "User", "Session Duration"]);
-
-    status_progress
-        .subtask(&format!(
-            "Operator version: {}",
-            mirrord_status.spec.operator_version
-        ))
-        .done();
-
-    status_progress
-        .subtask(&format!(
-            "Operator default namespace: {}",
-            mirrord_status.spec.default_namespace
-        ))
-        .done();
-
-    let license_progress = status_progress.subtask("Operator License");
-
-    license_progress
-        .subtask(&format!("name: {}", mirrord_status.spec.license.name))
-        .done();
-
-    license_progress
-        .subtask(&format!(
-            "organization: {}",
-            mirrord_status.spec.license.organization
-        ))
-        .done();
-
-    license_progress
-        .subtask(&format!(
-            "expire at: {}",
-            mirrord_status.spec.license.expire_at.format("%e-%b-%Y")
-        ))
-        .done();
-
-    license_progress.done();
 
     if let Some(status) = mirrord_status.status {
         for session in &status.sessions {
@@ -139,10 +131,6 @@ async fn operator_status() -> Result<()> {
             ]);
         }
     }
-
-    status_progress.done_with("Fetched Status");
-
-    progress.done();
 
     sessions.printstd();
 
