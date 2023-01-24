@@ -4,7 +4,7 @@ use kube::Api;
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
-    crd::{MirrordOperatorCrd, MirrordOperatorSpec},
+    crd::{MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     license::License,
     setup::{Operator, OperatorNamespace, OperatorSetup},
 };
@@ -76,7 +76,7 @@ async fn operator_status() -> Result<()> {
     let status_progress = progress.subtask("Fetching Status");
 
     let mirrord_status = match status_api
-        .get("operator-controller")
+        .get(OPERATOR_STATUS_NAME)
         .await
         .map_err(KubeApiError::KubeError)
         .map_err(OperatorApiError::KubeApiError)

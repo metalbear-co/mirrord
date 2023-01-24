@@ -54,6 +54,8 @@ impl From<TargetCrd> for TargetConfig {
     }
 }
 
+pub static OPERATOR_STATUS_NAME: &str = "operator";
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
