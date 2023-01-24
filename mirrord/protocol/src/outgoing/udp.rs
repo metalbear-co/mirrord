@@ -17,7 +17,7 @@ pub enum DaemonUdpOutgoing {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SendMsgResponse {
-    pub sent_amount: u64,
+    pub sent_amount: usize,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

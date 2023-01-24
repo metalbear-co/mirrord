@@ -19,9 +19,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{
-    outgoing::udp::SendMsgRequest, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
 use outgoing::{
     udp::{SendRecvManager, UdpOutgoingApi},
     TcpOutgoingApi,

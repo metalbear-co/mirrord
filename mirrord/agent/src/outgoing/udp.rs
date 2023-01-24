@@ -278,20 +278,26 @@ impl SendRecvManager {
     }
 
     pub(crate) async fn handle_message(
-        &self,
+        &mut self,
         request: SendRecvRequest,
     ) -> Result<Option<SendRecvResponse>> {
         match request {
-            SendRecvRequest::SendMsg(message) => {
-                let socket = UdpSocket::bind(message.addr.clone()).await?;
-                let sent_amount = socket
-                    .send_to(&message.message.as_bytes(), message.addr)
-                    .await?;
-                // if bound {
-                //     self.open_sockets.insert(message.addr, socket);
-                // }
-                // TODO: close if the socket is unbound
-                todo!("SendRecvRequest::SendMsg")
+            SendRecvRequest::SendMsg(SendMsgRequest {
+                message,
+                addr,
+                bound,
+            }) => {
+                let socket = UdpSocket::bind("0.0.0.0:0").await?;
+                let addr = addr.parse::<SocketAddr>().unwrap();
+                let sent_amount = socket.send_to(&message.as_bytes(), addr).await?;
+                if bound {
+                    self.open_sockets.insert(addr, socket);
+                } else {
+                    drop(socket);
+                }
+                Ok(Some(SendRecvResponse::SendMsg(SendMsgResponse {
+                    sent_amount,
+                })))
             }
         }
     }
