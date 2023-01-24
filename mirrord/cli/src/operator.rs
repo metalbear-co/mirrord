@@ -108,6 +108,28 @@ async fn operator_status() -> Result<()> {
         ))
         .done();
 
+    let license_progress = status_progress.subtask("Operator License");
+
+    license_progress
+        .subtask(&format!("name: {}", mirrord_status.spec.license.name))
+        .done();
+
+    license_progress
+        .subtask(&format!(
+            "organization: {}",
+            mirrord_status.spec.license.organization
+        ))
+        .done();
+
+    license_progress
+        .subtask(&format!(
+            "expire at: {}",
+            mirrord_status.spec.license.expire_at.format("%e-%b-%Y")
+        ))
+        .done();
+
+    license_progress.done();
+
     if let Some(status) = mirrord_status.status {
         for session in &status.sessions {
             sessions.add_row(row![
