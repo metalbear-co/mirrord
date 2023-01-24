@@ -392,7 +392,8 @@ fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool
     }
 }
 
-/// Acts as an API to the various features of mirrord-layer, holding the `X-Handler` types.
+/// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
+/// types.
 struct Layer {
     /// Used by the many `T::handle_hook_message` functions to send [`ClientMessage`]s to
     /// mirrord-agent.
