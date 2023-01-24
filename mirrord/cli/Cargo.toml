@@ -40,8 +40,10 @@ const-random = "0.1.15"
 tokio.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
-miette = { version = "5", features = ["fancy"] } 
+miette = { version = "5", features = ["fancy"] }
 thiserror.workspace = true
+prettytable-rs = "0.10"
+humantime = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
