@@ -5,9 +5,7 @@ mod file_ops {
 
     use rstest::*;
 
-    #[cfg(target_os = "linux")]
-    use crate::utils::FileOps;
-    use crate::utils::{run_exec, service, Agent, KubeService};
+    use crate::utils::{run_exec, service, Agent, FileOps, KubeService};
 
     #[cfg(target_os = "linux")]
     #[rstest]
@@ -19,7 +17,14 @@ mod file_ops {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::Python, FileOps::Go18, FileOps::Go19, FileOps::Rust)] ops: FileOps,
+        #[values(
+            FileOps::Python,
+            FileOps::Go18,
+            FileOps::Go19,
+            FileOps::Go20,
+            FileOps::Rust
+        )]
+        ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -166,7 +171,7 @@ mod file_ops {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(FileOps::GoDir18, FileOps::GoDir19)] ops: FileOps,
+        #[values(FileOps::GoDir18, FileOps::GoDir19, FileOps::GoDir20)] ops: FileOps,
     ) {
         let service = service.await;
         let command = ops.command();

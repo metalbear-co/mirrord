@@ -28,6 +28,7 @@ mod http {
             Application::NodeHTTP,
             Application::Go18HTTP,
             Application::Go19HTTP,
+            Application::Go20HTTP,
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP
         )]
