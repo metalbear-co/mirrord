@@ -31,7 +31,6 @@ crd = [
   "dep:kube",
   "dep:mirrord-config",
   "dep:tokio",
-  "dep:schemars",
   "dep:serde_json"
 ]
 setup = ["crd", "dep:rcgen", "dep:serde_yaml"]
@@ -54,7 +53,7 @@ kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rcgen = { version = "0.10", features = ["x509-parser"], optional = true }
 reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
-schemars = { version = "0.8", optional = true }
+schemars = { version = "0.8", features = ["chrono"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_yaml = { version = "0.9", optional = true }

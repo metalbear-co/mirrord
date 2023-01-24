@@ -11,11 +11,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Support for Go's `os.ReadDir` on Linux (by hooking the `getdents64` syscall). Part of
   [#120](https://github.com/metalbear-co/mirrord/issues/120).
+- Test mirrord with Go 1.20rc3.
+
+### Changed
+
+- mirrord-agent: Wrap agent with a parent proccess to doublecheck the clearing of iptables. See [#955](https://github.com/metalbear-co/mirrord/issues/955)
 
 ### Fixed
 
 - mirrord-agent: Handle HTTP upgrade requests when the stealer feature is enabled
   (with HTTP traffic) PR [#973](https://github.com/metalbear-co/mirrord/pull/973).
+- E2E tests compile on MacOS.
 
 ## 3.20.0
 

@@ -24,7 +24,7 @@ use crate::{
 pub(super) mod api;
 pub(super) mod connection;
 pub(crate) mod http;
-mod ip_tables;
+pub(super) mod ip_tables;
 mod orig_dst;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
