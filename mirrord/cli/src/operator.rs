@@ -1,6 +1,5 @@
 use std::{fs::File, path::PathBuf};
 
-use chrono::Duration;
 use kube::Api;
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
@@ -111,9 +110,11 @@ async fn operator_status() -> Result<()> {
 
     if let Some(status) = mirrord_status.status {
         for session in &status.sessions {
-            if let Ok(duration) = Duration::from_std(session.duration) {
-                sessions.add_row(row![&session.target, &session.user, &duration]);
-            }
+            sessions.add_row(row![
+                &session.target,
+                &session.user,
+                humantime::format_duration(session.duration),
+            ]);
         }
     }
 

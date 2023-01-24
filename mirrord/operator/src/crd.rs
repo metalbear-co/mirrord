@@ -13,16 +13,10 @@ use crate::license::License;
     version = "v1",
     kind = "Target",
     struct = "TargetCrd",
-    status = "TargetStatus",
     namespaced
 )]
 pub struct TargetSpec {
     pub target: Target,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct TargetStatus {
-    pub sessions: Vec<Session>,
 }
 
 impl TargetCrd {
