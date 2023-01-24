@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")]
 use std::arch::asm;
 
 use errno::errno;
@@ -14,6 +15,8 @@ use crate::{
  *
  * SYS_socket, SYS_bind, SYS_listen, SYS_accept, SYS_close: Syscall
  * SYS_accept4: Syscall6
+ *
+ * SYS_getdents64: Syscall on go 1.18, Syscall6 on go 1.19.
  */
 
 /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
@@ -343,6 +346,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
                 faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
             }
             libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
             _ => {
                 let syscall_res = syscall_3(syscall, param1, param2, param3);
                 return syscall_res;
@@ -427,6 +431,9 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         .into()
                 }
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_getdents64 => {
+                    getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
+                }
                 _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
             }
         }

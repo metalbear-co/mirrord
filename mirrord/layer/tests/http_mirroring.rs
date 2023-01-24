@@ -110,6 +110,9 @@ async fn test_mirroring_with_http(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_mirroring_with_http_go(dylib_path: &PathBuf) {
-    test_mirroring_with_http(Application::Go19HTTP, dylib_path).await;
+async fn test_mirroring_with_http_go(
+    dylib_path: &PathBuf,
+    #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
+) {
+    test_mirroring_with_http(application, dylib_path).await;
 }

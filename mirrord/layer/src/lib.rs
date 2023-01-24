@@ -10,6 +10,8 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(trait_alias)]
+#![feature(c_size_t)]
+#![feature(pointer_byte_offsets)]
 #![deny(clippy::missing_docs_in_private_items)]
 
 //! Loaded dynamically with your local process.
@@ -65,6 +67,8 @@
 //! [Configuration](https://mirrord.dev/docs/overview/configuration/) for usage information.
 
 extern crate alloc;
+extern crate core;
+
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},

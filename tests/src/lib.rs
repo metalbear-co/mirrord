@@ -85,12 +85,12 @@ mod utils {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        Go20HTTP,
         NodeTcpEcho,
     }
 
     #[derive(Debug)]
     pub enum Agent {
-        #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
     }
@@ -100,7 +100,23 @@ mod utils {
         Python,
         Go18,
         Go19,
+        Go20,
         Rust,
+        GoDir18,
+        GoDir19,
+        GoDir20,
+    }
+
+    #[derive(Debug)]
+    pub enum EnvApp {
+        Go18,
+        Go19,
+        Go20,
+        Bash,
+        BashInclude,
+        BashExclude,
+        NodeInclude,
+        NodeExclude,
     }
 
     pub struct TestProcess {
@@ -210,6 +226,7 @@ mod utils {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
+                Application::Go20HTTP => vec!["go-e2e/20"],
                 Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
@@ -240,7 +257,6 @@ mod utils {
     impl Agent {
         pub fn flag(&self) -> Option<Vec<&str>> {
             match self {
-                #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
             }
@@ -255,7 +271,11 @@ mod utils {
                 }
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
+                FileOps::Go20 => vec!["go-e2e-fileops/20"],
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
+                FileOps::GoDir18 => vec!["go-e2e-dir/18"],
+                FileOps::GoDir19 => vec!["go-e2e-dir/19"],
+                FileOps::GoDir20 => vec!["go-e2e-dir/20"],
             }
         }
 
@@ -263,6 +283,35 @@ mod utils {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
                 _ => {}
+            }
+        }
+    }
+
+    impl EnvApp {
+        pub fn command(&self) -> Vec<&str> {
+            match self {
+                Self::Go18 => vec!["go-e2e-env/18"],
+                Self::Go19 => vec!["go-e2e-env/19"],
+                Self::Go20 => vec!["go-e2e-env/20"],
+                Self::Bash => vec!["bash", "bash-e2e/env.sh"],
+                Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
+                Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
+                Self::NodeInclude => vec![
+                    "node",
+                    "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
+                ],
+                Self::NodeExclude => vec![
+                    "node",
+                    "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
+                ],
+            }
+        }
+
+        pub fn mirrord_args(&self) -> Option<Vec<&str>> {
+            match self {
+                Self::BashInclude | Self::NodeInclude => Some(vec!["-s", "MIRRORD_FAKE_VAR_FIRST"]),
+                Self::BashExclude | Self::NodeExclude => Some(vec!["-x", "MIRRORD_FAKE_VAR_FIRST"]),
+                Self::Go18 | Self::Go19 | Self::Go20 | Self::Bash => None,
             }
         }
     }

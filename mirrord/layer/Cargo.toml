@@ -24,7 +24,7 @@ mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-console = { path = "../console" }
 
 ctor = "0.1"
-libc = "0.2"
+libc.workspace = true
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -3,6 +3,7 @@
 #![feature(once_cell)]
 #![feature(is_some_and)]
 #![feature(let_chains)]
+#![feature(type_alias_impl_trait)]
 
 use std::{
     collections::HashSet,
@@ -35,7 +36,11 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
-    steal::{connection::TcpConnectionStealer, StealerCommand},
+    steal::{
+        connection::TcpConnectionStealer,
+        ip_tables::{IPTableFormatter, SafeIpTables, MIRRORD_IPTABLE_CHAIN_ENV},
+        StealerCommand,
+    },
     util::{run_thread_in_namespace, ClientId, IndexAllocator},
 };
 
@@ -464,6 +469,50 @@ async fn start_agent() -> Result<()> {
     Ok(())
 }
 
+async fn clear_iptable_chain(chain_name: String) -> Result<()> {
+    let ipt = iptables::new(false).unwrap();
+    let formatter = IPTableFormatter::detect(&ipt)?;
+
+    SafeIpTables::remove_chain(&ipt, &formatter, &chain_name)
+}
+
+fn spawn_child_agent() -> Result<()> {
+    let command_args = std::env::args().collect::<Vec<_>>();
+
+    let mut child_agent = std::process::Command::new(&command_args[0])
+        .args(&command_args[1..])
+        .spawn()?;
+
+    let _ = child_agent.wait();
+
+    Ok(())
+}
+
+async fn start_iptable_guard() -> Result<()> {
+    debug!("start_iptable_guard -> Initializing iptable-guard.");
+
+    let args = parse_args();
+    let state = State::new(&args).await?;
+    let pid = state.get_container_pid().await?;
+
+    let chain_name = SafeIpTables::<iptables::IPTables>::get_chain_name();
+
+    std::env::set_var(MIRRORD_IPTABLE_CHAIN_ENV, &chain_name);
+
+    let result = spawn_child_agent();
+
+    run_thread_in_namespace(
+        clear_iptable_chain(chain_name),
+        "clear iptables".to_owned(),
+        pid,
+        "net",
+    )
+    .join()
+    .map_err(|_| AgentError::JoinTask)??;
+
+    result
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
@@ -478,7 +527,13 @@ async fn main() -> Result<()> {
 
     debug!("main -> Initializing mirrord-agent.");
 
-    match start_agent().await {
+    let agent_result = if std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).is_ok() {
+        start_agent().await
+    } else {
+        start_iptable_guard().await
+    };
+
+    match agent_result {
         Ok(_) => {
             info!("main -> mirrord-agent `start` exiting successfully.")
         }
@@ -489,5 +544,6 @@ async fn main() -> Result<()> {
             )
         }
     }
+
     Ok(())
 }
