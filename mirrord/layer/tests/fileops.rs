@@ -580,7 +580,7 @@ async fn test_go_dir(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn test_go_dir_on_linux(
-    #[values(Application::GoDir)] application: Application,
+    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
     let executable = application.get_executable().await;
