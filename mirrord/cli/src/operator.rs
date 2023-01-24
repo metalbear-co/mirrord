@@ -113,7 +113,7 @@ async fn operator_status() -> Result<()> {
             sessions.add_row(row![
                 &session.target,
                 &session.user,
-                humantime::format_duration(session.duration),
+                format!("{}s", session.duration.as_secs()),
             ]);
         }
     }
