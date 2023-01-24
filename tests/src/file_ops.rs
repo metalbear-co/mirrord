@@ -5,9 +5,7 @@ mod file_ops {
 
     use rstest::*;
 
-    #[cfg(target_os = "linux")]
-    use crate::utils::FileOps;
-    use crate::utils::{run_exec, service, Agent, KubeService};
+    use crate::utils::{run_exec, service, Agent, FileOps, KubeService};
 
     #[cfg(target_os = "linux")]
     #[rstest]

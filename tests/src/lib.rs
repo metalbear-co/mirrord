@@ -91,7 +91,6 @@ mod utils {
 
     #[derive(Debug)]
     pub enum Agent {
-        #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
     }
@@ -258,7 +257,6 @@ mod utils {
     impl Agent {
         pub fn flag(&self) -> Option<Vec<&str>> {
             match self {
-                #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
             }

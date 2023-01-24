@@ -31,6 +31,9 @@ tests/go-e2e-dns/18
 tests/go-e2e-dns/19
 tests/go-e2e-dns/20
 tests/go-e2e-dir/go-e2e-dir
+tests/go-e2e-dir/18
+tests/go-e2e-dir/19
+tests/go-e2e-dir/20
 
 mirrord/layer/tests/apps/app_go/19
 mirrord/layer/tests/apps/app_go/20
