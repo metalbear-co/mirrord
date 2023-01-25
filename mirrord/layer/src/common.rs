@@ -39,12 +39,10 @@ pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 ///
 /// - [`socket::ops`](crate::socket::ops): used by some functions that are _blocking-ish_.
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
-    unsafe {
-        HOOK_SENDER
-            .as_ref()
-            .ok_or(HookError::EmptyHookSender)
-            .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
-    }
+    HOOK_SENDER
+        .get()
+        .ok_or(HookError::EmptyHookSender)
+        .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
 }
 
 /// Type alias for the channel that sends a response from the agent.

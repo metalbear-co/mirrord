@@ -172,7 +172,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
 /// Holds the file operations configuration, as specified by [`FsConfig`].
 ///
@@ -363,9 +363,9 @@ fn layer_start(config: LayerConfig) {
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
-    unsafe {
-        HOOK_SENDER = Some(sender);
-    };
+    HOOK_SENDER
+        .set(sender)
+        .expect("Setting HOOK_SENDER singleton");
 
     let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
     ENABLED_TCP_OUTGOING
