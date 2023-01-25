@@ -1,3 +1,7 @@
+//! Module for the mirrord-layer/mirrord-agent connection mechanism.
+//!
+//! The layer will either start a new agent pod with [`KubernetesAPI`], directly connect (for tests)
+//! to an existing agent, or let the [`OperatorApi`] handles the connection.
 use std::time::Duration;
 
 use mirrord_config::LayerConfig;
@@ -13,6 +17,8 @@ use tracing::log::info;
 
 use crate::{graceful_exit, FAIL_STILL_STUCK};
 
+/// Helpful message that we print to the user in a [`graceful_exit`] call, when we get a
+/// [`KubeApiError`], or an [`OperatorApiError].
 const FAIL_CREATE_AGENT: &str = r#"
 mirrord-layer failed while trying to establish connection with the agent pod!
 
@@ -26,6 +32,10 @@ mirrord-layer failed while trying to establish connection with the agent pod!
 >> Check your kubernetes context match where the agent should be spawned.
 "#;
 
+/// Handles a [`KubeApiError`] by priting what went wrong to the user, and closing the  program with
+/// [`graceful_exit`].
+///
+/// Used in [`connect`], as we treat every error there as fatal.
 fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
     match err {
         KubeApiError::KubeError(kube::Error::HyperError(err)) => {
@@ -43,10 +53,29 @@ fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
     }
 }
 
+/// Calls [`graceful_exit`] when we have an [`OperatorApiError`].
+///
+/// Used in [`connect`] (same as [`handle_error`]), but only when [`LayerConfig::operator`](link) is
+/// set to `true`.
 fn handle_operator_error(err: OperatorApiError) -> ! {
     graceful_exit!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK} with error {err}")
 }
 
+/// Initializes the agent pod with [`KubernetesAPI`], and connects to it, returning an API that the
+/// layer uses to communicate with it, in the form of a [`Sender`] for [`ClientMessage`]s, and a
+/// [`Receiver`] for [`DaemonMessage`]s.
+///
+/// ## Direct connection
+///
+/// There is support for connecting directly to a pod (instead of going through
+/// [`KubernetesAPI::create`])(link) by setting [`LayerConfig::connect_tcp`](link).
+///
+/// This is used for mirrord tests only.
+///
+/// ## Operator
+///
+/// The [`OperatorApi`] takes over the connection procedure if [`LayerConfig::operator`](link) is
+/// set to `true`. We use [`OperatorApi::discover`](link) instead of [`KubernetesAPI`].
 pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
