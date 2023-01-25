@@ -6,7 +6,29 @@ use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use crate::error::HookError;
 
-thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
+thread_local!(
+    /// Holds the thread-local state for bypassing the layer's detour functions.
+    ///
+    /// ## Warning
+    ///
+    /// Do **NOT** use this directly, instead use [`DetourGuard::new`](link) if you need to
+    /// create a bypass inside a function (like we have in
+    /// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream)).
+    ///
+    /// Or rely on the [`hook_guard_fn`](mirrord_layer_macro::hook_guard_fn) macro.
+    ///
+    /// ## Details
+    ///
+    /// Some of the layer functions will interact with [`libc`] functions that we are hooking into,
+    /// thus we could end up _stealing_ an actual call that we want to make. An example of this
+    /// would be if we wanted to open a file locally, the layer's [`open_detour`](link) intercepts
+    /// the [`libc::open`] call, and we get a remote file (if it exists), instead of the local
+    /// we wanted.
+    ///
+    /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
+    /// and back to `false` after it's done.
+    pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
+);
 
 pub(crate) fn detour_bypass_on() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
@@ -16,6 +38,14 @@ pub(crate) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
 }
 
+/// Handler for the layer's [`DETOUR_BYPASS`].
+///
+/// Sets [`DETOUR_BYPASS`] on creation, and turns it off on [`Drop`].
+///
+/// ## Warning
+///
+/// You should always use [`DetourGuard::new`](link), if you construct this in any other way, it's
+/// not going to guard anything.
 pub(crate) struct DetourGuard;
 
 impl DetourGuard {
