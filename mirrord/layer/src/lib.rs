@@ -93,7 +93,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .unwrap()
 });
 
-pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
 pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
@@ -245,9 +245,9 @@ fn layer_start(config: LayerConfig) {
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
-    unsafe {
-        HOOK_SENDER = Some(sender);
-    };
+    HOOK_SENDER
+        .set(sender)
+        .expect("Setting HOOK_SENDER singleton");
 
     let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
     ENABLED_TCP_OUTGOING
