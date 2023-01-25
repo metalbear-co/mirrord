@@ -30,10 +30,16 @@ thread_local!(
     pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
 );
 
+/// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
+///
+/// Prefer using [`DetourGuard::new`](link) instead.
 pub(crate) fn detour_bypass_on() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
 }
 
+/// Sets [`DETOUR_BYPASS`] to `false`.
+///
+/// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
 pub(crate) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
 }
@@ -68,8 +74,9 @@ impl Drop for DetourGuard {
     }
 }
 
-/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
-/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+/// Wrapper around [`OnceLock`](std::sync::OnceLock), mainly used for the [`Deref`] implementation
+/// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
+/// `FN_ORIGINAL.get().unwrap()`.
 #[derive(Debug)]
 pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
 
@@ -88,6 +95,7 @@ impl<T> const Default for HookFn<T> {
 }
 
 impl<T> HookFn<T> {
+    /// Helper function to set the inner [`OnceLock`](std::sync::OnceLock) `T` of `self`.
     pub(crate) fn set(&self, value: T) -> Result<(), T> {
         self.0.set(value)
     }
@@ -122,7 +130,7 @@ pub(crate) enum Bypass {
     TooManyArgs,
 }
 
-/// `ControlFlow`-like enum to be used by hooks.
+/// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
 ///
 /// Conversion from `Result`:
 /// - `Result::Ok` -> `Detour::Success`
