@@ -1,5 +1,5 @@
 use super::*;
-use crate::RemoteResult;
+use crate::{Port, RemoteResult};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerUdpOutgoing {
@@ -24,5 +24,11 @@ pub struct SendMsgResponse {
 pub struct SendMsgRequest {
     pub message: String,
     pub addr: String,
-    pub bound: bool,
+    pub bound: Option<BoundAddress>,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct BoundAddress {
+    pub requested_port: Port,
+    pub address: SocketAddr,
 }

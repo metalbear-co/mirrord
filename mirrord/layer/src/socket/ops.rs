@@ -9,7 +9,7 @@ use std::{
 };
 
 use libc::{c_int, msghdr, sockaddr, socklen_t, ssize_t};
-use mirrord_protocol::{dns::LookupRecord, SendRecvResponse};
+use mirrord_protocol::{dns::LookupRecord, outgoing::udp::BoundAddress, SendRecvResponse};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
@@ -643,11 +643,23 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
                     unsafe { CStr::from_ptr((*(*msg).msg_iov).iov_base as *const i8) };
                 let message = message_cstr.to_str().unwrap().to_string();
 
-                let hook = SendMsgHook {
-                    message,
-                    addr,
-                    bound: matches!(socket.state, SocketState::Bound(_)),
-                    hook_channel_tx,
+                let hook = if let SocketState::Bound(bound) = socket.state {
+                    SendMsgHook {
+                        message,
+                        addr,
+                        bound: Some(BoundAddress {
+                            requested_port: bound.requested_port,
+                            address: bound.address,
+                        }),
+                        hook_channel_tx,
+                    }
+                } else {
+                    SendMsgHook {
+                        message,
+                        addr,
+                        bound: None,
+                        hook_channel_tx,
+                    }
                 };
 
                 blocking_send_hook_message(HookMessage::SendRecvHook(SendRecvHook::SendMsg(hook)))?;

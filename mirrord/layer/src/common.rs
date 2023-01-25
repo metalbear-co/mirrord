@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use mirrord_protocol::{dns::DnsLookup, RemoteResult, SendRecvResponse};
+use mirrord_protocol::{
+    dns::DnsLookup, outgoing::udp::BoundAddress, RemoteResult, SendRecvResponse,
+};
 use tokio::sync::oneshot;
 
 use crate::{
@@ -39,7 +41,7 @@ pub(crate) enum SendRecvHook {
 pub struct SendMsgHook {
     pub(crate) message: String,
     pub(crate) addr: String,
-    pub(crate) bound: bool,
+    pub(crate) bound: Option<BoundAddress>,
     pub(crate) hook_channel_tx: ResponseChannel<SendRecvResponse>,
 }
 /// These messages are handled internally by -layer, and become `ClientMessage`s sent to -agent.

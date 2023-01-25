@@ -267,7 +267,7 @@ impl UdpOutgoingApi {
 }
 
 pub(crate) struct SendRecvManager {
-    open_sockets: HashMap<SocketAddr, UdpSocket>,
+    open_sockets: HashMap<UdpSocket, SocketAddr>,
 }
 
 impl SendRecvManager {
@@ -287,14 +287,16 @@ impl SendRecvManager {
                 addr,
                 bound,
             }) => {
-                let socket = UdpSocket::bind("0.0.0.0:0").await?;
-                let addr = addr.parse::<SocketAddr>().unwrap();
-                let sent_amount = socket.send_to(&message.as_bytes(), addr).await?;
-                if bound {
-                    self.open_sockets.insert(addr, socket);
+                let udp_socket = if let Some(bound_address) = bound {
+                    UdpSocket::bind(bound_address.address).await?
                 } else {
-                    drop(socket);
-                }
+                    UdpSocket::bind("0.0.0.0:0").await?
+                };
+
+                let sent_amount = udp_socket.send_to(&message.as_bytes(), addr).await?;
+
+                // some sort of mapping between the socket and the address
+
                 Ok(Some(SendRecvResponse::SendMsg(SendMsgResponse {
                     sent_amount,
                 })))
