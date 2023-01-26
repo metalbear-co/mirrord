@@ -22,12 +22,11 @@ use crate::{
 ///
 /// - The usual flow is:
 ///
-/// 1. [`push_back`](link) the [`oneshot::Sender`] that will be used to produce the
-/// [`RemoteResult`];
+/// 1. `push_back` the [`oneshot::Sender`] that will be used to produce the [`RemoteResult`];
 ///
 /// 2. When the operation gets a response from the agent:
-///     1. [`pop_front`](link) to get the [`oneshot::Sender`], then;
-///     2. [`Sender::send`](link) the result back to the operation that initiated the request.
+///     1. `pop_front` to get the [`oneshot::Sender`], then;
+///     2. `Sender::send` the result back to the operation that initiated the request.
 pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 
 /// Sends a [`HookMessage`] through the global [`HOOK_SENDER`].
@@ -50,7 +49,7 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()>
 /// See [`ResponseDeque`] for usage details.
 pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
-/// Hook message for the [`socket::getaddrinfo`](link) operation.
+/// Hook message for the `socket::getaddrinfo` operation.
 ///
 /// Used to perform a DNS lookup in the agent context.
 #[derive(Debug)]
@@ -59,17 +58,17 @@ pub struct GetAddrInfoHook {
     pub(crate) node: String,
 
     /// [`ResponseChannel`] used to send a [`DnsLookup`] response from the agent back to
-    /// [`socket::getaddrinfo`](link).
+    /// `socket::getaddrinfo`.
     pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
 }
 
-/// These messages are handled internally by the layer, and become [`ClientMessage`](link)s sent to
+/// These messages are handled internally by the layer, and become `ClientMessage`s sent to
 /// the agent.
 ///
 /// Most layer operations will send a [`HookMessage`] that will be converted to an equivalent
-/// [`ClientMessage`](link) after some internal handling is done. Usually this means taking a sender
+/// `ClientMessage` after some internal handling is done. Usually this means taking a sender
 /// channel from this message, and pushing it into a [`ResponseDeque`], while taking the other
-/// fields of the message to become a [`ClientMessage`](link).
+/// fields of the message to become a `ClientMessage`.
 #[derive(Debug)]
 pub(crate) enum HookMessage {
     /// TCP incoming messages originating from a hook, see [`HookMessageTcp`].
@@ -84,6 +83,6 @@ pub(crate) enum HookMessage {
     /// File messages originating from a hook, see [`HookMessageFile`].
     File(HookMessageFile),
 
-    /// Message originating from [`getaddrinfo`](link), see [`GetAddrInfoHook`].
+    /// Message originating from `getaddrinfo`, see [`GetAddrInfoHook`].
     GetAddrInfoHook(GetAddrInfoHook),
 }

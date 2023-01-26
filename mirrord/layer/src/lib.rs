@@ -13,6 +13,8 @@
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
 #![deny(clippy::missing_docs_in_private_items)]
+#![allow(rustdoc::private_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -141,7 +143,7 @@ mod go_hooks;
 /// Main tokio [`Runtime`] for mirrord-layer async tasks.
 ///
 /// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
-/// [`RUNTIME.block_on`](link).
+/// `RUNTIME.block_on`.
 ///
 /// ## Usage
 ///
@@ -154,8 +156,8 @@ mod go_hooks;
 /// ## Bypass
 ///
 /// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
-/// [`detour::detour_bypass_on`] [`on_thread_start`](link), and [`detour::detour_bypass_off`]
-/// [`on_thread_stop`](link).
+/// `detour::detour_bypass_on`] [`on_thread_start`, and [`detour::detour_bypass_off`]
+/// `on_thread_stop`.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -408,7 +410,7 @@ struct Layer {
     tx: Sender<ClientMessage>,
 
     /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
-    /// [`handle_daemon_message`](link).
+    /// `handle_daemon_message`.
     ///
     /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection)
     /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
@@ -438,10 +440,10 @@ struct Layer {
     file_handler: FileHandler,
 
     /// Handles the DNS lookup response we get from the agent, see
-    /// [`getaddrinfo`](link).
+    /// `getaddrinfo`.
     ///
     /// Unlike most of the other [`DaemonMessage`] handlers, this message is handled directly in
-    /// [`handle_daemon_message`](link)
+    /// `handle_daemon_message`.
     ///
     /// These are a list of [`oneshot::Sender`](tokio::sync::oneshot::Sender) channels containing
     /// the [`RemoteResult`](mirrord_protocol::codec::RemoteResult)s of the [`DnsLookup`] operation
@@ -453,13 +455,13 @@ struct Layer {
 
     /// Receives responses in the layer loop to be forwarded to the agent.
     ///
-    /// Part of the stealer HTTP traffic feature, see [`http`](link).
+    /// Part of the stealer HTTP traffic feature, see `http`.
     pub http_response_receiver: Receiver<HttpResponse>,
 
-    /// Sets the way we handle [`HookMessage::Tcp`] in [`handle_hook_message`](link):
+    /// Sets the way we handle [`HookMessage::Tcp`] in `handle_hook_message`:
     ///
-    /// - `true`: uses [`tcp_steal_handler`](link);
-    /// - `false`: uses [`tcp_mirror_handler`](link).
+    /// - `true`: uses `tcp_steal_handler`;
+    /// - `false`: uses `tcp_mirror_handler`.
     steal: bool,
 }
 
@@ -491,19 +493,19 @@ impl Layer {
         }
     }
 
-    /// Sends a [`ClientMessage`] through [`Self::tx`](link) to the [`Receiver`] in
+    /// Sends a `ClientMessage`] through [`Self::tx` to the [`Receiver`] in
     /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
     async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
     /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
-    /// [`Self::tx`](link) channel.
+    /// `Self::tx` channel.
     ///
     /// ## Special case
     ///
     /// The [`HookMessage::GetAddrInfoHook`] message is dealt with here, we convert it to a
-    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`](link).
+    /// `ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
@@ -565,7 +567,7 @@ impl Layer {
     ///
     /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
     /// response along in one of the feature's channels from
-    /// [`Self::getaddrinfo_handler_queue`](link).
+    /// `Self::getaddrinfo_handler_queue`.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -616,9 +618,9 @@ impl Layer {
 /// ## Parameters
 ///
 /// - `receiver`: receives the [`HookMessage`]s and pass them along with
-///   [`Layer::handle_hook_message`](link);
+///   `Layer::handle_hook_message`;
 ///
-/// - `tx`, `rx`: see [`Layer::tx`](link), and [`Layer::rx`](link);
+/// - `tx`, `rx`: see `Layer::tx`](link), and [`Layer::rx`;
 ///
 /// - `config`: the mirrord-layer configuration, see [`LayerConfig`].
 ///
@@ -631,12 +633,12 @@ impl Layer {
 /// - Pass [`HookMessage`]s to be handled by the [`Layer`];
 ///
 /// - Read from the [`Layer`] feature handlers [`Receivers`], to turn outgoing messages into
-///   [`ClientMessage`]s, sending them with [`Layer::send`](link);
+///   `ClientMessage`]s, sending them with [`Layer::send`;
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
 ///   the other channels received nothing for a while (60 seconds);
 ///
-/// - Write log file if [`FeatureConfig::capture_error_trace`](link) is set.
+/// - Write log file if `FeatureConfig::capture_error_trace` is set.
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -732,8 +734,7 @@ async fn start_layer_thread(
 /// ## Parameters
 ///
 /// - `enabled_file_ops`: replaces [`libc`] file-ish calls with our own from [`file::hooks`], see
-///   [`FsConfig::is_active`](link), and
-///   [`hooks::enable_file_hooks`](file::hooks::enable_file_hooks);
+///   `FsConfig::is_active`, and [`hooks::enable_file_hooks`](file::hooks::enable_file_hooks);
 ///
 /// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
 ///   `true`, see [`NetworkConfig`], and
@@ -825,7 +826,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 ///
 /// ## Hook
 ///
-/// Replaces [`?`](link).
+/// Replaces `?`.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
@@ -835,7 +836,7 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
 ///
 /// ## Hook
 ///
-/// Replaces [`?`](link).
+/// Replaces `?`.
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {

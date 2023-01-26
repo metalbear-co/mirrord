@@ -18,7 +18,7 @@ thread_local!(
     ///
     /// ## Warning
     ///
-    /// Do **NOT** use this directly, instead use [`DetourGuard::new`](link) if you need to
+    /// Do **NOT** use this directly, instead use `DetourGuard::new` if you need to
     /// create a bypass inside a function (like we have in
     /// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream)).
     ///
@@ -28,7 +28,7 @@ thread_local!(
     ///
     /// Some of the layer functions will interact with [`libc`] functions that we are hooking into,
     /// thus we could end up _stealing_ an actual call that we want to make. An example of this
-    /// would be if we wanted to open a file locally, the layer's [`open_detour`](link) intercepts
+    /// would be if we wanted to open a file locally, the layer's `open_detour` intercepts
     /// the [`libc::open`] call, and we get a remote file (if it exists), instead of the local
     /// we wanted.
     ///
@@ -39,7 +39,7 @@ thread_local!(
 
 /// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
 ///
-/// Prefer using [`DetourGuard::new`](link) instead.
+/// Prefer using `DetourGuard::new` instead.
 pub(crate) fn detour_bypass_on() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
 }
@@ -57,7 +57,7 @@ pub(crate) fn detour_bypass_off() {
 ///
 /// ## Warning
 ///
-/// You should always use [`DetourGuard::new`](link), if you construct this in any other way, it's
+/// You should always use `DetourGuard::new`, if you construct this in any other way, it's
 /// not going to guard anything.
 pub(crate) struct DetourGuard;
 
@@ -125,7 +125,7 @@ pub(crate) enum Bypass {
     /// [`SOCKETS`](crate::socket::SOCKETS).
     LocalFdNotFound(RawFd),
 
-    /// Similar to [`LocalFdNotFound`](link), but for [`OPEN_DIRS`](crate::file::OPEN_DIRS).
+    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::sockaddr::SockAddr) to
@@ -152,16 +152,32 @@ pub(crate) enum Bypass {
 
     /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
     EmptyBuffer,
+
+    /// Operation received [`None`] for an [`Option`] that was required to be [`Some`].
     EmptyOption,
+
+    /// Called `getaddrinfo` with `rawish_node` being [`None`].
     NullNode,
+
+    /// Skip patching SIP for macOS.
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
+
+    /// Tried patching SIP for a non-existing binary.
     #[cfg(target_os = "macos")]
     ExecOnNonExistingFile(String),
+
+    /// No args where changed in `intercept_tmp_dir`.
     #[cfg(target_os = "macos")]
     NoTempDirInArgv,
+
+    /// Environment variable [`TMP_DIR_ENV_VAR_NAME`] not set while running
+    /// `intercept_tmp_dir`.
     #[cfg(target_os = "macos")]
     TempDirEnvVarNotSet,
+
+    /// Reached `MAX_ARGC` while running
+    /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
     TooManyArgs,
 }
