@@ -17,8 +17,8 @@ use crate::{
 /// ## Usage
 ///
 /// Most mirrord features that interact with the agent use this type to keep a queue of the
-/// operations, otherwise we could end up doing these operations out of order (possibly
-/// deadlocking).
+/// operations, keeping them in order, and allowing us to match a hook request to a response. It's
+/// done in this way due to us not having identifiers for the hook requests.
 ///
 /// - The usual flow is:
 ///
@@ -72,9 +72,18 @@ pub struct GetAddrInfoHook {
 /// fields of the message to become a [`ClientMessage`](link).
 #[derive(Debug)]
 pub(crate) enum HookMessage {
+    /// TCP incoming messages originating from a hook, see [`HookMessageTcp`].
     Tcp(HookMessageTcp),
+
+    /// TCP outgoing messages originating from a hook, see [`TcpOutgoing`].
     TcpOutgoing(TcpOutgoing),
+
+    /// UDP outgoing messages originating from a hook, see [`UdpOutgoing`].
     UdpOutgoing(UdpOutgoing),
+
+    /// File messages originating from a hook, see [`HookMessageFile`].
     File(HookMessageFile),
+
+    /// Message originating from [`getaddrinfo`](link), see [`GetAddrInfoHook`].
     GetAddrInfoHook(GetAddrInfoHook),
 }

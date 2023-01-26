@@ -1,3 +1,10 @@
+//! The layer uses features from this module to check if it should bypass one of its hooks, and call
+//! the original [`libc`] function.
+//!
+//! Here we also have the convenient [`Detour`], that is used by the hooks to either return a
+//! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
+//! the original [`libc`] equivalent, stored in a [`HookFn`].
+
 use core::{
     convert,
     ops::{FromResidual, Residual, Try},
@@ -104,17 +111,46 @@ impl<T> HookFn<T> {
 /// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Bypass {
+    /// We're dealing with a socket port value that should be ignored.
     Port(u16),
+
+    /// The socket type does not match one of our handled
+    /// [`SocketKind`](crate::socket::SocketKind)s.
     Type(i32),
+
+    /// Either an invalid socket domain, or one that we don't handle.
     Domain(i32),
+
+    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](crate::file::OPEN_FILES), nor
+    /// [`SOCKETS`](crate::socket::SOCKETS).
     LocalFdNotFound(RawFd),
+
+    /// Similar to [`LocalFdNotFound`](link), but for [`OPEN_DIRS`](crate::file::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
+
+    /// A conversion from [`SockAddr`](socket2::sockaddr::SockAddr) to
+    /// [`SocketAddr`](std::net::SocketAddr) failed.
     AddressConversion,
+
+    /// The socket [`RawFd`] is in an invalid state for the operation.
     InvalidState(RawFd),
+
+    /// We got an [`Utf8Error`](core::str::error::Utf8Error) while trying to convert a
+    /// [`CStr`](core::ffi::c_str::CStr) into a safer string type.
     CStrConversion,
+
+    /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(PathBuf),
+
+    /// Some operations only handle absolute [`PathBuf`]s.
     RelativePath(PathBuf),
+
+    /// Started mirrord with [`FsModeConfig`](mirrord_config::fs::mode::FsModeConfig) set to
+    /// [`FsModeConfig::Read`](mirrord_config::fs::mode::FsModeConfig::Read), but operation
+    /// requires more file permissions.
     ReadOnly(PathBuf),
+
+    /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
     EmptyBuffer,
     EmptyOption,
     NullNode,
