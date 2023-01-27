@@ -14,8 +14,12 @@ use tracing::{error, info};
 use super::HookMessage;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
+/// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
+///
+/// Prefer using the [`should_ignore`] instead of relying on this constant.
 const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
+/// Checks if an error code from some [`libc`] function should be treated as a hard error, or not.
 fn should_ignore(code: Option<i32>) -> bool {
     if let Some(code) = code {
         IGNORE_ERROR_CODES.contains(&code)
@@ -24,6 +28,9 @@ fn should_ignore(code: Option<i32>) -> bool {
     }
 }
 
+/// Errors that occur in the layer's hook functions, and will reach the user's application.
+///
+/// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -67,6 +74,11 @@ pub(crate) enum HookError {
     FailedSipPatch(#[from] SipError),
 }
 
+/// Errors internal to mirrord-layer.
+///
+/// You'll encounter these when the layer is performing some of its internal operations (mostly when
+/// handling messsages, like [`HookMessage`], or
+/// [`DaemonMessage`](mirrord_protocol::codec::DaemonMessage)).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -155,7 +167,7 @@ pub(crate) enum LayerError {
     AgentErrorClosed(String),
 }
 
-// Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
+// Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
 impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookError {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
         HookError::LockError

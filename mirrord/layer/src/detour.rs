@@ -194,8 +194,8 @@ pub(crate) enum Bypass {
 pub(crate) enum Detour<S = ()> {
     /// Equivalent to `Result::Ok`
     Success(S),
-    // Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
-    // (errors that can be recovered from in the hook FFI).
+    /// Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
+    /// (errors that can be recovered from in the hook FFI).
     Bypass(Bypass),
     /// Equivalent to `Result::Err`
     Error(HookError),
@@ -264,6 +264,10 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
+    /// Calls `op` if the result is `Success`, otherwise returns the `Bypass` or `Error` value of
+    /// self.
+    ///
+    /// This function can be used for control flow based on `Detour` values.
     pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => op(s),
@@ -272,6 +276,10 @@ impl<S> Detour<S> {
         }
     }
 
+    /// Maps a `Detour<S>` to `Detour<U>` by applying a function to a contained `Success` value,
+    /// leaving a `Bypass` or `Error` value untouched.
+    ///
+    /// This function can be used to compose the results of two functions.
     pub(crate) fn map<U, F: FnOnce(S) -> U>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => Detour::Success(op(s)),
@@ -328,8 +336,13 @@ where
 
 /// Extends `Option<T>` with the `Option::bypass` function.
 pub(crate) trait OptionExt {
+    /// Inner `T` of the `Option<T>`.
     type Opt;
 
+    /// Converts `Option<T>` into `Detour<T>`, mapping:
+    ///
+    /// - `Some` => `Detour::Success`;
+    /// - `None` => `Detour::Bypass`.
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
