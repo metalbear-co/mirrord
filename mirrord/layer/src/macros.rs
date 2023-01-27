@@ -2,20 +2,20 @@
 //!
 //! ## Macros
 //!
-//! - [`replace`]
+//! - [`replace!`]
 //!
 //! Replaces a [`libc`] function with a hook.
 //!
-//! - [`hook_symbol`]
+//! - [`hook_symbol!`]
 //!
 //! Used to hook go symbols.
 //!
-//! - [`graceful_exit`]
+//! - [`graceful_exit!`]
 //!
 //! Exits the process with a nice message.
 
 /// Replaces the `$func` [`libc`] function, with the equivalent hook `$detour_function`, by calling
-/// [`hook_export_or_any`].
+/// `HookManager::hook_export_or_any`.
 ///
 /// ## Parameters
 ///

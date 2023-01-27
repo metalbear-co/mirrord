@@ -20,8 +20,8 @@ use crate::{
  */
 
 /// [Naked function] This detour is taken from `runtime.asmcgocall.abi0`
-/// Refer: https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806
-/// Golang's assembler - https://go.dev/doc/asm
+/// Refer: <https://go.googlesource.com/go/+/refs/tags/go1.19rc2/src/runtime/asm_amd64.s#806>
+/// Golang's assembler - <https://go.dev/doc/asm>
 /// We cannot provide any stack guarantees when our detour executes(whether it will exceed the
 /// go's stack limit), so we need to switch to system stack.
 #[naked]
@@ -647,7 +647,7 @@ fn post_go1_19(hook_manager: &mut HookManager) {
 /// when testing with "Gin", only these symbols were used to make syscalls.
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
-///   - https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go
+///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
 pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
     if let Some(version_symbol) =
         hook_manager.resolve_symbol_main_module("runtime.buildVersion.str")

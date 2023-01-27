@@ -14,7 +14,6 @@
 #![feature(pointer_byte_offsets)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![allow(rustdoc::private_intra_doc_links)]
-#![deny(rustdoc::broken_intra_doc_links)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -191,14 +190,14 @@ pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
 ///
 /// ## Usage
 ///
-/// Used to change the behavior of the [`connect`] hook operation.
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 /// Tells us if the user enabled the Udp outgoing feature in [`NetworkConfig`].
 ///
 /// ## Usage
 ///
-/// Used to change the behavior of the [`connect`] hook operation.
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
 /// Check if we're running in NixOS or Devbox.
@@ -493,19 +492,19 @@ impl Layer {
         }
     }
 
-    /// Sends a `ClientMessage`] through [`Self::tx` to the [`Receiver`] in
+    /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
     /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
     async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
     /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
-    /// `Self::tx` channel.
+    /// `Layer::tx` channel.
     ///
     /// ## Special case
     ///
     /// The [`HookMessage::GetAddrInfoHook`] message is dealt with here, we convert it to a
-    /// `ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`.
+    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
@@ -632,8 +631,8 @@ impl Layer {
 ///
 /// - Pass [`HookMessage`]s to be handled by the [`Layer`];
 ///
-/// - Read from the [`Layer`] feature handlers [`Receivers`], to turn outgoing messages into
-///   `ClientMessage`]s, sending them with [`Layer::send`;
+/// - Read from the [`Layer`] feature handlers [`Receiver`]s, to turn outgoing messages into
+///   [`ClientMessage`]s, sending them with `Layer::send`;
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
 ///   the other channels received nothing for a while (60 seconds);
@@ -820,7 +819,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     res
 }
 
-/// TODO(alex) [mid] 2023-01-24: What is this?
+// TODO(alex) [mid] 2023-01-24: What is this?
 ///
 /// No need to guard because we call another detour which will do the guard for us.
 ///
@@ -832,7 +831,7 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
-/// TODO(alex) [mid] 2023-01-24: What is this?
+// TODO(alex) [mid] 2023-01-24: What is this?
 ///
 /// ## Hook
 ///

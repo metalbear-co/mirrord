@@ -118,7 +118,7 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
     accept4_detour(sockfd, address, address_len, flags)
 }
 
-/// https://github.com/metalbear-co/mirrord/issues/184
+/// <https://github.com/metalbear-co/mirrord/issues/184>
 #[hook_fn]
 pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();

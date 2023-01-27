@@ -135,8 +135,7 @@ pub(crate) enum Bypass {
     /// The socket [`RawFd`] is in an invalid state for the operation.
     InvalidState(RawFd),
 
-    /// We got an [`Utf8Error`](core::str::error::Utf8Error) while trying to convert a
-    /// [`CStr`](core::ffi::c_str::CStr) into a safer string type.
+    /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
     CStrConversion,
 
     /// File [`PathBuf`] should be ignored (used for tests).

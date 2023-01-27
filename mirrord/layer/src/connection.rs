@@ -55,7 +55,7 @@ fn handle_error(err: KubeApiError, config: &LayerConfig) -> ! {
 
 /// Calls [`graceful_exit`] when we have an [`OperatorApiError`].
 ///
-/// Used in `connect`] (same as [`handle_error`]), but only when [`LayerConfig::operator` is
+/// Used in [`connect`] (same as [`handle_error`]), but only when `LayerConfig::operator` is
 /// set to `true`.
 fn handle_operator_error(err: OperatorApiError) -> ! {
     graceful_exit!("{FAIL_CREATE_AGENT}{FAIL_STILL_STUCK} with error {err}")
@@ -68,13 +68,13 @@ fn handle_operator_error(err: OperatorApiError) -> ! {
 /// ## Direct connection
 ///
 /// There is support for connecting directly to a pod (instead of going through
-/// `KubernetesAPI::create`])(link) by setting [`LayerConfig::connect_tcp`.
+/// `KubernetesAPI::create` by setting `LayerConfig::connect_tcp`.
 ///
 /// This is used for mirrord tests only.
 ///
 /// ## Operator
 ///
-/// The `OperatorApi`] takes over the connection procedure if [`LayerConfig::operator` is
+/// The [`OperatorApi`] takes over the connection procedure if `LayerConfig::operator` is
 /// set to `true`. We use `OperatorApi::discover` instead of [`KubernetesAPI`].
 pub(crate) async fn connect(
     config: &LayerConfig,
