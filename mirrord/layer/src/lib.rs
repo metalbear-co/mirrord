@@ -12,7 +12,6 @@
 #![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
-#![deny(clippy::missing_docs_in_private_items)]
 #![allow(rustdoc::private_intra_doc_links)]
 
 //! Loaded dynamically with your local process.
