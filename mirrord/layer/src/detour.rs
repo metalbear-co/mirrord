@@ -295,22 +295,11 @@ impl<S> Detour<S> {
     }
 
     /// Like Result's `ok()`.
+    #[cfg(target_os = "macos")] // Currently only used in macos, remove to use in linux code.
     pub(crate) fn success(self) -> Option<S> {
         match self {
             Detour::Success(s) => Some(s),
             _ => None,
-        }
-    }
-
-    /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
-    ///
-    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
-    /// fail.
-    #[allow(dead_code)] // leaving it here in case it's useful in the future.
-    pub(crate) fn unwrap_or(self, default: S) -> S {
-        match self {
-            Detour::Success(s) => s,
-            _ => default,
         }
     }
 }
