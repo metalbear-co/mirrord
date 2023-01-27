@@ -79,11 +79,12 @@ jobs:
       - run: cargo clippy -- -D warnings
 
   # TODO(alex) [high] 2023-01-27: Make this run only on push to main.
-  generate-docs:
+  generate-rust-docs:
     runs-on: ubuntu-latest
     # needs: changed_files
-    # if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
+      # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
@@ -93,7 +94,8 @@ jobs:
           toolchain: nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
-      - name: Deploy rust docs 🚀
+      - name: Deploy rust docs 🚀🦀
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: target/doc # The folder the action should deploy
