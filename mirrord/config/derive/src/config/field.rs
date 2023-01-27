@@ -25,7 +25,7 @@ pub struct ConfigField {
 }
 
 impl ConfigField {
-    /// Check if field is Option<T> and if so return type of T
+    /// Check if field is `Option<T>` and if so return type of `T`
     fn is_option(field: &Field) -> Option<Type> {
         let seg = if let Type::Path(ty) = &field.ty {
             ty.path.segments.first()

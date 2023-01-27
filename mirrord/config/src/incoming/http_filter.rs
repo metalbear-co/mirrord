@@ -15,8 +15,8 @@ use crate::{
 /// feature only captures HTTP requests that match the specified filter, forwarding unmatched
 /// requests to their original destinations.
 ///
-/// Only does something when [`IncomingConfig`] is set as [`IncomingMode::Steal`], ignored
-/// otherwise.
+/// Only does something when [`IncomingConfig`](super::IncomingConfig) is set as
+/// [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

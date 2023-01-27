@@ -78,7 +78,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
 
-  # TODO(alex) [high] 2023-01-27: Make this run only on push to main.
   generate-rust-docs:
     runs-on: ubuntu-latest
     # needs: changed_files
