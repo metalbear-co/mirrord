@@ -363,6 +363,14 @@ fn layer_start(config: LayerConfig) {
     };
 
     info!("Initializing mirrord-layer!");
+    let exe_path = std::env::current_exe()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    trace!(
+        "Loaded into executable: {}, with args: {:?}",
+        &exe_path,
+        std::env::args()
+    );
 
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 

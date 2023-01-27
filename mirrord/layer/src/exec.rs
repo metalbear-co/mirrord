@@ -2,10 +2,10 @@
 
 use std::{
     env,
-    ffi::{CStr, CString},
+    ffi::{c_void, CStr, CString},
 };
 
-use libc::{c_char, c_int};
+use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError, TMP_DIR_ENV_VAR_NAME};
 use null_terminated::Nul;
@@ -19,7 +19,8 @@ use crate::{
         Detour,
         Detour::{Bypass, Error, Success},
     },
-    error::{HookError, HookError::Null},
+    error::HookError,
+    exec::patched_args::PatchedSpawnArgs,
     file::ops::str_from_rawish,
     hooks::HookManager,
     replace,
@@ -29,6 +30,13 @@ const MAX_ARGC: usize = 254;
 
 pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
+    replace!(
+        hook_manager,
+        "posix_spawn",
+        posix_spawn_detour,
+        FnPosix_spawn,
+        FN_POSIX_SPAWN
+    );
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
@@ -86,6 +94,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>
                 return Bypass(TooManyArgs);
             }
             let arg_str = raw_to_str(arg)?;
+            trace!("execve arg: {arg_str}");
             ptr_vec.push(
                     arg_str
                         .strip_prefix(&tmp_dir)
@@ -112,6 +121,89 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>
     Bypass(TempDirEnvVarNotSet) // Temp dir was not set. Cannot intercept. Should not happen.
 }
 
+mod patched_args {
+    use std::ffi::CString;
+
+    use libc::c_char;
+
+    /// The arguments for `execve` or `posix_spawn` after patching the for side-stepping SIP.
+    /// Since the arguments for those functions are pointers, if we indeed modify the arguments, we
+    /// create new objects, so we have to keep them alive, so we put them in this struct, and the
+    /// detour code has to hold on to this struct until after the call to the original libc
+    /// functions.
+    pub struct PatchedSpawnArgs {
+        original_path: *const c_char,
+        path_c_string: Option<CString>,
+        original_argv: *const *const c_char,
+        argv_vec: Option<Vec<*const c_char>>,
+    }
+
+    impl PatchedSpawnArgs {
+        pub fn new(
+            original_path: *const c_char,
+            path_c_string: Option<CString>,
+            original_argv: *const *const c_char,
+            argv_vec: Option<Vec<*const c_char>>,
+        ) -> Self {
+            Self {
+                original_path,
+                path_c_string,
+                original_argv,
+                argv_vec,
+            }
+        }
+
+        /// Get the (maybe patched) path that should be executed.
+        pub fn get_path(&self) -> *const c_char {
+            // If we created a new string return a pointer to that, otherwise just the original
+            // pointer.
+            self.path_c_string
+                .as_ref()
+                .map(|path| path.as_ptr())
+                .unwrap_or(self.original_path)
+        }
+
+        /// Get the (maybe changed) argv.
+        pub fn get_argv(&self) -> *const *const c_char {
+            // If we created a new array return a pointer to that, otherwise just the original
+            // pointer.
+            self.argv_vec
+                .as_ref()
+                .map(|argv| argv.as_ptr())
+                .unwrap_or(self.original_argv)
+        }
+    }
+}
+
+unsafe fn patch_sip_for_new_process(
+    path: *const c_char,
+    argv: *const *const c_char,
+) -> PatchedSpawnArgs {
+    let exe_path = env::current_exe()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    trace!("Executable {} called execve/posix_spawn", exe_path);
+
+    // Do unsafe part of path conversion here.
+    let rawish_path = (!path.is_null()).then(|| CStr::from_ptr(path));
+
+    // Continue even if there were errors - just run without patching.
+    let path_c_string = patch_if_sip(rawish_path)
+        .success()
+        .map(CString::new)
+        .transpose()
+        .unwrap_or_default();
+
+    let argv_arr = Nul::new_unchecked(argv);
+
+    // If we intercept args, we create a new array.
+    // execve takes a null terminated array of char pointers.
+    // ptr_vec will own the vector that will be passed to execve as an array.
+    let argv_vec = intercept_tmp_dir(argv_arr).success();
+
+    PatchedSpawnArgs::new(path, path_c_string, argv, argv_vec)
+}
+
 /// Hook for `libc::execve`.
 ///
 /// Patch file if it is SIPed, used new path if patched.
@@ -125,31 +217,26 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    // Do unsafe part of path conversion here.
-    let rawish_path = (!path.is_null()).then(|| CStr::from_ptr(path));
-    let mut patched_path = CString::default();
-    let final_path = patch_if_sip(rawish_path)
-        .and_then(|s| match CString::new(s) {
-            Ok(c_string) => {
-                patched_path = c_string;
-                Success(patched_path.as_ptr())
-            }
-            Err(err) => Error(Null(err)),
-        })
-        .unwrap_or(path); // Continue even if there were errors - just run without patching.
+    let patched_args = patch_sip_for_new_process(path, argv);
+    FN_EXECVE(patched_args.get_path(), patched_args.get_argv(), envp)
+}
 
-    let argv_arr = Nul::new_unchecked(argv);
-
-    // If we intercept args, we create a new array.
-    // execve takes a null terminated array of char pointers.
-    // ptr_vec will own the vector that will be passed to execve as an array.
-    let mut ptr_vec: Vec<*const c_char> = Vec::new();
-    let final_argv = intercept_tmp_dir(argv_arr)
-        .map(|new_vec| {
-            ptr_vec = new_vec; // Make sure vector still lives when we pass the pointer to execve.
-            ptr_vec.as_ptr()
-        })
-        .unwrap_or(argv);
-
-    FN_EXECVE(final_path, final_argv, envp)
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn posix_spawn_detour(
+    pid: *const pid_t,
+    path: *const c_char,
+    file_actions: *const c_void,
+    attrp: *const c_void,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    let patched_args = patch_sip_for_new_process(path, argv);
+    FN_POSIX_SPAWN(
+        pid,
+        patched_args.get_path(),
+        file_actions,
+        attrp,
+        patched_args.get_argv(),
+        envp,
+    )
 }

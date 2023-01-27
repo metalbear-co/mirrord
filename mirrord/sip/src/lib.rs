@@ -354,6 +354,7 @@ mod main {
             trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
             Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
         } else {
+            trace!("No SIP detected on {:?}", binary_path);
             Ok(None)
         }
     }
