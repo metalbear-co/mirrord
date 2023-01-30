@@ -34,20 +34,20 @@ thread_local!(
     ///
     /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
     /// and back to `false` after it's done.
-    pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
+    static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
 );
 
 /// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
 ///
 /// Prefer using `DetourGuard::new` instead.
-pub(crate) fn detour_bypass_on() {
+pub(super) fn detour_bypass_on() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
 }
 
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
-pub(crate) fn detour_bypass_off() {
+pub(super) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
 }
 
