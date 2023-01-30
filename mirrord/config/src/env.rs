@@ -32,7 +32,7 @@ use crate::{
 /// ```
 ///
 /// Some environment variables are excluded by default (`PATH` for example), including these
-/// requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].
+/// requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.
 ///
 /// - Include the remote pod's environment variables "PROJECT", "DATABASE":
 ///

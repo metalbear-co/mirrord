@@ -27,7 +27,7 @@ use http_filter::*;
 /// listeners;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured,
-/// see [`StealModeConfig`]);
+/// see [`IncomingMode::Steal`]);
 ///
 /// ## Examples
 ///
