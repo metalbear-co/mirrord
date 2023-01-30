@@ -1,14 +1,15 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
 use std::collections::VecDeque;
 
-use mirrord_protocol::{dns::DnsLookup, RemoteResult};
+use mirrord_protocol::RemoteResult;
 use tokio::sync::oneshot;
 
 use crate::{
+    dns::GetAddrInfo,
     error::{HookError, HookResult},
-    file::HookMessageFile,
+    file::FileOperation,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
-    tcp::HookMessageTcp,
+    tcp::TcpIncoming,
     HOOK_SENDER,
 };
 
@@ -56,19 +57,6 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()>
         .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
 }
 
-/// Hook message for the `socket::getaddrinfo` operation.
-///
-/// Used to perform a DNS lookup in the agent context.
-#[derive(Debug)]
-pub struct GetAddrInfoHook {
-    /// Host name, or host address.
-    pub(crate) node: String,
-
-    /// [`ResponseChannel`] used to send a [`DnsLookup`] response from the agent back to
-    /// `socket::getaddrinfo`.
-    pub(crate) hook_channel_tx: ResponseChannel<DnsLookup>,
-}
-
 /// These messages are handled internally by the layer, and become `ClientMessage`s sent to
 /// the agent.
 ///
@@ -78,8 +66,8 @@ pub struct GetAddrInfoHook {
 /// fields of the message to become a `ClientMessage`.
 #[derive(Debug)]
 pub(crate) enum HookMessage {
-    /// TCP incoming messages originating from a hook, see [`HookMessageTcp`].
-    Tcp(HookMessageTcp),
+    /// TCP incoming messages originating from a hook, see [`TcpIncoming`].
+    Tcp(TcpIncoming),
 
     /// TCP outgoing messages originating from a hook, see [`TcpOutgoing`].
     TcpOutgoing(TcpOutgoing),
@@ -87,9 +75,9 @@ pub(crate) enum HookMessage {
     /// UDP outgoing messages originating from a hook, see [`UdpOutgoing`].
     UdpOutgoing(UdpOutgoing),
 
-    /// File messages originating from a hook, see [`HookMessageFile`].
-    File(HookMessageFile),
+    /// File messages originating from a hook, see [`FileOperation`].
+    File(FileOperation),
 
-    /// Message originating from `getaddrinfo`, see [`GetAddrInfoHook`].
-    GetAddrInfoHook(GetAddrInfoHook),
+    /// Message originating from `getaddrinfo`, see [`GetAddrInfo`].
+    GetAddrinfo(GetAddrInfo),
 }

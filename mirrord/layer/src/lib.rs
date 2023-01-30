@@ -76,8 +76,9 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{GetAddrInfoHook, ResponseChannel};
+use common::ResponseChannel;
 use ctor::ctor;
+use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
@@ -120,6 +121,7 @@ use crate::{
 mod common;
 mod connection;
 mod detour;
+mod dns;
 mod error;
 #[cfg(target_os = "macos")]
 mod exec;
@@ -504,7 +506,7 @@ impl Layer {
     ///
     /// ## Special case
     ///
-    /// The [`HookMessage::GetAddrInfoHook`] message is dealt with here, we convert it to a
+    /// The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
     /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
@@ -528,7 +530,7 @@ impl Layer {
                     .await
                     .unwrap();
             }
-            HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+            HookMessage::GetAddrinfo(GetAddrInfo {
                 node,
                 hook_channel_tx,
             }) => {

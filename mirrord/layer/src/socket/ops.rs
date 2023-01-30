@@ -16,13 +16,14 @@ use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage},
+    common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OptionExt},
+    dns::GetAddrInfo,
     error::HookError,
     file::OPEN_FILES,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     port_debug_patch,
-    tcp::{HookMessageTcp, Listen},
+    tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
@@ -206,7 +207,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 return Err(io::Error::last_os_error())?;
             }
 
-            blocking_send_hook_message(HookMessage::Tcp(HookMessageTcp::Listen(Listen {
+            blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
                 mirror_port: address.port(),
                 requested_port,
                 ipv6: address.is_ipv6(),
@@ -571,12 +572,12 @@ pub(super) fn getaddrinfo(
     } = raw_hints;
 
     let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfoHook {
+    let hook = GetAddrInfo {
         node,
         hook_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::GetAddrInfoHook(hook))?;
+    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
 
     let addr_info_list = hook_channel_rx.blocking_recv()??;
 

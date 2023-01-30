@@ -23,6 +23,8 @@ use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
 
 /// Hook messages handled by `TcpOutgoingHandler`.
+///
+/// - Part of [`HookMessage`](crate::common::HookMessage).
 #[derive(Debug)]
 pub(crate) enum UdpOutgoing {
     Connect(Connect),

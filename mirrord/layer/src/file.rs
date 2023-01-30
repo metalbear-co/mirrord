@@ -244,10 +244,10 @@ impl FileHandler {
     #[tracing::instrument(level = "trace", skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
-        message: HookMessageFile,
+        message: FileOperation,
         tx: &Sender<ClientMessage>,
     ) -> Result<()> {
-        use HookMessageFile::*;
+        use FileOperation::*;
         match message {
             Open(open) => self.handle_hook_open(open, tx).await,
             OpenRelative(open_relative) => self.handle_hook_open_relative(open_relative, tx).await,
@@ -686,7 +686,7 @@ pub struct GetDEnts64 {
 }
 
 #[derive(Debug)]
-pub enum HookMessageFile {
+pub enum FileOperation {
     Open(Open),
     OpenRelative(OpenRelative),
     Read(Read<ReadFileResponse>),
