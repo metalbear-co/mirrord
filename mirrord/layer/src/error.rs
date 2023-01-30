@@ -1,6 +1,7 @@
 use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
+use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
@@ -14,17 +15,21 @@ use tracing::{error, info};
 use super::HookMessage;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
-/// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
-///
-/// Prefer using the [`should_ignore`] instead of relying on this constant.
-const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+/// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
+mod ignore_codes {
+    /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
+    ///
+    /// Prefer using [`should_ignore`] instead of relying on this constant.
+    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
-/// Checks if an error code from some [`libc`] function should be treated as a hard error, or not.
-fn should_ignore(code: Option<i32>) -> bool {
-    if let Some(code) = code {
-        IGNORE_ERROR_CODES.contains(&code)
-    } else {
-        false
+    /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
+    /// not.
+    pub(super) fn is_ignored_code(code: Option<i32>) -> bool {
+        if let Some(code) = code {
+            IGNORE_ERROR_CODES.contains(&code)
+        } else {
+            false
+        }
     }
 }
 
@@ -188,7 +193,7 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
-            HookError::IO(ref e) if (should_ignore(e.raw_os_error())) => {
+            HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),

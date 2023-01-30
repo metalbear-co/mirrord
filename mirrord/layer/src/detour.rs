@@ -27,10 +27,10 @@ thread_local!(
     /// ## Details
     ///
     /// Some of the layer functions will interact with [`libc`] functions that we are hooking into,
-    /// thus we could end up _stealing_ an actual call that we want to make. An example of this
-    /// would be if we wanted to open a file locally, the layer's `open_detour` intercepts
-    /// the [`libc::open`] call, and we get a remote file (if it exists), instead of the local
-    /// we wanted.
+    /// thus we could end up _stealing_ a call by the layer itself rather than by the binary the
+    /// layer is injected into. An example of this  would be if we wanted to open a file locally,
+    /// the layer's `open_detour` intercepts the [`libc::open`] call, and we get a remote file
+    /// (if it exists), instead of the local file we wanted.
     ///
     /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
     /// and back to `false` after it's done.

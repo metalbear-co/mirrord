@@ -1,4 +1,4 @@
-//! Shared place for a few types and functions that are used everywhere by layer.
+//! Shared place for a few types and functions that are used everywhere by the layer.
 use std::collections::VecDeque;
 
 use mirrord_protocol::{dns::DnsLookup, RemoteResult};
@@ -16,9 +16,10 @@ use crate::{
 ///
 /// ## Usage
 ///
-/// Most mirrord features that interact with the agent use this type to keep a queue of the
-/// operations, keeping them in order, and allowing us to match a hook request to a response. It's
-/// done in this way due to us not having identifiers for the hook requests.
+/// We have no identifiers for the hook requests, so if hook responses were sent asynchronously we
+/// would have no way to match them back to their requests. However, requests are sent out
+/// synchronously, and responses are sent back synchronously, so keeping them in order is how we
+/// maintain our way to match them.
 ///
 /// - The usual flow is:
 ///
@@ -28,6 +29,11 @@ use crate::{
 ///     1. `pop_front` to get the [`oneshot::Sender`], then;
 ///     2. `Sender::send` the result back to the operation that initiated the request.
 pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
+
+/// Type alias for the channel that sends a response from the agent.
+///
+/// See [`ResponseDeque`] for usage details.
+pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 /// Sends a [`HookMessage`] through the global [`HOOK_SENDER`].
 ///
@@ -43,11 +49,6 @@ pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()>
         .ok_or(HookError::EmptyHookSender)
         .and_then(|hook_sender| hook_sender.blocking_send(message).map_err(Into::into))
 }
-
-/// Type alias for the channel that sends a response from the agent.
-///
-/// See [`ResponseDeque`] for usage details.
-pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 /// Hook message for the `socket::getaddrinfo` operation.
 ///
