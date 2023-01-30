@@ -20,7 +20,7 @@ use crate::{
         Detour::{Bypass, Error, Success},
     },
     error::HookError,
-    exec::patched_args::PatchedSpawnArgs,
+    exec::patched_args::PatchedArgs,
     file::ops::str_from_rawish,
     hooks::HookManager,
     replace,
@@ -131,14 +131,14 @@ mod patched_args {
     /// create new objects, so we have to keep them alive, so we put them in this struct, and the
     /// detour code has to hold on to this struct until after the call to the original libc
     /// functions.
-    pub struct PatchedSpawnArgs {
+    pub struct PatchedArgs {
         original_path: *const c_char,
         path_c_string: Option<CString>,
         original_argv: *const *const c_char,
         argv_vec: Option<Vec<*const c_char>>,
     }
 
-    impl PatchedSpawnArgs {
+    impl PatchedArgs {
         pub fn new(
             original_path: *const c_char,
             path_c_string: Option<CString>,
@@ -178,7 +178,7 @@ mod patched_args {
 unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-) -> PatchedSpawnArgs {
+) -> PatchedArgs {
     let exe_path = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -201,7 +201,7 @@ unsafe fn patch_sip_for_new_process(
     // ptr_vec will own the vector that will be passed to execve as an array.
     let argv_vec = intercept_tmp_dir(argv_arr).success();
 
-    PatchedSpawnArgs::new(path, path_c_string, argv, argv_vec)
+    PatchedArgs::new(path, path_c_string, argv, argv_vec)
 }
 
 /// Hook for `libc::execve`.
