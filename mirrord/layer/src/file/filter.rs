@@ -39,6 +39,7 @@ fn generate_local_set() -> RegexSet {
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
+    let temp_dir = env::temp_dir();
     let patterns = [
         r"^.+\.so$",
         r"^.+\.d$",
@@ -82,6 +83,7 @@ fn generate_local_set() -> RegexSet {
         r"^/Library",
         r"^/Applications",
         r"^/System",
+        &format!("^{}", temp_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
         "^/$", // root

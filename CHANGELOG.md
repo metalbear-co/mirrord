@@ -26,6 +26,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord could not load into some newer binaries of node -
   [#987](https://github.com/metalbear-co/mirrord/issues/987). Now hooking also `posix_spawn`, since node now uses
   `libuv`'s `uv_spawn` (which in turn calls `posix_spawn`) instead of libc's `execvp` (which calls `execve`).
+- Read files from the temp dir (defined by the system's `TMPDIR`) locally, closes
+  [#986](https://github.com/metalbear-co/mirrord/issues/986).
 
 ## 3.20.0
 

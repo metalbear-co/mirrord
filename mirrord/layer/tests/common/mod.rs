@@ -117,6 +117,10 @@ impl TestProcess {
         assert!(self.stdout.lock().unwrap().contains(string));
     }
 
+    pub fn assert_stderr_contains(&self, string: &str) {
+        assert!(self.stderr.lock().unwrap().contains(string));
+    }
+
     pub fn assert_no_error_in_stdout(&self) {
         assert!(!self
             .error_capture
@@ -352,6 +356,7 @@ pub enum Application {
     Go19Issue834,
     Go18Issue834,
     NodeSpawn,
+    BashShebang,
 }
 
 impl Application {
@@ -403,6 +408,7 @@ impl Application {
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
             Application::NodeSpawn => String::from("node"),
+            Application::BashShebang => String::from("tests/apps/nothing.sh"),
         }
     }
 
@@ -453,6 +459,7 @@ impl Application {
             | Application::Go18Issue834
             | Application::RustFileOps
             | Application::EnvBashCat
+            | Application::BashShebang
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
         }
@@ -472,6 +479,7 @@ impl Application {
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::BashShebang
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
