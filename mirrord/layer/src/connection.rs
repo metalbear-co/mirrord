@@ -1,8 +1,8 @@
 //! Module for the mirrord-layer/mirrord-agent connection mechanism.
 //!
 //! The layer will either start a new agent pod with [`KubernetesAPI`], directly connect to an
-//! existing agent (currently only used for tests) to an existing agent, or let the [`OperatorApi`]
-//! handle the connection.
+//! existing agent (currently only used for tests), or let the [`OperatorApi`] handle the
+//! connection.
 use std::time::Duration;
 
 use mirrord_config::LayerConfig;
