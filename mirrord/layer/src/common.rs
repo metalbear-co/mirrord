@@ -35,7 +35,7 @@ pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 /// See [`ResponseDeque`] for usage details.
 pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
-/// Sends a [`HookMessage`] through the global [`HOOK_SENDER`].
+/// Sends a [`HookMessage`] through the global [`HOOK_SENDER`] channel.
 ///
 /// ## Usage
 ///
