@@ -167,8 +167,8 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 /// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
 /// to [`ClientMessage`]s.
 ///
-/// The messages sent through here originate from the hooks, and are (mostly converted to
-/// [`ClientMessage`]s).
+/// The messages sent through here originate from the hooks, and are (usually) converted
+/// to [`ClientMessage`]s.
 ///
 /// ## Usage
 ///

@@ -37,12 +37,18 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
 /// Sends a [`HookMessage`] through the global [`HOOK_SENDER`] channel.
 ///
+/// ## Flow
+///
+/// hook function -> [`HookMessage`] -> [`blocking_send_hook_message`] -> [`ClientMessage`]
+///
 /// ## Usage
 ///
 /// - [`file::ops`](crate::file::ops): most of the file operations are blocking, and thus this
 ///   function is extensively used there;
 ///
 /// - [`socket::ops`](crate::socket::ops): used by some functions that are _blocking-ish_.
+///
+/// [`ClientMessage`]: mirrord_protocol::codec::ClientMessage
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
     HOOK_SENDER
         .get()
