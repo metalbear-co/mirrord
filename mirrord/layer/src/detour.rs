@@ -147,6 +147,9 @@ pub(crate) enum Bypass {
     /// Started mirrord with [`FsModeConfig`](mirrord_config::fs::mode::FsModeConfig) set to
     /// [`FsModeConfig::Read`](mirrord_config::fs::mode::FsModeConfig::Read), but operation
     /// requires more file permissions.
+    ///
+    /// The user will get this error if they started mirrord with file operations as _read-only_,
+    /// but tried to perform a file operation that requires _write_ permissions (for example).
     ReadOnly(PathBuf),
 
     /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
