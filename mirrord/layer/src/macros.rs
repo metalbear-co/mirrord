@@ -60,26 +60,6 @@ macro_rules! replace {
     }};
 }
 
-#[macro_export]
-macro_rules! replace_symbol {
-    ($hook_manager:expr, $func:expr, $detour_function:expr, $detour_type:ty, $hook_fn:expr) => {{
-        let intercept = |hook_manager: &mut $crate::hooks::HookManager,
-                         symbol_name,
-                         detour: $detour_type|
-         -> $crate::error::Result<$detour_type> {
-            let replaced =
-                hook_manager.hook_symbol_main_module(symbol_name, detour as *mut libc::c_void)?;
-            let original_fn: $detour_type = std::mem::transmute(replaced);
-
-            tracing::trace!("hooked {symbol_name:?}");
-            Ok(original_fn)
-        };
-
-        let _ = intercept($hook_manager, $func, $detour_function)
-            .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
-    }};
-}
-
 /// Used by [`go_hooks`](crate::go_hooks) to hook go syscalls with
 /// `HookManager::hook_symbol_main_module`.
 ///

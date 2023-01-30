@@ -137,7 +137,6 @@ mod tracing_util;
 #[cfg(target_arch = "x86_64")]
 mod go_hooks;
 
-// TODO(alex) [mid] 2023-01-23: Add proper doc links.
 /// Main tokio [`Runtime`] for mirrord-layer async tasks.
 ///
 /// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with

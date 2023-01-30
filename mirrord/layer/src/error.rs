@@ -19,7 +19,7 @@ use crate::tcp_steal::http_forwarding::HttpForwarderError;
 mod ignore_codes {
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
-    /// Prefer using [`should_ignore`] instead of relying on this constant.
+    /// Prefer using [`is_ignored_code`] instead of relying on this constant.
     const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
