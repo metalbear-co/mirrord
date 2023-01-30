@@ -1,3 +1,5 @@
+//! Holds the [`GetAddrInfo`] [`HookMessage`](crate::common::HookMessage) used to perform DNS lookup
+//! in a remote context.
 use mirrord_protocol::dns::DnsLookup;
 
 use crate::common::ResponseChannel;
@@ -6,7 +8,7 @@ use crate::common::ResponseChannel;
 ///
 /// Used to perform a DNS lookup in the agent context.
 ///
-/// - Part of [`HookMessage`](super::common::HookMessage).
+/// - Part of [`HookMessage`](crate::common::HookMessage).
 #[derive(Debug)]
 pub(super) struct GetAddrInfo {
     /// Host name, or host address.
