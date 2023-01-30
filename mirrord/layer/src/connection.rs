@@ -30,7 +30,7 @@ mirrord-layer failed while trying to establish connection with the agent pod!
 
 >> Check that you're using the correct kubernetes credentials (and configuration).
 
->> Check your kubernetes context match where the agent should be spawned.
+>> Check your kubernetes' context matches where the agent should be spawned.
 "#;
 
 /// Handles a [`KubeApiError`] by printing what went wrong to the user, and closing the  program
