@@ -221,6 +221,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     FN_EXECVE(patched_args.get_path(), patched_args.get_argv(), envp)
 }
 
+// TODO: do we also need to hook posix_spawnp?
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
     pid: *const pid_t,
