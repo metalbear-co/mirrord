@@ -72,7 +72,7 @@ pub struct GetAddrInfoHook {
 /// These messages are handled internally by the layer, and become `ClientMessage`s sent to
 /// the agent.
 ///
-/// Most layer operations will send a [`HookMessage`] that will be converted to an equivalent
+/// Most hook detours will send a [`HookMessage`] that will be converted to an equivalent
 /// `ClientMessage` after some internal handling is done. Usually this means taking a sender
 /// channel from this message, and pushing it into a [`ResponseDeque`], while taking the other
 /// fields of the message to become a `ClientMessage`.
