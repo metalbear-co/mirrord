@@ -6,7 +6,7 @@ const listen = () => {
   const server = createServer();
   server.listen(
     {
-      host: "127.0.0.1",
+      host: "localhost",
       port: 80,
     },
     function () {
