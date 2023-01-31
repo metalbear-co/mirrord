@@ -176,11 +176,6 @@ pub(crate) enum Bypass {
     #[cfg(target_os = "macos")]
     NoTempDirInArgv,
 
-    /// Environment variable [`TMP_DIR_ENV_VAR_NAME`] not set while running
-    /// `intercept_tmp_dir`.
-    #[cfg(target_os = "macos")]
-    TempDirEnvVarNotSet,
-
     /// Reached `MAX_ARGC` while running
     /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
