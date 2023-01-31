@@ -25,7 +25,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - E2E tests compile on MacOS.
 - mirrord-layer: DNS resolving doesn't work when having a non-OS resolver (using UDP sockets) since `/etc/resolv.conf` and `/etc/hosts` were in the local read override, leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
 
-
 ## 3.20.0
 
 ### Added
