@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.21.0
+
 ### Added
 
 - Support for Go's `os.ReadDir` on Linux (by hooking the `getdents64` syscall). Part of
