@@ -99,6 +99,9 @@ fn generate_remote_ro_set() -> RegexSet {
         // AWS cli cache
         // \.aws\/cli\/cache\/.+\.json
         r".aws/cli/cache/.+\.json$",
+        // for dns resolving
+        r"^/etc/resolv.conf$",
+        r"^/etc/hosts$",
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
