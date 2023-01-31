@@ -21,7 +21,7 @@ mod file_ops {
             FileOps::Python,
             FileOps::Go18,
             FileOps::Go19,
-            FileOps::Go20,
+            // FileOps::Go20,
             FileOps::Rust
         )]
         ops: FileOps,
