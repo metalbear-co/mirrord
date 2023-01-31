@@ -78,9 +78,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
 
-  generate-rust-docs:
+  check-rust-docs:
     runs-on: ubuntu-latest
-    # needs: changed_files
+    needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
@@ -93,11 +93,6 @@ jobs:
           toolchain: nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
-      - name: Deploy rust docs 🚀🦀
-        if: ${{ github.ref == 'refs/heads/main' }}
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          folder: target/doc # The folder the action should deploy
 
   lint_macos:
     runs-on: macos-latest
