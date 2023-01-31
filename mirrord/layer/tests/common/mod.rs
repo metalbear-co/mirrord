@@ -34,6 +34,10 @@ impl TestProcess {
         self.stdout.lock().unwrap().clone()
     }
 
+    pub fn get_stderr(&self) -> String {
+        self.stderr.lock().unwrap().clone()
+    }
+
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
             assert!(!self.stderr.lock().unwrap().contains(level));
@@ -347,6 +351,7 @@ pub enum Application {
     Go20Issue834,
     Go19Issue834,
     Go18Issue834,
+    NodeSpawn,
 }
 
 impl Application {
@@ -397,6 +402,7 @@ impl Application {
             Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
+            Application::NodeSpawn => String::from("node"),
         }
     }
 
@@ -426,6 +432,10 @@ impl Application {
             }
             Application::NodeFileOps => {
                 app_path.push("fileops.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
+            Application::NodeSpawn => {
+                app_path.push("node_spawn.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::PythonSelfConnect => {
@@ -461,6 +471,7 @@ impl Application {
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::NodeFileOps
+            | Application::NodeSpawn
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
