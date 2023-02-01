@@ -1,4 +1,6 @@
+#![feature(once_cell)]
 #![feature(stmt_expr_attributes)]
+
 mod env;
 mod file_ops;
 mod http;

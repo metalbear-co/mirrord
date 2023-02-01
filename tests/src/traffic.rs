@@ -2,13 +2,16 @@ mod steal;
 
 #[cfg(test)]
 mod traffic {
-    use std::{net::UdpSocket, time::Duration};
+    use std::{net::UdpSocket, sync::LazyLock, time::Duration};
 
     use futures::Future;
     use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
+    use tokio::sync::Mutex;
+
+    static SEQUENTIAL_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(Default::default);
 
     use crate::utils::{
         kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
@@ -18,6 +21,8 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_dns_enabled_works(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -33,6 +38,8 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn test_remote_dns_lookup_google(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -50,6 +57,8 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -65,6 +74,8 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[should_panic]
     pub async fn test_outgoing_traffic_single_request_ipv6(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -79,6 +90,8 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_single_request_disabled(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -101,6 +114,8 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_make_request_after_listen(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -114,6 +129,8 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         let node_command = vec![
             "node",
@@ -135,6 +152,8 @@ mod traffic {
         #[future] service: KubeService,
         #[future] kube_client: Client,
     ) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
         let target_service = service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
@@ -208,6 +227,8 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn test_outgoing_disabled_udp(#[future] service: KubeService) {
+        let _ = SEQUENTIAL_TEST_LOCK.lock().await;
+
         let service = service.await;
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
