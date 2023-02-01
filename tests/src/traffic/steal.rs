@@ -211,33 +211,7 @@ mod steal {
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         mirrorded_process.child.kill().await.unwrap();
-
-        // Wait for agent to exit.
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
-        // Now do a meta-test to see that with this setup but without the http filter the data does
-        // reach the local app.
-
-        let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut mirrorded_process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
-            .await;
-
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
-
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(tcp_data.as_bytes()).unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
-        assert_eq!(&buf[7..], tcp_data); // The correct data was sent there and back.
-
-        // Verify the data was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
-        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
-        mirrorded_process.child.kill().await.unwrap();
+        application.assert(&mirrorded_process);
     }
 
     /// Test the case where running with `steal` set and an http header filter, we get an HTTP
@@ -312,32 +286,6 @@ mod steal {
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         mirrorded_process.child.kill().await.unwrap();
-
-        // Wait for agent to exit.
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
-        // Now do a meta-test to see that with this setup but without the http filter the data does
-        // reach the local app.
-        let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut mirrorded_process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
-            .await;
-
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
-
-        let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(write_data.as_bytes()).unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
-        assert_eq!(&buf[7..], write_data); // The correct data was sent there and back.
-
-        // Verify the data was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
-        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
-        mirrorded_process.child.kill().await.unwrap();
+        application.assert(&mirrorded_process);
     }
 }
