@@ -337,28 +337,25 @@ impl FileManager {
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
                     let original_position = file.stream_position()?;
+                    // limit bytes read using take
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    // limit bytes read using take
-                    let read_result = reader
+                    reader
                         .read_until(b'\n', &mut buffer)
-                        .and_then(|read_amount| Ok(read_amount))
                         .and_then(|read_amount| {
-                            // Revert file to original position + bytes read (in case the bufreader
-                            // advanced too much)
+                            // Revert file to original position + bytes read (in case the
+                            // bufreader advanced too much)
                             file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
 
-                            // We handle the extra bytes in the `fgets` hook, so here we can just
-                            // return the full buffer.
+                            // We handle the extra bytes in the `fgets` hook, so here we can
+                            // just return the full buffer.
                             let response = ReadFileResponse {
                                 bytes: buffer,
                                 read_amount: read_amount as u64,
                             };
 
                             Ok(response)
-                        })?;
-
-                    Ok(read_result)
+                        })
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
