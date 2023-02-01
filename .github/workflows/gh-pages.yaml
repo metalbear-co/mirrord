@@ -1,0 +1,41 @@
+# Simple workflow for deploying static content to GitHub Pages
+name: Deploy mirrord rust-docs to gh-pages
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Generates rust docs with `RUSTDOCFLAGS` flags, and push it to `gh-pages` branch.
+  deploy-rust-docs:
+    runs-on: ubuntu-latest
+    env:
+      # enables the creation of a workspace index.html page.
+      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --document-private-items
+      - name: Deploy rust docs 🚀🦀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: target/doc # The folder the action should deploy

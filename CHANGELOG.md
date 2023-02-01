@@ -7,6 +7,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- mirrord-layer: DNS resolving doesn't work when having a non-OS resolver (using UDP sockets)
+  since `/etc/resolv.conf` and `/etc/hosts` were in the local read override,
+  leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
+- mirrord-agent: Infinite reading a file when using `fgets`/`read_line` due to bug seeking to start of file.
+
+## 3.21.0
+
 ### Added
 
 - Support for Go's `os.ReadDir` on Linux (by hooking the `getdents64` syscall). Part of
@@ -23,9 +32,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent: Handle HTTP upgrade requests when the stealer feature is enabled
   (with HTTP traffic) PR [#973](https://github.com/metalbear-co/mirrord/pull/973).
 - E2E tests compile on MacOS.
-- mirrord-layer: DNS resolving doesn't work when having a non-OS resolver (using UDP sockets)
-  since `/etc/resolv.conf` and `/etc/hosts` were in the local read override,
-  leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
+- mirrord could not load into some newer binaries of node -
+  [#987](https://github.com/metalbear-co/mirrord/issues/987). Now hooking also `posix_spawn`, since node now uses
+  `libuv`'s `uv_spawn` (which in turn calls `posix_spawn`) instead of libc's `execvp` (which calls `execve`).
+- Read files from the temp dir (defined by the system's `TMPDIR`) locally, closes
+  [#986](https://github.com/metalbear-co/mirrord/issues/986).
 
 ## 3.20.0
 

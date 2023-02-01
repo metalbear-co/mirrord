@@ -336,16 +336,16 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
-                    let mut buffer = String::with_capacity(buffer_size as usize);
+                    // limit bytes read using take
+                    let mut reader = BufReader::new(std::io::Read::by_ref().take(buffer_size));
+                    let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
                     let read_result = reader
-                        .read_line(&mut buffer)
+                        .read_until(b'\n', &mut buffer)
                         .and_then(|read_amount| {
                             // Take the new position to update the file's cursor position later.
                             let position_after_read = reader.stream_position()?;
 
-                            // Limit the new position to `buffer_size`.
-                            Ok((read_amount, position_after_read.clamp(0, buffer_size)))
+                            Ok((read_amount, position_after_read))
                         })
                         .and_then(|(read_amount, seek_to)| {
                             file.seek(SeekFrom::Start(seek_to))?;
@@ -353,7 +353,7 @@ impl FileManager {
                             // We handle the extra bytes in the `fgets` hook, so here we can just
                             // return the full buffer.
                             let response = ReadFileResponse {
-                                bytes: buffer.into_bytes(),
+                                bytes: buffer,
                                 read_amount: read_amount as u64,
                             };
 

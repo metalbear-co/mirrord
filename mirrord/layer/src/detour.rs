@@ -176,11 +176,6 @@ pub(crate) enum Bypass {
     #[cfg(target_os = "macos")]
     NoTempDirInArgv,
 
-    /// Environment variable [`TMP_DIR_ENV_VAR_NAME`] not set while running
-    /// `intercept_tmp_dir`.
-    #[cfg(target_os = "macos")]
-    TempDirEnvVarNotSet,
-
     /// Reached `MAX_ARGC` while running
     /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
@@ -294,17 +289,12 @@ impl<S> Detour<S> {
         }
     }
 
-    /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
-    ///
-    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
-    /// fail.
-    /// Currently defined only on macos because it is only used in macos-only code.
-    /// Remove the cfg attribute to enable using in other code.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn unwrap_or(self, default: S) -> S {
+    /// Like Result's `ok()`.
+    #[cfg(target_os = "macos")] // Currently only used in macos, remove to use in linux code.
+    pub(crate) fn success(self) -> Option<S> {
         match self {
-            Detour::Success(s) => s,
-            Detour::Bypass(_) | Detour::Error(_) => default,
+            Detour::Success(s) => Some(s),
+            _ => None,
         }
     }
 }

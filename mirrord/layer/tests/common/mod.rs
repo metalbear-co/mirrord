@@ -34,6 +34,10 @@ impl TestProcess {
         self.stdout.lock().unwrap().clone()
     }
 
+    pub fn get_stderr(&self) -> String {
+        self.stderr.lock().unwrap().clone()
+    }
+
     pub fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
             assert!(!self.stderr.lock().unwrap().contains(level));
@@ -111,6 +115,10 @@ impl TestProcess {
 
     pub fn assert_stdout_contains(&self, string: &str) {
         assert!(self.stdout.lock().unwrap().contains(string));
+    }
+
+    pub fn assert_stderr_contains(&self, string: &str) {
+        assert!(self.stderr.lock().unwrap().contains(string));
     }
 
     pub fn assert_no_error_in_stdout(&self) {
@@ -347,6 +355,8 @@ pub enum Application {
     Go20Issue834,
     Go19Issue834,
     Go18Issue834,
+    NodeSpawn,
+    BashShebang,
 }
 
 impl Application {
@@ -397,6 +407,8 @@ impl Application {
             Application::Go18Issue834 => String::from("tests/apps/issue834/18"),
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
+            Application::NodeSpawn => String::from("node"),
+            Application::BashShebang => String::from("tests/apps/nothing.sh"),
         }
     }
 
@@ -428,6 +440,10 @@ impl Application {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeSpawn => {
+                app_path.push("node_spawn.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
@@ -443,6 +459,7 @@ impl Application {
             | Application::Go18Issue834
             | Application::RustFileOps
             | Application::EnvBashCat
+            | Application::BashShebang
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
         }
@@ -461,6 +478,8 @@ impl Application {
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::NodeFileOps
+            | Application::NodeSpawn
+            | Application::BashShebang
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
