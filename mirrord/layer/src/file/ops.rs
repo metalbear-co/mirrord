@@ -347,11 +347,13 @@ pub(crate) fn openat(
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
-#[tracing::instrument(level = "trace")]
 pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
-    // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = get_remote_fd(local_fd)?;
+    get_remote_fd(local_fd).and_then(|remote_fd| remote_read(remote_fd, read_amount))
+}
 
+/// Blocking request and wait on already found remote_fd
+#[tracing::instrument(level = "trace")]
+fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let reading_file = Read {
