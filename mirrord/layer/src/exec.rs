@@ -134,7 +134,7 @@ unsafe fn patch_sip_for_new_process(
     let path_c_string = patch_if_sip(path_str)
         .and_then(|w| {
             // TODO: is there a shorter way to convert a Result into a Detour in this situation?
-            CString::new(w).map_or_else(|err| Error(Null(err)), |c_string| Success(c_string))
+            CString::new(w).map_or_else(|err| Error(Null(err)), Success)
         })
         .unwrap_or(
             CString::new(path_str.to_string()).unwrap(),
@@ -151,7 +151,7 @@ unsafe fn patch_sip_for_new_process(
 }
 
 // TODO: get rid of this.
-fn c_string_vec_to_null_terminated_pointer_vec(vec: &Vec<CString>) -> Vec<*const c_char> {
+fn c_string_vec_to_null_terminated_pointer_vec(vec: &[CString]) -> Vec<*const c_char> {
     let mut res = vec.iter().map(|c_string| c_string.as_ptr()).collect_vec();
     res.push(null());
     res
