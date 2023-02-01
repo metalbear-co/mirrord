@@ -380,6 +380,8 @@ fn layer_start(config: LayerConfig) {
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
+/// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
+/// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
 fn sip_only_layer_start() {
     let mut hook_manager = HookManager::default();

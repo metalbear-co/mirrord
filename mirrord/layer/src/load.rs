@@ -1,5 +1,7 @@
 use mirrord_config::{util::VecOrSingle, LayerConfig};
 
+/// For processes that spawn other processes whe should also patch sip on the spawned instances,
+/// curretly limiting to list from `SIP_ONLY_PROCESSES`
 #[cfg(target_os = "macos")]
 mod sip {
     use std::{collections::HashSet, sync::LazyLock};
@@ -12,13 +14,18 @@ mod sip {
     }
 }
 
+/// Load Type of mirrord-layer
 pub enum LoadType {
+    /// Mirrord is loaded fully and layer should connect to agent
     Full(Box<LayerConfig>),
+    /// Only load sip patch required hooks
     #[cfg(target_os = "macos")]
     SIPOnly,
+    /// Skip on current process
     Skip,
 }
 
+/// Determine the load type for the `given_process` with the help of [`should_load`]
 pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
