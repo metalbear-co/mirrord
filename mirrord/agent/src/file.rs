@@ -346,7 +346,7 @@ impl FileManager {
                         .and_then(|read_amount| {
                             // Revert file to original position + bytes read (in case the bufreader
                             // advanced too much)
-                            file.seek(SeekFrom::Start(original_position + read_amount))?;
+                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
 
                             // We handle the extra bytes in the `fgets` hook, so here we can just
                             // return the full buffer.
