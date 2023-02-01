@@ -336,19 +336,17 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
+                    let original_position = file.stream_position();
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
                     // limit bytes read using take
                     let read_result = reader
                         .read_until(b'\n', &mut buffer)
+                        .and_then(|read_amount| Ok(read_amount))
                         .and_then(|read_amount| {
-                            // Take the new position to update the file's cursor position later.
-                            let position_after_read = reader.stream_position()?;
-
-                            Ok((read_amount, position_after_read))
-                        })
-                        .and_then(|(read_amount, seek_to)| {
-                            file.seek(SeekFrom::Start(seek_to))?;
+                            // Revert file to original position + bytes read (in case the bufreader
+                            // advanced too much)
+                            file.seek(SeekFrom::Start(original_position + read_amount))?;
 
                             // We handle the extra bytes in the `fgets` hook, so here we can just
                             // return the full buffer.
