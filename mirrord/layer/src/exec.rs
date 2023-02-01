@@ -3,8 +3,10 @@
 use std::{
     env,
     ffi::{c_void, CStr, CString},
+    ptr::null,
 };
 
+use itertools::Itertools;
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
@@ -13,12 +15,11 @@ use tracing::{trace, warn};
 
 use crate::{
     detour::{
-        Bypass::{ExecOnNonExistingFile, NoSipDetected, NoTempDirInArgv, TooManyArgs},
+        Bypass::{ExecOnNonExistingFile, NoSipDetected, TooManyArgs},
         Detour,
         Detour::{Bypass, Error, Success},
     },
-    error::HookError,
-    exec::patched_args::PatchedArgs,
+    error::{HookError, HookError::Null},
     file::ops::str_from_rawish,
     hooks::HookManager,
     replace,
@@ -39,8 +40,7 @@ pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[tracing::instrument(level = "trace")]
-pub(super) fn patch_if_sip(rawish_path: Option<&CStr>) -> Detour<String> {
-    let path = str_from_rawish(rawish_path)?;
+pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     match sip_patch(path) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
@@ -74,13 +74,12 @@ fn raw_to_str(raw_str: &*const c_char) -> Detour<&str> {
 
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
-fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>> {
+fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<CString>> {
     let tmp_dir = env::temp_dir()
         .join(MIRRORD_PATCH_DIR)
         .to_string_lossy()
         .to_string();
-    let mut ptr_vec: Vec<*const c_char> = Vec::new();
-    let mut changed = false; // Did we change any of the args?
+    let mut c_string_vec: Vec<CString> = Vec::new();
 
     // Iterate through args, if an argument is a path inside our temp dir, save pointer to
     // after that prefix instead.
@@ -96,25 +95,26 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<*const c_char>
         }
         let arg_str = raw_to_str(arg)?;
         trace!("exec arg: {arg_str}");
-        ptr_vec.push(arg_str.strip_prefix(&tmp_dir).map_or_else(
-            || arg_str.as_ptr() as *const c_char, // No temp dir, use arg as is.
-            |original_path| {
-                trace!(
-                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
-                    arg_str,
-                    original_path
-                );
-                changed = true;
-                original_path.as_ptr() as *const c_char
-            },
-        ));
+
+        c_string_vec.push(
+            CString::new(arg_str
+                .strip_prefix(&tmp_dir)
+                .inspect(|original_path| {
+                    trace!(
+                        "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                        arg_str,
+                        original_path
+                    );
+                })
+                .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
+                // As the string slice we get here is a slice of memory allocated and managed by
+                // the user app, we copy the data and create new CStrings out of the copy without
+                // consuming the original data.
+                .to_owned()
+            )?
+        );
     }
-    if changed {
-        ptr_vec.push(std::ptr::null::<c_char>()); // Terminate with null.
-        Success(ptr_vec)
-    } else {
-        Bypass(NoTempDirInArgv)
-    }
+    Success(c_string_vec)
 }
 
 unsafe fn patch_sip_for_new_process(
@@ -126,25 +126,35 @@ unsafe fn patch_sip_for_new_process(
         .unwrap_or_default();
     trace!("Executable {} called execve/posix_spawn", exe_path);
 
-    // Do unsafe part of path conversion here.
-    let rawish_path = (!path.is_null()).then(|| CStr::from_ptr(path));
-    CString::from(rawish_path);
+    // TODO: should I change this function to return a result, and if exec/spawn are called with a
+    //       null pointer we could just pass it on instead of panicking?
+    let path_str = raw_to_str(&path).expect("Exec/Spawn hook got null pointer for path.");
+
     // Continue even if there were errors - just run without patching.
-    let path_c_string = patch_if_sip(rawish_path)
-        .map(|s| CString::from(s))
-        .unwrap_or(path);
+    let path_c_string = patch_if_sip(path_str)
+        .and_then(|w| {
+            // TODO: is there a shorter way to convert a Result into a Detour in this situation?
+            CString::new(w).map_or_else(|err| Error(Null(err)), |c_string| Success(c_string))
+        })
+        .unwrap_or(
+            CString::new(path_str.to_string()).unwrap(),
+            // unwrap(): path_str was created from CString so it won't have any nulls.
+        );
 
     let argv_arr = Nul::new_unchecked(argv);
 
-    // If we intercept args, we create a new array.
-    // execve takes a null terminated array of char pointers.
-    // ptr_vec will own the vector that will be passed to execve as an array.
-    let argv_vec = intercept_tmp_dir(argv_arr)
-        .map(|v| {
-            let (res, _, _) = v.into_raw_parts();
-            res
-        })
-        .unwrap_or(argv);
+    // TODO: if we want this function to return a Vec, we have to somehow return a vec also if there
+    //      is some problem in intercept_tmp_dir, up until now we just returned the original pointer
+    //      and let libc handle the error. Now we return an empty vector. Is this ok?
+    let argv_vec = intercept_tmp_dir(argv_arr).unwrap_or_default();
+    (path_c_string, argv_vec)
+}
+
+// TODO: get rid of this.
+fn c_string_vec_to_null_terminated_pointer_vec(vec: &Vec<CString>) -> Vec<*const c_char> {
+    let mut res = vec.iter().map(|c_string| c_string.as_ptr()).collect_vec();
+    res.push(null());
+    res
 }
 
 /// Hook for `libc::execve`.
@@ -161,7 +171,8 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     let (path, argv) = patch_sip_for_new_process(path, argv);
-    FN_EXECVE(path.as_c_str(), std::ptr::addr_of!(argv), envp)
+    let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&argv);
+    FN_EXECVE(path.as_ptr(), null_terminated_argv.as_ptr(), envp)
 }
 
 // TODO: do we also need to hook posix_spawnp?
@@ -175,12 +186,13 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     envp: *const *const c_char,
 ) -> c_int {
     let (path, argv) = patch_sip_for_new_process(path, argv);
+    let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&argv);
     FN_POSIX_SPAWN(
         pid,
-        path.as_c_str(),
+        path.as_ptr(),
         file_actions,
         attrp,
-        std::ptr::addr_of!(argv),
+        null_terminated_argv.as_ptr(),
         envp,
     )
 }

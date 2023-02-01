@@ -172,6 +172,7 @@ pub(crate) enum Bypass {
     #[cfg(target_os = "macos")]
     ExecOnNonExistingFile(String),
 
+    // TODO: delete if unused.
     /// No args where changed in `intercept_tmp_dir`.
     #[cfg(target_os = "macos")]
     NoTempDirInArgv,
@@ -295,6 +296,45 @@ impl<S> Detour<S> {
         match self {
             Detour::Success(s) => Some(s),
             _ => None,
+        }
+    }
+
+    /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
+    ///
+    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
+    /// fail.
+    /// Currently defined only on macos because it is only used in macos-only code.
+    /// Remove the cfg attribute to enable using in other code.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn unwrap_or(self, default: S) -> S {
+        match self {
+            Detour::Success(s) => s,
+            _ => default,
+        }
+    }
+
+    /// Return the contained `Success` value or the type's default if `Bypass` or `Error`.
+    ///
+    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
+    /// fail.
+    /// Currently defined only on macos because it is only used in macos-only code.
+    /// Remove the cfg attribute to enable using in other code.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn unwrap_or_default(self) -> S
+    where
+        S: Default,
+    {
+        match self {
+            Detour::Success(s) => s,
+            _ => S::default(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn expect(self, message: &str) -> S {
+        match self {
+            Detour::Success(s) => s,
+            _ => panic!("{message}"),
         }
     }
 }
