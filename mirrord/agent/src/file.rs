@@ -336,11 +336,10 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
+                    let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
                     // limit bytes read using take
                     let read_result = reader
-                        .take(buffer_size)
                         .read_until(b'\n', &mut buffer)
                         .and_then(|read_amount| {
                             // Take the new position to update the file's cursor position later.
