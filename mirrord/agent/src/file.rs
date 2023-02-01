@@ -340,7 +340,7 @@ impl FileManager {
                     // limit bytes read using take
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    reader
+                    Ok(reader
                         .read_until(b'\n', &mut buffer)
                         .and_then(|read_amount| {
                             // Revert file to original position + bytes read (in case the
@@ -355,7 +355,7 @@ impl FileManager {
                             };
 
                             Ok(response)
-                        })
+                        })?)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
