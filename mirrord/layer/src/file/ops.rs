@@ -242,8 +242,11 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
-    let mut open_files = OPEN_FILES.lock()?;
-    let remote_file_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
+    let remote_file_fd = OPEN_FILES
+        .lock()?
+        .get(&fd)
+        .ok_or(Bypass::LocalFdNotFound(fd))?
+        .fd;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -263,7 +266,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         .insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
-    open_files.remove(&fd);
+    OPEN_FILES.lock()?.remove(&fd);
 
     Detour::Success(local_dir_fd as usize)
 }

@@ -787,11 +787,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .is_active();
 
     // Remove from sockets, or if not a socket, remove from files if file mode active
-    SOCKETS.lock().unwrap().remove(&fd).is_none().then(|| {
-        if file_mode_active {
-            OPEN_FILES.lock().unwrap().remove(&fd);
-        }
-    });
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active {
+        // SOCKETS lock dropped, not holding it while locking OPEN_FILES.
+        OPEN_FILES.lock().unwrap().remove(&fd);
+    }
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
