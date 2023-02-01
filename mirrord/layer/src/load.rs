@@ -4,19 +4,19 @@ use mirrord_config::{util::VecOrSingle, LayerConfig};
 mod sip {
     use std::{collections::HashSet, sync::LazyLock};
 
-    static SIP_EXEC_PROCESSES: LazyLock<HashSet<&str>> =
+    static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash", "cargo", "rustc", "cargo-watch"]));
 
-    pub fn is_sip_exec(given_process: &str) -> bool {
-        SIP_EXEC_PROCESSES.contains(given_process)
+    pub fn is_sip_only(given_process: &str) -> bool {
+        SIP_ONLY_PROCESSES.contains(given_process)
     }
 }
 
 pub enum LoadType {
     Full(Box<LayerConfig>),
     #[cfg(target_os = "macos")]
-    SIPExecve,
-    Skipped,
+    SIPOnly,
+    Skip,
 }
 
 pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
@@ -26,11 +26,11 @@ pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
         LoadType::Full(Box::new(config))
     } else {
         #[cfg(target_os = "macos")]
-        if sip::is_sip_exec(given_process) {
-            return LoadType::SIPExecve;
+        if sip::is_sip_only(given_process) {
+            return LoadType::SIPOnly;
         }
 
-        LoadType::Skipped
+        LoadType::Skip
     }
 }
 

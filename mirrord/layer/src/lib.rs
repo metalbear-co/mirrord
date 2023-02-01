@@ -273,8 +273,8 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPExecve => sip_execve_layer_start(),
-        LoadType::Skipped => {}
+        LoadType::SIPOnly => sip_only_layer_start(),
+        LoadType::Skip => {}
     }
 
     Ok(())
@@ -381,7 +381,7 @@ fn layer_start(config: LayerConfig) {
 }
 
 #[cfg(target_os = "macos")]
-fn sip_execve_layer_start() {
+fn sip_only_layer_start() {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec::enable_execve_hook(&mut hook_manager) };
