@@ -337,7 +337,7 @@ impl FileManager {
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
                     // limit bytes read using take
-                    let mut reader = BufReader::new(std::io::Read::by_ref().take(buffer_size));
+                    let mut reader = BufReader::new(std::io::Read::by_ref(file).take(buffer_size));
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
                     let read_result = reader
                         .read_until(b'\n', &mut buffer)
