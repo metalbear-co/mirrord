@@ -336,7 +336,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let original_position = file.stream_position();
+                    let original_position = file.stream_position()?;
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
                     // limit bytes read using take
