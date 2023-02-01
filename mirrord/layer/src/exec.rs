@@ -132,10 +132,7 @@ unsafe fn patch_sip_for_new_process(
 
     // Continue even if there were errors - just run without patching.
     let path_c_string = patch_if_sip(path_str)
-        .and_then(|w| {
-            // TODO: is there a shorter way to convert a Result into a Detour in this situation?
-            CString::new(w).map_or_else(|err| Error(Null(err)), Success)
-        })
+        .and_then(|w| Success(CString::new(w)?))
         .unwrap_or(
             CString::new(path_str.to_string()).unwrap(),
             // unwrap(): path_str was created from CString so it won't have any nulls.
