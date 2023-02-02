@@ -7,7 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-- Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31 `.
+- Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31`.
 
 ## 3.21.0
 
