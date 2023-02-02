@@ -145,7 +145,7 @@ mod steal {
         // Since the app exits on DELETE, if there's a bug and the DELETE was stolen even though it
         // was not supposed to, the app would now exit and the next request would fail.
 
-        // Send a DELETE that should not be matched and thus not stolen.
+        // Send a DELETE that should be matched and thus stolen, closing the app.
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
@@ -172,9 +172,9 @@ mod steal {
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
+        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
-        let application = Application::NodeTcpEcho;
         let service = tcp_echo_service.await;
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
@@ -210,7 +210,19 @@ mod steal {
         let stdout_after = mirrorded_process.get_stdout();
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        mirrorded_process.child.kill().await.unwrap();
+        // Send a DELETE that should be matched and thus stolen, closing the app.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.delete(&url);
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
+
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
         application.assert(&mirrorded_process);
     }
 
@@ -226,6 +238,7 @@ mod steal {
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
+        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
             "Hello, websocket!\n".to_string(),
             "websocket\n".to_string()
@@ -234,7 +247,6 @@ mod steal {
     ) {
         use futures_util::{SinkExt, StreamExt};
 
-        let application = Application::NodeTcpEcho;
         let service = websocket_service.await;
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
@@ -285,7 +297,19 @@ mod steal {
         let stdout_after = mirrorded_process.get_stdout();
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        mirrorded_process.child.kill().await.unwrap();
+        // Send a DELETE that should be matched and thus stolen, closing the app.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.delete(&url);
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
+
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
         application.assert(&mirrorded_process);
     }
 }
