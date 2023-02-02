@@ -3,6 +3,7 @@
 use std::{
     env,
     ffi::{c_void, CStr, CString},
+    marker::PhantomData,
     mem::MaybeUninit,
     ptr::null,
 };
@@ -73,14 +74,41 @@ fn raw_to_str(raw_str: &*const c_char) -> Detour<&str> {
     str_from_rawish(rawish_str)
 }
 
+struct Argv(Vec<CString>);
+
+impl Default for Argv {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+#[repr(C)]
+struct StringPtr<'a> {
+    ptr: *const c_char,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl Argv {
+    fn null_vec<'a>(&'a self) -> Vec<StringPtr<'a>> {
+        self
+            .0
+            .iter()
+            .map(|cstr| StringPtr {
+                ptr: cstr.as_ptr(),
+                _phantom: PhantomData::default(),
+            })
+            .collect()
+    }
+}
+
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
-fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<MaybeUninit<CString>>> {
+fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
     let tmp_dir = env::temp_dir()
         .join(MIRRORD_PATCH_DIR)
         .to_string_lossy()
         .to_string();
-    let mut c_string_vec: Vec<MaybeUninit<CString>> = Vec::new();
+    let mut c_string_vec = Argv::default();
 
     // Iterate through args, if an argument is a path inside our temp dir, save pointer to
     // after that prefix instead.
@@ -97,8 +125,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<MaybeUninit<CS
         let arg_str = raw_to_str(arg)?;
         trace!("exec arg: {arg_str}");
 
-        c_string_vec.push(
-            MaybeUninit::new(
+        c_string_vec.0.push(
                 CString::new(arg_str
                     .strip_prefix(&tmp_dir)
                     .inspect(|original_path| {
@@ -115,9 +142,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<MaybeUninit<CS
                     .to_owned()
                 )?
             )
-        );
     }
-    c_string_vec.push(MaybeUninit::zeroed());
     Success(c_string_vec)
 }
 
@@ -128,7 +153,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<MaybeUninit<CS
 unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-) -> Detour<(CString, Vec<MaybeUninit<CString>>)> {
+) -> Detour<(CString, Argv)> {
     let calling_exe = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -147,17 +172,6 @@ unsafe fn patch_sip_for_new_process(
     Success((path_c_string, argv_vec))
 }
 
-/// After we're done with the new vector of CStrings (which are [`MaybeUninit`] so that we can put
-/// a null pointer at the end of the vector), we have to make sure they are dropped as [`CString`]s.
-///
-/// The vector must have only initialized items except for the last item that should be
-/// uninitialized.
-fn drop_vec(mut mu_c_string_vec: Vec<MaybeUninit<CString>>) {
-    mu_c_string_vec.pop(); // Make sure CString::drop is NOT called on the terminating null.
-    mu_c_string_vec
-        .into_iter()
-        .for_each(|mut mu_c_string| unsafe { mu_c_string.assume_init_drop() })
-}
 
 /// Hook for `libc::execve`.
 ///
@@ -173,7 +187,9 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
-        Success((new_path, mut new_argv)) => {
+        Success((new_path, new_argv)) => {
+            let mut new_argv = new_argv.null_vec();
+            new_argv.push(StringPtr{ptr: std::ptr::null(), _phantom: PhantomData::default()});
             // Here we assume that in the memory - a buffer of `CStrings` is exactly the same
             // as a buffer of the respective `.as_ptr()`s of those `CString`s.
             let res = FN_EXECVE(
@@ -181,13 +197,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
                 new_argv.as_ptr() as *const *const c_char,
                 envp,
             );
-
-            // When calling drop_vec, we have to be sure that all items in the vector are
-            // initialized except for the last. We are sure of that here, because all the vector
-            // items are created with MaybeUninit::new, so it is safe to assume they are
-            // init, except for the last item which is created as MaybeUninit::zeroed.
-            // Without this call, we would leak all the CStrings in the vec.
-            drop_vec(new_argv);
 
             res
         }
@@ -207,6 +216,8 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
+            let mut new_argv = new_argv.null_vec();
+            new_argv.push(StringPtr{ptr: std::ptr::null(), _phantom: PhantomData::default()});
             let res = FN_POSIX_SPAWN(
                 pid,
                 new_path.as_ptr(),
@@ -218,11 +229,6 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
                 envp,
             );
 
-            // When calling drop_vec, we have to be sure that all items in the vector are
-            // initialized. We are sure of that here, because except for the last item of the
-            // vector all items are created with MaybeUninit::new, so it is safe to assume they are
-            // init. Without this call, we would leak all the CStrings in the vec.
-            drop_vec(new_argv);
 
             res
         }
