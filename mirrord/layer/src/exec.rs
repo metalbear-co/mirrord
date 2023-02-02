@@ -72,13 +72,8 @@ fn raw_to_str(raw_str: &*const c_char) -> Detour<&str> {
     str_from_rawish(rawish_str)
 }
 
+#[derive(Default)]
 struct Argv(Vec<CString>);
-
-impl Default for Argv {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
 
 /// This must be memory-same as just a `*const c_char`.
 #[repr(C)]
@@ -198,13 +193,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
             let new_argv = new_argv.null_vec();
-            let res = FN_EXECVE(
+            FN_EXECVE(
                 new_path.as_ptr(),
                 new_argv.as_ptr() as *const *const c_char,
                 envp,
-            );
-
-            res
+            )
         }
         _ => FN_EXECVE(path, argv, envp),
     }
@@ -223,16 +216,14 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
             let new_argv = new_argv.null_vec();
-            let res = FN_POSIX_SPAWN(
+            FN_POSIX_SPAWN(
                 pid,
                 new_path.as_ptr(),
                 file_actions,
                 attrp,
                 new_argv.as_ptr() as *const *const c_char,
                 envp,
-            );
-
-            res
+            )
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
