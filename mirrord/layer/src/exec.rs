@@ -96,12 +96,14 @@ impl Argv {
         }
     }
 
+    /// Get a vector of pointers of which the data buffer is memory-same as a null-terminated array
+    /// of pointers to null-terminated strings.
     fn null_vec(&self) -> Vec<StringPtr> {
         let mut vec = self
             .0
             .iter()
-            .map(|cstr| StringPtr {
-                ptr: cstr.as_ptr(),
+            .map(|c_string| StringPtr {
+                ptr: c_string.as_ptr(),
                 ..Default::default()
             })
             .collect();
