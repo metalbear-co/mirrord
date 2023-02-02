@@ -145,7 +145,7 @@ mod steal {
         // Since the app exits on DELETE, if there's a bug and the DELETE was stolen even though it
         // was not supposed to, the app would now exit and the next request would fail.
 
-        // Send a DELETE that should not be matched and thus not stolen.
+        // Send a DELETE that should be matched and thus stolen, closing the app.
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
@@ -172,9 +172,9 @@ mod steal {
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
+        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
-        let application = Application::NodeTcpEcho;
         let service = tcp_echo_service.await;
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
@@ -210,34 +210,20 @@ mod steal {
         let stdout_after = mirrorded_process.get_stdout();
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        mirrorded_process.child.kill().await.unwrap();
+        // Send a DELETE that should be matched and thus stolen, closing the app.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.delete(&url);
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        // Wait for agent to exit.
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
 
-        // Now do a meta-test to see that with this setup but without the http filter the data does
-        // reach the local app.
-
-        let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut mirrorded_process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
-            .await;
-
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
-
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(tcp_data.as_bytes()).unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
-        assert_eq!(&buf[7..], tcp_data); // The correct data was sent there and back.
-
-        // Verify the data was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
-        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
-        mirrorded_process.child.kill().await.unwrap();
+        application.assert(&mirrorded_process);
     }
 
     /// Test the case where running with `steal` set and an http header filter, we get an HTTP
@@ -252,6 +238,7 @@ mod steal {
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
+        #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
             "Hello, websocket!\n".to_string(),
             "websocket\n".to_string()
@@ -260,7 +247,6 @@ mod steal {
     ) {
         use futures_util::{SinkExt, StreamExt};
 
-        let application = Application::NodeTcpEcho;
         let service = websocket_service.await;
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
@@ -311,33 +297,19 @@ mod steal {
         let stdout_after = mirrorded_process.get_stdout();
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        mirrorded_process.child.kill().await.unwrap();
+        // Send a DELETE that should be matched and thus stolen, closing the app.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.delete(&url);
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        // Wait for agent to exit.
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
 
-        // Now do a meta-test to see that with this setup but without the http filter the data does
-        // reach the local app.
-        let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
-        let mut mirrorded_process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
-            .await;
-
-        mirrorded_process.wait_for_line(Duration::from_secs(15), "daemon subscribed");
-
-        let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write(write_data.as_bytes()).unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(&buf[..7], "local: "); // The data was stolen to local app.
-        assert_eq!(&buf[7..], write_data); // The correct data was sent there and back.
-
-        // Verify the data was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
-        assert!(stdout_after.contains("LOCAL APP GOT DATA"));
-        mirrorded_process.child.kill().await.unwrap();
+        application.assert(&mirrorded_process);
     }
 }
