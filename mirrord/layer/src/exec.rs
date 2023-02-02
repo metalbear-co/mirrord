@@ -120,31 +120,23 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<CString>> {
 unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-) -> (CString, Vec<CString>) {
-    let exe_path = env::current_exe()
+) -> Detour<(CString, Vec<CString>)> {
+    let calling_exe = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
-    trace!("Executable {} called execve/posix_spawn", exe_path);
+    trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    // TODO: should I change this function to return a result, and if exec/spawn are called with a
-    //       null pointer we could just pass it on instead of panicking?
-    let path_str = raw_to_str(&path).expect("Exec/Spawn hook got null pointer for path.");
+    let path_str = raw_to_str(&path)?;
 
-    // Continue even if there were errors - just run without patching.
     let path_c_string = patch_if_sip(path_str)
-        .and_then(|w| Success(CString::new(w)?))
-        .unwrap_or(
-            CString::new(path_str.to_string()).unwrap(),
-            // unwrap(): path_str was created from CString so it won't have any nulls.
-        );
+        .and_then(|new_path| Success(CString::new(new_path)?))
+        // Continue also on error, use original path, don't bypass yet, try cleaning argv.
+        .unwrap_or(CString::new(path_str.to_string())?);
 
     let argv_arr = Nul::new_unchecked(argv);
 
-    // TODO: if we want this function to return a Vec, we have to somehow return a vec also if there
-    //      is some problem in intercept_tmp_dir, up until now we just returned the original pointer
-    //      and let libc handle the error. Now we return an empty vector. Is this ok?
-    let argv_vec = intercept_tmp_dir(argv_arr).unwrap_or_default();
-    (path_c_string, argv_vec)
+    let argv_vec = intercept_tmp_dir(argv_arr)?;
+    Success((path_c_string, argv_vec))
 }
 
 // TODO: get rid of this.
@@ -167,9 +159,13 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    let (path, argv) = patch_sip_for_new_process(path, argv);
-    let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&argv);
-    FN_EXECVE(path.as_ptr(), null_terminated_argv.as_ptr(), envp)
+    match patch_sip_for_new_process(path, argv) {
+        Success((new_path, new_argv)) => {
+            let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&new_argv);
+            FN_EXECVE(new_path.as_ptr(), null_terminated_argv.as_ptr(), envp)
+        }
+        _ => FN_EXECVE(path, argv, envp),
+    }
 }
 
 // TODO: do we also need to hook posix_spawnp?
@@ -182,14 +178,18 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    let (path, argv) = patch_sip_for_new_process(path, argv);
-    let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&argv);
-    FN_POSIX_SPAWN(
-        pid,
-        path.as_ptr(),
-        file_actions,
-        attrp,
-        null_terminated_argv.as_ptr(),
-        envp,
-    )
+    match patch_sip_for_new_process(path, argv) {
+        Success((new_path, new_argv)) => {
+            let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&new_argv);
+            FN_POSIX_SPAWN(
+                pid,
+                new_path.as_ptr(),
+                file_actions,
+                attrp,
+                null_terminated_argv.as_ptr(),
+                envp,
+            )
+        }
+        _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
+    }
 }
