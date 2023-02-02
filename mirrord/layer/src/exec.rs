@@ -3,6 +3,7 @@
 use std::{
     env,
     ffi::{c_void, CStr, CString},
+    mem::MaybeUninit,
     ptr::null,
 };
 
@@ -74,12 +75,12 @@ fn raw_to_str(raw_str: &*const c_char) -> Detour<&str> {
 
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
-fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<CString>> {
+fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<MaybeUninit<CString>>> {
     let tmp_dir = env::temp_dir()
         .join(MIRRORD_PATCH_DIR)
         .to_string_lossy()
         .to_string();
-    let mut c_string_vec: Vec<CString> = Vec::new();
+    let mut c_string_vec: Vec<MaybeUninit<CString>> = Vec::new();
 
     // Iterate through args, if an argument is a path inside our temp dir, save pointer to
     // after that prefix instead.
@@ -97,30 +98,37 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Vec<CString>> {
         trace!("exec arg: {arg_str}");
 
         c_string_vec.push(
-            CString::new(arg_str
-                .strip_prefix(&tmp_dir)
-                .inspect(|original_path| {
-                    trace!(
-                        "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
-                        arg_str,
-                        original_path
-                    );
-                })
-                .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
-                // As the string slice we get here is a slice of memory allocated and managed by
-                // the user app, we copy the data and create new CStrings out of the copy without
-                // consuming the original data.
-                .to_owned()
-            )?
+            MaybeUninit::new(
+                CString::new(arg_str
+                    .strip_prefix(&tmp_dir)
+                    .inspect(|original_path| {
+                        trace!(
+                            "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                            arg_str,
+                            original_path
+                        );
+                    })
+                    .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
+                    // As the string slice we get here is a slice of memory allocated and managed by
+                    // the user app, we copy the data and create new CStrings out of the copy 
+                    // without consuming the original data.
+                    .to_owned()
+                )?
+            )
         );
     }
+    c_string_vec.push(MaybeUninit::zeroed());
     Success(c_string_vec)
 }
 
+/// Patch the new executable for SIP if necessary. Also: if mirrord's temporary directory appears
+/// in any of the arguments, remove it and leave only the original path of the file. If for example
+/// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
+/// `"/bin/bash"`.
 unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-) -> Detour<(CString, Vec<CString>)> {
+) -> Detour<(CString, Vec<MaybeUninit<CString>>)> {
     let calling_exe = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -139,11 +147,16 @@ unsafe fn patch_sip_for_new_process(
     Success((path_c_string, argv_vec))
 }
 
-// TODO: get rid of this.
-fn c_string_vec_to_null_terminated_pointer_vec(vec: &[CString]) -> Vec<*const c_char> {
-    let mut res = vec.iter().map(|c_string| c_string.as_ptr()).collect_vec();
-    res.push(null());
-    res
+/// After we're done with the new vector of CStrings (which are [`MaybeUninit`] so that we can put
+/// a null pointer at the end of the vector), we have to make sure they are dropped as [`CString`]s.
+///
+/// The vector must have only initialized items except for the last item that should be
+/// uninitialized.
+fn drop_vec(mut mu_c_string_vec: Vec<MaybeUninit<CString>>) {
+    mu_c_string_vec.pop(); // Make sure CString::drop is NOT called on the terminating null.
+    mu_c_string_vec
+        .into_iter()
+        .for_each(|mut mu_c_string| unsafe { mu_c_string.assume_init_drop() })
 }
 
 /// Hook for `libc::execve`.
@@ -160,9 +173,23 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
-        Success((new_path, new_argv)) => {
-            let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&new_argv);
-            FN_EXECVE(new_path.as_ptr(), null_terminated_argv.as_ptr(), envp)
+        Success((new_path, mut new_argv)) => {
+            // Here we assume that in the memory - a buffer of `CStrings` is exactly the same
+            // as a buffer of the respective `.as_ptr()`s of those `CString`s.
+            let res = FN_EXECVE(
+                new_path.as_ptr(),
+                new_argv.as_ptr() as *const *const c_char,
+                envp,
+            );
+
+            // When calling drop_vec, we have to be sure that all items in the vector are
+            // initialized except for the last. We are sure of that here, because all the vector
+            // items are created with MaybeUninit::new, so it is safe to assume they are
+            // init, except for the last item which is created as MaybeUninit::zeroed.
+            // Without this call, we would leak all the CStrings in the vec.
+            drop_vec(new_argv);
+
+            res
         }
         _ => FN_EXECVE(path, argv, envp),
     }
@@ -180,15 +207,24 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
-            let null_terminated_argv = c_string_vec_to_null_terminated_pointer_vec(&new_argv);
-            FN_POSIX_SPAWN(
+            let res = FN_POSIX_SPAWN(
                 pid,
                 new_path.as_ptr(),
                 file_actions,
                 attrp,
-                null_terminated_argv.as_ptr(),
+                // Here we assume that in the memory - a buffer of `CStrings` is exactly the same
+                // as a buffer of the respective `.as_ptr()`s of those `CString`s.
+                new_argv.as_ptr() as *const *const c_char,
                 envp,
-            )
+            );
+
+            // When calling drop_vec, we have to be sure that all items in the vector are
+            // initialized. We are sure of that here, because except for the last item of the
+            // vector all items are created with MaybeUninit::new, so it is safe to assume they are
+            // init. Without this call, we would leak all the CStrings in the vec.
+            drop_vec(new_argv);
+
+            res
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
