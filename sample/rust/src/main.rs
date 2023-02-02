@@ -15,9 +15,7 @@ fn main() -> Result<()> {
     println!(">>>>> read {read_count:#?} bytes from file {file:#?}");
 
     let new_start = file.seek(SeekFrom::Start(10))?;
-    println!(
-        ">>> seek now starts at {new_start:#?} for file {file:#?}"
-    );
+    println!(">>> seek now starts at {new_start:#?} for file {file:#?}");
 
     let mut write_file = OpenOptions::new()
         .create(true)
@@ -28,18 +26,14 @@ fn main() -> Result<()> {
     println!(">>>>> created file with write permission {write_file:#?}");
 
     let written_count = write_file.write("mirrord sample rust".as_bytes()).unwrap();
-    println!(
-        ">>>>> written {written_count:#?} bytes to file {write_file:#?}"
-    );
+    println!(">>>>> written {written_count:#?} bytes to file {write_file:#?}");
 
     write_file.seek(SeekFrom::Start(0)).unwrap();
     println!(">>>>> seeking file back to start {write_file:#?}");
 
     let mut read_buf = vec![0; 128];
     let read_count = write_file.read(&mut read_buf).unwrap();
-    println!(
-        ">>>>> read {read_count:#?} bytes from file {write_file:#?}"
-    );
+    println!(">>>>> read {read_count:#?} bytes from file {write_file:#?}");
 
     let read_str = String::from_utf8_lossy(&read_buf);
     println!(">>>>> read {read_str:#?} from file {write_file:#?}");
@@ -54,9 +48,7 @@ fn main() -> Result<()> {
 
         let mut buffer = vec![0; 128];
         let read_amount = libc::fread(buffer.as_mut_ptr().cast(), size_of::<u8>(), 128, file_ptr);
-        println!(
-            ">>>>> fread read {read_amount:#?} bytes from file {filepath:#?}"
-        );
+        println!(">>>>> fread read {read_amount:#?} bytes from file {filepath:#?}");
 
         let read_str = String::from_utf8_lossy(&buffer);
         println!(">>>>> read {read_str:#?} from file {filepath:#?}");

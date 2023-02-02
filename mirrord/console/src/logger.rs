@@ -57,9 +57,7 @@ where
     let hello = protocol::Hello {
         process_info: protocol::ProcessInfo {
             args: std::env::args().collect(),
-            env: std::env::vars()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect(),
+            env: std::env::vars().map(|(k, v)| format!("{k}={v}")).collect(),
             cwd: std::env::current_dir()
                 .map(|p| p.to_str().map(String::from))
                 .unwrap_or(None),

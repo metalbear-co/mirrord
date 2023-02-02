@@ -228,9 +228,8 @@ impl IPTableFormatter {
     }
 
     fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
-        let redirect_rule = format!(
-            "-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}"
-        );
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         match self {
             IPTableFormatter::Normal => redirect_rule,

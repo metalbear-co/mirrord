@@ -106,9 +106,7 @@ impl EnvVarGuard {
             if value != orig_val {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!(
-                        "Missmatch in values recived {value} expected {orig_val}"
-                    ),
+                    format!("Missmatch in values recived {value} expected {orig_val}"),
                 ));
             }
         }

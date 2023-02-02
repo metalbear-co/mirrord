@@ -80,8 +80,7 @@ pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub enum SocketState {
     #[default]
     Initialized,
@@ -89,8 +88,6 @@ pub enum SocketState {
     Listening(Bound),
     Connected(Connected),
 }
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SocketKind {

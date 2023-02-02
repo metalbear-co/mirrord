@@ -82,7 +82,6 @@ pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
     let progress = NoProgress;
-    
 
     if let Some(address) = &config.connect_tcp {
         Connection(address)
