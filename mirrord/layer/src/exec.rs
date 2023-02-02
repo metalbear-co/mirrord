@@ -4,11 +4,9 @@ use std::{
     env,
     ffi::{c_void, CStr, CString},
     marker::PhantomData,
-    mem::MaybeUninit,
     ptr,
 };
 
-use itertools::Itertools;
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
 use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
@@ -21,7 +19,7 @@ use crate::{
         Detour,
         Detour::{Bypass, Error, Success},
     },
-    error::{HookError, HookError::Null},
+    error::HookError,
     file::ops::str_from_rawish,
     hooks::HookManager,
     replace,
@@ -82,6 +80,7 @@ impl Default for Argv {
     }
 }
 
+/// This must be memory-same as just a `*const c_char`.
 #[repr(C)]
 struct StringPtr<'a> {
     ptr: *const c_char,
@@ -92,19 +91,19 @@ impl Argv {
     fn null_string_ptr() -> StringPtr<'static> {
         StringPtr {
             ptr: ptr::null(),
-            ..Default::default()
+            _phantom: Default::default(),
         }
     }
 
     /// Get a vector of pointers of which the data buffer is memory-same as a null-terminated array
     /// of pointers to null-terminated strings.
     fn null_vec(&self) -> Vec<StringPtr> {
-        let mut vec = self
+        let mut vec: Vec<StringPtr> = self
             .0
             .iter()
             .map(|c_string| StringPtr {
                 ptr: c_string.as_ptr(),
-                ..Default::default()
+                _phantom: Default::default(),
             })
             .collect();
         vec.push(Self::null_string_ptr());
