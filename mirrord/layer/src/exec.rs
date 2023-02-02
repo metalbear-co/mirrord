@@ -5,7 +5,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     marker::PhantomData,
     mem::MaybeUninit,
-    ptr::null,
+    ptr,
 };
 
 use itertools::Itertools;
@@ -89,15 +89,24 @@ struct StringPtr<'a> {
 }
 
 impl Argv {
-    fn null_vec<'a>(&'a self) -> Vec<StringPtr<'a>> {
-        self
+    fn null_string_ptr() -> StringPtr<'static> {
+        StringPtr {
+            ptr: ptr::null(),
+            ..Default::default()
+        }
+    }
+
+    fn null_vec(&self) -> Vec<StringPtr> {
+        let mut vec = self
             .0
             .iter()
             .map(|cstr| StringPtr {
                 ptr: cstr.as_ptr(),
-                _phantom: PhantomData::default(),
+                ..Default::default()
             })
-            .collect()
+            .collect();
+        vec.push(Self::null_string_ptr());
+        vec
     }
 }
 
@@ -172,7 +181,6 @@ unsafe fn patch_sip_for_new_process(
     Success((path_c_string, argv_vec))
 }
 
-
 /// Hook for `libc::execve`.
 ///
 /// Patch file if it is SIPed, used new path if patched.
@@ -188,10 +196,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
-            let mut new_argv = new_argv.null_vec();
-            new_argv.push(StringPtr{ptr: std::ptr::null(), _phantom: PhantomData::default()});
-            // Here we assume that in the memory - a buffer of `CStrings` is exactly the same
-            // as a buffer of the respective `.as_ptr()`s of those `CString`s.
+            let new_argv = new_argv.null_vec();
             let res = FN_EXECVE(
                 new_path.as_ptr(),
                 new_argv.as_ptr() as *const *const c_char,
@@ -216,19 +221,15 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
 ) -> c_int {
     match patch_sip_for_new_process(path, argv) {
         Success((new_path, new_argv)) => {
-            let mut new_argv = new_argv.null_vec();
-            new_argv.push(StringPtr{ptr: std::ptr::null(), _phantom: PhantomData::default()});
+            let new_argv = new_argv.null_vec();
             let res = FN_POSIX_SPAWN(
                 pid,
                 new_path.as_ptr(),
                 file_actions,
                 attrp,
-                // Here we assume that in the memory - a buffer of `CStrings` is exactly the same
-                // as a buffer of the respective `.as_ptr()`s of those `CString`s.
                 new_argv.as_ptr() as *const *const c_char,
                 envp,
             );
-
 
             res
         }
