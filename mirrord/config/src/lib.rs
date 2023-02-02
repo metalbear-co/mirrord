@@ -287,11 +287,11 @@ mod tests {
         fn parse(&self, value: &str) -> LayerFileConfig {
             match self {
                 ConfigType::Json => {
-                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
-                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err)),
+                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{err:?}")),
                 ConfigType::Yaml => {
-                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
             }
         }

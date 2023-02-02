@@ -99,7 +99,7 @@ impl EnvVarGuard {
             let orig_val = self.envs.get(key).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Missing env value {}", key),
+                    format!("Missing env value {key}"),
                 )
             })?;
 
@@ -107,8 +107,7 @@ impl EnvVarGuard {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!(
-                        "Missmatch in values recived {} expected {}",
-                        value, orig_val
+                        "Missmatch in values recived {value} expected {orig_val}"
                     ),
                 ));
             }

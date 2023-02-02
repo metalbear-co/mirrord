@@ -35,7 +35,7 @@ mod steal {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
+        if let Some(flag) = agent.flag() { flags.extend(flag) }
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -70,7 +70,7 @@ mod steal {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
+        if let Some(flag) = agent.flag() { flags.extend(flag) }
 
         let mut client = application
             .run(
@@ -116,7 +116,7 @@ mod steal {
         let url = get_service_url(kube_client.clone(), &service).await;
 
         let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
+        if let Some(flag) = agent.flag() { flags.extend(flag) }
         let mut mirrorded_process = application
             .run(
                 &service.target,
@@ -180,7 +180,7 @@ mod steal {
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
         let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
+        if let Some(flag) = agent.flag() { flags.extend(flag) }
         let mut mirrorded_process = application
             .run(
                 &service.target,
@@ -252,7 +252,7 @@ mod steal {
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
         let mut flags = vec!["--steal"];
-        agent.flag().map(|flag| flags.extend(flag));
+        if let Some(flag) = agent.flag() { flags.extend(flag) }
         let mut mirrorded_process = application
             .run(
                 &service.target,

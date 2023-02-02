@@ -81,18 +81,16 @@ pub struct Bound {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 pub enum SocketState {
+    #[default]
     Initialized,
     Bound(Bound),
     Listening(Bound),
     Connected(Connected),
 }
 
-impl Default for SocketState {
-    fn default() -> Self {
-        SocketState::Initialized
-    }
-}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SocketKind {

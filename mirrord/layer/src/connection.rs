@@ -82,7 +82,9 @@ pub(crate) async fn connect(
     config: &LayerConfig,
 ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
     let progress = NoProgress;
-    let agent_api = if let Some(address) = &config.connect_tcp {
+    
+
+    if let Some(address) = &config.connect_tcp {
         Connection(address)
             .connect(&progress)
             .await
@@ -125,7 +127,5 @@ pub(crate) async fn connect(
             .create_connection(agent_ref)
             .await
             .unwrap_or_else(|err| handle_error(err, config))
-    };
-
-    agent_api
+    }
 }
