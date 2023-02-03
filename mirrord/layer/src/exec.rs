@@ -25,7 +25,10 @@ use crate::{
     replace,
 };
 
-const MAX_ARGC: usize = 254;
+/// Maximal number of items to expect in argv.
+/// If there are more we assume something's wrong and abort the detour (and continue without
+/// patching).
+const MAX_ARGC: usize = 256;
 
 pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
@@ -67,11 +70,13 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     }
 }
 
+/// Get a string slice from a reference to a C string (raw char pointer).
 fn raw_to_str(raw_str: &*const c_char) -> Detour<&str> {
     let rawish_str = (!raw_str.is_null()).then(|| unsafe { CStr::from_ptr(raw_str.to_owned()) });
     str_from_rawish(rawish_str)
 }
 
+/// Hold a vector of new CStrings to use instead of the original argv.
 #[derive(Default)]
 struct Argv(Vec<CString>);
 
@@ -83,6 +88,7 @@ struct StringPtr<'a> {
 }
 
 impl Argv {
+    /// Get a null-pointer [`StringPtr`].
     fn null_string_ptr() -> StringPtr<'static> {
         StringPtr {
             ptr: ptr::null(),
@@ -179,11 +185,18 @@ unsafe fn patch_sip_for_new_process(
 
 /// Hook for `libc::execve`.
 ///
-/// Patch file if it is SIPed, used new path if patched.
-/// If any args in argv are paths to mirrord's temp directory, strip the temp dir part.
-/// So if argv[1] is "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx"
-/// Switch it to "/opt/homebrew/bin/npx"
-/// then call normal execve with the possibly updated path and argv and the original envp.
+/// We change 2 arguments and then call the original functions:
+/// 1. The executable path - we check it for SIP, create a patched binary and use the path to the
+///     new path instead of the original path. If there is no SIP, we use a new string with the
+///     same path.
+/// 2. argv - we strip mirrord's temporary directory from the start of arguments.
+///     So if argv[1] is "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx"
+///     Switch it to "/opt/homebrew/bin/npx"
+///     Also here we create a new array with pointers to new strings, even if there are no changes
+///     needed (except for the case of an error).
+///
+/// If there is an error in the detour, we don't exit or anything, we just call the original libc
+/// function with the original passed arguments.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
@@ -203,6 +216,8 @@ pub(crate) unsafe extern "C" fn execve_detour(
     }
 }
 
+/// Hook for `libc::posix_spawn`.
+/// Same as [`execve_detour`], with all the extra arguments present here being passed untouched.
 // TODO: do we also need to hook posix_spawnp?
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
