@@ -54,37 +54,6 @@ impl HyperHandler<HttpV2> {
     }
 }
 
-// #[tracing::instrument(level = "trace", skip(self))]
-async fn response(
-    request: Request<Incoming>,
-    original_destination: SocketAddr,
-    filters: Arc<DashMap<ClientId, Regex>>,
-    port: Port,
-    connection_id: ConnectionId,
-    request_id: RequestId,
-    matched_tx: Sender<HandlerHttpRequest>,
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    if let Some(client_id) = header_matches(&request, &filters) {
-        let request = MatchedHttpRequest {
-            port,
-            connection_id,
-            client_id,
-            request_id,
-            request,
-        };
-
-        let (response_tx, response_rx) = oneshot::channel();
-        let handler_request = HandlerHttpRequest {
-            request,
-            response_tx,
-        };
-
-        matched_request(handler_request, matched_tx, response_rx).await
-    } else {
-        HttpV2::unmatched_request(request, original_destination).await
-    }
-}
-
 // TODO(alex) [low] 2023-02-03: Handle HTTP/2 distinction in the layer.
 //
 // TODO(alex) [low] 2023-02-03: Handle HTTP/2 distinction in the protocol.
@@ -105,7 +74,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
-        Box::pin(response(
+        Box::pin(HttpV2::handle_request(
             request,
             self.original_destination,
             self.filters.clone(),
@@ -152,5 +121,36 @@ impl HttpV2 {
                 .into_parts(),
         )
         .await
+    }
+
+    // #[tracing::instrument(level = "trace", skip(self))]
+    async fn handle_request(
+        request: Request<Incoming>,
+        original_destination: SocketAddr,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+        matched_tx: Sender<HandlerHttpRequest>,
+    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+        if let Some(client_id) = header_matches(&request, &filters) {
+            let request = MatchedHttpRequest {
+                port,
+                connection_id,
+                client_id,
+                request_id,
+                request,
+            };
+
+            let (response_tx, response_rx) = oneshot::channel();
+            let handler_request = HandlerHttpRequest {
+                request,
+                response_tx,
+            };
+
+            matched_request(handler_request, matched_tx, response_rx).await
+        } else {
+            Self::unmatched_request(request, original_destination).await
+        }
     }
 }

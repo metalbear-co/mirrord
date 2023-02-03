@@ -50,40 +50,6 @@ impl HyperHandler<HttpV1> {
     }
 }
 
-// #[tracing::instrument(level = "trace", skip(self))]
-async fn response(
-    request: Request<Incoming>,
-    original_destination: SocketAddr,
-    upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
-    filters: Arc<DashMap<ClientId, Regex>>,
-    port: Port,
-    connection_id: ConnectionId,
-    request_id: RequestId,
-    matched_tx: Sender<HandlerHttpRequest>,
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    if request.headers().get(UPGRADE).is_some() {
-        HttpV1::unmatched_request(request, upgrade_tx, original_destination).await
-    } else if let Some(client_id) = header_matches(&request, &filters) {
-        let request = MatchedHttpRequest {
-            port,
-            connection_id,
-            client_id,
-            request_id,
-            request,
-        };
-
-        let (response_tx, response_rx) = oneshot::channel();
-        let handler_request = HandlerHttpRequest {
-            request,
-            response_tx,
-        };
-
-        matched_request(handler_request, matched_tx, response_rx).await
-    } else {
-        HttpV1::unmatched_request(request, None, original_destination).await
-    }
-}
-
 impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
     type Response = Response<Full<Bytes>>;
 
@@ -95,7 +61,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
-        Box::pin(response(
+        Box::pin(HttpV1::handle_request(
             request,
             self.original_destination,
             self.handle_version.upgrade_tx.take(),
@@ -193,5 +159,39 @@ impl HttpV1 {
                 .into_parts(),
         )
         .await
+    }
+
+    // #[tracing::instrument(level = "trace", skip(self))]
+    async fn handle_request(
+        request: Request<Incoming>,
+        original_destination: SocketAddr,
+        upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+        matched_tx: Sender<HandlerHttpRequest>,
+    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+        if request.headers().get(UPGRADE).is_some() {
+            Self::unmatched_request(request, upgrade_tx, original_destination).await
+        } else if let Some(client_id) = header_matches(&request, &filters) {
+            let request = MatchedHttpRequest {
+                port,
+                connection_id,
+                client_id,
+                request_id,
+                request,
+            };
+
+            let (response_tx, response_rx) = oneshot::channel();
+            let handler_request = HandlerHttpRequest {
+                request,
+                response_tx,
+            };
+
+            matched_request(handler_request, matched_tx, response_rx).await
+        } else {
+            Self::unmatched_request(request, None, original_destination).await
+        }
     }
 }
