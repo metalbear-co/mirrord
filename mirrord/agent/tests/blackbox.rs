@@ -77,7 +77,7 @@ mod tests {
                 .await
                 .expect("couldn't get next message")
                 .expect("got invalid message"),
-            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_subscription_port)))
+            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
         ));
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
