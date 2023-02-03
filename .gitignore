@@ -50,6 +50,18 @@ mirrord/layer/tests/apps/dir_go_bypass/20
 mirrord/layer/tests/apps/issue834/18
 mirrord/layer/tests/apps/issue834/19
 mirrord/layer/tests/apps/issue834/20
+mirrord/layer/tests/apps/read_go/18
+mirrord/layer/tests/apps/read_go/19
+mirrord/layer/tests/apps/read_go/20
+mirrord/layer/tests/apps/write_go/18
+mirrord/layer/tests/apps/write_go/19
+mirrord/layer/tests/apps/write_go/20
+mirrord/layer/tests/apps/lseek_go/18
+mirrord/layer/tests/apps/lseek_go/19
+mirrord/layer/tests/apps/lseek_go/20
+mirrord/layer/tests/apps/faccessat_go/18
+mirrord/layer/tests/apps/faccessat_go/19
+mirrord/layer/tests/apps/faccessat_go/20
 
 ### VSCode ###
 .vscode/*

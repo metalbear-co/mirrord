@@ -12,8 +12,9 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
+    file::{MetadataInternal, OpenOptionsInternal, XstatRequest, XstatResponse},
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage,
+    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
 use rstest::fixture;
 use tokio::{
@@ -254,20 +255,52 @@ impl LayerConnection {
 
     /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
     pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: u64) {
+        self.expect_file_open_with_options(
+            file_name,
+            fd,
+            OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        )
+        .await
+    }
+
+    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    pub async fn expect_file_open_for_writing(&mut self, file_name: &str, fd: u64) {
+        self.expect_file_open_with_options(
+            file_name,
+            fd,
+            OpenOptionsInternal {
+                read: true,
+                write: true,
+                append: false,
+                truncate: true,
+                create: true,
+                create_new: false,
+            },
+        )
+        .await
+    }
+
+    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    pub async fn expect_file_open_with_options(
+        &mut self,
+        file_name: &str,
+        fd: u64,
+        open_options: OpenOptionsInternal,
+    ) {
         // Verify the app tries to open the expected file.
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
+            ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
-                    open_options: mirrord_protocol::file::OpenOptionsInternal {
-                        read: true,
-                        write: false,
-                        append: false,
-                        truncate: false,
-                        create: false,
-                        create_new: false,
-                    },
+                    open_options,
                 }
             ))
         );
@@ -282,7 +315,7 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
+    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
             mirrord_protocol::file::ReadFileRequest {
@@ -312,14 +345,36 @@ impl LayerConnection {
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_file_read(expected_fd).await;
+    pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let buffer_size = self.expect_only_file_read(expected_fd).await;
         let read_amount = min(buffer_size, contents.len() as u64);
         let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
         self.answer_file_read(contents).await;
         // last call should return 0.
-        let _buffer_size = self.expect_file_read(expected_fd).await;
+        let _buffer_size = self.expect_only_file_read(expected_fd).await;
         self.answer_file_read(vec![]).await;
+    }
+
+    /// Verify that the layer sends a file write request with the expected contents.
+    /// Send back response.
+    pub async fn expect_file_write(&mut self, contents: &str, fd: u64) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Write(
+                mirrord_protocol::file::WriteFileRequest {
+                    fd,
+                    write_bytes: contents.as_bytes().to_vec()
+                }
+            ))
+        );
+
+        let written_amount = contents.len() as u64;
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Write(Ok(
+                mirrord_protocol::file::WriteFileResponse { written_amount },
+            ))))
+            .await
+            .unwrap();
     }
 
     /// Read next layer message and verify it's close.
@@ -327,10 +382,39 @@ impl LayerConnection {
     pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
+            ClientMessage::FileRequest(FileRequest::Close(
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
+    }
+
+    /// Assert that the layer sends an xstat request with the given fd, answer the request.
+    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path,
+                fd,
+                follow_symlink: true,
+            }))
+        );
+
+        // reply to Xstat
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 1,
+            user_id: 2,
+            blocks: 3,
+            ..Default::default()
+        };
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse {
+                    metadata: Default::default(),
+                },
+            ))))
+            .await
+            .unwrap();
     }
 }
 
@@ -357,6 +441,12 @@ pub enum Application {
     Go18Issue834,
     NodeSpawn,
     BashShebang,
+    Go18Read,
+    Go19Read,
+    Go20Read,
+    Go18Write,
+    Go19Write,
+    Go20Write,
 }
 
 impl Application {
@@ -409,6 +499,12 @@ impl Application {
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
             Application::NodeSpawn => String::from("node"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
+            Application::Go18Read => String::from("tests/apps/read_go/18"),
+            Application::Go19Read => String::from("tests/apps/read_go/19"),
+            Application::Go20Read => String::from("tests/apps/read_go/20"),
+            Application::Go18Write => String::from("tests/apps/write_go/18"),
+            Application::Go19Write => String::from("tests/apps/write_go/19"),
+            Application::Go20Write => String::from("tests/apps/write_go/20"),
         }
     }
 
@@ -457,6 +553,12 @@ impl Application {
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
+            | Application::Go20Read
+            | Application::Go19Read
+            | Application::Go18Read
+            | Application::Go20Write
+            | Application::Go19Write
+            | Application::Go18Write
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::BashShebang
@@ -483,6 +585,12 @@ impl Application {
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
+            | Application::Go20Read
+            | Application::Go19Read
+            | Application::Go18Read
+            | Application::Go20Write
+            | Application::Go19Write
+            | Application::Go18Write
             | Application::Go19DirBypass
             | Application::Go20DirBypass
             | Application::Go19Dir

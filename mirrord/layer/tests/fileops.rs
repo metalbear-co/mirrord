@@ -1,8 +1,9 @@
 #![feature(assert_matches)]
 
-#[cfg(target_os = "linux")]
-use std::assert_matches::assert_matches;
-use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    assert_matches::assert_matches, collections::HashMap, env::temp_dir, path::PathBuf,
+    process::Stdio, time::Duration,
+};
 
 use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
@@ -15,31 +16,6 @@ use tokio::{
 
 mod common;
 pub use common::*;
-
-struct LayerConnection {
-    codec: Framed<TcpStream, DaemonCodec>,
-}
-
-impl LayerConnection {
-    /// Accept a connection from the layer
-    /// Return the codec of the accepted stream.
-    async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
-        let (stream, _) = listener.accept().await.unwrap();
-        println!("Got connection from library.");
-        Framed::new(stream, DaemonCodec::new())
-    }
-
-    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
-    /// caused by the listen hook.
-    async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
-        let codec = Self::accept_library_connection(listener).await;
-        LayerConnection { codec }
-    }
-
-    async fn is_ended(&mut self) -> bool {
-        self.codec.next().await.is_none()
-    }
-}
 
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
 #[rstest]
@@ -735,6 +711,91 @@ async fn test_go_dir_bypass(
     let mut _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     println!("Got connection from layer.");
 
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file read.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_read_go(
+    #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "read");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    let fd = 1;
+    layer_connection
+        .expect_file_open_for_reading("/app/test.txt", fd)
+        .await;
+
+    layer_connection.expect_xstat(None, Some(fd)).await;
+    layer_connection.expect_xstat(None, Some(fd)).await;
+
+    layer_connection.expect_file_read("Pineapples.", 1).await;
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file read.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_write_go(
+    #[values(
+    // TODO: uncomment:
+    // Application::Go18Write, Application::Go19Write, 
+    Application::Go20Write)]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "localwithoverrides");
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    let fd = 1;
+    layer_connection
+        .expect_file_open_for_writing("/app/test.txt", fd)
+        .await;
+
+    layer_connection.expect_xstat(None, Some(fd)).await;
+
+    layer_connection.expect_file_write("Pineapples.", 1).await;
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
 }

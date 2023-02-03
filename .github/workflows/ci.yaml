@@ -321,6 +321,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dir_go_bypass
           go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
+          go build -o 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
@@ -339,11 +342,17 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dir_go_bypass
           go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
+          go build -o 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"
       - run: |
           cd mirrord/layer/tests/apps/issue834
+          go build -o 18
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
           go build -o 18
       - run: |
           cd mirrord/layer/tests/apps/fileops

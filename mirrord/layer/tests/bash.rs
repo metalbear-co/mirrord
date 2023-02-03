@@ -74,7 +74,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     }
 
     cat_layer_connection
-        .expect_and_answer_file_read("Very interesting contents.", fd)
+        .expect_file_read("Very interesting contents.", fd)
         .await;
 
     // don't expect file close as it might not get called due to race condition
