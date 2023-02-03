@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31`.
+- exec/spawn detour refactor [#999](https://github.com/metalbear-co/mirrord/issues/999).
 
 ## 3.21.0
 
