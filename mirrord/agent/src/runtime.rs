@@ -58,8 +58,7 @@ pub(crate) async fn get_container(
                 container_id,
             }))),
             _ => Err(AgentError::NotFound(format!(
-                "Unknown runtime {:?}",
-                container_runtime
+                "Unknown runtime {container_runtime:?}"
             ))),
         }
     } else {

@@ -27,7 +27,7 @@ pub fn file_tracing_writer() -> NonBlocking {
         run_id
     });
 
-    let log_file_name = format!("{}-mirrord-layer.log", run_id);
+    let log_file_name = format!("{run_id}-mirrord-layer.log");
 
     LOG_FILE_PATH
         .set(PathBuf::from("/tmp/mirrord").join(&log_file_name))
@@ -66,9 +66,8 @@ mirrord encountered an error. We'd appreciate it if you could create an issue on
 
 NOTE: Please redact sensitive information from the logs.
 
-{}
-            "#,
-            issue_link
+{issue_link}
+            "#
         );
     }
 }
@@ -88,7 +87,7 @@ fn create_github_link<P: AsRef<Path>>(log_file: P) -> String {
                 &encoded_logs[(encoded_logs.len() - 6000)..]
             )
         } else {
-            format!("{}&logs={}", base_url, encoded_logs)
+            format!("{base_url}&logs={encoded_logs}")
         }
     } else {
         base_url

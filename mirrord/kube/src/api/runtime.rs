@@ -135,7 +135,7 @@ impl RuntimeDataProvider for DeploymentTarget {
         // convert to key value pair
         let formatted_deployments_labels = deployment_labels
             .iter()
-            .map(|(key, value)| format!("{}={}", key, value))
+            .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<String>>()
             .join(",");
 

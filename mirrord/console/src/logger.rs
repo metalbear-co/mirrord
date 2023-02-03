@@ -57,9 +57,7 @@ where
     let hello = protocol::Hello {
         process_info: protocol::ProcessInfo {
             args: std::env::args().collect(),
-            env: std::env::vars()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect(),
+            env: std::env::vars().map(|(k, v)| format!("{k}={v}")).collect(),
             cwd: std::env::current_dir()
                 .map(|p| p.to_str().map(String::from))
                 .unwrap_or(None),
@@ -87,7 +85,7 @@ where
 /// Connects to the console, and sets the global logger to use it.
 pub async fn init_logger(address: &str) -> Result<()> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let (mut client, _) = connect_async(format!("ws://{}/ws", address))
+    let (mut client, _) = connect_async(format!("ws://{address}/ws"))
         .await
         .map_err(ConsoleError::ConnectError)?;
 

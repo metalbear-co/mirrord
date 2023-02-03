@@ -205,7 +205,7 @@ impl Service<Request<Incoming>> for HyperHandler {
                 .map(|(header_name, header_value)| {
                     header_value
                         .to_str()
-                        .map(|header_value| format!("{}: {}", header_name, header_value))
+                        .map(|header_value| format!("{header_name}: {header_value}"))
                 })
                 .find_map(|header| {
                     filters.iter().find_map(|filter| {

@@ -245,7 +245,7 @@ impl ContainerApi for JobContainer {
             .map_err(KubeApiError::KubeError)?;
 
         let params = ListParams::default()
-            .labels(&format!("job-name={}", mirrord_agent_job_name))
+            .labels(&format!("job-name={mirrord_agent_job_name}"))
             .timeout(60);
 
         pod_progress.done_with("agent pod created");
@@ -267,7 +267,7 @@ impl ContainerApi for JobContainer {
         }
 
         let pods = pod_api
-            .list(&ListParams::default().labels(&format!("job-name={}", mirrord_agent_job_name)))
+            .list(&ListParams::default().labels(&format!("job-name={mirrord_agent_job_name}")))
             .await
             .map_err(KubeApiError::KubeError)?;
 
