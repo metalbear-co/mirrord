@@ -39,6 +39,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
   ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
 
+### Fixed
+
+- Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
+  ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
+
 ## 3.21.0
 
 ### Added
