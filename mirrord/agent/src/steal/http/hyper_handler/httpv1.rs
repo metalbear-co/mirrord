@@ -4,7 +4,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::TryFutureExt;
+use futures::{future::OptionFuture, FutureExt, TryFutureExt};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Incoming, client, header::UPGRADE, http, service::Service, Request, Response};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
@@ -62,7 +62,7 @@ async fn response(
     matched_tx: Sender<HandlerHttpRequest>,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
     if request.headers().get(UPGRADE).is_some() {
-        HttpV1::unmatched_request::<true>(request, upgrade_tx, original_destination).await
+        HttpV1::unmatched_request(request, upgrade_tx, original_destination).await
     } else if let Some(client_id) = header_matches(&request, &filters) {
         let request = MatchedHttpRequest {
             port,
@@ -80,7 +80,7 @@ async fn response(
 
         matched_request(handler_request, matched_tx, response_rx).await
     } else {
-        HttpV1::unmatched_request::<false>(request, upgrade_tx, original_destination).await
+        HttpV1::unmatched_request(request, None, original_destination).await
     }
 }
 
@@ -144,7 +144,7 @@ impl HttpV1 {
     /// receive anything due it being in a different `Request` than the one we actually send to
     /// the hyper machine.
     // #[tracing::instrument(level = "trace")]
-    async fn unmatched_request<const IS_UPGRADE: bool>(
+    async fn unmatched_request(
         request: Request<Incoming>,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
         original_destination: SocketAddr,
@@ -172,17 +172,14 @@ impl HttpV1 {
             // If this is not an upgrade, then we'll just drop the `Sender`, this is enough to
             // signal the `Receiver` in `filter.rs` that we're not dealing with an
             // upgrade request, and that the `HyperHandler` connection can be dropped.
-            if IS_UPGRADE {
+            if let Some(sender) = upgrade_tx {
                 let client::conn::http1::Parts { io, read_buf, .. } = connection.into_parts();
 
-                let _ = upgrade_tx
-                    .map(|sender| {
-                        sender.send(RawHyperConnection {
-                            stream: io,
-                            unprocessed_bytes: read_buf,
-                        })
+                let _ = sender
+                    .send(RawHyperConnection {
+                        stream: io,
+                        unprocessed_bytes: read_buf,
                     })
-                    .transpose()
                     .inspect_err(|_| error!("Failed sending interceptor connection!"));
             }
         });
