@@ -30,7 +30,9 @@ impl RemoteFile {
 
 impl Drop for RemoteFile {
     fn drop(&mut self) {
-        trace!("dropping RemoteFile {self:?}");
+        // TODO: put a warning about logging from here.
+        // TODO: delete commented out log.
+        // trace!("dropping RemoteFile {self:?}");
         let closing_file = Close { fd: self.fd };
 
         if let Err(err) = blocking_send_file_message(FileOperation::Close(closing_file)) {
