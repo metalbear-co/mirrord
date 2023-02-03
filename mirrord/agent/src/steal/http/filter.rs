@@ -1,8 +1,14 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::server::{self, conn::http1};
+use hyper::{
+    rt::Executor,
+    server::{
+        self,
+        conn::{http1, http2},
+    },
+};
 use mirrord_protocol::ConnectionId;
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
@@ -20,6 +26,21 @@ use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Future executor that utilises `tokio` threads.
+#[non_exhaustive]
+#[derive(Default, Debug, Clone)]
+pub struct TokioExecutor;
+
+impl<Fut> Executor<Fut> for TokioExecutor
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    fn execute(&self, fut: Fut) {
+        tokio::spawn(fut);
+    }
+}
 
 /// Controls the amount of data we read when trying to detect if the stream's first message contains
 /// an HTTP request.
@@ -49,10 +70,10 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 ///
 /// It's important to note that, we don't lose the bytes read from the original stream, due to us
 /// converting it into a  [`DefaultReversibleStream`].
-#[tracing::instrument(
-    level = "trace",
-    skip(stolen_stream, matched_tx, connection_close_sender)
-)]
+// #[tracing::instrument(
+//     level = "trace",
+//     skip(stolen_stream, matched_tx, connection_close_sender)
+// )]
 pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
@@ -127,11 +148,37 @@ pub(super) async fn filter_task(
                             Cannot report the closing of connection {connection_id}.");
                         }).map_err(From::from)
                 }
+                HttpVersion::V2 => {
+                    // We have to keep the connection alive to handle a possible upgrade request
+                    // manually.
+                    let server = http2::Builder::new(TokioExecutor::default())
+                        .serve_connection(
+                            reversible_stream,
+                            HyperHandler {
+                                filters,
+                                matched_tx,
+                                connection_id,
+                                port,
+                                original_destination,
+                                request_id: 0,
+                                upgrade_tx: None,
+                            },
+                        )
+                        .await?;
+
+                    connection_close_sender
+                        .send(connection_id)
+                        .await
+                        .inspect_err(|connection_id| {
+                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
+                            Cannot report the closing of connection {connection_id}.");
+                        }).map_err(From::from)
+                }
 
                 // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
                 // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough),
                 // and some more effort to chase some missing implementations.
-                HttpVersion::V2 | HttpVersion::NotHttp => {
+                HttpVersion::NotHttp => {
                     trace!(
                         "Got a connection with unsupported protocol version, passing it through \
                         to its original destination."

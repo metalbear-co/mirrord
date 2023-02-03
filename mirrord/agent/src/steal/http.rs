@@ -81,9 +81,6 @@ impl HttpFilterManager {
         }
     }
 
-    // TODO(alex): Is adding a filter like this enough for it to be added to the hyper task? Do we
-    // have a possible deadlock here? Tune in next week for the conclusion!
-    //
     /// Inserts a new client (layer) and its filter.
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
