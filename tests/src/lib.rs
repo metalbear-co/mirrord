@@ -54,14 +54,14 @@ mod utils {
         name: &str,
     ) {
         let params = ListParams::default()
-            .fields(&format!("metadata.name={}", name))
+            .fields(&format!("metadata.name={name}"))
             .timeout(10);
         let mut stream = api.watch(&params, "0").await.unwrap().boxed();
         while let Some(status) = stream.try_next().await.unwrap() {
             match status {
                 WatchEvent::Modified(_) => break,
                 WatchEvent::Error(s) => {
-                    panic!("Error watching namespaces: {:?}", s);
+                    panic!("Error watching namespaces: {s:?}");
                 }
                 _ => {}
             }
@@ -156,7 +156,7 @@ mod utils {
                     return;
                 }
             }
-            panic!("Timeout waiting for line: {}", line);
+            panic!("Timeout waiting for line: {line}");
         }
 
         pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
@@ -612,7 +612,7 @@ mod utils {
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
-            target: format!("pod/{}/container/{}", target, CONTAINER_NAME),
+            target: format!("pod/{target}/container/{CONTAINER_NAME}"),
             _pod: pod_guard,
             _service: service_guard,
         }
@@ -747,7 +747,7 @@ mod utils {
 
     pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
         let (host_ip, port) = get_service_host_and_port(kube_client, service).await;
-        format!("http://{}:{}", host_ip, port)
+        format!("http://{host_ip}:{port}")
     }
 
     pub async fn get_pod_instance(
@@ -757,7 +757,7 @@ mod utils {
     ) -> Option<String> {
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let pods = pod_api
-            .list(&ListParams::default().labels(&format!("app={}", app_name)))
+            .list(&ListParams::default().labels(&format!("app={app_name}")))
             .await
             .unwrap();
         let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());

@@ -72,7 +72,7 @@ async fn test_self_open(dylib_path: &PathBuf) {
     assert!(layer_connection.is_ended().await);
     let output = server.wait_with_output().await.unwrap();
     let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    println!("{}", stdout_str);
+    println!("{stdout_str}");
     assert!(output.status.success());
     let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(!&stdout_str.to_lowercase().contains("error"));

@@ -67,7 +67,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
         cat_layer_connection
             .codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata: metadata },
+                XstatResponse { metadata },
             ))))
             .await
             .unwrap();

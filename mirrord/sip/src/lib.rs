@@ -85,7 +85,7 @@ mod main {
                     .find(is_fat_x64_arch)
                     .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
                     .ok_or(SipError::NoX64Arch),
-                other => Err(SipError::UnsupportedFileFormat(format!("{:?}", other))),
+                other => Err(SipError::UnsupportedFileFormat(format!("{other:?}"))),
             }
         }
     }

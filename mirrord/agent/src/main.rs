@@ -218,7 +218,7 @@ impl ClientConnectionHandler {
                                 break;
                             }
                             Err(e) => {
-                                self.respond(DaemonMessage::Close(format!("{:?}", e))).await?;
+                                self.respond(DaemonMessage::Close(format!("{e:?}"))).await?;
                                 break;
                             }
                         }

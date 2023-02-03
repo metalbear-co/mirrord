@@ -80,18 +80,13 @@ pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum SocketState {
+    #[default]
     Initialized,
     Bound(Bound),
     Listening(Bound),
     Connected(Connected),
-}
-
-impl Default for SocketState {
-    fn default() -> Self {
-        SocketState::Initialized
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
