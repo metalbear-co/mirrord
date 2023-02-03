@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- exec/spawn detour refactor [#999](https://github.com/metalbear-co/mirrord/issues/999).
+
 ## 3.21.0
 
 ### Added
