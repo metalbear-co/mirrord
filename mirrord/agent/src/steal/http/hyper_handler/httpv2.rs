@@ -59,6 +59,11 @@ impl HyperHandler<HttpV2> {
 // TODO(alex) [low] 2023-02-03: Handle HTTP/2 distinction in the protocol.
 //
 // TODO(alex) [mid] 2023-02-03: Some of the channels are dealing with HTTP/1 types, fix that.
+// ADD(alex) [mid] 2023-02-03: The `matched` channel can extract the protocol version from the
+// header, so we don't care about `matched` version in the agent.
+//
+// Only when we deserialize it in the layer, then build a similar V1/V2 distinction for client
+// there.
 //
 // TODO(alex) [high] 2023-02-03: `matched` and `unmatched` functions should be split into generic
 // implementations (similar to shared `new`) to handle HTTP/1 and HTTP/2 parts separately. They
