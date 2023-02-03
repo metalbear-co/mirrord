@@ -19,7 +19,7 @@ use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,
-    hyper_handler::{HyperHandler, RawHyperConnection},
+    hyper_handler::{httpv1::HttpV1, httpv2::HttpV2, HyperHandler, RawHyperConnection},
     DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
@@ -109,15 +109,14 @@ pub(super) async fn filter_task(
                         .preserve_header_case(true)
                         .serve_connection(
                             reversible_stream,
-                            HyperHandler {
+                            HyperHandler::<HttpV1>::new(
                                 filters,
                                 matched_tx,
                                 connection_id,
                                 port,
                                 original_destination,
-                                request_id: 0,
-                                upgrade_tx: Some(upgrade_tx),
-                            },
+                                Some(upgrade_tx),
+                            ),
                         )
                         .without_shutdown()
                         .await?;
@@ -151,18 +150,16 @@ pub(super) async fn filter_task(
                 HttpVersion::V2 => {
                     // We have to keep the connection alive to handle a possible upgrade request
                     // manually.
-                    let server = http2::Builder::new(TokioExecutor::default())
+                    http2::Builder::new(TokioExecutor::default())
                         .serve_connection(
                             reversible_stream,
-                            HyperHandler {
+                            HyperHandler::<HttpV2>::new(
                                 filters,
                                 matched_tx,
                                 connection_id,
                                 port,
                                 original_destination,
-                                request_id: 0,
-                                upgrade_tx: None,
-                            },
+                            ),
                         )
                         .await?;
 
@@ -174,10 +171,6 @@ pub(super) async fn filter_task(
                             Cannot report the closing of connection {connection_id}.");
                         }).map_err(From::from)
                 }
-
-                // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
-                // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough),
-                // and some more effort to chase some missing implementations.
                 HttpVersion::NotHttp => {
                     trace!(
                         "Got a connection with unsupported protocol version, passing it through \
