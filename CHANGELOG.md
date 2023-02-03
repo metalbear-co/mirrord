@@ -21,6 +21,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
 - mirrord-agent: Infinite reading a file when using `fgets`/`read_line` due to bug seeking to start of file.
 
+### Fixed
+
+- Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
+  ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
+
 ## 3.21.0
 
 ### Added
