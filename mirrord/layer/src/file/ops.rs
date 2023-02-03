@@ -30,13 +30,18 @@ impl RemoteFile {
 
 impl Drop for RemoteFile {
     fn drop(&mut self) {
-        // TODO: put a warning about logging from here.
-        // TODO: delete commented out log.
-        // trace!("dropping RemoteFile {self:?}");
+        // Warning: Don't log from here. This is called when self is removed from OPEN_FILES, so
+        // during the whole execution of this function, OPEN_FILES is locked.
+        // When emitting logs, sometimes a file `write` operation is required, in order for the
+        // operation to complete. The write operation is hooked and at some point tries to lock
+        // `OPEN_FILES`, which means the thread deadlocks with itself (we call
+        // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
         let closing_file = Close { fd: self.fd };
 
         if let Err(err) = blocking_send_file_message(FileOperation::Close(closing_file)) {
-            warn!("Failed to send close file {self:?} message: {err:?}");
+            println!(
+                "mirrord failed to send close file message to main layer thread. Error: {err:?}"
+            );
         };
     }
 }
