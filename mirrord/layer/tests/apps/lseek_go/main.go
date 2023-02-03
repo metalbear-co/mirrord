@@ -6,34 +6,28 @@ import (
 	"os"
 )
 
-const TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
+const TEXT = "Pineapples."
 
-func createTempFile() string {
-	file, err := os.CreateTemp("/tmp", "test")
-	if err != nil {
-		panic(err)
-	}
-	file.WriteString(TEXT)
-	fileName := file.Name()
-	file.Close()
-	return fileName
-}
-
+// Tests: SYS_lseek
 func main() {
-	// Tests: SYS_lseek
-	fileName := createTempFile()
+    fileName := "/app/test.txt"
 	file, err := os.Open(fileName)
 	if err != nil {
 		panic(err)
 	}
 	buf := make([]byte, len(TEXT))
-	file.Seek(0, 1)
-	_, err = file.Read(buf)
+	var offset int64 = 4
+	file.Seek(offset, 1) // 1 means the offset is from the start.
+	amount_read, err := file.Read(buf)
 	if err != nil {
 		panic(err)
 	}
-	if string(buf) != TEXT {
-		err := fmt.Errorf("Expected %s, got %s", TEXT, string(buf))
+	if string(buf[:amount_read]) != TEXT[offset:] {
+		err := fmt.Errorf("Expected %s, got %s", TEXT[offset:], string(buf))
+		panic(err)
+	}
+	err = file.Close()
+	if err != nil {
 		panic(err)
 	}
 }

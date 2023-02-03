@@ -12,7 +12,7 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
-    file::{MetadataInternal, OpenOptionsInternal, XstatRequest, XstatResponse},
+    file::{MetadataInternal, OpenOptionsInternal, SeekFromInternal, XstatRequest, XstatResponse},
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
@@ -355,6 +355,14 @@ impl LayerConnection {
         self.answer_file_read(vec![]).await;
     }
 
+    /// For when the application does not keep reading until it gets 0 bytes.
+    pub async fn expect_single_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let read_amount = min(buffer_size, contents.len() as u64);
+        let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
+        self.answer_file_read(contents).await;
+    }
+
     /// Verify that the layer sends a file write request with the expected contents.
     /// Send back response.
     pub async fn expect_file_write(&mut self, contents: &str, fd: u64) {
@@ -372,6 +380,24 @@ impl LayerConnection {
         self.codec
             .send(DaemonMessage::File(FileResponse::Write(Ok(
                 mirrord_protocol::file::WriteFileResponse { written_amount },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Verify that the layer sends a file write request with the expected contents.
+    /// Send back response.
+    pub async fn expect_file_lseek(&mut self, seek_from: SeekFromInternal, fd: u64) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Seek(
+                mirrord_protocol::file::SeekFileRequest { fd, seek_from }
+            ))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Seek(Ok(
+                mirrord_protocol::file::SeekFileResponse { result_offset: 0 },
             ))))
             .await
             .unwrap();
@@ -447,6 +473,9 @@ pub enum Application {
     Go18Write,
     Go19Write,
     Go20Write,
+    Go18LSeek,
+    Go19LSeek,
+    Go20LSeek,
 }
 
 impl Application {
@@ -505,6 +534,9 @@ impl Application {
             Application::Go18Write => String::from("tests/apps/write_go/18"),
             Application::Go19Write => String::from("tests/apps/write_go/19"),
             Application::Go20Write => String::from("tests/apps/write_go/20"),
+            Application::Go18LSeek => String::from("tests/apps/lseek_go/18"),
+            Application::Go19LSeek => String::from("tests/apps/lseek_go/19"),
+            Application::Go20LSeek => String::from("tests/apps/lseek_go/20"),
         }
     }
 
@@ -559,6 +591,9 @@ impl Application {
             | Application::Go20Write
             | Application::Go19Write
             | Application::Go18Write
+            | Application::Go20LSeek
+            | Application::Go19LSeek
+            | Application::Go18LSeek
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::BashShebang
@@ -591,6 +626,9 @@ impl Application {
             | Application::Go20Write
             | Application::Go19Write
             | Application::Go18Write
+            | Application::Go20LSeek
+            | Application::Go19LSeek
+            | Application::Go18LSeek
             | Application::Go19DirBypass
             | Application::Go20DirBypass
             | Application::Go19Dir
