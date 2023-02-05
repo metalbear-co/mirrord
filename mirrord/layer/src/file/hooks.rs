@@ -487,12 +487,9 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    let local_fd = *(file_stream as *const _);
-
-    let (res, fd) = if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
-        (0, local_fd)
-    } else {
-        (FN_FCLOSE(file_stream), fileno_logic(file_stream))
+    let (res, fd) = match open_file_stream_fd(file_stream) {
+        Some(local_fd) => (0, local_fd),
+        None => (FN_FCLOSE(file_stream), fileno_logic(file_stream)),
     };
 
     close_layer_fd(fd);
@@ -509,13 +506,17 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
 
 /// Implementation of fileno_detour, used in fileno_detour and fread_detour
 unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
+    open_file_stream_fd(file_stream).unwrap_or_else(|| FN_FILENO(file_stream))
+}
+
+unsafe fn open_file_stream_fd(file_stream: *mut FILE) -> Option<RawFd> {
     let local_fd = *(file_stream as *const _);
 
-    if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
-        local_fd
-    } else {
-        FN_FILENO(file_stream)
-    }
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .contains_key(&local_fd)
+        .then_some(local_fd)
 }
 
 /// Tries to convert input to type O, if it fails it returns the max value of O.
