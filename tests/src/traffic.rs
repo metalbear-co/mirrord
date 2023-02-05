@@ -1,6 +1,5 @@
 mod steal;
 
-#[allow(clippy::module_inception)]
 #[cfg(test)]
 mod traffic {
     use std::{net::UdpSocket, time::Duration};
@@ -212,7 +211,7 @@ mod traffic {
         let service = service.await;
         // Binding specific port, because if we bind 0 then we get a  port that is bypassed by
         // mirrord and then the tested crash is not prevented by the fix but by the bypassed port.
-        let socket = UdpSocket::bind("127.0.0.1:31416").unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:31415").unwrap();
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = vec![
