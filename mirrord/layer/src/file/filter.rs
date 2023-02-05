@@ -226,11 +226,6 @@ mod tests {
 
     /// Implementation of helper methods for testing [`Detour`].
     impl<S> Detour<S> {
-        /// Convenience function to convert [`Detour::Success`] to `bool`.
-        fn is_success(&self) -> bool {
-            matches!(self, Detour::Success(_))
-        }
-
         /// Convenience function to convert [`Detour::Bypass`] to `bool`.
         fn is_bypass(&self) -> bool {
             matches!(self, Detour::Bypass(_))
@@ -328,7 +323,6 @@ mod tests {
             read_only,
             local,
             mode,
-            ..Default::default()
         };
 
         let file_filter = FileFilter::new(fs_config);

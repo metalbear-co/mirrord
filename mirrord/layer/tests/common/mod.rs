@@ -186,7 +186,7 @@ impl LayerConnection {
                 // triggered by the app.
                 // So accept the next connection which will be the one by the library that was
                 // loaded to the python process that actually runs the application.
-                codec = Self::accept_library_connection(&listener).await;
+                codec = Self::accept_library_connection(listener).await;
                 codec.next().await.unwrap().unwrap()
             }
         };
@@ -315,7 +315,7 @@ impl LayerConnection {
     pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
         let buffer_size = self.expect_file_read(expected_fd).await;
         let read_amount = min(buffer_size, contents.len() as u64);
-        let contents = (&contents.as_bytes()[0..read_amount as usize]).to_vec();
+        let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
         self.answer_file_read(contents).await;
         // last call should return 0.
         let _buffer_size = self.expect_file_read(expected_fd).await;
@@ -418,12 +418,12 @@ impl Application {
         match self {
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
-                println!("using flask server from {:?}", app_path);
+                println!("using flask server from {app_path:?}");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::PythonDontLoad => {
                 app_path.push("dont_load.py");
-                println!("using script from {:?}", app_path);
+                println!("using script from {app_path:?}");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::PythonFastApiHTTP => vec![
@@ -506,13 +506,13 @@ pub fn dylib_path() -> PathBuf {
     match std::env::var("MIRRORD_TEST_USE_EXISTING_LIB") {
         Ok(path) => {
             let dylib_path = PathBuf::from(path);
-            println!("Using existing layer lib from: {:?}", dylib_path);
+            println!("Using existing layer lib from: {dylib_path:?}");
             assert!(dylib_path.exists());
             dylib_path
         }
         Err(_) => {
             let dylib_path = test_cdylib::build_current_project();
-            println!("Built library at {:?}", dylib_path);
+            println!("Built library at {dylib_path:?}");
             dylib_path
         }
     }
@@ -522,7 +522,7 @@ pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", &addr);
+    env.insert("MIRRORD_CONNECT_TCP", addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
@@ -533,7 +533,7 @@ pub fn get_env_no_fs<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a 
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", &addr);
+    env.insert("MIRRORD_CONNECT_TCP", addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
     env.insert("MIRRORD_FILE_MODE", "local");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
