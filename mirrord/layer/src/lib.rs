@@ -114,6 +114,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     common::HookMessage,
     file::{filter::FILE_FILTER, FileHandler},
+    load::LoadType,
 };
 
 mod common;
@@ -125,6 +126,7 @@ mod error;
 mod exec;
 mod file;
 mod hooks;
+mod load;
 mod macros;
 mod outgoing;
 mod socket;
@@ -267,10 +269,12 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     let mut config = LayerConfig::from_env()?;
 
     nix_devbox_patch(&mut config);
-    let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-    if should_load(given_process, skip_processes) {
-        layer_start(config);
+    match load::load_type(given_process, config) {
+        LoadType::Full(config) => layer_start(*config),
+        #[cfg(target_os = "macos")]
+        LoadType::SIPOnly => sip_only_layer_start(),
+        LoadType::Skip => {}
     }
 
     Ok(())
@@ -376,18 +380,13 @@ fn layer_start(config: LayerConfig) {
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
-/// Checks if mirrord-layer should load with the process named `given_process`.
-///
-/// ## Details
-///
-/// Some processes may start other processes (like an IDE launching a program to be debugged), and
-/// we don't want to hook mirrord-layer into those.
-fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
-    if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.iter().any(|x| x == given_process)
-    } else {
-        true
-    }
+/// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
+/// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
+#[cfg(target_os = "macos")]
+fn sip_only_layer_start() {
+    let mut hook_manager = HookManager::default();
+
+    unsafe { exec::enable_execve_hook(&mut hook_manager) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -845,31 +844,3 @@ pub(crate) const FAIL_STILL_STUCK: &str = r#"
 >> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
 
 "#;
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-
-    #[rstest]
-    #[case("test", Some(vec!["foo".to_string()]))]
-    #[case("test", None)]
-    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_true(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
-        assert!(should_load(given_process, skip_processes));
-    }
-
-    #[rstest]
-    #[case("test", Some(vec!["test".to_string()]))]
-    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_false(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
-        assert!(!should_load(given_process, skip_processes));
-    }
-}

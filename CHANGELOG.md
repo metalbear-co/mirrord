@@ -11,6 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31`.
 - exec/spawn detour refactor [#999](https://github.com/metalbear-co/mirrord/issues/999).
+- mirrord-layer: Partialy load mirrord on certian processes that spawn other processes to allow sip patch on the spawned process.
+  This to prevent breaking mirrord-layer load if parent process is specified in `--skip-processes`.  (macOS only)
 
 ## 3.21.0
 
