@@ -9,8 +9,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
-- mirrord-layer: partialy load mirrord on certian processes that spawn other processes to allow sip patch on the spawned process.
-  This to prevent breaking mirrord-layer load if parent process is specified in `--skip-processes`.
+- mirrord-layer: Partialy load mirrord on certian processes that spawn other processes to allow sip patch on the spawned process.
+  This to prevent breaking mirrord-layer load if parent process is specified in `--skip-processes`.  (MacOS only)
 
 ## 3.21.0
 

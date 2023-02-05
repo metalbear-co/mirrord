@@ -1,7 +1,8 @@
 use mirrord_config::{util::VecOrSingle, LayerConfig};
 
-/// For processes that spawn other processes whe should also patch sip on the spawned instances,
-/// curretly limiting to list from `SIP_ONLY_PROCESSES`
+/// For processes that spawn other processes and also specified in `MIRRORD_SKIP_PROCESSES` list we
+/// should patch sip for the spawned instances, curretly limiting to list from
+/// `SIP_ONLY_PROCESSES`
 #[cfg(target_os = "macos")]
 mod sip {
     use std::{collections::HashSet, sync::LazyLock};
