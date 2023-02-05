@@ -40,7 +40,7 @@ use crate::{
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
-    replace,
+    replace, FN_CLOSE,
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
@@ -488,7 +488,7 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
     let (res, fd) = match open_file_stream_fd(file_stream) {
-        Some(local_fd) => (0, local_fd),
+        Some(local_fd) => (FN_CLOSE(local_fd), local_fd),
         None => (FN_FCLOSE(file_stream), fileno_logic(file_stream)),
     };
 
