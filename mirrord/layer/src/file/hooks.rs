@@ -487,9 +487,13 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    let res = FN_FCLOSE(file_stream);
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
+    let local_fd = *(file_stream as *const _);
+
+    let (res, fd) = if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
+        (0, local_fd)
+    } else {
+        (FN_FCLOSE(file_stream), fileno_logic(file_stream))
+    };
 
     close_layer_fd(fd);
     res
