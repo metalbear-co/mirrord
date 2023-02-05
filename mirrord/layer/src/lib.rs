@@ -293,7 +293,7 @@ fn mirrord_layer_entry_point() {
                 match fail {
                     LayerError::NoProcessFound => (),
                     _ => {
-                        eprintln!("mirrord layer setup failed with {:?}", fail);
+                        eprintln!("mirrord layer setup failed with {fail:?}");
                         std::process::exit(-1)
                     }
                 }

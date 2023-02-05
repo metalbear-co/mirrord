@@ -104,7 +104,7 @@ where
         formatter: &IPTableFormatter,
         chain_name: &str,
     ) -> Result<()> {
-        ipt.remove_rule(formatter.entrypoint(), &format!("-j {}", chain_name))?;
+        ipt.remove_rule(formatter.entrypoint(), &format!("-j {chain_name}"))?;
 
         ipt.remove_chain(chain_name)?;
 
@@ -228,15 +228,13 @@ impl IPTableFormatter {
     }
 
     fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
-        let redirect_rule = format!(
-            "-m tcp -p tcp --dport {} -j REDIRECT --to-ports {}",
-            redirected_port, target_port
-        );
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
-                format!("-o lo {}", redirect_rule)
+                format!("-o lo {redirect_rule}")
             }
         }
     }
