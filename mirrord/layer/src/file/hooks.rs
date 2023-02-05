@@ -40,7 +40,7 @@ use crate::{
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
-    replace,
+    replace, FN_CLOSE,
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
@@ -487,9 +487,10 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    let res = FN_FCLOSE(file_stream);
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
+    let (res, fd) = match open_file_stream_fd(file_stream) {
+        Some(local_fd) => (FN_CLOSE(local_fd), local_fd),
+        None => (FN_FCLOSE(file_stream), fileno_logic(file_stream)),
+    };
 
     close_layer_fd(fd);
     res
@@ -505,13 +506,17 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
 
 /// Implementation of fileno_detour, used in fileno_detour and fread_detour
 unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
+    open_file_stream_fd(file_stream).unwrap_or_else(|| FN_FILENO(file_stream))
+}
+
+unsafe fn open_file_stream_fd(file_stream: *mut FILE) -> Option<RawFd> {
     let local_fd = *(file_stream as *const _);
 
-    if OPEN_FILES.lock().unwrap().contains_key(&local_fd) {
-        local_fd
-    } else {
-        FN_FILENO(file_stream)
-    }
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .contains_key(&local_fd)
+        .then_some(local_fd)
 }
 
 /// Tries to convert input to type O, if it fails it returns the max value of O.
