@@ -395,9 +395,10 @@ impl LayerConnection {
 
     /// Verify that the layer sends a file write request with the expected contents.
     /// Send back response.
-    pub async fn expect_file_write(&mut self, contents: &str, fd: u64) {
+    pub async fn consume_xstats_then_expect_file_write(&mut self, contents: &str, fd: u64) {
+        let message = self.consume_xstats().await;
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            message,
             ClientMessage::FileRequest(FileRequest::Write(
                 mirrord_protocol::file::WriteFileRequest {
                     fd,
@@ -417,9 +418,14 @@ impl LayerConnection {
 
     /// Verify that the layer sends a file write request with the expected contents.
     /// Send back response.
-    pub async fn expect_file_lseek(&mut self, seek_from: SeekFromInternal, fd: u64) {
+    pub async fn consume_xstats_then_expect_file_lseek(
+        &mut self,
+        seek_from: SeekFromInternal,
+        fd: u64,
+    ) {
+        let message = self.consume_xstats().await;
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            message,
             ClientMessage::FileRequest(FileRequest::Seek(
                 mirrord_protocol::file::SeekFileRequest { fd, seek_from }
             ))

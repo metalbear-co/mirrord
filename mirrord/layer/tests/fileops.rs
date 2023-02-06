@@ -806,10 +806,7 @@ async fn test_read_go(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 async fn test_write_go(
-    #[values(
-    // TODO: uncomment:
-    // Application::Go18Write, Application::Go19Write, 
-    Application::Go20Write)]
+    #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -836,7 +833,9 @@ async fn test_write_go(
 
     layer_connection.expect_xstat(None, Some(fd)).await;
 
-    layer_connection.expect_file_write("Pineapples.", 1).await;
+    layer_connection
+        .consume_xstats_then_expect_file_write("Pineapples.", 1)
+        .await;
 
     layer_connection.expect_file_close(fd).await;
 
@@ -852,10 +851,7 @@ async fn test_write_go(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 async fn test_lseek_go(
-    #[values(
-    // TODO: uncomment:
-    // Application::Go18Write, Application::Go19Write, 
-    Application::Go20LSeek)]
+    #[values(Application::Go18Write, Application::Go19Write, Application::Go20LSeek)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -883,7 +879,7 @@ async fn test_lseek_go(
     layer_connection.expect_xstat(None, Some(fd)).await;
 
     layer_connection
-        .expect_file_lseek(SeekFromInternal::Current(4), fd)
+        .consume_xstats_then_expect_file_lseek(SeekFromInternal::Current(4), fd)
         .await;
 
     layer_connection
@@ -891,7 +887,7 @@ async fn test_lseek_go(
         .await;
 
     // TODO: why don't we get a close request?!
-    // layer_connection.expect_file_close(fd).await;
+    layer_connection.expect_file_close(fd).await;
 
     assert!(layer_connection.is_ended().await);
 
