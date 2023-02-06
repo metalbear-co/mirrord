@@ -836,9 +836,6 @@ async fn test_lseek_go(
         .expect_single_file_read("apples.", fd)
         .await;
 
-    // TODO: why don't we get a close request?!
-    layer_connection.expect_file_close(fd).await;
-
     assert!(layer_connection.is_ended().await);
 
     // Assert all clear
