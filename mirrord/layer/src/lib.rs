@@ -787,11 +787,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .is_active();
 
     // Remove from sockets, or if not a socket, remove from files if file mode active
-    SOCKETS.lock().unwrap().remove(&fd).is_none().then(|| {
-        if file_mode_active {
-            OPEN_FILES.lock().unwrap().remove(&fd);
-        }
-    });
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active {
+        // SOCKETS lock dropped, not holding it while locking OPEN_FILES.
+        OPEN_FILES.lock().unwrap().remove(&fd);
+    }
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
@@ -831,6 +830,8 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
+    // In this case we call `close_layer_fd` before the original close function, because execution
+    // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
 }

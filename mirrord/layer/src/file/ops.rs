@@ -30,12 +30,17 @@ impl RemoteFile {
 
 impl Drop for RemoteFile {
     fn drop(&mut self) {
-        trace!("dropping RemoteFile {self:?}");
+        // Warning: Don't log from here. This is called when self is removed from OPEN_FILES, so
+        // during the whole execution of this function, OPEN_FILES is locked.
+        // When emitting logs, sometimes a file `write` operation is required, in order for the
+        // operation to complete. The write operation is hooked and at some point tries to lock
+        // `OPEN_FILES`, which means the thread deadlocks with itself (we call
+        // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
         let closing_file = Close { fd: self.fd };
 
-        if let Err(err) = blocking_send_file_message(FileOperation::Close(closing_file)) {
-            warn!("Failed to send close file {self:?} message: {err:?}");
-        };
+        blocking_send_file_message(FileOperation::Close(closing_file)).expect(
+            "mirrord failed to send close file message to main layer thread. Error: {err:?}",
+        );
     }
 }
 
@@ -242,8 +247,11 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
-    let mut open_files = OPEN_FILES.lock()?;
-    let remote_file_fd = open_files.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
+    let remote_file_fd = OPEN_FILES
+        .lock()?
+        .get(&fd)
+        .ok_or(Bypass::LocalFdNotFound(fd))?
+        .fd;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -263,7 +271,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         .insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
-    open_files.remove(&fd);
+    OPEN_FILES.lock()?.remove(&fd);
 
     Detour::Success(local_dir_fd as usize)
 }

@@ -97,8 +97,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         kind: socket_kind,
     };
 
-    let mut sockets = SOCKETS.lock()?;
-    sockets.insert(socket_fd, Arc::new(new_socket));
+    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
 
     Detour::Success(socket_fd)
 }
@@ -504,11 +503,13 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 
 #[tracing::instrument(level = "trace")]
 pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
-    let mut sockets = SOCKETS.lock()?;
-    if let Some(socket) = sockets.get(&fd).cloned() {
-        sockets.insert(dup_fd as RawFd, socket);
-        return Ok(());
-    }
+    {
+        let mut sockets = SOCKETS.lock()?;
+        if let Some(socket) = sockets.get(&fd).cloned() {
+            sockets.insert(dup_fd as RawFd, socket);
+            return Ok(());
+        }
+    } // Drop sockets, free Mutex.
 
     let mut files = OPEN_FILES.lock()?;
     if let Some(file) = files.get(&fd).cloned() {
