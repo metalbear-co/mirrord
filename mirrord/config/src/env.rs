@@ -136,7 +136,7 @@ mod tests {
             Option<&str>,
             Option<&str>,
         ),
-        #[values((None, None), (Some("EVAR1"), Some("EVAR1")))] exclude: (
+        #[values((None, Some("*")), (Some("EVAR1"), Some("EVAR1")))] exclude: (
             Option<&str>,
             Option<&str>,
         ),
