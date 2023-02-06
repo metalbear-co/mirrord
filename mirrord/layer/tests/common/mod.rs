@@ -253,7 +253,8 @@ impl LayerConnection {
         self.send_close(new_connection_id).await;
     }
 
-    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    /// Verify layer hooks an `open` of file `file_name` with only read flag set. Send back answer
+    /// with given `fd`.
     pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: u64) {
         self.expect_file_open_with_options(
             file_name,
@@ -270,7 +271,8 @@ impl LayerConnection {
         .await
     }
 
-    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    /// Verify layer hooks an `open` of file `file_name` with write, truncate and create flags set.
+    /// Send back answer with given `fd`.
     pub async fn expect_file_open_for_writing(&mut self, file_name: &str, fd: u64) {
         self.expect_file_open_with_options(
             file_name,
@@ -287,7 +289,8 @@ impl LayerConnection {
         .await
     }
 
-    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    /// Verify layer hooks an `open` of file `file_name` with given open options, send back answer
+    /// with given `fd`.
     pub async fn expect_file_open_with_options(
         &mut self,
         file_name: &str,
@@ -334,12 +337,12 @@ impl LayerConnection {
     pub async fn answer_file_read(&mut self, contents: Vec<u8>) {
         let read_amount = contents.len();
         self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
-                Ok(mirrord_protocol::file::ReadFileResponse {
+            .send(DaemonMessage::File(FileResponse::Read(Ok(
+                mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
-                }),
-            )))
+                },
+            ))))
             .await
             .unwrap();
     }
