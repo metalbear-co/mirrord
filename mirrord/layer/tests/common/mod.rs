@@ -317,20 +317,27 @@ impl LayerConnection {
             .unwrap();
     }
 
-    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
+    /// Verify that the passed message (not the next message from self.codec!) is a file read.
+    /// Return buffer size.
+    pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
-        if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
+        if let ClientMessage::FileRequest(FileRequest::Read(
             mirrord_protocol::file::ReadFileRequest {
                 remote_fd: requested_fd,
                 buffer_size,
             },
-        )) = self.codec.next().await.unwrap().unwrap()
+        )) = message
         {
             assert_eq!(expected_fd, requested_fd);
             return buffer_size;
         }
         panic!("Expected Read FileRequest.");
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
+        // Verify the app reads the file.
+        Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
     }
 
     /// Send file read response with given `contents`.
@@ -347,15 +354,35 @@ impl LayerConnection {
             .unwrap();
     }
 
-    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_only_file_read(expected_fd).await;
+    /// Answer an already verified file read request, then expect another one and answer with 0
+    /// bytes.
+    pub async fn answer_file_read_twice(
+        &mut self,
+        contents: &str,
+        expected_fd: u64,
+        buffer_size: u64,
+    ) {
         let read_amount = min(buffer_size, contents.len() as u64);
         let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
         self.answer_file_read(contents).await;
-        // last call should return 0.
+        // last call returns 0.
         let _buffer_size = self.expect_only_file_read(expected_fd).await;
         self.answer_file_read(vec![]).await;
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        self.answer_file_read_twice(contents, expected_fd, buffer_size)
+            .await
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn consume_xstats_then_expect_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let message = self.consume_xstats().await;
+        let buffer_size = Self::expect_message_file_read(message, expected_fd).await;
+        self.answer_file_read_twice(contents, expected_fd, buffer_size)
+            .await
     }
 
     /// For when the application does not keep reading until it gets 0 bytes.
@@ -428,15 +455,6 @@ impl LayerConnection {
             }))
         );
 
-        // TODO: delete?
-        // reply to Xstat
-        let metadata = MetadataInternal {
-            device_id: 0,
-            size: 1,
-            user_id: 2,
-            blocks: 3,
-            ..Default::default()
-        };
         self.codec
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse {
@@ -445,6 +463,24 @@ impl LayerConnection {
             ))))
             .await
             .unwrap();
+    }
+
+    /// Consume messages from the codec and return the first non-xstat message.
+    pub async fn consume_xstats(&mut self) -> ClientMessage {
+        let mut message = self.codec.next().await.unwrap().unwrap();
+        while let ClientMessage::FileRequest(FileRequest::Xstat(_xstat_request)) = message {
+            // Answer xstat.
+            self.codec
+                .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                    XstatResponse {
+                        metadata: Default::default(),
+                    },
+                ))))
+                .await
+                .unwrap();
+            message = self.codec.next().await.unwrap().unwrap();
+        }
+        message
     }
 }
 

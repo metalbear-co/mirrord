@@ -757,11 +757,10 @@ async fn test_read_go_linux(
 }
 
 /// Test go file read.
-#[cfg(target_os = "macos")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_read_go_macos(
+async fn test_read_go(
     #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
     application: Application,
     dylib_path: &PathBuf,
@@ -786,10 +785,12 @@ async fn test_read_go_macos(
         .expect_file_open_for_reading("/app/test.txt", fd)
         .await;
 
-    layer_connection.expect_xstat(None, Some(fd)).await;
-    layer_connection.expect_xstat(None, Some(fd)).await;
-
-    layer_connection.expect_file_read("Pineapples.", 1).await;
+    // Different go versions (mac/linux, 1.18/1.19/1.20) use different amounts of xstat calls here.
+    // We accept and answer however many xstat calls the app does, then we verify and answer the
+    // read calls.
+    layer_connection
+        .consume_xstats_then_expect_file_read("Pineapples.", fd)
+        .await;
 
     assert!(layer_connection.is_ended().await);
 
