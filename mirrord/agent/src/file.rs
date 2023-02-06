@@ -336,31 +336,26 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
-                    let mut reader = BufReader::new(std::io::Read::by_ref(file));
-                    let mut buffer = String::with_capacity(buffer_size as usize);
-                    let read_result = reader
-                        .read_line(&mut buffer)
+                    let original_position = file.stream_position()?;
+                    // limit bytes read using take
+                    let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
+                    let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
+                    Ok(reader
+                        .read_until(b'\n', &mut buffer)
                         .and_then(|read_amount| {
-                            // Take the new position to update the file's cursor position later.
-                            let position_after_read = reader.stream_position()?;
+                            // Revert file to original position + bytes read (in case the
+                            // bufreader advanced too much)
+                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
 
-                            // Limit the new position to `buffer_size`.
-                            Ok((read_amount, position_after_read.clamp(0, buffer_size)))
-                        })
-                        .and_then(|(read_amount, seek_to)| {
-                            file.seek(SeekFrom::Start(seek_to))?;
-
-                            // We handle the extra bytes in the `fgets` hook, so here we can just
-                            // return the full buffer.
+                            // We handle the extra bytes in the `fgets` hook, so here we can
+                            // just return the full buffer.
                             let response = ReadFileResponse {
-                                bytes: buffer.into_bytes(),
+                                bytes: buffer,
                                 read_amount: read_amount as u64,
                             };
 
                             Ok(response)
-                        })?;
-
-                    Ok(read_result)
+                        })?)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }

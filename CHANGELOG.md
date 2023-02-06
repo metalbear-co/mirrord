@@ -7,10 +7,23 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.22.0
+
 ### Changed
 
 - Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31`.
 - exec/spawn detour refactor [#999](https://github.com/metalbear-co/mirrord/issues/999).
+- mirrord-layer: Partialy load mirrord on certian processes that spawn other processes to allow sip patch on the spawned process.
+  This to prevent breaking mirrord-layer load if parent process is specified in `--skip-processes`.  (macOS only)
+
+### Fixed
+
+- mirrord-layer: DNS resolving doesn't work when having a non-OS resolver (using UDP sockets)
+  since `/etc/resolv.conf` and `/etc/hosts` were in the local read override,
+  leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
+- mirrord-agent: Infinite reading a file when using `fgets`/`read_line` due to bug seeking to start of file.
+- Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
+  ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
 
 ## 3.21.0
 

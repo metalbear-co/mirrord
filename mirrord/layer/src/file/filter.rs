@@ -95,12 +95,14 @@ fn generate_local_set() -> RegexSet {
 }
 
 /// List of files that mirrord should use remotely read only
-/// Right now used to return "file not exist" for identity caches (AWS)
 fn generate_remote_ro_set() -> RegexSet {
     let patterns = [
         // AWS cli cache
-        // \.aws\/cli\/cache\/.+\.json
+        // "file not exist" for identity caches (AWS)
         r".aws/cli/cache/.+\.json$",
+        // for dns resolving
+        r"^/etc/resolv.conf$",
+        r"^/etc/hosts$",
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
