@@ -1,11 +1,8 @@
-use core::marker::PhantomData;
 use std::{
     collections::{HashMap, HashSet},
-    future::Future,
     net::SocketAddr,
 };
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};

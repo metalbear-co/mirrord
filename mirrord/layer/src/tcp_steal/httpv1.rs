@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 
-use anyhow::Result;
 use bytes::Bytes;
 use futures::FutureExt;
 use http_body_util::Full;
