@@ -785,8 +785,6 @@ async fn test_write_go(
         .expect_file_open_for_writing("/app/test.txt", fd)
         .await;
 
-    layer_connection.expect_xstat(None, Some(fd)).await;
-
     layer_connection
         .consume_xstats_then_expect_file_write("Pineapples.", 1)
         .await;
@@ -829,8 +827,6 @@ async fn test_lseek_go(
     layer_connection
         .expect_file_open_for_reading("/app/test.txt", fd)
         .await;
-
-    layer_connection.expect_xstat(None, Some(fd)).await;
 
     layer_connection
         .consume_xstats_then_expect_file_lseek(SeekFromInternal::Current(4), fd)
