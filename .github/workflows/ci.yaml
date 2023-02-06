@@ -416,7 +416,7 @@ jobs:
           for go_app in read_go write_go lseek_go faccessat_go
           do
           cd ../$go_app
-          go build -o 19
+          go build -o 20
           done
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
@@ -436,7 +436,7 @@ jobs:
           for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
           do
           cd ../$go_app
-          go build -o 19
+          go build -o 20
           done
       - run: |
           cd mirrord/layer/tests/apps/fileops
