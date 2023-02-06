@@ -792,6 +792,8 @@ async fn test_read_go(
         .consume_xstats_then_expect_file_read("Pineapples.", fd)
         .await;
 
+    layer_connection.expect_file_close(fd).await;
+
     assert!(layer_connection.is_ended().await);
 
     // Assert all clear
@@ -836,8 +838,7 @@ async fn test_write_go(
 
     layer_connection.expect_file_write("Pineapples.", 1).await;
 
-    // TODO: why don't we get a close request?!
-    // layer_connection.expect_file_close(fd).await;
+    layer_connection.expect_file_close(fd).await;
 
     assert!(layer_connection.is_ended().await);
 
