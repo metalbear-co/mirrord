@@ -1,4 +1,5 @@
 use std::{
+    assert_matches::assert_matches,
     cmp::min,
     collections::HashMap,
     fmt::Debug,
@@ -271,6 +272,29 @@ impl LayerConnection {
         .await
     }
 
+    /// Verify layer hooks an `open` of file `file_name` with read flag set, and any other flags.
+    /// Send back answer with given `fd`.
+    pub async fn expect_file_open_with_read_flag(&mut self, file_name: &str, fd: u64) {
+        // Verify the app tries to open the expected file.
+        assert_matches!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Open(
+                mirrord_protocol::file::OpenFileRequest {
+                    path,
+                    open_options: OpenOptionsInternal { read: true, .. },
+                }
+            )) if path.to_str().unwrap() == file_name
+        );
+
+        // Answer open.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
+            )))
+            .await
+            .unwrap();
+    }
+
     /// Verify layer hooks an `open` of file `file_name` with write, truncate and create flags set.
     /// Send back answer with given `fd`.
     pub async fn expect_file_open_for_writing(&mut self, file_name: &str, fd: u64) {
@@ -306,6 +330,28 @@ impl LayerConnection {
                     open_options,
                 }
             ))
+        );
+
+        // Answer open.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// Like the other expect_file_open_... but where we don't compare to predefined open options.
+    pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
+        // Verify the app tries to open the expected file.
+        assert_matches!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Open(
+                mirrord_protocol::file::OpenFileRequest {
+                    path,
+                    open_options: _,
+                }
+            )) if path.to_str().unwrap() == file_name
         );
 
         // Answer open.

@@ -838,7 +838,7 @@ async fn test_lseek_go(
 
     let fd = 1;
     layer_connection
-        .expect_file_open_for_reading("/app/test.txt", fd)
+        .expect_file_open_with_read_flag("/app/test.txt", fd)
         .await;
 
     layer_connection
