@@ -816,7 +816,7 @@ async fn test_write_go(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 async fn test_lseek_go(
-    #[values(Application::Go18Write, Application::Go19Write, Application::Go20LSeek)]
+    #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
