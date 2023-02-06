@@ -716,7 +716,7 @@ async fn test_go_dir_bypass(
 }
 
 /// Test go file read.
-#[cfg(target_os = "macos")] // TODO
+#[cfg(target_os = "linux")] // TODO
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]

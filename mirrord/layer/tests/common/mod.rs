@@ -425,6 +425,7 @@ impl LayerConnection {
             }))
         );
 
+        // TODO: delete?
         // reply to Xstat
         let metadata = MetadataInternal {
             device_id: 0,
