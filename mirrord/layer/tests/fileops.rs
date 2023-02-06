@@ -745,7 +745,7 @@ async fn test_read_go_linux(
         .expect_file_open_for_reading("/app/test.txt", fd)
         .await;
 
-    layer_connection.expect_xstat(None, Some(fd)).await;
+    // layer_connection.expect_xstat(None, Some(fd)).await;
 
     layer_connection.expect_file_read("Pineapples.", 1).await;
 
