@@ -18,4 +18,7 @@ pub(crate) enum HttpForwarderError {
 
     #[error("HTTP Forwarder: TCP connection failed with error: {0}.")]
     TcpStream(#[from] std::io::Error),
+
+    #[error("TODO")]
+    ConnectionClosedTooSoon(HttpRequest),
 }
