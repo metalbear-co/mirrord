@@ -13,5 +13,8 @@ func main() {
 		panic(err)
 	}
 	file.WriteString(TEXT)
-	file.Close()
+	err = file.Close()
+	if err != nil {
+		panic(err)
+	}
 }
