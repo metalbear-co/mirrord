@@ -12,7 +12,7 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
-    file::{MetadataInternal, OpenOptionsInternal, SeekFromInternal, XstatRequest, XstatResponse},
+    file::{OpenOptionsInternal, SeekFromInternal, XstatRequest, XstatResponse},
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };

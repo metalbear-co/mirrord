@@ -1,18 +1,13 @@
 #![feature(assert_matches)]
 
-use std::{
-    assert_matches::assert_matches, collections::HashMap, env::temp_dir, path::PathBuf,
-    process::Stdio, time::Duration,
-};
+#[cfg(target_os = "linux")]
+use std::assert_matches::assert_matches;
+use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
 
-use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    process::Command,
-};
+use tokio::{net::TcpListener, process::Command};
 
 mod common;
 pub use common::*;
