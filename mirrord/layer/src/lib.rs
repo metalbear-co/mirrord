@@ -830,9 +830,10 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
-    let res = FN_UV_FS_CLOSE(a, b, fd, c);
+    // In this case we call `close_layer_fd` before the original close function, because execution
+    // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
-    res
+    FN_UV_FS_CLOSE(a, b, fd, c)
 }
 
 /// Message presented to the user as a sort of footer when mirrord crashes.
