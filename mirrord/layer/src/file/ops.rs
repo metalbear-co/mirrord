@@ -38,11 +38,9 @@ impl Drop for RemoteFile {
         // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
         let closing_file = Close { fd: self.fd };
 
-        if let Err(err) = blocking_send_file_message(FileOperation::Close(closing_file)) {
-            println!(
-                "mirrord failed to send close file message to main layer thread. Error: {err:?}"
-            );
-        };
+        blocking_send_file_message(FileOperation::Close(closing_file)).expect(
+            "mirrord failed to send close file message to main layer thread. Error: {err:?}",
+        );
     }
 }
 
