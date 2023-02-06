@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #![cfg(target_os = "macos")]
 use std::{path::PathBuf, time::Duration};
 

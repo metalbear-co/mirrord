@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
 use futures::SinkExt;
