@@ -490,9 +490,6 @@ jobs:
           cd tests/go-e2e
           go build -o 18
       - run: |
-          cd tests/go-e2e-fileops
-          go build -o 18
-      - run: |
           cd tests/go-e2e-env
           go build -o 18
       - run: |
@@ -509,9 +506,6 @@ jobs:
           go-version: "1.19.0"
       - run: |
           cd tests/go-e2e
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-fileops
           go build -o 19
       - run: |
           cd tests/go-e2e-env
@@ -532,9 +526,6 @@ jobs:
           go version
       - run: |
           cd tests/go-e2e
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-fileops
           go build -o 20
       - run: |
           cd tests/go-e2e-env

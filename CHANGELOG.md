@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Convert go fileops e2e tests into integration tests. Part of
+  [#994](https://github.com/metalbear-co/mirrord/issues/994#issuecomment-1410721960).
+
 ### Fixed
 
 - mirrord-config: Fix disabled feature for env in config file, `env = false` should work. See [#1015](https://github.com/metalbear-co/mirrord/issues/1015).
@@ -36,11 +41,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   since `/etc/resolv.conf` and `/etc/hosts` were in the local read override,
   leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
 - mirrord-agent: Infinite reading a file when using `fgets`/`read_line` due to bug seeking to start of file.
-- Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
-  ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
-
-### Fixed
-
 - Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
   ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
 
