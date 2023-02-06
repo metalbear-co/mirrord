@@ -5,7 +5,12 @@ use std::assert_matches::assert_matches;
 use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
 
 use futures::{stream::StreamExt, SinkExt};
+use libc::pid_t;
 use mirrord_protocol::{file::*, *};
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
 use rstest::rstest;
 use tokio::{net::TcpListener, process::Command};
 
@@ -747,6 +752,16 @@ async fn test_read_go(
         .await;
 
     layer_connection.expect_file_close(fd).await;
+    // Notify Go test app that the close detour completed and it can exit.
+    // (The go app waits for this, since Go does not wait for the close detour to complete befor
+    // returning from `Close`).
+    test_process.child.as_ref().map(|process| {
+        signal::kill(
+            Pid::from_raw(process.id().unwrap() as pid_t),
+            Signal::SIGTERM,
+        )
+        .unwrap()
+    });
 
     assert!(layer_connection.is_ended().await);
 
@@ -788,8 +803,6 @@ async fn test_write_go(
     layer_connection
         .consume_xstats_then_expect_file_write("Pineapples.", 1)
         .await;
-
-    layer_connection.expect_file_close(fd).await;
 
     assert!(layer_connection.is_ended().await);
 
