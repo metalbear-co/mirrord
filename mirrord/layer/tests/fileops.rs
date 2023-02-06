@@ -715,7 +715,14 @@ async fn test_go_dir_bypass(
     test_process.assert_no_error_in_stderr();
 }
 
-/// Test go file read.
+/// Test go file read and close.
+/// This test also verifies the close hook, since go's `os.ReadFile` calls `Close`.
+/// We don't call close in other tests because Go does not wait for the operation to complete before
+/// returning, which means we can't just normally wait in the test for the message from the layer
+/// because the app could close before the message is sent.
+/// What we do here in order to avoid race conditions is that the Go test app for this test waits
+/// for a signal after calling `Close` (implicitly, by calling `ReadFile`), and the test sends the
+/// signal to the app only once the close message was verified. Only then does the test app exit.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
@@ -770,7 +777,7 @@ async fn test_read_go(
     test_process.assert_no_error_in_stderr();
 }
 
-/// Test go file read.
+/// Test go file write.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
@@ -811,7 +818,7 @@ async fn test_write_go(
     test_process.assert_no_error_in_stderr();
 }
 
-/// Test go file read.
+/// Test go file lseek.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
@@ -856,7 +863,7 @@ async fn test_lseek_go(
     test_process.assert_no_error_in_stderr();
 }
 
-/// Test go file read.
+/// Test go file access.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
