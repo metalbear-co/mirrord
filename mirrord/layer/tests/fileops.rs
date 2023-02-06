@@ -716,47 +716,6 @@ async fn test_go_dir_bypass(
 }
 
 /// Test go file read.
-#[cfg(target_os = "linux")] // TODO
-#[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(10))]
-async fn test_read_go_linux(
-    #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
-    application: Application,
-    dylib_path: &PathBuf,
-) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    let fd = 1;
-    layer_connection
-        .expect_file_open_for_reading("/app/test.txt", fd)
-        .await;
-
-    // layer_connection.expect_xstat(None, Some(fd)).await;
-
-    layer_connection.expect_file_read("Pineapples.", 1).await;
-
-    assert!(layer_connection.is_ended().await);
-
-    // Assert all clear
-    test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-}
-
-/// Test go file read.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
