@@ -5,7 +5,7 @@ use std::assert_matches::assert_matches;
 use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
 
 use futures::{stream::StreamExt, SinkExt};
-use libc::pid_t;
+use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
 use nix::{
     sys::signal::{self, Signal},
@@ -849,6 +849,45 @@ async fn test_lseek_go(
         .expect_single_file_read("apples.", fd)
         .await;
 
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file read.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_faccessat_go(
+    #[values(
+        Application::Go18FAccessAt,
+        Application::Go19FAccessAt,
+        Application::Go20FAccessAt
+    )]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let executable = application.get_executable().await;
+    println!("Using executable: {}", &executable);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    println!("Listening for messages from the layer on {addr}");
+    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+
+    env.insert("MIRRORD_FILE_MODE", "localwithoverrides");
+    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt");
+
+    let mut test_process =
+        TestProcess::start_process(executable, application.get_args(), env).await;
+
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("Got connection from layer.");
+
+    layer_connection
+        .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
+        .await;
     assert!(layer_connection.is_ended().await);
 
     // Assert all clear

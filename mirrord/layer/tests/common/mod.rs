@@ -13,7 +13,10 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
-    file::{OpenOptionsInternal, SeekFromInternal, XstatRequest, XstatResponse},
+    file::{
+        AccessFileRequest, AccessFileResponse, OpenOptionsInternal, SeekFromInternal, XstatRequest,
+        XstatResponse,
+    },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
@@ -485,8 +488,7 @@ impl LayerConnection {
             .unwrap();
     }
 
-    /// Read next layer message and verify it's close.
-    /// Answer that close.
+    /// Read next layer message and verify it's a close request.
     pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
@@ -494,6 +496,22 @@ impl LayerConnection {
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
+    }
+
+    /// Verify the next message from the layer is an access to the given path with the given mode.
+    /// Send back a response.
+    pub async fn expect_file_access(&mut self, pathname: PathBuf, mode: u8) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Access(AccessFileRequest { pathname, mode }))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Access(Ok(
+                AccessFileResponse {},
+            ))))
+            .await
+            .unwrap();
     }
 
     /// Assert that the layer sends an xstat request with the given fd, answer the request.
@@ -568,6 +586,9 @@ pub enum Application {
     Go18LSeek,
     Go19LSeek,
     Go20LSeek,
+    Go18FAccessAt,
+    Go19FAccessAt,
+    Go20FAccessAt,
 }
 
 impl Application {
@@ -629,6 +650,9 @@ impl Application {
             Application::Go18LSeek => String::from("tests/apps/lseek_go/18"),
             Application::Go19LSeek => String::from("tests/apps/lseek_go/19"),
             Application::Go20LSeek => String::from("tests/apps/lseek_go/20"),
+            Application::Go18FAccessAt => String::from("tests/apps/faccessat_go/18"),
+            Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
+            Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
         }
     }
 
@@ -686,6 +710,9 @@ impl Application {
             | Application::Go20LSeek
             | Application::Go19LSeek
             | Application::Go18LSeek
+            | Application::Go20FAccessAt
+            | Application::Go19FAccessAt
+            | Application::Go18FAccessAt
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::BashShebang
@@ -721,6 +748,9 @@ impl Application {
             | Application::Go20LSeek
             | Application::Go19LSeek
             | Application::Go18LSeek
+            | Application::Go20FAccessAt
+            | Application::Go19FAccessAt
+            | Application::Go18FAccessAt
             | Application::Go19DirBypass
             | Application::Go20DirBypass
             | Application::Go19Dir
