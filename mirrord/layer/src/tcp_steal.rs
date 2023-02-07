@@ -38,7 +38,6 @@ mod httpv1;
 mod httpv2;
 
 struct ConnectionTask<HttpVersion> {
-    connect_to: SocketAddr,
     request_receiver: Receiver<HttpRequest>,
     response_sender: Sender<HttpResponse>,
     port: Port,

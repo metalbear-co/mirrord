@@ -69,7 +69,6 @@ impl ConnectionTask<V2> {
         let http_version = Self::connect_to_application(connect_to).await?;
 
         Ok(Self {
-            connect_to,
             request_receiver,
             response_sender,
             port,
@@ -101,7 +100,6 @@ impl ConnectionTask<V2> {
 
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
         let Self {
-            connect_to,
             mut request_receiver,
             response_sender,
             port,

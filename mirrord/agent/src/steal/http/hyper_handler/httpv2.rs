@@ -4,24 +4,12 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use futures::TryFutureExt;
-use http_body_util::{BodyExt, Full};
-use hyper::{
-    body::Incoming,
-    client::{self, conn::http2::SendRequest},
-    header::UPGRADE,
-    http::{self, response},
-    service::Service,
-    Request, Response,
-};
+use http_body_util::Full;
+use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
-    macros::support::poll_fn,
     net::TcpStream,
-    sync::{
-        mpsc::Sender,
-        oneshot::{self, Receiver},
-    },
+    sync::{mpsc::Sender, oneshot},
 };
 use tracing::error;
 

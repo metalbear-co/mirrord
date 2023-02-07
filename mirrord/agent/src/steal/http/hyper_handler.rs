@@ -1,4 +1,4 @@
-use core::{fmt::Debug, future::Future, pin::Pin};
+use core::fmt::Debug;
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
@@ -8,28 +8,17 @@ use futures::TryFutureExt;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::Incoming,
-    client,
-    header::UPGRADE,
-    http::{self, response, HeaderValue},
-    service::Service,
-    HeaderMap, Request, Response,
+    http::{self, response},
+    Request, Response,
 };
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
-    macros::support::poll_fn,
     net::TcpStream,
-    sync::{
-        mpsc::Sender,
-        oneshot::{self, Receiver},
-    },
+    sync::{mpsc::Sender, oneshot::Receiver},
 };
-use tracing::error;
 
 use super::error::HttpTrafficError;
-use crate::{
-    steal::{HandlerHttpRequest, MatchedHttpRequest},
-    util::ClientId,
-};
+use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 pub(super) mod httpv1;
 pub(super) mod httpv2;
