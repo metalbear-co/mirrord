@@ -215,7 +215,7 @@ async function openConfig() {
 
 async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBarItem) {
 	if (process.platform === "win32") {
-		vscode.window.showErrorMessage('mirrord is not supported on Windows. You can use via remote development or WSL.');
+		vscode.window.showErrorMessage('mirrord is not supported on Windows. You can use it via remote development or WSL.');
 		return;
 	}
 	let state = context.workspaceState;
