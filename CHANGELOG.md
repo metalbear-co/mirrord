@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - mirrord-config: Fix disabled feature for env in config file, `env = false` should work. See [#1015](https://github.com/metalbear-co/mirrord/issues/1015).
+- VS Code extension: release universal extension as a fallback for Windows and other platforms to be used with WSL/Remote development. Fixes [#1017](https://github.com/metalbear-co/mirrord/issues/1017)
 
 ## 3.22.0
 
