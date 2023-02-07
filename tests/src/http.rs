@@ -9,6 +9,7 @@ mod http {
 
     use crate::utils::{
         get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
+        HTTP_1,
     };
 
     #[ignore]
@@ -47,7 +48,7 @@ mod http {
             )
             .await;
         process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
-        send_requests(&url, false, Default::default()).await;
+        send_requests::<HTTP_1>(&url, false, Default::default()).await;
         process.wait_for_line(Duration::from_secs(10), "GET");
         process.wait_for_line(Duration::from_secs(10), "POST");
         process.wait_for_line(Duration::from_secs(10), "PUT");

@@ -13,7 +13,8 @@ mod steal {
 
     use crate::utils::{
         get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
-        service, tcp_echo_service, websocket_service, Agent, Application, KubeService,
+        service, tcp_echo_service, websocket_service, Agent, Application, KubeService, HTTP_1,
+        HTTP_2,
     };
 
     #[cfg(target_os = "linux")]
@@ -43,7 +44,7 @@ mod steal {
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests(&url, true, Default::default()).await;
+        send_requests::<HTTP_1>(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -89,7 +90,52 @@ mod steal {
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
-        send_requests(&url, true, headers).await;
+        send_requests::<HTTP_1>(&url, true, headers).await;
+
+        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
+        application.assert(&client);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(45))]
+    async fn test_filter_with_single_client_and_only_matching_requests_http2(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(
+            Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::NodeHTTP
+        )]
+        application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut flags = vec!["--steal"];
+        if let Some(flag) = agent.flag() {
+            flags.extend(flag)
+        }
+
+        let mut client = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+            )
+            .await;
+
+        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap());
+        send_requests::<HTTP_2>(&url, true, headers).await;
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await

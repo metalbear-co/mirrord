@@ -157,6 +157,7 @@ impl HttpV1 {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(level = "trace")]
     async fn handle_request(
         request: Request<Incoming>,

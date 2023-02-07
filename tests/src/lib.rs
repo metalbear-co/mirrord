@@ -43,8 +43,13 @@ mod utils {
         process::{Child, Command},
         task::JoinHandle,
     };
+    use tokio_tungstenite::tungstenite::handshake::client;
     // 0.8
     use tokio_util::sync::{CancellationToken, DropGuard};
+
+    pub(crate) type HttpV = bool;
+    pub(crate) const HTTP_1: HttpV = false;
+    pub(crate) const HTTP_2: HttpV = true;
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
@@ -779,7 +784,7 @@ mod utils {
         }
     }
 
-    pub async fn send_requests(
+    pub async fn send_requests<const HTTP_VERSION: HttpV>(
         url: &str,
         expect_response: bool,
         headers: reqwest::header::HeaderMap,
@@ -787,7 +792,14 @@ mod utils {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
-        let client = reqwest::Client::new();
+        let client_builder = reqwest::Client::builder();
+
+        let client = match HTTP_VERSION {
+            HTTP_1 => client_builder.build(),
+            HTTP_2 => client_builder.http2_prior_knowledge().build(),
+        }
+        .unwrap();
+
         let req_builder = client.get(url);
         send_request(
             req_builder,
