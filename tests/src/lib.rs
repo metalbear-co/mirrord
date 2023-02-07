@@ -88,10 +88,10 @@ mod utils {
         PythonFlaskHTTP,
         PythonFastApiHTTP,
         NodeHTTP,
+        NodeHTTP2,
         Go18HTTP,
         Go19HTTP,
         Go20HTTP,
-        NodeTcpEcho,
     }
 
     #[derive(Debug)]
@@ -229,10 +229,12 @@ mod utils {
                     ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+                Application::NodeHTTP2 => {
+                    vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+                }
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
                 Application::Go20HTTP => vec!["go-e2e/20"],
-                Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
 

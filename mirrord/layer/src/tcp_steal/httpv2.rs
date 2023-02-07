@@ -1,9 +1,9 @@
-use std::net::SocketAddr;
+use std::{future::Future, net::SocketAddr};
 
 use bytes::Bytes;
 use futures::FutureExt;
 use http_body_util::Full;
-use hyper::client::conn::http2;
+use hyper::{client::conn::http2, rt::Executor};
 use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse},
     ConnectionId, Port,
@@ -12,7 +12,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{handle_response, ConnectionTask};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
@@ -58,7 +58,24 @@ impl V2 {
     }
 }
 
+/// Future executor that utilises `tokio` threads.
+#[non_exhaustive]
+#[derive(Default, Debug, Clone)]
+pub struct TokioExecutor;
+
+impl<Fut> Executor<Fut> for TokioExecutor
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    fn execute(&self, fut: Fut) {
+        debug!("starting tokio executor for hyper HTTP/2");
+        tokio::spawn(fut);
+    }
+}
+
 impl ConnectionTask<V2> {
+    #[tracing::instrument(level = "debug", skip(request_receiver, response_sender))]
     pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,
@@ -66,6 +83,7 @@ impl ConnectionTask<V2> {
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<Self, HttpForwarderError> {
+        println!("httpv2::new -> {connect_to:#?}");
         let http_version = Self::connect_to_application(connect_to).await?;
 
         Ok(Self {
@@ -77,20 +95,32 @@ impl ConnectionTask<V2> {
         })
     }
 
+    #[tracing::instrument(level = "debug")]
     async fn connect_to_application(connect_to: SocketAddr) -> Result<V2, HttpForwarderError> {
-        let target_stream = {
+        println!("connect_to_application");
+        let http_request_sender = {
             let _ = DetourGuard::new();
-            TcpStream::connect(connect_to).await?
+            let target_stream = TcpStream::connect(connect_to).await?;
+            println!("{target_stream:#?}");
+
+            let (http_request_sender, connection) = http2::Builder::new()
+                .executor(TokioExecutor::default())
+                .handshake(target_stream)
+                .await?;
+            // let (http_request_sender, connection) = http2::handshake(target_stream).await?;
+            println!("{http_request_sender:#?}");
+            println!("{connection:#?}");
+
+            // spawn a task to poll the connection.
+            tokio::spawn(async move {
+                println!("connecting!");
+                if let Err(fail) = connection.await {
+                    error!("Error in http connection with addr {connect_to:?}: {fail:?}");
+                }
+            });
+
+            http_request_sender
         };
-
-        let (http_request_sender, connection) = http2::handshake(target_stream).await?;
-
-        // spawn a task to poll the connection.
-        tokio::spawn(async move {
-            if let Err(fail) = connection.await {
-                error!("Error in http connection with addr {connect_to:?}: {fail:?}");
-            }
-        });
 
         Ok(V2 {
             address: connect_to,
@@ -98,6 +128,7 @@ impl ConnectionTask<V2> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
         let Self {
             mut request_receiver,

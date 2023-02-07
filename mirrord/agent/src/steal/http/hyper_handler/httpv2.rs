@@ -61,7 +61,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 

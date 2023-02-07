@@ -15,7 +15,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use super::{
     error::HttpTrafficError,
@@ -38,6 +38,7 @@ where
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
+        debug!("starting tokio executor for hyper HTTP/2");
         tokio::spawn(fut);
     }
 }
