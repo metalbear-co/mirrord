@@ -211,7 +211,7 @@
           "minimum": 0.0
         },
         "ttl": {
-          "description": "Controls how long the agent pod persists for, after the local process terminated (in seconds).\n\nCan be useful for collecting logs.",
+          "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.",
           "type": [
             "integer",
             "null"
