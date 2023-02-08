@@ -19,6 +19,7 @@
 	"activationEvents": [
 		"onStartupFinished"
 	],
+	"extensionKind": ["workspace"],
 	"contributes": {
 		"commands": [
 			{

@@ -201,6 +201,16 @@ jobs:
       - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: cp CHANGELOG.md LICENSE vscode-ext/
       - run: mkdir -p /tmp/vscode-ext
+      # publish universal as fallback (for WSL/Remote situations)
+      - run: |
+          cd vscode-ext
+          npm install
+          tsc && vsce package -o /tmp/vscode-ext/vscode-ext-universal
+      - name: Publish universal fallback
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }}
       - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord vscode-ext/
       - run: |
           cd vscode-ext 
@@ -220,7 +230,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target linux-arm64      
+        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target linux-arm64
       - run: cp /tmp/artifacts/universal-apple-darwin/mirrord vscode-ext/
       # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
       - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O vscode-ext/dlv && chmod +x vscode-ext/dlv
@@ -244,11 +254,6 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }} --target darwin-arm64
-      - run: |
-          cd vscode-ext
-          npm install          
-          tsc && vsce package -o  /tmp/vscode-ext/vscode-ext-darwin-arm64 --target darwin-arm64
-
       - uses: actions/upload-artifact@v3
         with:
           name: vscode-ext
@@ -256,6 +261,7 @@ jobs:
             /tmp/vscode-ext/vscode-ext-linux-x64
             /tmp/vscode-ext/vscode-ext-darwin-x64
             /tmp/vscode-ext/vscode-ext-darwin-arm64
+            /tmp/vscode-ext/vscode-ext-universal
           if-no-files-found: error
 
   release_intellij_plugin:

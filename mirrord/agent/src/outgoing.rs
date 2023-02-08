@@ -42,7 +42,7 @@ pub(crate) struct TcpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
-#[tracing::instrument(skip(allocator, writers, readers, daemon_tx))]
+#[tracing::instrument(level = "trace", skip(allocator, writers, readers, daemon_tx))]
 async fn layer_recv(
     layer_message: LayerTcpOutgoing,
     allocator: &mut IndexAllocator<ConnectionId>,
