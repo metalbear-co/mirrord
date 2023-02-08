@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-config: Fix disabled feature for env in config file, `env = false` should work. See [#1015](https://github.com/metalbear-co/mirrord/issues/1015).
 - VS Code extension: release universal extension as a fallback for Windows and other platforms to be used with WSL/Remote development. Fixes [#1017](https://github.com/metalbear-co/mirrord/issues/1017)
 - Fix `MIRRORD_AGENT_RUST_LOG` can't be more than info due to dependency on info log.
+- Fix pause feature not working in extension due to writing to stdout (changed to use trace)
 
 ### Changed
 

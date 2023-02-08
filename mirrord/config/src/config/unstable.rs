@@ -17,9 +17,10 @@ where
 
     fn source_value(self) -> Option<Result<Self::Value>> {
         self.2.source_value().map(|result| {
-            println!(
+            tracing::warn!(
                 "Warning: field {}.{} is marked as unstable. Please note API may change",
-                self.0, self.1
+                self.0,
+                self.1
             );
             result
         })
