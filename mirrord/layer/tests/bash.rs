@@ -1,7 +1,9 @@
 #![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
+#[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
+#[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
     file::{MetadataInternal, XstatRequest, XstatResponse},
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -14,6 +16,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
+#[cfg(not(target_os = "macos"))]
 use tokio_stream::StreamExt;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
