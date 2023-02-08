@@ -61,18 +61,20 @@ async fn test_pwrite(
 
     let fd = 1;
 
-    layer_connection.expect_file_open_with_options(
-        "/tmp/test_file.txt",
-        fd,
-        OpenOptionsInternal {
-            read: false,
-            write: true,
-            append: false,
-            truncate: false,
-            create: true,
-            create_new: false,
-        },
-    );
+    layer_connection
+        .expect_file_open_with_options(
+            "/tmp/test_file.txt",
+            fd,
+            OpenOptionsInternal {
+                read: false,
+                write: true,
+                append: false,
+                truncate: false,
+                create: true,
+                create_new: false,
+            },
+        )
+        .await;
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
@@ -172,48 +174,22 @@ async fn test_node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
     // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let fd = 1;
 
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-    // pwrite test
-    // reply to open
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
-            open_options: OpenOptionsInternal {
-                read: true,
-                write: false,
-                append: false,
-                truncate: false,
-                create: false,
-                create_new: false,
-            },
-        }))
-    );
     layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        .expect_file_open_for_reading("/tmp/test_file.txt", fd)
+        .await;
 
-    let bytes = "hello".as_bytes().to_vec();
-    let read_amount = bytes.len();
+    let contents = "hello";
+    let read_amount = contents.len();
     // on macOS it will send xstat before reading.
     #[cfg(target_os = "macos")]
     {
@@ -242,48 +218,9 @@ async fn test_node_close(
             .unwrap();
     }
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-            remote_fd: 1,
-            buffer_size: 8192
-        }))
-    );
+    layer_connection.expect_file_read(contents, fd).await;
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Read(Ok(
-            ReadFileResponse {
-                bytes,
-                read_amount: read_amount as u64,
-            },
-        ))))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-            remote_fd: 1,
-            buffer_size: 8192
-        }))
-    );
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Read(Ok(
-            ReadFileResponse {
-                bytes: vec![],
-                read_amount: 0,
-            },
-        ))))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -298,28 +235,21 @@ async fn test_go_stat(
     #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
     // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let fd = 1;
 
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
-            open_options: OpenOptionsInternal {
+    layer_connection
+        .expect_file_open_with_options(
+            "/tmp/test_file.txt",
+            fd,
+            OpenOptionsInternal {
                 read: false,
                 write: true,
                 append: false,
@@ -327,16 +257,9 @@ async fn test_go_stat(
                 create: true,
                 create_new: false,
             },
-        }))
-    );
+        )
+        .await;
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
