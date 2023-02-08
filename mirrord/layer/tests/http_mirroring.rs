@@ -46,7 +46,7 @@ async fn test_mirroring_with_http(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer_and_port(dylib_path, vec![])
+        .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
         .await;
 
     println!("Application subscribed to port, sending tcp messages.");
