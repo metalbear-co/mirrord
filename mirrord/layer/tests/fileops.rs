@@ -760,7 +760,7 @@ async fn test_read_go(
 
     layer_connection.expect_file_close(fd).await;
     // Notify Go test app that the close detour completed and it can exit.
-    // (The go app waits for this, since Go does not wait for the close detour to complete befor
+    // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
     test_process.child.as_ref().map(|process| {
         signal::kill(
