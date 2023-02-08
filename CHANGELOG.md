@@ -20,6 +20,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent: now prints "agent ready" instead of logging it so it can't be fudged with `RUST_LOG` control.
 - mirrord-agent: `agent::layer_recv` changed instrumentation to be trace instead of info.
 - mirrord-layer/agent: change ttl of job to be 1 second for cases where 0 means in cluster don't clean up.
+- Convert go fileops e2e tests into integration tests. Part of
+  [#994](https://github.com/metalbear-co/mirrord/issues/994#issuecomment-1410721960).
 
 ## 3.22.0
 

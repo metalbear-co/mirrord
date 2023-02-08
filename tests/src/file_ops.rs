@@ -17,14 +17,7 @@ mod file_ops {
         #[notrace]
         service: KubeService,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-        #[values(
-            FileOps::Python,
-            FileOps::Go18,
-            FileOps::Go19,
-            FileOps::Go20,
-            FileOps::Rust
-        )]
-        ops: FileOps,
+        #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
@@ -162,6 +155,8 @@ mod file_ops {
     }
 
     /// On Linux: Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
+    /// This is an E2E test and not an integration test in order to test the agent side of the
+    /// detour.
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
