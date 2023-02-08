@@ -2,7 +2,7 @@
 use std::collections::VecDeque;
 
 use mirrord_protocol::{
-    dns::DnsLookup, outgoing::udp::BoundAddress, RemoteResult, SendRecvResponse,
+    outgoing::udp::BoundAddress, RemoteResult, SendRecvResponse,
 };
 use tokio::sync::oneshot;
 
@@ -67,7 +67,7 @@ pub(crate) enum SendRecvHook {
 #[derive(Debug)]
 pub struct SendMsgHook {
     pub(crate) message: String,
-    pub(crate) addr: String,
+    pub(crate) addr: Option<String>,
     pub(crate) bound: Option<BoundAddress>,
     pub(crate) hook_channel_tx: ResponseChannel<SendRecvResponse>,
 }
@@ -88,9 +88,7 @@ pub(crate) enum HookMessage {
     TcpOutgoing(TcpOutgoing),
 
     /// UDP outgoing messages originating from a hook, see [`UdpOutgoing`].
-    UdpOutgoing(UdpOutgoing),
-    File(HookMessageFile),
-    GetAddrInfoHook(GetAddrInfoHook),
+    UdpOutgoing(UdpOutgoing),    
 
     /// File messages originating from a hook, see [`FileOperation`].
     File(FileOperation),

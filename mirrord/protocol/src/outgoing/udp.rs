@@ -23,7 +23,7 @@ pub struct SendMsgResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SendMsgRequest {
     pub message: String,
-    pub addr: String,
+    pub addr: Option<String>,
     pub bound: Option<BoundAddress>,
 }
 

@@ -76,7 +76,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
-use common::{GetAddrInfoHook, ResponseChannel, SendMsgHook, SendRecvHook};
+use common::{ResponseChannel, SendMsgHook, SendRecvHook};
 use ctor::ctor;
 use dns::GetAddrInfo;
 use error::{LayerError, Result};

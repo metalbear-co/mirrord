@@ -16,8 +16,7 @@ use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, GetAddrInfoHook, HookMessage, SendMsgHook, SendRecvHook},
-    common::{blocking_send_hook_message, HookMessage},
+    common::{blocking_send_hook_message, HookMessage, SendMsgHook, SendRecvHook},    
     detour::{Detour, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
@@ -639,9 +638,7 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
             }
             SocketKind::Udp(_) => {
                 let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-                let addr_cstr = unsafe { CStr::from_ptr((*msg).msg_name as *const i8) };
-                let addr = addr_cstr.to_str().unwrap().to_string();
-
+                
                 let message_cstr =
                     unsafe { CStr::from_ptr((*(*msg).msg_iov).iov_base as *const i8) };
                 let message = message_cstr.to_str().unwrap().to_string();
@@ -649,7 +646,7 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
                 let hook = if let SocketState::Bound(bound) = socket.state {
                     SendMsgHook {
                         message,
-                        addr,
+                        addr: None,
                         bound: Some(BoundAddress {
                             requested_port: bound.requested_port,
                             address: bound.address,
@@ -657,9 +654,12 @@ pub(super) fn sendmsg(fd: c_int, msg: *const msghdr, _flags: c_int) -> Detour<ss
                         hook_channel_tx,
                     }
                 } else {
+                    let addr_cstr = unsafe { CStr::from_ptr((*msg).msg_name as *const i8) };
+                    let addr = addr_cstr.to_str().unwrap().to_string();
+
                     SendMsgHook {
                         message,
-                        addr,
+                        addr: Some(addr),
                         bound: None,
                         hook_channel_tx,
                     }
