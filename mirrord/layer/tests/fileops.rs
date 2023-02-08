@@ -298,7 +298,6 @@ async fn test_go_dir(
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
             dylib_path,
-            // add rw override for the specific path
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
         )
         .await;
@@ -419,45 +418,17 @@ async fn test_go_dir_on_linux(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+        )
+        .await;
 
-    env.insert("MIRRORD_FILE_MODE", "read");
-    // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/foo".to_string().into(),
-            open_options: OpenOptionsInternal {
-                read: true,
-                write: false,
-                append: false,
-                truncate: false,
-                create: false,
-                create_new: false,
-            },
-        }))
-    );
-
+    let fd = 1;
     layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        .expect_file_open_for_reading("/tmp/foo", fd)
+        .await;
 
     // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
     assert_matches!(
@@ -524,10 +495,7 @@ async fn test_go_dir_on_linux(
         .await
         .unwrap();
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
