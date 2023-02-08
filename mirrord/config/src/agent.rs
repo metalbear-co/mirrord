@@ -92,7 +92,7 @@ mod tests {
             Option<&str>,
             &str,
         ),
-        #[values((None, 0), (Some("30"), 30))] ttl: (Option<&str>, u16),
+        #[values((None, 1), (Some("30"), 30))] ttl: (Option<&str>, u16),
         #[values((None, false), (Some("true"), true))] ephemeral: (Option<&str>, bool),
         #[values((None, None), (Some("30"), Some(30)))] communication_timeout: (
             Option<&str>,
