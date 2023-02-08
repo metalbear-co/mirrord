@@ -1,21 +1,15 @@
 #![feature(assert_matches)]
+#![cfg(target_os = "linux")]
 
-#[cfg(target_os = "linux")]
 use std::{path::PathBuf, time::Duration};
 
-#[cfg(target_os = "linux")]
 use rstest::rstest;
-#[cfg(target_os = "linux")]
-use tokio::net::TcpListener;
 
-#[cfg(target_os = "linux")]
 mod common;
 
-#[cfg(target_os = "linux")]
 pub use common::*;
 
 /// Verify that issue [#834](https://github.com/metalbear-co/mirrord/issues/834) is fixed
-#[cfg(target_os = "linux")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]

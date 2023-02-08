@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
+use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
@@ -12,7 +12,6 @@ use nix::{
     unistd::Pid,
 };
 use rstest::rstest;
-use tokio::{net::TcpListener, process::Command};
 
 mod common;
 pub use common::*;
@@ -189,10 +188,10 @@ async fn test_node_close(
         .await;
 
     let contents = "hello";
-    let read_amount = contents.len();
     // on macOS it will send xstat before reading.
     #[cfg(target_os = "macos")]
     {
+        let read_amount = contents.len();
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
