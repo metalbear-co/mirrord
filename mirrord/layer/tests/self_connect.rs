@@ -3,7 +3,6 @@
 use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
-use tokio::net::TcpListener;
 
 mod common;
 
