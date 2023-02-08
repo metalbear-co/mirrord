@@ -168,6 +168,7 @@ impl LayerConnection {
     /// Accept the library's connection and verify initial ENV message
     pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
         let codec = Self::accept_library_connection(listener).await;
+        println!("Got connection from layer.");
         LayerConnection {
             codec,
             num_connections: 0,
@@ -765,6 +766,38 @@ impl Application {
         }
     }
 
+    /// Get a new TCP listener.
+    async fn get_listener() -> TcpListener {
+        // Listen for a connection from the layer.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        println!("Listening for messages from the layer on {addr}");
+
+        listener
+    }
+
+    /// Start the test process with the given env.
+    async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
+        let executable = self.get_executable().await;
+        println!("Using executable: {}", &executable);
+
+        TestProcess::start_process(executable, self.get_args(), env).await
+    }
+
+    /// Start the test process and return the started process and a tcp listener that the layer is
+    /// supposed to connect to.
+    pub async fn get_test_process_and_listener(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, TcpListener) {
+        let listener = Self::get_listener().await;
+        let addr = listener.local_addr().unwrap().to_string();
+        let env = get_env(dylib_path.to_str().unwrap(), &addr, extra_env_vars);
+        let test_process = self.get_test_process(env).await;
+
+        (test_process, listener)
+    }
+
     /// Start the process of this application, with the layer lib loaded.
     /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
     pub async fn start_process_with_layer(
@@ -772,26 +805,25 @@ impl Application {
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
     ) -> (TestProcess, LayerConnection) {
-        let executable = self.get_executable().await;
-        println!("Using executable: {}", &executable);
-
-        // Listen for a connection from the layer.
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap().to_string();
-        println!("Listening for messages from the layer on {addr}");
-
-        // Add extra env vars to execution beyond the ones we always add (in `get_env`).
-        let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-        for (key, value) in extra_env_vars {
-            env.insert(key, value);
-        }
-
-        let test_process = TestProcess::start_process(executable, self.get_args(), env).await;
-
-        // Accept connection, verify first message.
+        let (test_process, listener) = self
+            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .await;
         let layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-        println!("Got connection from layer.");
+        (test_process, layer_connection)
+    }
 
+    /// Like `start_process_with_layer`, but also verify a port subscribe.
+    pub async fn start_process_with_layer_and_port(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, LayerConnection) {
+        let (test_process, listener) = self
+            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .await;
+        let layer_connection =
+            LayerConnection::get_initialized_connection_with_port(&listener, self.get_app_port())
+                .await;
         (test_process, layer_connection)
     }
 }
@@ -820,7 +852,11 @@ pub fn dylib_path() -> PathBuf {
     }
 }
 
-pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
+pub fn get_env<'a>(
+    dylib_path_str: &'a str,
+    addr: &'a str,
+    extra_vars: Vec<(&'a str, &'a str)>,
+) -> HashMap<&'a str, &'a str> {
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
@@ -828,6 +864,9 @@ pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &
     env.insert("MIRRORD_REMOTE_DNS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
+    for (key, value) in extra_vars {
+        env.insert(key, value);
+    }
     env
 }
 

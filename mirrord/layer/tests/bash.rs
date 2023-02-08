@@ -29,7 +29,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    let env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![]);
     #[cfg(target_os = "macos")]
     let executable = sip_patch(&executable).unwrap().unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
