@@ -98,7 +98,7 @@ async fn test_pwrite(
         .await
         .unwrap();
 
-    layer_connection.expect_file_close(fd);
+    layer_connection.expect_file_close(fd).await;
 
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
