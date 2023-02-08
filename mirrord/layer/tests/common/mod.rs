@@ -766,15 +766,6 @@ impl Application {
         }
     }
 
-    /// Get a new TCP listener.
-    async fn get_listener() -> TcpListener {
-        // Listen for a connection from the layer.
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        println!("Listening for messages from the layer on {addr}");
-
-        listener
-    }
-
     /// Start the test process with the given env.
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
@@ -790,8 +781,9 @@ impl Application {
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
     ) -> (TestProcess, TcpListener) {
-        let listener = Self::get_listener().await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
+        println!("Listening for messages from the layer on {addr}");
         let env = get_env(dylib_path.to_str().unwrap(), &addr, extra_env_vars);
         let test_process = self.get_test_process(env).await;
 
