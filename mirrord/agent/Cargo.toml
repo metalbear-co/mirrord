@@ -16,7 +16,7 @@ edition.workspace = true
 
 [dependencies]
 containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="6bc49c007cf93869e7d83fca4818b6aae1145b45"}
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "fs"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "fs", "process"] }
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.31"

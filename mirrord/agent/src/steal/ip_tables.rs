@@ -1,6 +1,8 @@
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
+use tokio::process::Command;
+use tracing::info;
 
 use crate::error::{AgentError, Result};
 
@@ -167,13 +169,21 @@ where
 
     /// Adds port redirection, and bypass gid packets from iptables.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_stealer_iptables_rules(
+    pub(super) async fn add_stealer_iptables_rules(
         &self,
         redirected_port: Port,
         target_port: Port,
     ) -> Result<()> {
         self.add_redirect(redirected_port, target_port)
-            .and_then(|_| self.add_bypass_own_packets())
+            .and_then(|_| self.add_bypass_own_packets())?;
+
+        let conntrack = Command::new("conntrack").args(&["--flush"]).output().await;
+        info!("conntrack result is \n{conntrack:#?}\n");
+
+        let output = conntrack?;
+        info!("conntrack output is \n{output:#?}\n");
+
+        Ok(())
     }
 
     /// Removes port redirection, and bypass gid packets from iptables.
