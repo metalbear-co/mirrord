@@ -1,6 +1,9 @@
+#![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
+#[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
+#[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
     file::{MetadataInternal, XstatRequest, XstatResponse},
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
@@ -13,6 +16,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
+#[cfg(not(target_os = "macos"))]
 use tokio_stream::StreamExt;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
@@ -28,7 +32,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    let env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![]);
     #[cfg(target_os = "macos")]
     let executable = sip_patch(&executable).unwrap().unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
@@ -74,7 +78,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     }
 
     cat_layer_connection
-        .expect_and_answer_file_read("Very interesting contents.", fd)
+        .expect_file_read("Very interesting contents.", fd)
         .await;
 
     // don't expect file close as it might not get called due to race condition

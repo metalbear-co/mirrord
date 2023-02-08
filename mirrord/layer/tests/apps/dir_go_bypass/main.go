@@ -9,7 +9,7 @@ import (
 import "time"
 
 func main() {
-    dirPath := os.Args[1]
+    dirPath := os.Getenv("MIRRORD_TEST_GO_DIR_BYPASS_PATH")
 	dir, err := os.ReadDir(dirPath)
 	if err != nil {
 		fmt.Printf("Reading dir error: %s\n", err)

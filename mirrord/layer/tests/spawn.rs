@@ -1,7 +1,8 @@
+#![feature(assert_matches)]
+
 use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
-use tokio::net::TcpListener;
 
 mod common;
 
@@ -19,14 +20,9 @@ pub use common::*;
 #[timeout(Duration::from_secs(20))]
 async fn test_node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let (mut test_process, listener) = application
+        .get_test_process_and_listener(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
+        .await;
 
     // Accept the connection from the layer and verify initial messages.
     let _node_layer_connection = LayerConnection::get_initialized_connection(&listener).await;

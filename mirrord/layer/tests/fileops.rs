@@ -2,43 +2,25 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-use std::{collections::HashMap, env::temp_dir, path::PathBuf, process::Stdio, time::Duration};
+use std::{env::temp_dir, path::PathBuf, time::Duration};
 
-use actix_codec::Framed;
 use futures::{stream::StreamExt, SinkExt};
+use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
-use rstest::rstest;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    process::Command,
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
 };
+use rstest::rstest;
 
 mod common;
 pub use common::*;
 
-struct LayerConnection {
-    codec: Framed<TcpStream, DaemonCodec>,
-}
-
-impl LayerConnection {
-    /// Accept a connection from the layer
-    /// Return the codec of the accepted stream.
-    async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
-        let (stream, _) = listener.accept().await.unwrap();
-        println!("Got connection from library.");
-        Framed::new(stream, DaemonCodec::new())
-    }
-
-    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
-    /// caused by the listen hook.
-    async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
-        let codec = Self::accept_library_connection(listener).await;
-        LayerConnection { codec }
-    }
-
-    async fn is_ended(&mut self) -> bool {
-        self.codec.next().await.is_none()
-    }
+fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("MIRRORD_FILE_MODE", "localwithoverrides"),
+        ("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt"),
+    ]
 }
 
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
@@ -46,37 +28,17 @@ impl LayerConnection {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
 async fn test_self_open(dylib_path: &PathBuf) {
-    let mut env = HashMap::new();
-    env.insert("RUST_LOG", "warn,mirrord=debug");
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", &addr);
-    env.insert("MIRRORD_REMOTE_DNS", "false");
-    env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
-    env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
-    let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    app_path.push("tests/apps/self_open/19");
-    let server = Command::new(app_path)
-        .envs(env)
-        .current_dir("/tmp") // if it's the same as the binary it will ignore it by that.
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    println!("Started application.");
+    let application = Application::Go19SelfOpen;
 
-    // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![])
+        .await;
+
     assert!(layer_connection.is_ended().await);
-    let output = server.wait_with_output().await.unwrap();
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    println!("{stdout_str}");
-    assert!(output.status.success());
-    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(!&stdout_str.to_lowercase().contains("error"));
-    assert!(!&stderr_str.to_lowercase().contains("error"));
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout();
 }
 
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
@@ -88,29 +50,21 @@ async fn test_pwrite(
     #[values(Application::RustFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
     // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let fd = 1;
 
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-    // pwrite test
-    // reply to open
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
-            open_options: OpenOptionsInternal {
+    layer_connection
+        .expect_file_open_with_options(
+            "/tmp/test_file.txt",
+            fd,
+            OpenOptionsInternal {
                 read: false,
                 write: true,
                 append: false,
@@ -118,20 +72,13 @@ async fn test_pwrite(
                 create: true,
                 create_new: false,
             },
-        }))
-    );
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        )
+        .await;
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::WriteLimited(WriteLimitedFileRequest {
-            remote_fd: 1,
+            remote_fd: fd,
             start_from: 0,
             write_bytes: vec![
                 72, 101, 108, 108, 111, 44, 32, 73, 32, 97, 109, 32, 116, 104, 101, 32, 102, 105,
@@ -150,10 +97,7 @@ async fn test_pwrite(
         .await
         .unwrap();
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
@@ -229,51 +173,25 @@ async fn test_node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            // add rw override for the specific path
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+        )
+        .await;
 
-    env.insert("MIRRORD_FILE_MODE", "read");
-    // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+    let fd = 1;
 
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-    // pwrite test
-    // reply to open
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
-            open_options: OpenOptionsInternal {
-                read: true,
-                write: false,
-                append: false,
-                truncate: false,
-                create: false,
-                create_new: false,
-            },
-        }))
-    );
     layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        .expect_file_open_for_reading("/tmp/test_file.txt", fd)
+        .await;
 
-    let bytes = "hello".as_bytes().to_vec();
-    let read_amount = bytes.len();
+    let contents = "hello";
     // on macOS it will send xstat before reading.
     #[cfg(target_os = "macos")]
     {
+        let read_amount = contents.len();
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -299,48 +217,9 @@ async fn test_node_close(
             .unwrap();
     }
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-            remote_fd: 1,
-            buffer_size: 8192
-        }))
-    );
+    layer_connection.expect_file_read(contents, fd).await;
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Read(Ok(
-            ReadFileResponse {
-                bytes,
-                read_amount: read_amount as u64,
-            },
-        ))))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-            remote_fd: 1,
-            buffer_size: 8192
-        }))
-    );
-
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Read(Ok(
-            ReadFileResponse {
-                bytes: vec![],
-                read_amount: 0,
-            },
-        ))))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -355,28 +234,21 @@ async fn test_go_stat(
     #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
     // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let fd = 1;
 
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/test_file.txt".to_string().into(),
-            open_options: OpenOptionsInternal {
+    layer_connection
+        .expect_file_open_with_options(
+            "/tmp/test_file.txt",
+            fd,
+            OpenOptionsInternal {
                 read: false,
                 write: true,
                 append: false,
@@ -384,16 +256,9 @@ async fn test_go_stat(
                 create: true,
                 create_new: false,
             },
-        }))
-    );
+        )
+        .await;
 
-    layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -429,45 +294,17 @@ async fn test_go_dir(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+        )
+        .await;
 
-    env.insert("MIRRORD_FILE_MODE", "read");
-    // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/foo".to_string().into(),
-            open_options: OpenOptionsInternal {
-                read: true,
-                write: false,
-                append: false,
-                truncate: false,
-                create: false,
-                create_new: false,
-            },
-        }))
-    );
-
+    let fd = 1;
     layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        .expect_file_open_for_reading("/tmp/foo", fd)
+        .await;
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
@@ -490,7 +327,7 @@ async fn test_go_dir(
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata: metadata },
+            XstatResponse { metadata },
         ))))
         .await
         .unwrap();
@@ -566,10 +403,7 @@ async fn test_go_dir(
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
     );
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
@@ -583,45 +417,17 @@ async fn test_go_dir_on_linux(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+        )
+        .await;
 
-    env.insert("MIRRORD_FILE_MODE", "read");
-    // add rw override for the specific path
-    env.insert("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
-
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-            path: "/tmp/foo".to_string().into(),
-            open_options: OpenOptionsInternal {
-                read: true,
-                write: false,
-                append: false,
-                truncate: false,
-                create: false,
-                create_new: false,
-            },
-        }))
-    );
-
+    let fd = 1;
     layer_connection
-        .codec
-        .send(DaemonMessage::File(FileResponse::Open(Ok(
-            OpenFileResponse { fd: 1 },
-        ))))
-        .await
-        .unwrap();
+        .expect_file_open_for_reading("/tmp/foo", fd)
+        .await;
 
     // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
     assert_matches!(
@@ -688,10 +494,7 @@ async fn test_go_dir_on_linux(
         .await
         .unwrap();
 
-    assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
-    );
+    layer_connection.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
@@ -714,27 +517,161 @@ async fn test_go_dir_bypass(
     std::fs::write(tmp_dir.join("a"), "").unwrap();
     std::fs::write(tmp_dir.join("b"), "").unwrap();
 
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
     let path_string = tmp_dir.to_str().unwrap().to_string();
 
-    // Have FS on so that getdents64 gets hooked.
-    env.insert("MIRRORD_FILE_MODE", "read");
-
     // But make this path local so that in the getdents64 detour we get to the bypass.
-    env.insert("MIRRORD_FILE_LOCAL_PATTERN", &path_string);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![
+                ("MIRRORD_TEST_GO_DIR_BYPASS_PATH", &path_string),
+                ("MIRRORD_FILE_LOCAL_PATTERN", &path_string),
+            ],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, vec![path_string.clone()], env).await;
+    assert!(layer_connection.is_ended().await);
 
-    let mut _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
 
+/// Test go file read and close.
+/// This test also verifies the close hook, since go's `os.ReadFile` calls `Close`.
+/// We don't call close in other tests because Go does not wait for the operation to complete before
+/// returning, which means we can't just normally wait in the test for the message from the layer
+/// because the app could close before the message is sent.
+/// What we do here in order to avoid race conditions is that the Go test app for this test waits
+/// for a signal after calling `Close` (implicitly, by calling `ReadFile`), and the test sends the
+/// signal to the app only once the close message was verified. Only then does the test app exit.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_read_go(
+    #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")])
+        .await;
+
+    let fd = 1;
+    layer_connection
+        .expect_file_open_for_reading("/app/test.txt", fd)
+        .await;
+
+    // Different go versions (mac/linux, 1.18/1.19/1.20) use different amounts of xstat calls here.
+    // We accept and answer however many xstat calls the app does, then we verify and answer the
+    // read calls.
+    layer_connection
+        .consume_xstats_then_expect_file_read("Pineapples.", fd)
+        .await;
+
+    layer_connection.expect_file_close(fd).await;
+    // Notify Go test app that the close detour completed and it can exit.
+    // (The go app waits for this, since Go does not wait for the close detour to complete before
+    // returning from `Close`).
+    test_process.child.as_ref().map(|process| {
+        signal::kill(
+            Pid::from_raw(process.id().unwrap() as pid_t),
+            Signal::SIGTERM,
+        )
+        .unwrap()
+    });
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file write.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_write_go(
+    #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
+
+    let fd = 1;
+    layer_connection
+        .expect_file_open_for_writing("/app/test.txt", fd)
+        .await;
+
+    layer_connection
+        .consume_xstats_then_expect_file_write("Pineapples.", 1)
+        .await;
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file lseek.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_lseek_go(
+    #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
+
+    let fd = 1;
+    layer_connection
+        .expect_file_open_with_read_flag("/app/test.txt", fd)
+        .await;
+
+    layer_connection
+        .consume_xstats_then_expect_file_lseek(SeekFromInternal::Current(4), fd)
+        .await;
+
+    layer_connection
+        .expect_single_file_read("apples.", fd)
+        .await;
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
+
+/// Test go file access.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn test_faccessat_go(
+    #[values(
+        Application::Go18FAccessAt,
+        Application::Go19FAccessAt,
+        Application::Go20FAccessAt
+    )]
+    application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
+
+    layer_connection
+        .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
+        .await;
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
 }
