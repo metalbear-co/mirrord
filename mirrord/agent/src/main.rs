@@ -386,9 +386,8 @@ async fn start_agent() -> Result<()> {
     );
 
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
-    // `wait_for_agent_startup`. If you change this, or if this is not logged (i.e. user disables
-    // `MIRRORD_AGENT_RUST_LOG`), then mirrord fails to initialize.
-    info!("agent ready");
+    // `wait_for_agent_startup`. If you change this then mirrord fails to initialize.
+    println!("agent ready");
 
     let mut clients = FuturesUnordered::new();
     loop {

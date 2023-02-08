@@ -190,7 +190,8 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
-            | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
+            | HookError::ResponseError(ResponseError::RemoteIO(_))
+            | HookError::ResponseError(ResponseError::DnsLookup(_)) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
