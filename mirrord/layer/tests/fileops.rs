@@ -29,33 +29,17 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
 async fn test_self_open(dylib_path: &PathBuf) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
+    let application = Application::Go19SelfOpen;
 
-    let env = get_env(dylib_path.to_str().unwrap(), &addr);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![])
+        .await;
 
-    let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    app_path.push("tests/apps/self_open/19");
-    let server = Command::new(app_path)
-        .envs(env)
-        .current_dir("/tmp") // if it's the same as the binary it will ignore it by that.
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    println!("Started application.");
-
-    // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     assert!(layer_connection.is_ended().await);
-    let output = server.wait_with_output().await.unwrap();
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    println!("{stdout_str}");
-    assert!(output.status.success());
-    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(!&stdout_str.to_lowercase().contains("error"));
-    assert!(!&stderr_str.to_lowercase().contains("error"));
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout();
 }
 
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero

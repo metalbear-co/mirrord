@@ -589,6 +589,7 @@ pub enum Application {
     Go18FAccessAt,
     Go19FAccessAt,
     Go20FAccessAt,
+    Go19SelfOpen,
 }
 
 impl Application {
@@ -653,6 +654,7 @@ impl Application {
             Application::Go18FAccessAt => String::from("tests/apps/faccessat_go/18"),
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
+            Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
         }
     }
 
@@ -716,6 +718,7 @@ impl Application {
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::BashShebang
+            | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
         }
@@ -753,6 +756,7 @@ impl Application {
             | Application::Go18FAccessAt
             | Application::Go19DirBypass
             | Application::Go20DirBypass
+            | Application::Go19SelfOpen
             | Application::Go19Dir
             | Application::Go20Dir => {
                 unimplemented!("shouldn't get here")
