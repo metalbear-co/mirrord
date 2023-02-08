@@ -518,26 +518,17 @@ async fn test_go_dir_bypass(
     std::fs::write(tmp_dir.join("a"), "").unwrap();
     std::fs::write(tmp_dir.join("b"), "").unwrap();
 
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
     let path_string = tmp_dir.to_str().unwrap().to_string();
 
-    // Have FS on so that getdents64 gets hooked.
-    env.insert("MIRRORD_FILE_MODE", "read");
-
     // But make this path local so that in the getdents64 detour we get to the bypass.
-    env.insert("MIRRORD_FILE_LOCAL_PATTERN", &path_string);
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_LOCAL_PATTERN", &path_string)],
+        )
+        .await;
 
-    let mut test_process =
-        TestProcess::start_process(executable, vec![path_string.clone()], env).await;
-
-    let mut _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
