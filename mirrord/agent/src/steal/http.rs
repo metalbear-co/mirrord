@@ -105,6 +105,7 @@ impl HttpFilterManager {
     }
 
     /// Start a [`filter_task`] to handle this new connection.
+    #[tracing::instrument(level = "trace", skip(self, connection_close_sender))]
     pub(super) async fn new_connection(
         &self,
         original_stream: TcpStream,

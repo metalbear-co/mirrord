@@ -70,7 +70,10 @@ where
 {
     fn execute(&self, fut: Fut) {
         debug!("starting tokio executor for hyper HTTP/2");
-        tokio::spawn(fut);
+        tokio::spawn(async move {
+            let _ = DetourGuard::new();
+            fut.await
+        });
     }
 }
 

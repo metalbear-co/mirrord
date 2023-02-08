@@ -57,7 +57,7 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
-hyper = { workspace = true, features = ["client"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
 http-body-util  = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

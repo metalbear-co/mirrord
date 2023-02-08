@@ -111,7 +111,7 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
 }
 
 // TODO(alex): Errors here are not reported back anywhere, we end up with a generic fail of:
-// "ERROR ThreadId(03) mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
+// "ERROR  mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
 // error: SnifferCommand sender failed with `channel closed`"
 //
 // And to make matters worse, the error reported back to the user is the very generic:

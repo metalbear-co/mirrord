@@ -71,10 +71,10 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 ///
 /// It's important to note that, we don't lose the bytes read from the original stream, due to us
 /// converting it into a  [`DefaultReversibleStream`].
-// #[tracing::instrument(
-//     level = "trace",
-//     skip(stolen_stream, matched_tx, connection_close_sender)
-// )]
+#[tracing::instrument(
+    level = "trace",
+    skip(stolen_stream, matched_tx, connection_close_sender)
+)]
 pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,

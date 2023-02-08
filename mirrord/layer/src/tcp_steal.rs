@@ -164,7 +164,7 @@ impl TcpHandler for TcpStealHandler {
     /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
         if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
             trace!(
@@ -268,7 +268,7 @@ impl TcpStealHandler {
     /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
     /// The responses from all the http client tasks will arrive together at
     /// [`self.response_receiver`].
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn create_http_connection(
         &mut self,
         http_request: HttpRequest,
