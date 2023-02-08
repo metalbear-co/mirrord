@@ -524,7 +524,10 @@ async fn test_go_dir_bypass(
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
             dylib_path,
-            vec![("MIRRORD_FILE_LOCAL_PATTERN", &path_string)],
+            vec![
+                ("MIRRORD_TEST_GO_DIR_BYPASS_PATH", &path_string),
+                ("MIRRORD_FILE_LOCAL_PATTERN", &path_string),
+            ],
         )
         .await;
 
