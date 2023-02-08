@@ -36,11 +36,10 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
-    /// Controls how long the agent pod persists for, after the local process terminated (in
-    /// seconds).
+    /// Controls how long the agent pod persists for after the agent exits (in seconds).
     ///
     /// Can be useful for collecting logs.
-    #[config(env = "MIRRORD_AGENT_TTL", default = 0)]
+    #[config(env = "MIRRORD_AGENT_TTL", default = 1)]
     pub ttl: u16,
 
     /// Runs the agent as an [ephemeral
@@ -92,7 +91,7 @@ mod tests {
             Option<&str>,
             &str,
         ),
-        #[values((None, 0), (Some("30"), 30))] ttl: (Option<&str>, u16),
+        #[values((None, 1), (Some("30"), 30))] ttl: (Option<&str>, u16),
         #[values((None, false), (Some("true"), true))] ephemeral: (Option<&str>, bool),
         #[values((None, None), (Some("30"), Some(30)))] communication_timeout: (
             Option<&str>,

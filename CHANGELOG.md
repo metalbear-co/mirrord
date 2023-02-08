@@ -19,6 +19,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - `DNSLookup` failures changed to be info log from error since it is a common case.
 - mirrord-agent: now prints "agent ready" instead of logging it so it can't be fudged with `RUST_LOG` control.
 - mirrord-agent: `agent::layer_recv` changed instrumentation to be trace instead of info.
+- mirrord-layer/agent: change ttl of job to be 1 second for cases where 0 means in cluster don't clean up.
 
 ## 3.22.0
 
