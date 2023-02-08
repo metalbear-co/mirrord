@@ -17,6 +17,13 @@ use tokio::{net::TcpListener, process::Command};
 mod common;
 pub use common::*;
 
+fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("MIRRORD_FILE_MODE", "localwithoverrides"),
+        ("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt"),
+    ]
+}
+
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -731,20 +738,9 @@ async fn test_read_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "read");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")])
+        .await;
 
     let fd = 1;
     layer_connection
@@ -786,21 +782,9 @@ async fn test_write_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "localwithoverrides");
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
 
     let fd = 1;
     layer_connection
@@ -827,21 +811,9 @@ async fn test_lseek_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "localwithoverrides");
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
 
     let fd = 1;
     layer_connection
@@ -876,21 +848,9 @@ async fn test_faccessat_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await;
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
-
-    env.insert("MIRRORD_FILE_MODE", "localwithoverrides");
-    env.insert("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/test.txt");
-
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
-
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("Got connection from layer.");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
 
     layer_connection
         .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)

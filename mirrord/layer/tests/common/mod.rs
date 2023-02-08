@@ -760,6 +760,36 @@ impl Application {
             Application::PythonSelfConnect => 1337,
         }
     }
+
+    /// Start the process of this application, with the layer lib loaded.
+    /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
+    pub async fn start_process_with_layer(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, LayerConnection) {
+        let executable = self.get_executable().await;
+        println!("Using executable: {}", &executable);
+
+        // Listen for a connection from the layer.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        println!("Listening for messages from the layer on {addr}");
+
+        // Add extra env vars to execution beyond the ones we always add (in `get_env`).
+        let mut env = get_env(dylib_path.to_str().unwrap(), &addr);
+        for (key, value) in extra_env_vars {
+            env.insert(key, value);
+        }
+
+        let test_process = TestProcess::start_process(executable, self.get_args(), env).await;
+
+        // Accept connection, verify first message.
+        let layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+        println!("Got connection from layer.");
+
+        (test_process, layer_connection)
+    }
 }
 
 /// Return the path to the existing layer lib, or build it first and return the path, according to
