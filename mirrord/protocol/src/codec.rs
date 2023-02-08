@@ -7,6 +7,8 @@ use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 
+#[cfg(target_os = "linux")]
+use crate::file::{GetDEnts64Request, GetDEnts64Response};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
@@ -51,6 +53,8 @@ pub enum FileRequest {
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
+    #[cfg(target_os = "linux")]
+    GetDEnts64(GetDEnts64Request),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -89,6 +93,8 @@ pub enum FileResponse {
     Xstat(RemoteResult<XstatResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
+    #[cfg(target_os = "linux")]
+    GetDEnts64(RemoteResult<GetDEnts64Response>),
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

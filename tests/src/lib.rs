@@ -54,14 +54,14 @@ mod utils {
         name: &str,
     ) {
         let params = ListParams::default()
-            .fields(&format!("metadata.name={}", name))
+            .fields(&format!("metadata.name={name}"))
             .timeout(10);
         let mut stream = api.watch(&params, "0").await.unwrap().boxed();
         while let Some(status) = stream.try_next().await.unwrap() {
             match status {
                 WatchEvent::Modified(_) => break,
                 WatchEvent::Error(s) => {
-                    panic!("Error watching namespaces: {:?}", s);
+                    panic!("Error watching namespaces: {s:?}");
                 }
                 _ => {}
             }
@@ -85,12 +85,12 @@ mod utils {
         NodeHTTP,
         Go18HTTP,
         Go19HTTP,
+        Go20HTTP,
         NodeTcpEcho,
     }
 
     #[derive(Debug)]
     pub enum Agent {
-        #[cfg(target_os = "linux")]
         Ephemeral,
         Job,
     }
@@ -100,7 +100,23 @@ mod utils {
         Python,
         Go18,
         Go19,
+        Go20,
         Rust,
+        GoDir18,
+        GoDir19,
+        GoDir20,
+    }
+
+    #[derive(Debug)]
+    pub enum EnvApp {
+        Go18,
+        Go19,
+        Go20,
+        Bash,
+        BashInclude,
+        BashExclude,
+        NodeInclude,
+        NodeExclude,
     }
 
     pub struct TestProcess {
@@ -116,8 +132,8 @@ mod utils {
             self.stdout.lock().unwrap().clone()
         }
 
-        pub fn assert_stderr(&self) {
-            assert!(self.stderr.lock().unwrap().is_empty());
+        pub fn get_stderr(&self) -> String {
+            self.stderr.lock().unwrap().clone()
         }
 
         pub fn assert_log_level(&self, stderr: bool, level: &str) {
@@ -135,12 +151,12 @@ mod utils {
         pub fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
-                let stdout = self.get_stdout();
-                if stdout.contains(line) {
+                let stderr = self.get_stderr();
+                if stderr.contains(line) {
                     return;
                 }
             }
-            panic!("Timeout waiting for line: {}", line);
+            panic!("Timeout waiting for line: {line}");
         }
 
         pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
@@ -210,6 +226,7 @@ mod utils {
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
+                Application::Go20HTTP => vec!["go-e2e/20"],
                 Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
@@ -232,7 +249,7 @@ mod utils {
                     process.assert_log_level(true, "CRITICAL");
                     process.assert_log_level(false, "CRITICAL");
                 }
-                _ => process.assert_stderr(),
+                _ => {}
             }
         }
     }
@@ -240,7 +257,6 @@ mod utils {
     impl Agent {
         pub fn flag(&self) -> Option<Vec<&str>> {
             match self {
-                #[cfg(target_os = "linux")]
                 Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
                 Agent::Job => None,
             }
@@ -255,14 +271,47 @@ mod utils {
                 }
                 FileOps::Go18 => vec!["go-e2e-fileops/18"],
                 FileOps::Go19 => vec!["go-e2e-fileops/19"],
+                FileOps::Go20 => vec!["go-e2e-fileops/20"],
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
+                FileOps::GoDir18 => vec!["go-e2e-dir/18"],
+                FileOps::GoDir19 => vec!["go-e2e-dir/19"],
+                FileOps::GoDir20 => vec!["go-e2e-dir/20"],
             }
         }
 
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),
-                _ => process.assert_stderr(),
+                _ => {}
+            }
+        }
+    }
+
+    impl EnvApp {
+        pub fn command(&self) -> Vec<&str> {
+            match self {
+                Self::Go18 => vec!["go-e2e-env/18"],
+                Self::Go19 => vec!["go-e2e-env/19"],
+                Self::Go20 => vec!["go-e2e-env/20"],
+                Self::Bash => vec!["bash", "bash-e2e/env.sh"],
+                Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
+                Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
+                Self::NodeInclude => vec![
+                    "node",
+                    "node-e2e/remote_env/test_remote_env_vars_include_works.mjs",
+                ],
+                Self::NodeExclude => vec![
+                    "node",
+                    "node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs",
+                ],
+            }
+        }
+
+        pub fn mirrord_args(&self) -> Option<Vec<&str>> {
+            match self {
+                Self::BashInclude | Self::NodeInclude => Some(vec!["-s", "MIRRORD_FAKE_VAR_FIRST"]),
+                Self::BashExclude | Self::NodeExclude => Some(vec!["-x", "MIRRORD_FAKE_VAR_FIRST"]),
+                Self::Go18 | Self::Go19 | Self::Go20 | Self::Bash => None,
             }
         }
     }
@@ -563,7 +612,7 @@ mod utils {
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
-            target: format!("pod/{}/container/{}", target, CONTAINER_NAME),
+            target: format!("pod/{target}/container/{CONTAINER_NAME}"),
             _pod: pod_guard,
             _service: service_guard,
         }
@@ -632,6 +681,23 @@ mod utils {
         .await
     }
 
+    /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
+    /// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+    /// connection, allowing us to test HTTP upgrade requests.
+    #[fixture]
+    pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-websocket:latest",
+            "websocket",
+            true,
+            false,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
@@ -681,7 +747,7 @@ mod utils {
 
     pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
         let (host_ip, port) = get_service_host_and_port(kube_client, service).await;
-        format!("http://{}:{}", host_ip, port)
+        format!("http://{host_ip}:{port}")
     }
 
     pub async fn get_pod_instance(
@@ -691,7 +757,7 @@ mod utils {
     ) -> Option<String> {
         let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
         let pods = pod_api
-            .list(&ListParams::default().labels(&format!("app={}", app_name)))
+            .list(&ListParams::default().labels(&format!("app={app_name}")))
             .await
             .unwrap();
         let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());

@@ -68,7 +68,7 @@ async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
         .last()
         .ok_or(RemoteError::NameserverNotFound)?;
 
-    let dns_address: SocketAddr = format!("{}:{}", nameserver, DNS_PORT)
+    let dns_address: SocketAddr = format!("{nameserver}:{DNS_PORT}")
         .parse()
         .map_err(RemoteError::from)?;
 

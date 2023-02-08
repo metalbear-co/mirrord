@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM instrumentisto/rust:nightly-2022-11-20 as build-env
+FROM --platform=$BUILDPLATFORM instrumentisto/rust:nightly-2023-01-31 as build-env
 ARG TARGETARCH
 WORKDIR /app
 RUN curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py

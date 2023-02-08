@@ -251,17 +251,17 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
         .iter()
         .flat_map(|(pod, containers)| {
             if containers.len() == 1 {
-                vec![format!("pod/{}", pod)]
+                vec![format!("pod/{pod}")]
             } else {
                 containers
                     .iter()
-                    .map(move |container| format!("pod/{}/container/{}", pod, container))
+                    .map(move |container| format!("pod/{pod}/container/{container}"))
                     .collect::<Vec<String>>()
             }
         })
         .collect::<Vec<String>>();
     let json_obj = json!(target_vector);
-    println!("{}", json_obj);
+    println!("{json_obj}");
     Ok(())
 }
 
@@ -293,7 +293,7 @@ async fn main() -> miette::Result<()> {
         mirrord_console::init_logger(&console_addr).await?;
     } else {
         registry()
-            .with(fmt::layer())
+            .with(fmt::layer().with_writer(std::io::stderr))
             .with(EnvFilter::from_default_env())
             .init();
     }
@@ -332,7 +332,7 @@ async fn prompt_outdated_version() {
             {
                 if let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-                        println!("New mirrord version available: {}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`.", latest_version);
+                        println!("New mirrord version available: {latest_version}. To update, run: `curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash`.");
                         println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
                     }
                 }

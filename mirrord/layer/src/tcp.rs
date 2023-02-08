@@ -24,7 +24,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) enum HookMessageTcp {
+pub(crate) enum TcpIncoming {
     Listen(Listen),
 }
 
@@ -109,11 +109,11 @@ pub(crate) trait TcpHandler {
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_message(
         &mut self,
-        message: HookMessageTcp,
+        message: TcpIncoming,
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         match message {
-            HookMessageTcp::Listen(listen) => self.handle_listen(listen, tx).await,
+            TcpIncoming::Listen(listen) => self.handle_listen(listen, tx).await,
         }
     }
 

@@ -66,6 +66,7 @@ impl HttpFilterManager {
     ///
     /// You can't create just an empty [`HttpFilterManager`], as we don't steal traffic on ports
     /// that no client has registered interest in.
+    #[tracing::instrument(level = "trace", skip(matched_tx))]
     pub(super) fn new(
         client_id: ClientId,
         filter: Regex,
@@ -87,6 +88,7 @@ impl HttpFilterManager {
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
     /// here will impact the tasks as well.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
         self.client_filters.insert(client_id, filter)
     }
@@ -95,10 +97,12 @@ impl HttpFilterManager {
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so removing a client
     /// here will impact the tasks as well.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, Regex)> {
         self.client_filters.remove(client_id)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
         self.client_filters.contains_key(client_id)
     }
@@ -121,6 +125,7 @@ impl HttpFilterManager {
         ));
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn is_empty(&self) -> bool {
         self.client_filters.is_empty()
     }

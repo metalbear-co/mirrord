@@ -211,7 +211,7 @@
           "minimum": 0.0
         },
         "ttl": {
-          "description": "Controls how long the agent pod persists for, after the local process terminated (in seconds).\n\nCan be useful for collecting logs.",
+          "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.",
           "type": [
             "integer",
             "null"
@@ -242,7 +242,7 @@
       }
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] exclude = \"USER;SECRET\" ```",
+      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] exclude = \"USER;SECRET\" ```",
       "type": "object",
       "properties": {
         "exclude": {
@@ -382,7 +382,7 @@
       ]
     },
     "HttpHeaderFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`IncomingConfig`] is set as [`IncomingMode::Steal`], ignored otherwise.",
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`IncomingConfig`](super::IncomingConfig) is set as [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.",
       "type": "object",
       "properties": {
         "filter": {
@@ -434,7 +434,7 @@
       }
     },
     "IncomingFileConfig": {
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`StealModeConfig`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`IncomingMode::Steal`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
       "anyOf": [
         {
           "anyOf": [

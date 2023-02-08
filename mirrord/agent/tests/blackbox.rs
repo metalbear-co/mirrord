@@ -51,7 +51,7 @@ mod tests {
                                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                                     sleep(Duration::from_millis(10)).await;
                                 }
-                                Err(e) => panic!("socket error {:?}", e)
+                                Err(e) => panic!("socket error {e:?}")
                             }
                         }
                     },
@@ -77,7 +77,7 @@ mod tests {
                 .await
                 .expect("couldn't get next message")
                 .expect("got invalid message"),
-            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(subscription_port)))
+            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
         ));
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
@@ -136,10 +136,10 @@ mod tests {
         assert!(result.status.success());
 
         let stderr = String::from_utf8_lossy(&result.stderr);
-        println!("stderr: {:?}", stderr);
+        println!("stderr: {stderr:?}");
 
         let stdout = String::from_utf8_lossy(&result.stdout);
-        println!("stdout: {:?}", stdout);
+        println!("stdout: {stdout:?}");
 
         assert!(!stderr.to_ascii_lowercase().contains("error"));
         assert!(!stdout.to_ascii_lowercase().contains("error"));

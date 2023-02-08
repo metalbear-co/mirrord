@@ -212,6 +212,7 @@ pub(super) enum OperatorCommand {
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
     },
+    Status,
 }
 
 #[derive(ValueEnum, Clone, Debug)]

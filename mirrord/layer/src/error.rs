@@ -1,6 +1,7 @@
 use std::{env::VarError, ptr, str::ParseBoolError};
 
 use errno::set_errno;
+use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
@@ -14,16 +15,27 @@ use tracing::{error, info};
 use super::HookMessage;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
-const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+/// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
+mod ignore_codes {
+    /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
+    ///
+    /// Prefer using [`is_ignored_code`] instead of relying on this constant.
+    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
 
-fn should_ignore(code: Option<i32>) -> bool {
-    if let Some(code) = code {
-        IGNORE_ERROR_CODES.contains(&code)
-    } else {
-        false
+    /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
+    /// not.
+    pub(super) fn is_ignored_code(code: Option<i32>) -> bool {
+        if let Some(code) = code {
+            IGNORE_ERROR_CODES.contains(&code)
+        } else {
+            false
+        }
     }
 }
 
+/// Errors that occur in the layer's hook functions, and will reach the user's application.
+///
+/// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -67,6 +79,11 @@ pub(crate) enum HookError {
     FailedSipPatch(#[from] SipError),
 }
 
+/// Errors internal to mirrord-layer.
+///
+/// You'll encounter these when the layer is performing some of its internal operations (mostly when
+/// handling messsages, like [`HookMessage`], or
+/// [`DaemonMessage`](mirrord_protocol::codec::DaemonMessage)).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -158,7 +175,7 @@ pub(crate) enum LayerError {
     AgentErrorClosed(String),
 }
 
-// Cannot have a generic From<T> implementation for this error, so explicitly implemented here.
+// Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
 impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookError {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
         HookError::LockError
@@ -168,7 +185,7 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookE
 pub(crate) type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 
-/// mapping based on - https://man7.org/linux/man-pages/man3/errno.3.html
+/// mapping based on - <https://man7.org/linux/man-pages/man3/errno.3.html>
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
         match fail {
@@ -176,10 +193,11 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::NotFile(_))
             | HookError::ResponseError(ResponseError::NotDirectory(_))
             | HookError::ResponseError(ResponseError::Remote(_))
-            | HookError::ResponseError(ResponseError::RemoteIO(_)) => {
+            | HookError::ResponseError(ResponseError::RemoteIO(_))
+            | HookError::ResponseError(ResponseError::DnsLookup(_)) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
-            HookError::IO(ref e) if (should_ignore(e.raw_os_error())) => {
+            HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
             _ => error!("Error occured in Layer >> {:?}", fail),

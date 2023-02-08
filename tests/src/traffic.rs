@@ -27,7 +27,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -43,7 +42,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
@@ -61,7 +59,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -77,7 +74,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -100,7 +96,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -114,7 +109,6 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -128,7 +122,6 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
@@ -194,7 +187,6 @@ mod traffic {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
 
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
@@ -245,7 +237,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
@@ -253,7 +244,6 @@ mod traffic {
         let mut process = run_exec(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 
     #[rstest]
@@ -267,6 +257,13 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/19"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go20_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
+        let command = vec!["go-e2e-outgoing/20"];
         test_go(service, command).await;
     }
 
@@ -286,12 +283,18 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_go20_dns_lookup(#[future] service: KubeService) {
+        let command = vec!["go-e2e-dns/20"];
+        test_go(service, command).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn test_listen_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
     }
 }

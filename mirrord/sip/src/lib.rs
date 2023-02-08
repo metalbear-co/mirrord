@@ -6,7 +6,6 @@ mod whitespace;
 mod main {
     use std::{
         collections::HashSet,
-        env,
         env::temp_dir,
         io::{self, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
@@ -28,8 +27,8 @@ mod main {
         SipError::{CyclicShebangs, FileNotFound, UnlikelyError},
     };
 
-    const EXCLUDE_ENV_VAR_NAME: &str = "MIRRORD_FILE_FILTER_EXCLUDE";
-    pub const TMP_DIR_ENV_VAR_NAME: &str = "MIRRORD_TMP_DIR";
+    /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
+    pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
 
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
@@ -86,7 +85,7 @@ mod main {
                     .find(is_fat_x64_arch)
                     .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
                     .ok_or(SipError::NoX64Arch),
-                other => Err(SipError::UnsupportedFileFormat(format!("{:?}", other))),
+                other => Err(SipError::UnsupportedFileFormat(format!("{other:?}"))),
             }
         }
     }
@@ -309,51 +308,18 @@ mod main {
         }
     }
 
-    /// Add the given `path` to excluded paths.
-    fn add_to_file_exclude(path: &str) {
-        env::set_var(
-            EXCLUDE_ENV_VAR_NAME,
-            env::var(EXCLUDE_ENV_VAR_NAME)
-                .map(|paths| paths + ";")
-                .unwrap_or_else(|_| String::new())
-                + path,
-        )
-    }
-
-    /// Get a path to a temp dir that is excluded from FS hooks and is also saved in an env var so
-    /// that child processes also use the same one and exclude it from FS hooks.
-    pub fn get_tmp_dir() -> Result<PathBuf> {
-        env::var(TMP_DIR_ENV_VAR_NAME)
-            .map(PathBuf::from)
-            .or_else(|_err| {
-                let tmp_dir = temp_dir().join("mirrord-bin");
-                let tmp_dir_string = tmp_dir
-                    .to_str()
-                    .ok_or_else(|| UnlikelyError("Failed to convert path to string".to_string()))?
-                    .to_string();
-                env::set_var(TMP_DIR_ENV_VAR_NAME, &tmp_dir_string);
-                add_to_file_exclude(&(tmp_dir_string + "/.*$"));
-                Ok(tmp_dir)
-            })
-    }
-
     /// Check if the file that the user wants to execute is a SIP protected binary (or a script
     /// starting with a shebang that leads to a SIP protected binary).
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
     pub fn sip_patch(binary_path: &str) -> Result<Option<String>> {
-        // Important: do also if the binary has no SIP, so that a temp directory is set, added to
-        // ignored files, and saved in an environment variable, so that if the binary execs SIP
-        // binaries the patched versions are created in a directory that is already added to the
-        // excluded files. (It's currently not possible to add excluded paths when the layer is
-        // already running, and the first call to this function is from the cli.)
-        let tmp_dir = get_tmp_dir()?;
-
         if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(binary_path)? {
+            let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
             trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
             Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
         } else {
+            trace!("No SIP detected on {:?}", binary_path);
             Ok(None)
         }
     }

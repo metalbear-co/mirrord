@@ -287,11 +287,11 @@ mod tests {
         fn parse(&self, value: &str) -> LayerFileConfig {
             match self {
                 ConfigType::Json => {
-                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                    serde_json::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
-                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err)),
+                ConfigType::Toml => toml::from_str(value).unwrap_or_else(|err| panic!("{err:?}")),
                 ConfigType::Yaml => {
-                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{:?}", err))
+                    serde_yaml::from_str(value).unwrap_or_else(|err| panic!("{err:?}"))
                 }
             }
         }
@@ -394,7 +394,8 @@ mod tests {
             .open(SCHEMA_FILE_PATH)
             .expect("Failed to create schema file!");
 
-        file.write(content.as_bytes())
+        let _ = file
+            .write(content.as_bytes())
             .expect("Failed writing schema to file!");
 
         file
@@ -418,8 +419,9 @@ mod tests {
 
         println!("Checking for an existing schema file!");
         let mut existing_content = String::with_capacity(fresh_content.len());
-        if let Ok(_) = File::open(SCHEMA_FILE_PATH)
+        if File::open(SCHEMA_FILE_PATH)
             .and_then(|mut file| file.read_to_string(&mut existing_content))
+            .is_ok()
         {
             if existing_content != fresh_content {
                 println!("Schema is outdated, preparing updated version!");

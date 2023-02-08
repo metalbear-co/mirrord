@@ -10,8 +10,65 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(trait_alias)]
+#![feature(c_size_t)]
+#![feature(pointer_byte_offsets)]
+#![allow(rustdoc::private_intra_doc_links)]
+
+//! Loaded dynamically with your local process.
+//!
+//! Paired with [`mirrord-agent`], it makes your local process behave as if it was running in a
+//! remote context.
+//!
+//! Check out the [Introduction](https://mirrord.dev/docs/overview/introduction/) guide to learn
+//! more about mirrord.
+//!
+//! ## How it works
+//!
+//! This crate intercepts your processes' [`libc`] calls, and instead of executing them locally (as
+//! normal), it instead forwards them as a message to the mirrord-agent pod.
+//! The operation is executed there, with the result being returned back to `mirrord-layer`, and
+//! finally to the original [`libc`] call.
+//!
+//! ### Example
+//!
+//! Let's say you have a Node.js app that just opens a file, like this:
+//!
+//! - `open-file.mjs`
+//!
+//! ```js
+//! import { open } from 'node:fs';
+//!
+//! const file = open('/tmp/hello.txt');
+//! ```
+//!
+//! When run with mirrord, this is what's going to happen:
+//!
+//! 1. We intercept the call to [`libc::open`] using our `open_detour` hook, which calls
+//!  [`file::ops::open`];
+//!
+//! 2. [`file::ops::open`] sends an open file message to `mirrord-agent`;
+//!
+//! 3. `mirrore-agent` tries to open `/tmp/hello.txt` in the remote context it's running, and
+//! returns the result of the operation back to `mirrord-layer`;
+//!
+//! 4. We handle the mapping of the remote file (the one we have open in `mirrord-agent`), and a
+//! local file (temporarily created);
+//!
+//! 5. And finally, we return the expected result (type) to your Node.js application, as if it had
+//! just called [`libc::open`].
+//!
+//! Your application will get an fd that is valid in the context of mirrord, and calls to other file
+//! functions (like [`libc::read`]), will work just fine, operating on the remote file.
+//!
+//! ## Configuration
+//!
+//! The functions we intercept are controlled via the `mirrord-config` crate, check its
+//! documentation for more details, or
+//! [Configuration](https://mirrord.dev/docs/overview/configuration/) for usage information.
 
 extern crate alloc;
+extern crate core;
+
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -21,6 +78,7 @@ use std::{
 
 use common::{GetAddrInfoHook, ResponseChannel, SendMsgHook, SendRecvHook};
 use ctor::ctor;
+use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
@@ -40,8 +98,6 @@ use mirrord_protocol::{
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage, SendRecvRequest, SendRecvResponse,
 };
-#[cfg(target_os = "macos")]
-use mirrord_sip::get_tmp_dir;
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use socket::SOCKETS;
 use tcp::TcpHandler;
@@ -59,16 +115,19 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     common::HookMessage,
     file::{filter::FILE_FILTER, FileHandler},
+    load::LoadType,
 };
 
 mod common;
 mod connection;
 mod detour;
+mod dns;
 mod error;
 #[cfg(target_os = "macos")]
 mod exec;
 mod file;
 mod hooks;
+mod load;
 mod macros;
 mod outgoing;
 mod socket;
@@ -81,6 +140,24 @@ mod tracing_util;
 #[cfg(target_arch = "x86_64")]
 mod go_hooks;
 
+/// Main tokio [`Runtime`] for mirrord-layer async tasks.
+///
+/// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
+/// `RUNTIME.block_on`.
+///
+/// ## Usage
+///
+/// Currently it's being used to run 2 big tasks:
+///
+/// 1. [`connection::connect`]: which creates the mirrord-agent connection for this layer instance;
+///
+/// 2. [`start_layer_thread`]: where we [`spawn`](tokio::spawn) mirrord-layer's main loop.
+///
+/// ## Bypass
+///
+/// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
+/// `detour::detour_bypass_on`] [`on_thread_start`, and [`detour::detour_bypass_off`]
+/// `on_thread_stop`.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -90,14 +167,47 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .unwrap()
 });
 
-pub(crate) static mut HOOK_SENDER: Option<Sender<HookMessage>> = None;
+/// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
+/// to [`ClientMessage`]s.
+///
+/// The messages sent through here originate from the hooks, and are (usually) converted
+/// to [`ClientMessage`]s.
+///
+/// ## Usage
+///
+/// You probably don't want to use this directly, instead prefer calling
+/// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
+pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
+/// Holds the file operations configuration, as specified by [`FsConfig`].
+///
+/// ## Usage
+///
+/// Mainly used to share the [`FsConfig`] in places where we can't easily pass this as an argument
+/// to some function:
+///
+/// 1. [`close_layer_fd`];
+/// 2. [`go_hooks`] file operations.
 pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
+
+/// Tells us if the user enabled the Tcp outgoing feature in [`NetworkConfig`].
+///
+/// ## Usage
+///
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
+
+/// Tells us if the user enabled the Udp outgoing feature in [`NetworkConfig`].
+///
+/// ## Usage
+///
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-/// Check if we're running in NixOS or Devbox
-/// if so, add `sh` to the skip list because of https://github.com/metalbear-co/mirrord/issues/531
+/// Check if we're running in NixOS or Devbox.
+///
+/// - If so, add `sh` to the skip list because of
+/// [#531](https://github.com/metalbear-co/mirrord/issues/531)
 fn nix_devbox_patch(config: &mut LayerConfig) {
     let mut current_skip = config
         .skip_processes
@@ -157,35 +267,23 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .and_then(|arg| arg.split('/').last())
         .ok_or(LayerError::NoProcessFound)?;
 
-    // This is for better SIP handling on IDEs. If started by an IDE, SIP handling was not called
-    // before starting the binary, (but we're here so binary was not SIP). This means a temp dir
-    // was not yet set, and was not added to excluded files. In that case, set it now, before
-    // generating the configuration so that if the application calls `execve`, and we patch a SIP
-    // executable, the file hooks bypass our patched files (currently there is no way to add files
-    // to the file filter after it was constructed).
-    #[cfg(target_os = "macos")]
-    let _tmp_dir = get_tmp_dir()
-        .inspect_err(|err| {
-            trace!(
-                "Getting temp dir failed with {:?} in layer_pre_initialization",
-                err
-            )
-        })
-        .unwrap_or_default();
-
     let mut config = LayerConfig::from_env()?;
 
     nix_devbox_patch(&mut config);
-    let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-    if should_load(given_process, skip_processes) {
-        layer_start(config);
+    match load::load_type(given_process, config) {
+        LoadType::Full(config) => layer_start(*config),
+        #[cfg(target_os = "macos")]
+        LoadType::SIPOnly => sip_only_layer_start(),
+        LoadType::Skip => {}
     }
 
     Ok(())
 }
 
 /// The one true start of mirrord-layer.
+///
+/// Calls [`layer_pre_initialization`], which runs mirrord-layer.
 #[ctor]
 fn mirrord_layer_entry_point() {
     // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
@@ -196,7 +294,7 @@ fn mirrord_layer_entry_point() {
                 match fail {
                     LayerError::NoProcessFound => (),
                     _ => {
-                        eprintln!("mirrord layer setup failed with {:?}", fail);
+                        eprintln!("mirrord layer setup failed with {fail:?}");
                         std::process::exit(-1)
                     }
                 }
@@ -208,6 +306,20 @@ fn mirrord_layer_entry_point() {
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Starts the main parts of mirrord-layer.
+///
+/// ## Details
+///
+/// Sets up a few things based on the [`LayerConfig`] given by the user:
+///
+/// 1. [`tracing_subscriber`], or [`mirrord_console`];
+///
+/// 2. Connects to the mirrord-agent with [`connection::connect`];
+///
+/// 3. Initializes some of our globals;
+///
+/// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 5. Starts the main mirrord-layer thread.
 fn layer_start(config: LayerConfig) {
     if config.feature.capture_error_trace {
         tracing_subscriber::registry()
@@ -230,20 +342,29 @@ fn layer_start(config: LayerConfig) {
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
                     .with_span_events(FmtSpan::ACTIVE)
-                    .compact(),
+                    .compact()
+                    .with_writer(std::io::stderr),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
     };
 
     info!("Initializing mirrord-layer!");
+    let exe_path = std::env::current_exe()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    trace!(
+        "Loaded into executable: {}, with args: {:?}",
+        &exe_path,
+        std::env::args()
+    );
 
     let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
-    unsafe {
-        HOOK_SENDER = Some(sender);
-    };
+    HOOK_SENDER
+        .set(sender)
+        .expect("Setting HOOK_SENDER singleton");
 
     let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
     ENABLED_TCP_OUTGOING
@@ -260,20 +381,47 @@ fn layer_start(config: LayerConfig) {
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
-fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
-    if let Some(processes_to_avoid) = skip_processes {
-        !processes_to_avoid.iter().any(|x| x == given_process)
-    } else {
-        true
-    }
+/// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
+/// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
+#[cfg(target_os = "macos")]
+fn sip_only_layer_start() {
+    let mut hook_manager = HookManager::default();
+
+    unsafe { exec::enable_execve_hook(&mut hook_manager) };
 }
 
+/// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
+/// types.
 struct Layer {
+    /// Used by the many `T::handle_hook_message` functions to send [`ClientMessage`]s to
+    /// mirrord-agent.
+    ///
+    /// The [`Receiver`] lives in the
+    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection) loop, where we read from
+    /// this channel and send the messages to the agent.
     tx: Sender<ClientMessage>,
+
+    /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
+    /// `handle_daemon_message`.
+    ///
+    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection)
+    /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
     rx: Receiver<DaemonMessage>,
+
+    /// Part of the heartbeat mechanism of mirrord.
+    ///
+    /// When it's been too long since we've last received a message (60 seconds), and this is
+    /// `false`, we send a [`ClientMessage::Ping`], set this to `true`, and expect to receive a
+    /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
     ping: bool,
+
+    /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
+
+    /// Handler to the TCP outgoing operations, see [`TcpOutgoingHandler`].
     tcp_outgoing_handler: TcpOutgoingHandler,
+
+    /// Handler to the UDP outgoing operations, see [`UdpOutgoingHandler`].
     udp_outgoing_handler: UdpOutgoingHandler,
     // TODO: Starting to think about a better abstraction over this whole mess. File operations are
     // pretty much just `std::fs::File` things, so I think the best approach would be to create
@@ -283,16 +431,30 @@ struct Layer {
     // `common` module above `XHook` structs.
     file_handler: FileHandler,
 
-    // Stores a list of `oneshot`s that communicates with the hook side (send a message from -layer
-    // to -agent, and when we receive a message from -agent to -layer).
+    /// Handles the DNS lookup response we get from the agent, see
+    /// `getaddrinfo`.
+    ///
+    /// Unlike most of the other [`DaemonMessage`] handlers, this message is handled directly in
+    /// `handle_daemon_message`.
+    ///
+    /// These are a list of [`oneshot::Sender`](tokio::sync::oneshot::Sender) channels containing
+    /// the [`RemoteResult`](mirrord_protocol::codec::RemoteResult)s of the [`DnsLookup`] operation
+    /// from the agent.
     getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
     send_recv_queue: VecDeque<ResponseChannel<SendRecvResponse>>,
 
+    /// Handler to the TCP stealer operations, see [`UdpOutgoingHandler`].
     pub tcp_steal_handler: TcpStealHandler,
 
     /// Receives responses in the layer loop to be forwarded to the agent.
+    ///
+    /// Part of the stealer HTTP traffic feature, see `http`.
     pub http_response_receiver: Receiver<HttpResponse>,
 
+    /// Sets the way we handle [`HookMessage::Tcp`] in `handle_hook_message`:
+    ///
+    /// - `true`: uses `tcp_steal_handler`;
+    /// - `false`: uses `tcp_mirror_handler`.
     steal: bool,
 }
 
@@ -325,10 +487,19 @@ impl Layer {
         }
     }
 
+    /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
+    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
     async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
+    /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
+    /// `Layer::tx` channel.
+    ///
+    /// ## Special case
+    ///
+    /// The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
+    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_hook_message(&mut self, hook_message: HookMessage) {
         match hook_message {
@@ -351,7 +522,7 @@ impl Layer {
                     .await
                     .unwrap();
             }
-            HookMessage::GetAddrInfoHook(GetAddrInfoHook {
+            HookMessage::GetAddrinfo(GetAddrInfo {
                 node,
                 hook_channel_tx,
             }) => {
@@ -389,6 +560,25 @@ impl Layer {
         }
     }
 
+    /// Passes most of the [`DaemonMessage`]s to their appropriate handlers.
+    ///
+    /// ## Special case
+    ///
+    /// ### [`DaemonMessage::Pong`]
+    ///
+    /// This message has no dedicated handler, and is thus handled directly here, changing the
+    /// [`Self::ping`] state.
+    ///
+    /// ### [`DaemonMessage::GetEnvVarsResponse`]
+    ///
+    /// Handled during mirrord-layer initialization, this message should never make it this far.
+    ///
+    /// ### [`DaemonMessage::GetAddrInfoResponse`]
+    ///
+    /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
+    /// response along in one of the feature's channels from
+    /// `Self::getaddrinfo_handler_queue`.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
             DaemonMessage::Tcp(message) => {
@@ -439,6 +629,32 @@ impl Layer {
     }
 }
 
+/// Main loop of mirrord-layer.
+///
+/// ## Parameters
+///
+/// - `receiver`: receives the [`HookMessage`]s and pass them along with
+///   `Layer::handle_hook_message`;
+///
+/// - `tx`, `rx`: see `Layer::tx`](link), and [`Layer::rx`;
+///
+/// - `config`: the mirrord-layer configuration, see [`LayerConfig`].
+///
+/// ## Details
+///
+/// We have our big loop here that is initialized in a separate task by [`start_layer_thread`].
+///
+/// In this loop we:
+///
+/// - Pass [`HookMessage`]s to be handled by the [`Layer`];
+///
+/// - Read from the [`Layer`] feature handlers [`Receiver`]s, to turn outgoing messages into
+///   [`ClientMessage`]s, sending them with `Layer::send`;
+///
+/// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
+///   the other channels received nothing for a while (60 seconds);
+///
+/// - Write log file if `FeatureConfig::capture_error_trace` is set.
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -517,6 +733,7 @@ async fn thread_loop(
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
+/// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
 #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
 async fn start_layer_thread(
     tx: Sender<ClientMessage>,
@@ -527,7 +744,17 @@ async fn start_layer_thread(
     tokio::spawn(thread_loop(receiver, tx, rx, config));
 }
 
-/// Enables file (behind `MIRRORD_FILE_OPS` option) and socket hooks.
+/// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
+/// the user configured.
+///
+/// ## Parameters
+///
+/// - `enabled_file_ops`: replaces [`libc`] file-ish calls with our own from [`file::hooks`], see
+///   `FsConfig::is_active`, and [`hooks::enable_file_hooks`](file::hooks::enable_file_hooks);
+///
+/// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
+///   `true`, see [`NetworkConfig`], and
+///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[tracing::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     let mut hook_manager = HookManager::default();
@@ -570,8 +797,13 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
     }
 }
 
-/// Shared code for closing fd in our data structures
+/// Shared code for closing `fd` in our data structures.
+///
 /// Callers should call their respective close before calling this.
+///
+/// ## Details
+///
+/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 pub(crate) fn close_layer_fd(fd: c_int) {
     trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
@@ -580,19 +812,22 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .is_active();
 
     // Remove from sockets, or if not a socket, remove from files if file mode active
-    SOCKETS.lock().unwrap().remove(&fd).is_none().then(|| {
-        if file_mode_active {
-            OPEN_FILES.lock().unwrap().remove(&fd);
-        }
-    });
+    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active {
+        // SOCKETS lock dropped, not holding it while locking OPEN_FILES.
+        OPEN_FILES.lock().unwrap().remove(&fd);
+    }
 }
 
 // TODO: When this is annotated with `hook_guard_fn`, then the outgoing sockets never call it (we
 // just bypass). Everything works, so, should we intervene?
 //
 /// Attempts to close on a managed `Socket`, if there is no socket with `fd`, then this means we
-/// either let the `fd` bypass and call `libc::close` directly, or it might be a managed file `fd`,
-/// so it tries to do the same for files.
+/// either let the `fd` bypass and call [`libc::close`] directly, or it might be a managed file
+/// `fd`, so it tries to do the same for files.
+///
+/// ## Hook
+///
+/// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
@@ -600,19 +835,33 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     res
 }
 
-// no need to guard because we call another detour which will do the guard for us.
+// TODO(alex) [mid] 2023-01-24: What is this?
+///
+/// No need to guard because we call another detour which will do the guard for us.
+///
+/// ## Hook
+///
+/// Replaces `?`.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
+// TODO(alex) [mid] 2023-01-24: What is this?
+///
+/// ## Hook
+///
+/// Replaces `?`.
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
+    // In this case we call `close_layer_fd` before the original close function, because execution
+    // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
 }
 
+/// Message presented to the user as a sort of footer when mirrord crashes.
 pub(crate) const FAIL_STILL_STUCK: &str = r#"
 - If you're still stuck and everything looks fine:
 
@@ -621,31 +870,3 @@ pub(crate) const FAIL_STILL_STUCK: &str = r#"
 >> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
 
 "#;
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-
-    #[rstest]
-    #[case("test", Some(vec!["foo".to_string()]))]
-    #[case("test", None)]
-    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_true(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
-        assert!(should_load(given_process, skip_processes));
-    }
-
-    #[rstest]
-    #[case("test", Some(vec!["test".to_string()]))]
-    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_false(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
-        assert!(!should_load(given_process, skip_processes));
-    }
-}

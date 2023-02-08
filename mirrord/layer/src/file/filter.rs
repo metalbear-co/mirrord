@@ -39,6 +39,7 @@ fn generate_local_set() -> RegexSet {
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
     let current_dir = env::current_dir().unwrap();
     let current_binary = env::current_exe().unwrap();
+    let temp_dir = env::temp_dir();
     let patterns = [
         r"^.+\.so$",
         r"^.+\.d$",
@@ -82,6 +83,7 @@ fn generate_local_set() -> RegexSet {
         r"^/Library",
         r"^/Applications",
         r"^/System",
+        &format!("^{}", temp_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
         "^/$", // root
@@ -93,12 +95,14 @@ fn generate_local_set() -> RegexSet {
 }
 
 /// List of files that mirrord should use remotely read only
-/// Right now used to return "file not exist" for identity caches (AWS)
 fn generate_remote_ro_set() -> RegexSet {
     let patterns = [
         // AWS cli cache
-        // \.aws\/cli\/cache\/.+\.json
+        // "file not exist" for identity caches (AWS)
         r".aws/cli/cache/.+\.json$",
+        // for dns resolving
+        r"^/etc/resolv.conf$",
+        r"^/etc/hosts$",
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
@@ -222,11 +226,6 @@ mod tests {
 
     /// Implementation of helper methods for testing [`Detour`].
     impl<S> Detour<S> {
-        /// Convenience function to convert [`Detour::Success`] to `bool`.
-        fn is_success(&self) -> bool {
-            matches!(self, Detour::Success(_))
-        }
-
         /// Convenience function to convert [`Detour::Bypass`] to `bool`.
         fn is_bypass(&self) -> bool {
             matches!(self, Detour::Bypass(_))
@@ -324,7 +323,6 @@ mod tests {
             read_only,
             local,
             mode,
-            ..Default::default()
         };
 
         let file_filter = FileFilter::new(fs_config);

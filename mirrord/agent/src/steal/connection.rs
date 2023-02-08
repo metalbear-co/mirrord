@@ -419,7 +419,7 @@ impl TcpConnectionStealer {
             },
             StealType::FilteredHttp(port, filter) => {
                 // Make the regex case-insensitive.
-                match Regex::new(&format!("(?i){}", filter)) {
+                match Regex::new(&format!("(?i){filter}")) {
                     Ok(regex) => match self.port_subscriptions.get_mut(&port) {
                         Some(Unfiltered(earlier_client)) => {
                             error!("Can't steal port {port:?} as it is already being stolen with no filters by client {earlier_client:?}.");

@@ -10,7 +10,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.19.2"
+version = "3.22.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -51,6 +51,7 @@ miette = "5"
 fancy-regex = { version = "0.10" }
 hyper = { version = "1.0.0-rc.2", features = ["full"] }
 http-body-util = { version = "0.1.0-rc.2" }
+libc = "0.2"
 
 # latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032

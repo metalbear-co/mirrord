@@ -4,8 +4,10 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use crate::error::{AgentError, Result};
 
+pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
+
 #[cfg_attr(test, mockall::automock)]
-pub(super) trait IPTables {
+pub(crate) trait IPTables {
     fn create_chain(&self, name: &str) -> Result<()>;
     fn remove_chain(&self, name: &str) -> Result<()>;
 
@@ -56,7 +58,7 @@ impl IPTables for iptables::IPTables {
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
-pub(super) struct SafeIpTables<IPT: IPTables> {
+pub(crate) struct SafeIpTables<IPT: IPTables> {
     inner: IPT,
     chain_name: String,
     formatter: IPTableFormatter,
@@ -75,18 +77,38 @@ where
     pub(super) fn new(ipt: IPT) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
-        let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 5);
-        let chain_name = format!("MIRRORD_REDIRECT_{}", random_string);
+        let chain_name = Self::get_chain_name();
 
         ipt.create_chain(&chain_name)?;
 
-        ipt.add_rule(formatter.entrypoint(), &format!("-j {}", chain_name))?;
+        ipt.add_rule(formatter.entrypoint(), &format!("-j {}", &chain_name))?;
 
         Ok(Self {
             inner: ipt,
             chain_name,
             formatter,
         })
+    }
+
+    pub(crate) fn get_chain_name() -> String {
+        std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).unwrap_or_else(|_| {
+            format!(
+                "MIRRORD_REDIRECT_{}",
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            )
+        })
+    }
+
+    pub(crate) fn remove_chain(
+        ipt: &IPT,
+        formatter: &IPTableFormatter,
+        chain_name: &str,
+    ) -> Result<()> {
+        ipt.remove_rule(formatter.entrypoint(), &format!("-j {chain_name}"))?;
+
+        ipt.remove_chain(chain_name)?;
+
+        Ok(())
     }
 
     /// Helper function that lists all the iptables' rules belonging to [`Self::chain_name`].
@@ -171,18 +193,11 @@ where
     IPT: IPTables,
 {
     fn drop(&mut self) {
-        self.inner
-            .remove_rule(
-                self.formatter.entrypoint(),
-                &format!("-j {}", self.chain_name),
-            )
-            .unwrap();
-
-        self.inner.remove_chain(&self.chain_name).unwrap();
+        Self::remove_chain(&self.inner, &self.formatter, &self.chain_name).unwrap();
     }
 }
 
-enum IPTableFormatter {
+pub(crate) enum IPTableFormatter {
     Normal,
     Mesh,
 }
@@ -191,7 +206,7 @@ impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
 
     #[tracing::instrument(level = "trace", skip_all)]
-    fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
+    pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
         if output.iter().any(|rule| {
@@ -213,15 +228,13 @@ impl IPTableFormatter {
     }
 
     fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
-        let redirect_rule = format!(
-            "-m tcp -p tcp --dport {} -j REDIRECT --to-ports {}",
-            redirected_port, target_port
-        );
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
-                format!("-o lo {}", redirect_rule)
+                format!("-o lo {redirect_rule}")
             }
         }
     }

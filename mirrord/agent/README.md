@@ -1,5 +1,5 @@
 # mirrord-agent
-[![CI](https://github.com/metalbear-co/mirrord-agent/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord-agent/actions/workflows/ci.yaml)
+[![CI](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml/badge.svg)](https://github.com/metalbear-co/mirrord/actions/workflows/ci.yaml)
 
 Agent part of [mirrord](https://github.com/metalbear-co/mirrord) responsible for running on the same node as the debuggee, entering it's namespace and collecting traffic.
 

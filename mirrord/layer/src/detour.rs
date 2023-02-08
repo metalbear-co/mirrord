@@ -1,3 +1,10 @@
+//! The layer uses features from this module to check if it should bypass one of its hooks, and call
+//! the original [`libc`] function.
+//!
+//! Here we also have the convenient [`Detour`], that is used by the hooks to either return a
+//! [`Result`]-like value, or the special [`Bypass`] case, which makes the _detour_ function call
+//! the original [`libc`] equivalent, stored in a [`HookFn`].
+
 use core::{
     convert,
     ops::{FromResidual, Residual, Try},
@@ -6,16 +13,52 @@ use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
 
 use crate::error::HookError;
 
-thread_local!(pub(crate) static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false));
+thread_local!(
+    /// Holds the thread-local state for bypassing the layer's detour functions.
+    ///
+    /// ## Warning
+    ///
+    /// Do **NOT** use this directly, instead use `DetourGuard::new` if you need to
+    /// create a bypass inside a function (like we have in
+    /// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream)).
+    ///
+    /// Or rely on the [`hook_guard_fn`](mirrord_layer_macro::hook_guard_fn) macro.
+    ///
+    /// ## Details
+    ///
+    /// Some of the layer functions will interact with [`libc`] functions that we are hooking into,
+    /// thus we could end up _stealing_ a call by the layer itself rather than by the binary the
+    /// layer is injected into. An example of this  would be if we wanted to open a file locally,
+    /// the layer's `open_detour` intercepts the [`libc::open`] call, and we get a remote file
+    /// (if it exists), instead of the local file we wanted.
+    ///
+    /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
+    /// and back to `false` after it's done.
+    static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
+);
 
-pub(crate) fn detour_bypass_on() {
+/// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
+///
+/// Prefer using `DetourGuard::new` instead.
+pub(super) fn detour_bypass_on() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
 }
 
-pub(crate) fn detour_bypass_off() {
+/// Sets [`DETOUR_BYPASS`] to `false`.
+///
+/// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
+pub(super) fn detour_bypass_off() {
     DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
 }
 
+/// Handler for the layer's [`DETOUR_BYPASS`].
+///
+/// Sets [`DETOUR_BYPASS`] on creation, and turns it off on [`Drop`].
+///
+/// ## Warning
+///
+/// You should always use `DetourGuard::new`, if you construct this in any other way, it's
+/// not going to guard anything.
 pub(crate) struct DetourGuard;
 
 impl DetourGuard {
@@ -38,8 +81,9 @@ impl Drop for DetourGuard {
     }
 }
 
-/// Wrapper around `std::sync::OnceLock`, mainly used for the `Deref` implementation to simplify
-/// calls to the original functions as `FN_ORIGINAL()`, instead of `FN_ORIGINAL.get().unwrap()`.
+/// Wrapper around [`OnceLock`](std::sync::OnceLock), mainly used for the [`Deref`] implementation
+/// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
+/// `FN_ORIGINAL.get().unwrap()`.
 #[derive(Debug)]
 pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
 
@@ -58,6 +102,7 @@ impl<T> const Default for HookFn<T> {
 }
 
 impl<T> HookFn<T> {
+    /// Helper function to set the inner [`OnceLock`](std::sync::OnceLock) `T` of `self`.
     pub(crate) fn set(&self, value: T) -> Result<(), T> {
         self.0.set(value)
     }
@@ -66,35 +111,77 @@ impl<T> HookFn<T> {
 /// Soft-errors that can be recovered from by calling the raw FFI function.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Bypass {
+    /// We're dealing with a socket port value that should be ignored.
     Port(u16),
+
+    /// The socket type does not match one of our handled
+    /// [`SocketKind`](crate::socket::SocketKind)s.
     Type(i32),
+
+    /// Either an invalid socket domain, or one that we don't handle.
     Domain(i32),
+
+    /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](crate::file::OPEN_FILES), nor
+    /// [`SOCKETS`](crate::socket::SOCKETS).
     LocalFdNotFound(RawFd),
+
+    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
+
+    /// A conversion from [`SockAddr`](socket2::sockaddr::SockAddr) to
+    /// [`SocketAddr`](std::net::SocketAddr) failed.
     AddressConversion,
+
+    /// The socket [`RawFd`] is in an invalid state for the operation.
     InvalidState(RawFd),
+
+    /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
     CStrConversion,
+
+    /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(PathBuf),
+
+    /// Some operations only handle absolute [`PathBuf`]s.
     RelativePath(PathBuf),
+
+    /// Started mirrord with [`FsModeConfig`](mirrord_config::fs::mode::FsModeConfig) set to
+    /// [`FsModeConfig::Read`](mirrord_config::fs::mode::FsModeConfig::Read), but operation
+    /// requires more file permissions.
+    ///
+    /// The user will reach this case if they started mirrord with file operations as _read-only_,
+    /// but tried to perform a file operation that requires _write_ permissions (for example).
+    ///
+    /// When this happens, the file operation will be bypassed (will be handled locally, instead of
+    /// through the agent).
     ReadOnly(PathBuf),
+
+    /// Called [`write`](crate::file::ops::write) with `write_bytes` set to [`None`].
     EmptyBuffer,
+
+    /// Operation received [`None`] for an [`Option`] that was required to be [`Some`].
     EmptyOption,
+
+    /// Called `getaddrinfo` with `rawish_node` being [`None`].
     NullNode,
+    
     TcpSocket,
     UnManagedSocket,
+
+    /// Skip patching SIP for macOS.
     #[cfg(target_os = "macos")]
     NoSipDetected(String),
+
+    /// Tried patching SIP for a non-existing binary.
     #[cfg(target_os = "macos")]
     ExecOnNonExistingFile(String),
-    #[cfg(target_os = "macos")]
-    NoTempDirInArgv,
-    #[cfg(target_os = "macos")]
-    TempDirEnvVarNotSet,
+
+    /// Reached `MAX_ARGC` while running
+    /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
     TooManyArgs,
 }
 
-/// `ControlFlow`-like enum to be used by hooks.
+/// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
 ///
 /// Conversion from `Result`:
 /// - `Result::Ok` -> `Detour::Success`
@@ -107,8 +194,8 @@ pub(crate) enum Bypass {
 pub(crate) enum Detour<S = ()> {
     /// Equivalent to `Result::Ok`
     Success(S),
-    // Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
-    // (errors that can be recovered from in the hook FFI).
+    /// Useful for operations with parameters that are ignored by `mirrord`, or for soft-failures
+    /// (errors that can be recovered from in the hook FFI).
     Bypass(Bypass),
     /// Equivalent to `Result::Err`
     Error(HookError),
@@ -177,6 +264,10 @@ impl<S> Residual<S> for Detour<convert::Infallible> {
 }
 
 impl<S> Detour<S> {
+    /// Calls `op` if the result is `Success`, otherwise returns the `Bypass` or `Error` value of
+    /// self.
+    ///
+    /// This function can be used for control flow based on `Detour` values.
     pub(crate) fn and_then<U, F: FnOnce(S) -> Detour<U>>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => op(s),
@@ -185,6 +276,10 @@ impl<S> Detour<S> {
         }
     }
 
+    /// Maps a `Detour<S>` to `Detour<U>` by applying a function to a contained `Success` value,
+    /// leaving a `Bypass` or `Error` value untouched.
+    ///
+    /// This function can be used to compose the results of two functions.
     pub(crate) fn map<U, F: FnOnce(S) -> U>(self, op: F) -> Detour<U> {
         match self {
             Detour::Success(s) => Detour::Success(op(s)),
@@ -203,7 +298,7 @@ impl<S> Detour<S> {
     pub(crate) fn unwrap_or(self, default: S) -> S {
         match self {
             Detour::Success(s) => s,
-            Detour::Bypass(_) | Detour::Error(_) => default,
+            _ => default,
         }
     }
 }
@@ -241,8 +336,13 @@ where
 
 /// Extends `Option<T>` with the `Option::bypass` function.
 pub(crate) trait OptionExt {
+    /// Inner `T` of the `Option<T>`.
     type Opt;
 
+    /// Converts `Option<T>` into `Detour<T>`, mapping:
+    ///
+    /// - `Some` => `Detour::Success`;
+    /// - `None` => `Detour::Bypass`.
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 

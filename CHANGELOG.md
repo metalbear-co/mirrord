@@ -9,10 +9,76 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
+- mirrord-config: Fix disabled feature for env in config file, `env = false` should work. See [#1015](https://github.com/metalbear-co/mirrord/issues/1015).
+- VS Code extension: release universal extension as a fallback for Windows and other platforms to be used with WSL/Remote development. Fixes [#1017](https://github.com/metalbear-co/mirrord/issues/1017)
+- Fix `MIRRORD_AGENT_RUST_LOG` can't be more than info due to dependency on info log.
+- Fix pause feature not working in extension due to writing to stdout (changed to use trace)
+
+### Changed
+
+- `DNSLookup` failures changed to be info log from error since it is a common case.
+- mirrord-agent: now prints "agent ready" instead of logging it so it can't be fudged with `RUST_LOG` control.
+- mirrord-agent: `agent::layer_recv` changed instrumentation to be trace instead of info.
+- mirrord-layer/agent: change ttl of job to be 1 second for cases where 0 means in cluster don't clean up.
+
+## 3.22.0
+
+### Changed
+
+- Rust: update rust toolchain (and agent rust `DOCKERFILE`) to `nightly-2023-01-31`.
+- exec/spawn detour refactor [#999](https://github.com/metalbear-co/mirrord/issues/999).
+- mirrord-layer: Partialy load mirrord on certian processes that spawn other processes to allow sip patch on the spawned process.
+  This to prevent breaking mirrord-layer load if parent process is specified in `--skip-processes`.  (macOS only)
+
+### Fixed
+
+- mirrord-layer: DNS resolving doesn't work when having a non-OS resolver (using UDP sockets)
+  since `/etc/resolv.conf` and `/etc/hosts` were in the local read override,
+  leading to use the local nameserver for resolving. Fixes [#989](https://github.com/metalbear-co/mirrord/issues/989)
+- mirrord-agent: Infinite reading a file when using `fgets`/`read_line` due to bug seeking to start of file.
+- Rare deadlock on file close that caused the e2e file-ops test to sometimes fail
+  ([#994](https://github.com/metalbear-co/mirrord/issues/994)).
+
+## 3.21.0
+
+### Added
+
+- Support for Go's `os.ReadDir` on Linux (by hooking the `getdents64` syscall). Part of
+  [#120](https://github.com/metalbear-co/mirrord/issues/120).
+- Test mirrord with Go 1.20rc3.
+
+### Changed
+
+- mirrord-agent: Wrap agent with a parent proccess to doublecheck the clearing of iptables. See [#955](https://github.com/metalbear-co/mirrord/issues/955)
+- mirrord-layer: Change `HOOK_SENDER` from `Option` to `OnceLock`.
+
+### Fixed
+
+- mirrord-agent: Handle HTTP upgrade requests when the stealer feature is enabled
+  (with HTTP traffic) PR [#973](https://github.com/metalbear-co/mirrord/pull/973).
+- E2E tests compile on MacOS.
+- mirrord could not load into some newer binaries of node -
+  [#987](https://github.com/metalbear-co/mirrord/issues/987). Now hooking also `posix_spawn`, since node now uses
+  `libuv`'s `uv_spawn` (which in turn calls `posix_spawn`) instead of libc's `execvp` (which calls `execve`).
+- Read files from the temp dir (defined by the system's `TMPDIR`) locally, closes
+  [#986](https://github.com/metalbear-co/mirrord/issues/986).
+
+## 3.20.0
+
+### Added
+
+- Support impersonation in operator
+
+### Fixed
+
 - Go crash in some scenarios [#834](https://github.com/metalbear-co/mirrord/issues/834).
 - Remove already deprecated `--no-fs` and `--rw` options, that do not do anything anymore, but were still listed in the
   help message.
 - Bug: SIP would fail the second time to run scripts for which the user does not have write permissions.
+
+### Changed
+
+- Change layer/cli logs to be to stderr instead of stdout to avoid mixing with the output of the application. Closes [#786](https://github.com/metalbear-co/mirrord/issues/786)
 
 ## 3.19.2
 

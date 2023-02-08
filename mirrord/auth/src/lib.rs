@@ -83,23 +83,22 @@ impl AuthConfig {
     pub fn from_webbrowser(server: &str, timeout: u64, no_open: bool) -> Result<AuthConfig> {
         let ref_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
 
-        let url = format!("{}/oauth?ref={}", server, ref_id);
+        let url = format!("{server}/oauth?ref={ref_id}");
 
         let url_print = format!(
-            "Please enter the following url in your webbrowser of choice\n\n url: {:?}\n",
-            url
+            "Please enter the following url in your webbrowser of choice\n\n url: {url:?}\n"
         );
 
         if no_open {
-            println!("{}", url_print);
+            println!("{url_print}");
         } else if webbrowser::open(&url).is_err() {
-            println!("Problem auto launching webbrowser\n{}", url_print);
+            println!("Problem auto launching webbrowser\n{url_print}");
         }
 
         let client = reqwest::blocking::Client::new();
 
         client
-            .get(format!("{}/wait?ref={}", server, ref_id))
+            .get(format!("{server}/wait?ref={ref_id}"))
             .timeout(Duration::from_secs(timeout))
             .send()?
             .json()

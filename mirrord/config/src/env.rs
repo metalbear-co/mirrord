@@ -32,7 +32,7 @@ use crate::{
 /// ```
 ///
 /// Some environment variables are excluded by default (`PATH` for example), including these
-/// requires specifying them with `include`, see [`mirrord_agent::env::EnvFilter`].
+/// requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.
 ///
 /// - Include the remote pod's environment variables "PROJECT", "DATABASE":
 ///
@@ -90,7 +90,8 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .transpose()?,
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
                 .source_value()
-                .transpose()?,
+                .transpose()?
+                .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
             overrides: None,
         })
     }
@@ -135,7 +136,7 @@ mod tests {
             Option<&str>,
             Option<&str>,
         ),
-        #[values((None, None), (Some("EVAR1"), Some("EVAR1")))] exclude: (
+        #[values((None, Some("*")), (Some("EVAR1"), Some("EVAR1")))] exclude: (
             Option<&str>,
             Option<&str>,
         ),
