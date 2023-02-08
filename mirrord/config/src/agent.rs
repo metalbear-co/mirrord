@@ -40,7 +40,7 @@ pub struct AgentConfig {
     /// seconds).
     ///
     /// Can be useful for collecting logs.
-    #[config(env = "MIRRORD_AGENT_TTL", default = 0)]
+    #[config(env = "MIRRORD_AGENT_TTL", default = 1)]
     pub ttl: u16,
 
     /// Runs the agent as an [ephemeral
