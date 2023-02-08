@@ -6,7 +6,6 @@ use mirrord_protocol::{
     ClientMessage::UdpOutgoing,
 };
 use rstest::rstest;
-use tokio::net::TcpListener;
 
 mod common;
 
