@@ -29,16 +29,12 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
 async fn test_self_open(dylib_path: &PathBuf) {
-    let mut env = HashMap::new();
-    env.insert("RUST_LOG", "warn,mirrord=debug");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", &addr);
-    env.insert("MIRRORD_REMOTE_DNS", "false");
-    env.insert("DYLD_INSERT_LIBRARIES", dylib_path.to_str().unwrap());
-    env.insert("LD_PRELOAD", dylib_path.to_str().unwrap());
+
+    let env = get_env(dylib_path.to_str().unwrap(), &addr);
+
     let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     app_path.push("tests/apps/self_open/19");
     let server = Command::new(app_path)
