@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
+- Removed limit on future builds `untilBuild` in JetBrains plugin.
 - IntelliJ-ext: change the dialog to provide a sorted list and make it searchable, resolves [#1031](https://github.com/metalbear-co/mirrord/issues/1031).
 - mirrord-layer: Changed default to read AWS credentials + config from remote pod.
 - Removed unused env var (`MIRRORD_EXTERNAL_ENV`)
