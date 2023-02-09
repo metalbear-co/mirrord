@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- Add a field to mirrord-config to specify custom path for kubeconfig , resolves [#1027](https://github.com/metalbear-co/mirrord/issues/1027).
+
 ## 3.23.0
 
 ### Fixed
